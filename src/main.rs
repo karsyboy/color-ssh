@@ -1,6 +1,7 @@
 use std::env;
 use std::fs;
 use std::io::{self, BufReader, Read, Write};
+use std::path::PathBuf;
 use std::process::{Command, Stdio};
 use regex::Regex;
 use serde::Deserialize;
@@ -31,24 +32,42 @@ fn hex_to_ansi(hex: &str) -> String {
     "\x1b[0m".to_string() // Default to reset color if hex is invalid.
 }
 
+fn find_config_file() -> Option<PathBuf> {
+    // Check current directory
+    let current_dir_path = env::current_dir().unwrap().join(".csh-config.yaml");
+    if current_dir_path.exists() {
+        return Some(current_dir_path);
+    }
+
+    // Check home directory
+    if let Some(home_dir) = dirs::home_dir() {
+        let home_dir_path = home_dir.join(".csh-config.yaml");
+        if home_dir_path.exists() {
+            return Some(home_dir_path);
+        }
+    }
+
+    None
+}
+
 fn main() -> io::Result<()> {
     // Get the command-line arguments (excluding the program name).
     let args: Vec<String> = env::args().skip(1).collect();
 
-    if args.len() < 2 {
-        eprintln!("Usage: csh <config.yaml> <ssh arguments>");
+    if args.is_empty() {
+        eprintln!("Usage: csh <ssh arguments>");
         std::process::exit(1);
     }
 
     // Read the YAML configuration file.
-    let config_path = &args[0];
+    let config_path: PathBuf = find_config_file()
+        .expect("Configuration file not found.");
     let config_content = fs::read_to_string(config_path)
         .expect("Failed to read the configuration file.");
     let config: Config = serde_yaml::from_str(&config_content)
         .expect("Failed to parse the configuration file.");
 
-    // Compile regex patterns and map to their corresponding ANSI escape codes.
-// Compile regex patterns and map them to their corresponding ANSI escape codes.
+    // Compile regex patterns and map them to their corresponding ANSI escape codes.
     let rules: Vec<(Regex, String)> = config
         .rules
         .iter()
@@ -58,16 +77,15 @@ fn main() -> io::Result<()> {
                 .get(&rule.color)
                 .map(|hex| hex_to_ansi(hex))
                 .unwrap_or_else(|| "\x1b[0m".to_string()); // Default to reset color.
-            let regex = Regex::new(&format!(r#"{}"#, rule.regex)) // Use raw strings for regex.
+            let regex = Regex::new(&rule.regex)
                 .expect("Invalid regex in configuration.");
             (regex, color)
         })
         .collect();
 
-
     // Spawn the SSH process.
     let mut child = Command::new("ssh")
-        .args(&args[1..])
+        .args(&args)
         .stdin(Stdio::inherit()) // Pass stdin to the child process.
         .stdout(Stdio::piped())  // Capture stdout.
         .stderr(Stdio::inherit()) // Pass stderr to the child process.
@@ -92,18 +110,53 @@ fn main() -> io::Result<()> {
         }
 
         let chunk = String::from_utf8_lossy(&buffer[..n]);
-        let mut processed_chunk = chunk.to_string();
+        let mut matches: Vec<(usize, usize, String)> = Vec::new(); // Start, end, color for matches
 
-        // Apply each rule sequentially to the output.
+        // Collect matches for all rules
         for (regex, color) in &rules {
-            processed_chunk = regex
-                .replace_all(&processed_chunk, |caps: &regex::Captures| {
-                    format!("{color}{}{reset_color}", &caps[0], color = color, reset_color = reset_color)
-                })
-                .to_string();
+            for caps in regex.captures_iter(&chunk) {
+                if let Some(m) = caps.get(0) {
+                    matches.push((m.start(), m.end(), color.clone()));
+                }
+            }
         }
 
-        // Write the modified chunk to stdout.
+        // Sort matches by start position
+        matches.sort_by_key(|&(start, _, _)| start);
+
+        // Handle overlaps by precedence (earlier rules in the list take precedence)
+        let mut filtered_matches: Vec<(usize, usize, String)> = Vec::new();
+        for &(start, end, ref color) in &matches {
+            if filtered_matches
+                .iter()
+                .all(|&(s, e, _)| end <= s || start >= e)
+            {
+                filtered_matches.push((start, end, color.clone()));
+            }
+        }
+
+        // Reconstruct the processed chunk with highlights applied.
+        let mut processed_chunk = String::new();
+        let mut last_idx = 0;
+
+        for (start, end, color) in filtered_matches {
+            if start > last_idx {
+                processed_chunk.push_str(&chunk[last_idx..start]); // Add uncolored text.
+            }
+            processed_chunk.push_str(&format!(
+                "{}{}{}",
+                color,
+                &chunk[start..end],
+                reset_color
+            )); // Add colored text.
+            last_idx = end;
+        }
+
+        if last_idx < chunk.len() {
+            processed_chunk.push_str(&chunk[last_idx..]); // Add any remaining uncolored text.
+        }
+
+        // Write the fully processed chunk to stdout.
         stdout.write_all(processed_chunk.as_bytes())?;
         stdout.flush()?;
     }

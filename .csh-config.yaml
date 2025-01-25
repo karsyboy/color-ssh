@@ -5,6 +5,11 @@ palette:
   blue: "#0000ff"
 
 rules:
+
+  - description: "Highlight all URLs in blue"
+    regex: (?i)\b((https?|ftp)://[^\s/$.?#].[^\s]*)\b
+    color: "blue"
+    
   - description: "Highlight IP addresses in green"
     regex: |
       (?x)          # Enable free-spacing mode for readability
@@ -22,6 +27,3 @@ rules:
       )\b
     color: "red"
 
-  - description: "Highlight all URLs in blue"
-    regex: https?://[^\s/$.?#].[^\s]*
-    color: "blue"
