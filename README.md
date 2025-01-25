@@ -51,7 +51,7 @@ This runs an SSH session while applying the syntax highlighting rules defined in
 ## Configuration
 The ocnfiguration file is expected to be store either in the users home directory as `.csh-config.yaml` or in the current directory the `csh` tool is being ran out of.
 
-Valid Configuration file locations
+Valid Configuration file locations:
 - `$HOME/.csh-config.yaml`
 - `$PWD/.csh-config.yaml`
 
