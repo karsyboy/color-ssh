@@ -36,19 +36,23 @@
 
 ### Basic Syntax
 ```bash
-csh <config.yaml> <ssh arguments>
+csh <ssh arguments>
 ```
 
 ### Example
 ```bash
-csh csh-config.yaml user@hostname
+csh user@hostname
 ```
 
-This runs an SSH session while applying the syntax highlighting rules defined in `csh-config.yaml`.
+This runs an SSH session while applying the syntax highlighting rules defined in `.csh-config.yaml`.
 
 ---
 
 ## Configuration
+The ocnfiguration file is expected to be store either in the users home directory as `.csh-config.yaml` or in the current directory the `csh` tool is being ran out of.
+Valid Configuration file locations
+- `$HOME/.csh-config.yaml`
+- `$PWD/.csh-config.yaml`
 
 The syntax highlighting rules are defined in a YAML file. Each rule consists of:
 - **`description`**: A human-readable explanation of what the rule does.
