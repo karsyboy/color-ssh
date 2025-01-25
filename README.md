@@ -69,6 +69,15 @@ palette:
   blue: "#0000ff"
 
 rules:
+
+  - description: "Highlight all URLs in blue"
+    regex: (?i)\b((https?|ftp)://[^\s/$.?#].[^\s]*)\b
+    color: "blue"
+    
+  - description: "Highlight words 'error' and 'fail' in red"
+    regex: (?ix)\b(error|fail)\b
+    color: "red"
+
   - description: "Highlight IP addresses in green"
     regex: |
       (?x)          # Enable free-spacing mode for readability
@@ -77,18 +86,6 @@ rules:
       (\.\d{1,3}){3} # Match three ".<1-3 digits>" sequences
       \b            # End of a word boundary
     color: "green"
-
-  - description: "Highlight words related to interfaces"
-    regex: |
-      (?ix)         # Case-insensitive and free-spacing mode
-      \b(
-      bgp          # BGP
-      )\b
-    color: "red"
-
-  - description: "Highlight all URLs in blue"
-    regex: https?://[^\s/$.?#].[^\s]*
-    color: "blue"
 ```
 
 ### Explanation of Configuration
