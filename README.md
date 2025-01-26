@@ -16,7 +16,7 @@
 
 1. Clone the repository:
    ```bash
-   git clone <repository-url>
+   git clone https://github.com/karsyboy/csh.git
    cd csh
    ```
 
@@ -49,7 +49,7 @@ This runs an SSH session while applying the syntax highlighting rules defined in
 ---
 
 ## Configuration
-The ocnfiguration file is expected to be store either in the users home directory as `.csh-config.yaml` or in the current directory the `csh` tool is being ran out of.
+The ocnfiguration file is expected to be stored either in the users home directory as `.csh-config.yaml` or in the current directory the `csh` tool is being ran out of.
 
 Valid Configuration file locations:
 - `$HOME/.csh-config.yaml`
@@ -60,32 +60,161 @@ The syntax highlighting rules are defined in a YAML file. Each rule consists of:
 - **`regex`**: The pattern to match in SSH output.
 - **`color`**: The color to apply, specified as a key from the `palette` section.
 
-### Example Configuration (`csh-config.yaml`)
+### Example Configuration (`.csh-config.yaml`)
 ```yaml
 palette:
-  green: "#32cd32"
-  red: "#ff4500"
-  yellow: "#ffd700"
-  blue: "#0000ff"
+  Sunrise-Orange: '#e67549'
+  Aqua-Blue: '#00e0d1'
+  Hot-Pink: '#FF69B4'
+  Celestial-Blue: '#5698c8'
+  Rich-Gold: '#a35a00'
+  Bright-Ube: '#df99f0'
+  Caribbean-Green: '#03d28d'
+  Milano-Red: '#c71800'
+  Sedona: '#c96901'
+  Ochre: '#ca9102'
+  Mustard: '#cab902'
+  Bright-Olive: '#a2bc02'
+  Dark-Lime-Green: '#79bf02'
+  Kelly-Green: '#28c501'
 
 rules:
+# Switch Prompt
+- description: Prompt in enabled mode for network switches
+  regex: ((?:\r\n)|^)+([a-zA-Z0-9_-]+#)
+  color: Rich-Gold
 
-  - description: "Highlight all URLs in blue"
-    regex: (?i)\b((https?|ftp)://[^\s/$.?#].[^\s]*)\b
-    color: "blue"
-    
-  - description: "Highlight words 'error' and 'fail' in red"
-    regex: (?ix)\b(error|fail)\b
-    color: "red"
+- description: Match prompt in disable for mode network switches
+  regex: ((?:\r\n)|^)+([a-zA-Z0-9_-]+>)
+  color: Rich-Gold
 
-  - description: "Highlight IP addresses in green"
-    regex: |
-      (?x)          # Enable free-spacing mode for readability
-      \b            # Start of a word boundary
-      \d{1,3}       # Match 1-3 digits
-      (\.\d{1,3}){3} # Match three ".<1-3 digits>" sequences
-      \b            # End of a word boundary
-    color: "green"
+# Interfaces
+- description: Always color the word "interface"
+  regex: |
+    (?ix)
+      \b(
+      interfaces?|
+      \w+-interface
+      )\b
+  color: Kelly-Green
+
+- description: Match on interface type "Ethernet"
+  regex: |
+    (?ix)
+      \b(
+      (ethernet|eth|et)
+      (\d{1,2})?
+      (/\d{1,2})?
+      (/\d{1,2})?
+      (\.\d{1,4})?
+      )\b
+  color: Sedona
+
+- description: Match on Cisco interface types
+  regex: |
+    (?ix)
+      \b
+      (gigabitethernet|gi|gig|
+      twogigabitethernet|tw|
+      tengigabitethernet|te|
+      twentyfivegige|twe|
+      fortygigabitethernet|fo|
+      appgigabitethernet|ap)
+      (\d{1,2})?
+      (/\d{1,2})?
+      (/\d{1,2})?
+      (\.\d{1,4})?
+      \b
+  color: Sedona
+
+- description: Match on type "Vlan"
+  regex: |
+    (?ix)
+      \b
+      (vlan|vl)
+      (\d{1,4}|\s\d{1,4})?
+      ((?:,\d{1,4})*)?
+      \b
+  color: Dark-Lime-Green
+
+- description: Match on type "Port-Channel"
+  regex: |
+    (?ix)
+      \b(
+      (port-channel|po)
+      (\d{1,4})?
+      (\.\d{1,4})?
+      )\b
+  color: Bright-Olive
+
+- description: Match on Extra interface types
+  regex: |
+    (?ix)
+      \b
+      (management|mgmt|
+      loopback|lo|
+      tunnel|tu)
+      (\d{1,4})?
+      \b
+  color: Mustard
+
+# Keywords
+- description: Match on good keywords
+  regex: |
+    (?ix)
+      \b
+      (connected|up)
+      \b
+  color: Kelly-Green
+
+- description: Match on nutral keywords
+  regex: |
+    (?ix)
+      \b
+      (xcvrAbsen|noOperMem|notconnect)
+      \b
+  color: Sunrise-Orange
+
+- description: Match on bad keywords
+  regex: |
+    (?ix)
+      \b
+      (down|shutdown)
+      \b
+  color: Milano-Red
+
+# URLs and IPs 
+- description: URL
+  regex: (?i)\b(((htt|ft|lda)ps?|telnet|ssh|tftp)://[^\s/$.?#].[^\s]*)\b
+  color: Aqua-Blue
+
+- description: IPv4
+  regex: i?(?:[0-9]{1,3}\.){3}[0-9]{1,3}(?:\/[0-9]{1,2}|:[0-9]{1,5})?(?:,(?:[0-9]{1,5})?)?
+  color: Celestial-Blue
+
+- description: Subnet Mask
+  regex: (?:)(?:0|255)\.(?:[0-9]{1,3}\.){2}[0-9]{1,3}
+  color: Celestial-Blue
+
+- description: IPv6
+  regex: |
+    (([0-9a-fA-F]{1,4}:){7,7}[0-9a-fA-F]{1,4}|
+    ([0-9a-fA-F]{1,4}:){1,7}:|
+    ([0-9a-fA-F]{1,4}:){1,6}:[0-9a-fA-F]{1,4}|
+    ([0-9a-fA-F]{1,4}:){1,5}(:[0-9a-fA-F]{1,4}){1,2}|
+    ([0-9a-fA-F]{1,4}:){1,4}(:[0-9a-fA-F]{1,4}){1,3}|
+    ([0-9a-fA-F]{1,4}:){1,3}(:[0-9a-fA-F]{1,4}){1,4}|
+    ([0-9a-fA-F]{1,4}:){1,2}(:[0-9a-fA-F]{1,4}){1,5}|
+    [0-9a-fA-F]{1,4}:((:[0-9a-fA-F]{1,4}){1,6})|
+    :((:[0-9a-fA-F]{1,4}){1,7}|:)|
+    fe80:(:[0-9a-fA-F]{0,4}){0,4}%[0-9a-zA-Z]{1,}|
+    ::(ffff(:0{1,4}){0,1}:){0,1}
+    ((25[0-5]|(2[0-4]|1{0,1}[0-9]){0,1}[0-9])\.){3,3}
+    (25[0-5]|(2[0-4]|1{0,1}[0-9]){0,1}[0-9])|
+    ([0-9a-fA-F]{1,4}:){1,4}:
+    ((25[0-5]|(2[0-4]|1{0,1}[0-9]){0,1}[0-9])\.){3,3}
+    (25[0-5]|(2[0-4]|1{0,1}[0-9]){0,1}[0-9]))
+  color: Celestial-Blue
 ```
 
 ### Explanation of Configuration
