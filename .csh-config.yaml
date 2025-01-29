@@ -17,11 +17,11 @@ palette:
 rules:
 # Switch Prompt
 - description: Prompt in enabled mode for network switches
-  regex: ((?:\r\n)|^)+([a-zA-Z0-9_-]+#)
+  regex: (?:\u001b\[[^m]*m)?([A-Z0-9-]+)#
   color: Rich-Gold
 
 - description: Match prompt in disable for mode network switches
-  regex: ((?:\r\n)|^)+([a-zA-Z0-9_-]+>)
+  regex: (?:\u001b\[[^m]*m)?([A-Z0-9-]+)>
   color: Rich-Gold
 
 # Interfaces

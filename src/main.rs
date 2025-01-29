@@ -9,7 +9,7 @@ use std::thread;
 use regex::Regex;
 use serde::Deserialize;
 
-static DEBUG_MODE: bool = true;
+static DEBUG_MODE: bool = false;
 
 // Configuration structure containing the color palette and highlighting rules
 #[derive(Debug, Deserialize)]
@@ -166,6 +166,7 @@ fn main() -> io::Result<()> {
             log_debug(&format!("  Rule {}: regex = {:?}, color = {:?}", i + 1, regex, color)).unwrap();
         }
     }
+
 
     // Launch the SSH process
     let mut child = Command::new("ssh")
