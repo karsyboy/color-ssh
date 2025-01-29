@@ -9,6 +9,8 @@ use std::thread;
 use regex::Regex;
 use serde::Deserialize;
 
+static DEBUG_MODE: bool = true;
+
 // Configuration structure containing the color palette and highlighting rules
 #[derive(Debug, Deserialize)]
 struct Config {
@@ -42,7 +44,7 @@ fn log_debug(message: &str) -> io::Result<()> {
     let mut file = OpenOptions::new()
         .create(true)
         .append(true)
-        .open("csh-debug.log")?;
+        .open("csh-debug.log")?; // Change the log file name if needed
     writeln!(file, "{}", message)
 }
 
@@ -68,6 +70,12 @@ fn find_config_file() -> Option<PathBuf> {
 // Processes a chunk of text, applying syntax highlighting based on the provided rules
 fn process_chunk(chunk: String, rules: &[(Regex, String)], reset_color: &str) -> String {
 
+
+    if DEBUG_MODE {
+        log_debug(&format!("2:Chunk with Escapes: {:?}", chunk)).unwrap();
+    }
+
+    // Highlighting logic
     let mut matches: Vec<(usize, usize, String)> = Vec::new();
 
     // Match each rule's regex against the input chunk
@@ -90,7 +98,7 @@ fn process_chunk(chunk: String, rules: &[(Regex, String)], reset_color: &str) ->
         }
     }
 
-    // Build the highlighted output string
+    // Build the highlighted output
     let mut processed_chunk = String::new();
     let mut last_idx = 0;
 
@@ -105,39 +113,31 @@ fn process_chunk(chunk: String, rules: &[(Regex, String)], reset_color: &str) ->
     if last_idx < chunk.len() {
         processed_chunk.push_str(&chunk[last_idx..]);
     }
-
+    if DEBUG_MODE {
+        log_debug(&format!("3:Processed Chunk: {:?}", processed_chunk)).unwrap();
+    }
+    // Return processed chunk
     processed_chunk
 }
 
 // Entry point of the program
 fn main() -> io::Result<()> {
-    // SSH arguments for debugging (replace as needed for actual usage)
-    // let debug_args: Vec<String> = vec!["admin@10.64.15.254".to_string()];
-
     // Get the command-line arguments (excluding the program name). 
-    let mut args: Vec<String> = env::args().skip(1).collect();
-    // Remove the debug flag from args if present
+    let args: Vec<String> = env::args().skip(1).collect();
     if args.is_empty() {
         eprintln!("Usage: csh <ssh arguments>");
         std::process::exit(1);
     }
 
-    // Check if the debug flag is present
-    let debug_mode = args.contains(&"--debug".to_string());
-    // Remove the debug flag from args if present
-    if debug_mode {
-        args.retain(|arg| arg != "--debug");
-        log_debug("Debug mode enabled").unwrap();
-    }
-
     // Debug: Print SSH arguments for validation
-    if debug_mode {
+    if DEBUG_MODE {
+        log_debug("Debug mode enabled").unwrap();
         log_debug(&format!("SSH arguments: {:?}", args)).unwrap();
     }
 
     // Load the configuration file
     let config_path = find_config_file().expect("Configuration file not found.");
-    if debug_mode {
+    if DEBUG_MODE {
         log_debug(&format!("Using configuration file: {:?}", config_path)).unwrap();
     }
     let config_content = fs::read_to_string(config_path).expect("Failed to read the configuration file.");
@@ -156,27 +156,25 @@ fn main() -> io::Result<()> {
 
             // Normalize the regex to remove newlines and unnecessary whitespace
             let normalized_regex = rule.regex.replace("\n  ", "").trim().to_string();
-            if debug_mode {
+            if DEBUG_MODE {
                 log_debug(&format!("Compiling regex: {:?}", normalized_regex)).unwrap();
             }
             let regex = Regex::new(&normalized_regex).expect("Invalid regex in configuration.");
-
             (regex, color)
         })
         .collect();
 
     // Debug: List compiled rules
-if debug_mode {
-    log_debug("Compiled rules:").unwrap();
-    for (i, (regex, color)) in rules.iter().enumerate() {
-        log_debug(&format!("  Rule {}: regex = {:?}, color = {:?}", i + 1, regex, color)).unwrap();
+    if DEBUG_MODE {
+        log_debug("Compiled rules:").unwrap();
+        for (i, (regex, color)) in rules.iter().enumerate() {
+            log_debug(&format!("  Rule {}: regex = {:?}, color = {:?}", i + 1, regex, color)).unwrap();
+        }
     }
-}
 
     // Launch the SSH process
     let mut child = Command::new("ssh")
         .args(&args)
-        // .args(&debug_args)
         .stdin(Stdio::inherit())
         .stdout(Stdio::piped())
         .stderr(Stdio::inherit())
@@ -208,8 +206,8 @@ if debug_mode {
             break; // Exit loop when EOF is reached
         }
         let chunk = String::from_utf8_lossy(&buffer[..n]).to_string();
-        if debug_mode {
-            log_debug(&format!("Read Chunk: {:?}", chunk)).unwrap();
+        if DEBUG_MODE {
+            log_debug(&format!("1:Read Chunk: {:?}", chunk)).unwrap();
         }
         tx.send(chunk).expect("Failed to send data to processing thread");
     }
