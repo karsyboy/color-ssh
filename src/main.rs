@@ -70,11 +70,6 @@ fn find_config_file() -> Option<PathBuf> {
 // Processes a chunk of text, applying syntax highlighting based on the provided rules
 fn process_chunk(chunk: String, rules: &[(Regex, String)], reset_color: &str) -> String {
 
-
-    if DEBUG_MODE {
-        log_debug(&format!("2:Chunk with Escapes: {:?}", chunk)).unwrap();
-    }
-
     // Highlighting logic
     let mut matches: Vec<(usize, usize, String)> = Vec::new();
 
@@ -114,7 +109,7 @@ fn process_chunk(chunk: String, rules: &[(Regex, String)], reset_color: &str) ->
         processed_chunk.push_str(&chunk[last_idx..]);
     }
     if DEBUG_MODE {
-        log_debug(&format!("3:Processed Chunk: {:?}", processed_chunk)).unwrap();
+        log_debug(&format!("2:Processed Chunk: {:?}", processed_chunk)).unwrap();
     }
     // Return processed chunk
     processed_chunk
