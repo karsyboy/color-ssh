@@ -13,6 +13,7 @@ palette:
   Bright-Olive: '#a2bc02'
   Dark-Lime-Green: '#79bf02'
   Kelly-Green: '#28c501'
+  Clarice: '#00bfae'
 
 rules:
 # Switch Prompt
