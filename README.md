@@ -81,11 +81,11 @@ palette:
 rules:
 # Switch Prompt
 - description: Prompt in enabled mode for network switches
-  regex: ((?:\r\n)|^)+([a-zA-Z0-9_-]+#)
+  regex: (\S+)#
   color: Rich-Gold
 
 - description: Match prompt in disable for mode network switches
-  regex: ((?:\r\n)|^)+([a-zA-Z0-9_-]+>)
+  regex: (\S+)>
   color: Rich-Gold
 
 # Interfaces
@@ -189,7 +189,7 @@ rules:
   color: Aqua-Blue
 
 - description: IPv4
-  regex: i?(?:[0-9]{1,3}\.){3}[0-9]{1,3}(?:\/[0-9]{1,2}|:[0-9]{1,5})?(?:,(?:[0-9]{1,5})?)?
+  regex: ([0-9]{1,3}\.){3}[0-9]{1,3}($|/\d{1,2})?
   color: Celestial-Blue
 
 - description: Subnet Mask
