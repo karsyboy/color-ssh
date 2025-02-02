@@ -12,8 +12,6 @@ license = "MIT"
 keywords = ["ssh", "client", "syntax", "highlighting"]
 categories = ["command-line-interface", "command-line-utilities", "network-programming"]
 
-
-
 [dependencies]
 chrono = "0.4.39"
 clap = { version = "4.5.27", features = ["derive"] }
