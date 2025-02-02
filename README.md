@@ -1,4 +1,11 @@
-# CSH (Colored SSH)
+# Colored SSH (CSH)
+
+<p align="center">
+    <a href="https://github.com/karsyboy/colored-ssh/releases">
+        <img src="https://img.shields.io/github/v/release/karsyboy/colored-ssh?include_prereleases&logo=GitHub"></a>
+    <a href="https://crates.io/crates/colored-ssh">
+        <img src="https://img.shields.io/crates/v/colored-ssh?logo=Rust"></a>
+    <br>
 
 `csh` is a Rust-based wrapper for `ssh` that provides syntax-highlighted output using configurable rules. This tool enhances the usability of SSH by allowing regex-based syntax highlighting for specific text patterns in the output.
 
