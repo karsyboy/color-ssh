@@ -8,8 +8,6 @@ on:
       - main
 
 jobs:
-
-
   # Create a PR with the new versions and changelog, preparing the next release.
   # If you want release-plz to only release your packages
   # and you want to update `Cargo.toml` versions and changelogs by yourself,
