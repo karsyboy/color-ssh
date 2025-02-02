@@ -27,7 +27,3 @@ serde_yaml = "0.9.34"
 [profile.dist]
 inherits = "release"
 lto = "thin"
-
-[workspace]
-# Publish jobs to run in CI
-pr-run-mode = "upload"
