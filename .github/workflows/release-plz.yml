@@ -5,7 +5,7 @@ name: csh_release-plz
 on:
   push:
     branches:
-      - release
+      - main
 
 jobs:
 
