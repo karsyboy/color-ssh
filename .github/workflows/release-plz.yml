@@ -1,5 +1,5 @@
 # Name of the workflow: you can change it.
-name: CSH_Release-plz
+name: csh_release-plz
 
 # The action runs on every push to the main branch.
 on:
