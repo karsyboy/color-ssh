@@ -13,12 +13,11 @@ palette:
   Bright-Olive: '#a2bc02'
   Dark-Lime-Green: '#79bf02'
   Kelly-Green: '#28c501'
-  Clarice: '#00bfae'
 
 rules:
 # Switch Prompt
 - description: Prompt in enabled mode for network switches
-  regex: (?:\u001b\[[^m]*m)?([A-Z0-9-]+)#
+  regex: (\S+)#
   color: Rich-Gold
 
 - description: Match prompt in disable for mode network switches
