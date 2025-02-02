@@ -9,7 +9,6 @@ readme = "README.md"
 homepage = "https://github.com/karsyboy/csh"
 repository = "https://github.com/karsyboy/csh"
 license = "MIT"
-license-file = "LICENSE.txt"
 keywords = ["ssh", "client", "syntax", "highlighting"]
 categories = ["networking", "command-line-utilities"]
 
