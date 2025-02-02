@@ -1,7 +1,18 @@
 [package]
 name = "csh"
+description = "A Rust-based SSH client with syntax highlighting."
 version = "0.2.11"
 edition = "2021"
+authors = ["Karsyboy"]
+documentation = "https://github.com/karsyboy/csh"
+readme = "README.md"
+homepage = "https://github.com/karsyboy/csh"
+repository = "https://github.com/karsyboy/csh"
+license = "MIT"
+license-file = "LICENSE.txt"
+keywords = ["ssh", "client", "syntax", "highlighting"]
+categories = ["networking", "command-line-utilities"]
+
 
 [dependencies]
 chrono = "0.4.39"
