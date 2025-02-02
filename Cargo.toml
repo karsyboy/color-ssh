@@ -4,13 +4,13 @@ description = "A Rust-based SSH client with syntax highlighting."
 version = "0.3.0-alpha"
 edition = "2021"
 authors = ["Karsyboy"]
-documentation = "https://github.com/karsyboy/csh"
+documentation = "https://github.com/karsyboy/colored-ssh"
 readme = "README.md"
-homepage = "https://github.com/karsyboy/csh"
-repository = "https://github.com/karsyboy/csh"
+homepage = "https://github.com/karsyboy/colored-ssh"
+repository = "https://github.com/karsyboy/colored-ssh"
 license = "MIT"
 keywords = ["ssh", "client", "syntax", "highlighting"]
-categories = ["networking", "command-line-utilities"]
+categories = ["command-line-interface", "command-line-utilities", "network-programming"]
 
 
 [dependencies]
