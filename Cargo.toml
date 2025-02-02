@@ -1,5 +1,5 @@
 [package]
-name = "csh"
+name = "colored-ssh"
 description = "A Rust-based SSH client with syntax highlighting."
 version = "0.2.11"
 edition = "2021"
