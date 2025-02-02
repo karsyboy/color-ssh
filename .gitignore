@@ -2,6 +2,3 @@
 Cargo.lock
 .vscode
 csh-debug.log
-test-ssh-clients/russh-client/target
-test-ssh-clients/ssh2-client/target
-test-ssh-clients
