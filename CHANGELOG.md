@@ -1,61 +1,104 @@
-## What's Changed
-* fix: Updated release-plz to it will maybe run the release workflow by @karsyboy
+# Changelog
 
-## What's Changed in v0.3.3
-* fix: cargo-dist fixes by @karsyboy
+All notable changes to this project will be documented in this file.
 
-**Full Changelog**: https://github.com/karsyboy/colored-ssh/compare/v0.3.2...v0.3.3
+## [0.3.4] - 2025-02-02
 
-## What's Changed in v0.3.2
-* fix: Updated release please workflow by @karsyboy
-* style: updated CHANGELOG.md by @karsyboy
-* Minor version upgrade by @karsyboy
-* chore: release v0.3.1 by @karsyboy in [#3](https://github.com/karsyboy/colored-ssh/pull/3)
-* Merge branch 'main' into release-plz-2025-02-02T05-53-08Z
-* Merge branch 'main' into release-plz-2025-02-02T05-53-08Z
-* chore: release v0.3.0-alpha.1
-* style: Added version badge to readme by @karsyboy
-* style: Created changlog file for easy tracking by git cliff by @karsyboy
-* style: Updated to the github template for a bit until everything is in order by @karsyboy
-* fix: version not showing proper changing version to 0.3.1 by @karsyboy
-* fix: Updated release-plz workflow to only do the PR report by @karsyboy
+### 🐛 Bug Fixes
 
-**Full Changelog**: https://github.com/karsyboy/colored-ssh/compare/v0.3.0-alpha...v0.3.2
+- Updated release-plz to it will maybe run the release workflow
 
-## What's Changed in v0.3.0-alpha
-* style: Updated Cargo.toml with new github link to colored-ssh by @karsyboy
-* feat: by @karsyboy
-* style:Changed package  name to colored-ssh due to crate conflict with name by @karsyboy
-* feat: Added cargo-dist for automated building of packages and installer setup by @karsyboy
-* feat(Workflow): Added github workflow for creating PR an processing github release with release-plz by @karsyboy
-* doc:Removed blank space from .gitignore by @karsyboy by @karsyboy
-* doc: Removed unused entries from .gitignore by @karsyboy by @karsyboy
-* fix: corrected config template and readme by @karsyboy
-* feature: added needed files for csh release workflow by @karsyboy
-* Fixed license file duplicate info in Cargo.toml by @karsyboy
-* Added license and updated Cargo tolm metadata by @karsyboy
-* Upgraded to version 0.2.11 by @karsyboy
+### 💼 Other
 
-**Full Changelog**: https://github.com/karsyboy/colored-ssh/compare/v0.2.10-alpha...v0.3.0-alpha
+- Version 0.3.4-alpha
 
-## What's Changed in v0.2.10-alpha
-* More stable and accurate version of CSH. Upgraded to version 0.2.10. by @karsyboy
-* disabled debug flag and updated .csh-config by @qkars-stars
-* More debug clean up by @karsyboy
-* Updated code to add better debugging by @karsyboy
-* Updated some docs and other stuff. Moved to version 0.2.1 by @karsyboy
-* Added start of network switch config example by @karsyboy
-* Cleaned code and added multi process support with debugging by @karsyboy
-* Fixed all rules not being processed! by @karsyboy
-* Update README.md
-* Update README.md
-* Update README.md
-* Fixed all rules not being processed!
-* first commit
+## [0.3.3] - 2025-02-02
 
-## New Contributors
-* @karsyboy made their first contribution
-* @qkars-stars made their first contribution
-* @ made their first contribution
+### 🐛 Bug Fixes
+
+- Cargo-dist fixes
+
+## [0.3.2] - 2025-02-02
+
+### 🐛 Bug Fixes
+
+- Updated release-plz workflow to only do the PR report
+- Version not showing proper changing version to 0.3.1
+- Updated release please workflow
+
+### 💼 Other
+
+- Merge branch 'main' into release-plz-2025-02-02T05-53-08Z
+- Merge branch 'main' into release-plz-2025-02-02T05-53-08Z
+- Merge pull request #3 from karsyboy/release-plz-2025-02-02T05-53-08Z
+
+chore: release v0.3.1
+- Minor version upgrade
+
+### 🎨 Styling
+
+- Updated to the github template for a bit until everything is in order
+- Created changlog file for easy tracking by git cliff
+- Added version badge to readme
+- Updated CHANGELOG.md
+
+### ⚙️ Miscellaneous Tasks
+
+- Release v0.3.0-alpha.1
+
+## [0.3.0-alpha] - 2025-02-02
+
+### 🚀 Features
+
+- Added needed files for csh release workflow
+- *(Workflow)* Added github workflow for creating PR an processing github release with release-plz
+- Added cargo-dist for automated building of packages and installer setup
+- Feat:
+- added github dependabot feature for cargo and github-actions
+- Upgrade versioning in code to version 0.3.0-alpha 🚀
+
+### 🐛 Bug Fixes
+
+- Corrected config template and readme
+
+### 💼 Other
+
+- Upgraded to version 0.2.11
+added following features
+- better logging
+- split code into modules
+- better cli argument handling using clap
+- and much more cleanup
+- Added license and updated Cargo tolm metadata
+- Fixed license file duplicate info in Cargo.toml
+
+### 📚 Documentation
+
+- Removed unused entries from .gitignore by @karsyboy
+- Removed blank space from .gitignore by @karsyboy
+
+### 🎨 Styling
+
+- Changed package  name to colored-ssh due to crate conflict with name
+- Style: Updated Cargo.toml with new github link to colored-ssh
+fix: Updated categories due to issue with networking not being a category slug
+
+## [0.2.10-alpha] - 2025-02-01
+
+### 💼 Other
+
+- First commit
+- Fixed all rules not being processed!
+- Update README.md
+- Update README.md
+- Update README.md
+- Fixed all rules not being processed!
+- Cleaned code and added multi process support with debugging
+- Added start of network switch config example
+- Updated some docs and other stuff. Moved to version 0.2.1
+- Updated code to add better debugging
+- More debug clean up
+- Disabled debug flag and updated .csh-config
+- More stable and accurate version of CSH. Upgraded to version 0.2.10.
 
 <!-- generated by git-cliff -->
