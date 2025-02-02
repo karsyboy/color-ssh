@@ -12,8 +12,8 @@ jobs:
   # If you want release-plz to only release your packages
   # and you want to update `Cargo.toml` versions and changelogs by yourself,
   # remove this job.
-  release-plz-pr:
-    name: Release-plz PR
+  release-plz:
+    name: Release-plz
     runs-on: ubuntu-latest
     permissions:
       # Used to create and update pull requests.
@@ -36,9 +36,6 @@ jobs:
         uses: dtolnay/rust-toolchain@stable
       - name: Run release-plz
         uses: release-plz/action@v0.5
-        with:
-          # Run `release-plz release-pr` command.
-          command: release-pr
         env:
           GITHUB_TOKEN: ${{ secrets.RELEASE_PLZ_TOKEN }}
           # In `release-plz-pr` this is only required if you are using a private registry.
