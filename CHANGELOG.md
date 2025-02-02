@@ -1,13 +1,26 @@
 ## What's Changed
-* Merge pull request #3 from karsyboy/release-plz-2025-02-02T05-53-08Z
+* fix: Updated release-plz to it will maybe run the release workflow by @karsyboy
+
+## What's Changed in v0.3.3
+* fix: cargo-dist fixes by @karsyboy
+
+**Full Changelog**: https://github.com/karsyboy/colored-ssh/compare/v0.3.2...v0.3.3
+
+## What's Changed in v0.3.2
+* fix: Updated release please workflow by @karsyboy
+* style: updated CHANGELOG.md by @karsyboy
+* Minor version upgrade by @karsyboy
+* chore: release v0.3.1 by @karsyboy in [#3](https://github.com/karsyboy/colored-ssh/pull/3)
 * Merge branch 'main' into release-plz-2025-02-02T05-53-08Z
 * Merge branch 'main' into release-plz-2025-02-02T05-53-08Z
 * chore: release v0.3.0-alpha.1
-* style: Added version badge to readme
+* style: Added version badge to readme by @karsyboy
 * style: Created changlog file for easy tracking by git cliff by @karsyboy
 * style: Updated to the github template for a bit until everything is in order by @karsyboy
 * fix: version not showing proper changing version to 0.3.1 by @karsyboy
 * fix: Updated release-plz workflow to only do the PR report by @karsyboy
+
+**Full Changelog**: https://github.com/karsyboy/colored-ssh/compare/v0.3.0-alpha...v0.3.2
 
 ## What's Changed in v0.3.0-alpha
 * style: Updated Cargo.toml with new github link to colored-ssh by @karsyboy
@@ -34,9 +47,9 @@
 * Added start of network switch config example by @karsyboy
 * Cleaned code and added multi process support with debugging by @karsyboy
 * Fixed all rules not being processed! by @karsyboy
-* Update README.md by @karsyboy
-* Update README.md by @karsyboy
-* Update README.md by @karsyboy
+* Update README.md
+* Update README.md
+* Update README.md
 * Fixed all rules not being processed!
 * first commit
 
