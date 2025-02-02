@@ -1,27 +1,13 @@
 [workspace]
-# path of the git-cliff configuration
-changelog_config = "cliff.toml"
-
-# enable changelog updates
-changelog_update = true
-
-# update dependencies with `cargo update`
-dependencies_update = true
-
-# create tags for the releases
-git_tag_enable = true
-
-# disable GitHub releases
-git_release_enable = false
-
-# labels for the release PR
-pr_labels = ["release"]
-
-# disallow updating repositories with uncommitted changes
-allow_dirty = false
-
-# disallow packaging with uncommitted changes
-publish_allow_dirty = false
-
-# disable running `cargo-semver-checks`
-semver_check = false
+changelog_config = "cliff.toml" # path of the git-cliff configuration
+changelog_update = true # enable changelog updates
+dependencies_update = true # update dependencies with `cargo update`
+git_tag_enable = true # create tags for the releases
+git_release_enable = false # disable GitHub releases
+pr_branch_prefix = "release-plz-" # PR branch prefix
+pr_name = "Release {{ package }} v{{ version }}" # template for the PR name
+pr_labels = ["release"] # labels for the release PR
+release_commits = "^version:" # prepare release only if at least one commit matches a regex
+allow_dirty = false # disallow updating repositories with uncommitted changes
+publish_allow_dirty = false # disallow packaging with uncommitted changes
+semver_check = false # disable running `cargo-semver-checks`

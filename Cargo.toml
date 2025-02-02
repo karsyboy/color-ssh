@@ -13,6 +13,7 @@ keywords = ["ssh", "client", "syntax", "highlighting"]
 categories = ["command-line-interface", "command-line-utilities", "network-programming"]
 
 
+
 [dependencies]
 chrono = "0.4.39"
 clap = { version = "4.5.27", features = ["derive"] }
@@ -27,5 +28,6 @@ serde_yaml = "0.9.34"
 inherits = "release"
 lto = "thin"
 
+[workspace]
 # Publish jobs to run in CI
 pr-run-mode = "upload"
