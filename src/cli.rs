@@ -12,7 +12,7 @@ fn enable_ssh_logging() {
 /// Returns a vector of strings representing the SSH arguments.
 pub fn parse_args() -> Vec<String> {
     let matches = Command::new("csh")
-        .version("v0.3.0-alpha")
+        .version("v0.3.1-alpha")
         .author("@karsyboy")
         .about("A Rust-based SSH client with syntax highlighting.")
         .arg(
