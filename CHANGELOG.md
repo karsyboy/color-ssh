@@ -1,4 +1,11 @@
 ## What's Changed
+* Merge pull request #3 from karsyboy/release-plz-2025-02-02T05-53-08Z
+* Merge branch 'main' into release-plz-2025-02-02T05-53-08Z
+* Merge branch 'main' into release-plz-2025-02-02T05-53-08Z
+* chore: release v0.3.0-alpha.1
+* style: Added version badge to readme
+* style: Created changlog file for easy tracking by git cliff by @karsyboy
+* style: Updated to the github template for a bit until everything is in order by @karsyboy
 * fix: version not showing proper changing version to 0.3.1 by @karsyboy
 * fix: Updated release-plz workflow to only do the PR report by @karsyboy
 
