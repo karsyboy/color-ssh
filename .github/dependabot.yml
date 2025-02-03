@@ -6,11 +6,6 @@
 
 version: 2
 updates:
- - package-ecosystem: "devcontainers"
-   directory: "/"
-   schedule:
-     interval: weekly
-     
   # Maintain dependencies for Cargo
   - package-ecosystem: cargo
     directory: "/"
