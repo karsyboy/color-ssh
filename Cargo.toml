@@ -1,13 +1,13 @@
 [package]
-name = "colored-ssh"
+name = "color-ssh"
 description = "A Rust-based SSH client with syntax highlighting."
 version = "0.3.6"
 edition = "2021"
 authors = ["Karsyboy"]
-documentation = "https://github.com/karsyboy/colored-ssh"
+documentation = "https://github.com/karsyboy/color-ssh"
 readme = "README.md"
-homepage = "https://github.com/karsyboy/colored-ssh"
-repository = "https://github.com/karsyboy/colored-ssh"
+homepage = "https://github.com/karsyboy/color-ssh"
+repository = "https://github.com/karsyboy/color-ssh"
 license = "MIT"
 keywords = ["ssh", "client", "syntax", "highlighting"]
 categories = ["command-line-interface", "command-line-utilities", "network-programming"]
