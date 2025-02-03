@@ -14,12 +14,7 @@ jobs:
   # remove this job.
   release-plz-pr:
     name: Release-plz PR
-    runs-on: ubuntu-latest
-    permissions:
-      # Used to create and update pull requests.
-      pull-requests: write
-      # Used to push to the pull request branch.
-      contents: write
+    runs-on: ubuntu-lates
 
     # The concurrency block is explained below (after the code block).
     concurrency:
@@ -32,13 +27,11 @@ jobs:
           # `fetch-depth: 0` is needed to clone all the git history, which is necessary to
           # determine the next version and build the changelog.
           fetch-depth: 0
+          token: ${{ secrets.RELEASE_PLZ_TOKEN }}
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
       - name: Run release-plz
         uses: release-plz/action@v0.5
-        with:
-          # Run `release-plz release-pr` command.
-          command: release-pr
         env:
           GITHUB_TOKEN: ${{ secrets.RELEASE_PLZ_TOKEN }}
           # In `release-plz-pr` this is only required if you are using a private registry.
