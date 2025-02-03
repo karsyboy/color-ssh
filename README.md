@@ -1,6 +1,6 @@
-<h1 style="font-size: value;" align="center">
-  <span style="color:#FF8585">C</span><span style="color:#FFB985">o</span><span style="color:#FFEE85">l</span><span style="color:#DCFF85">o</span><span style="color:#A8FF85">r</span> <span style="color:#85FF96">S</span><span style="color:#85FFCB">S</span><span style="color:#85FFFF">H</span> <span style="color:#85CBFF">-</span> <span style="color:#8596FF">(</span><span style="color:#A885FF">c</span><span style="color:#DC85FF">s</span><span style="color:#FF85EE">h</span><span style="color:#FF85B9">)</span>
-</h1>
+<p align="center">
+  <img src="https://raw.githubusercontent.com/karsyboy/color-ssh/refs/heads/main/csh.svg" />
+</p>
 
 
 <p align="center">
