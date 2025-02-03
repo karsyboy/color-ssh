@@ -94,8 +94,15 @@ fn find_config_file() -> Option<PathBuf> {
         return Some(current_dir_path);
     }
 
-    // Return None if the config file was not found
-    None
+    // Create a default configuration file if no configuration file is found
+    match create_default_config() {
+        Ok(path) => Some(path),
+        Err(e) => {
+            eprintln!("Failed to create default configuration file: {}", e);
+            None
+        }
+    }
+
 }
 
 /// Converts a hex color code (e.g., "#FFFFFF") to an ANSI escape sequence for terminal color
@@ -118,4 +125,66 @@ fn hex_to_ansi(hex: &str) -> String {
     }
     // Return the reset color sequence if the hex is invalid
     "\x1b[0m".to_string()
+}
+
+/// Creates a default configuration file with sample content if config does not exist in home directory .csh
+/// Returns an io::Result containing the path to the created configuration file or an error
+fn create_default_config() -> io::Result<PathBuf> {
+    let home_dir = dirs::home_dir().expect("Failed to get home directory.");
+    let csh_dir = home_dir.join(".csh");
+    let config_path = csh_dir.join(".csh-config.yaml");
+
+    // Create the .csh directory if it does not exist
+    if !csh_dir.exists() {
+        fs::create_dir(&csh_dir)?;
+    }
+
+    // Create the configuration file with sample content
+    let config_content = r#"# Description: This is the default template created by color-ssh (csh). 
+# It contains information on the template layout and how to create a custom template.
+# color-ssh templates can be found at https://github.com/karsyboy/color-ssh
+
+# The palette section is used to define the colors that can be used in the rules section.
+# The colors are defined in hex format.
+palette:
+  Red: '#c71800'
+  Green: '#28c501'
+  Blue: '#5698c8'
+
+rules:
+# example rule with all possible options
+# - description: Match on the word "example"
+#   regex: |
+#     (?ix)
+#       \b
+#       example
+#       \b
+#   color: Kelly-Green
+# create a rule that matches on the word "connected" or "up" and color it Kelly-Green
+
+# Example of a rule that uses a one line regex to match on "good" or "up" and color it Green
+- description: Match on good keywords
+  regex: (?ix)\b(good|up)\b
+  color: Green
+
+
+- description: Match on neutral keywords
+  regex: |
+    (?ix)
+      \b
+      neutral
+      \b
+  color: Blue
+
+# create a rule that matches on the word "down" or "error" or "disabled" and color it Red
+- description: Match on bad keywords
+  regex: |
+    (?ix)
+      \b
+      (down|error|disabled)
+      \b
+  color: Red"#;
+    fs::write(&config_path, config_content)?;
+
+    Ok(config_path)
 }
