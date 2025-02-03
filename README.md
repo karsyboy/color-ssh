@@ -1,4 +1,4 @@
-# Color SSH (csh)
+# <span style="color:#FF8585">C</span><span style="color:#FFB985">o</span><span style="color:#FFEE85">l</span><span style="color:#DCFF85">o</span><span style="color:#A8FF85">r</span> <span style="color:#85FF96">S</span><span style="color:#85FFCB">S</span><span style="color:#85FFFF">H</span> <span style="color:#85CBFF">-</span> <span style="color:#8596FF">(</span><span style="color:#A885FF">c</span><span style="color:#DC85FF">s</span><span style="color:#FF85EE">h</span><span style="color:#FF85B9">)</span>
 
 <p align="center">
     <a href="https://github.com/karsyboy/color-ssh/releases">
@@ -12,7 +12,7 @@
         <img src="https://img.shields.io/github/actions/workflow/status/karsyboy/color-ssh/release.yml?logo=Rust&label=Release%20Build"></a>
     <br>
     
-`csh` is a Rust-based wrapper for `ssh` that provides syntax-highlighted output using configurable rules. This tool enhances the usability of SSH by allowing regex-based syntax highlighting for specific text patterns in the output.
+Color SSH, `csh` for short, is a Rust-based wrapper for `ssh` that provides syntax-highlighted output using configurable rules. This tool enhances the usability of SSH by allowing regex-based syntax highlighting for specific text patterns in the output.
 
 ## Features
 
@@ -26,10 +26,19 @@
 
 ## Installation
 
+### [Install using Latest Github Release](https://github.com/karsyboy/color-ssh/releases/)
+
+### Install using Cargo
+
+```bash
+cargo install color-ssh
+```
+
+### Install using Github Source (Testing & Development)
 1. Clone the repository:
    ```bash
-   git clone https://github.com/karsyboy/csh.git
-   cd csh
+   git clone https://github.com/karsyboy/color-ssh.git
+   cd color-ssh
    ```
 
 2. Build the project:
@@ -48,7 +57,18 @@
 
 ### Basic Syntax
 ```bash
-csh <ssh arguments>
+A Rust-based SSH client with syntax highlighting.
+
+Usage: csh [OPTIONS] <ssh_args>...
+
+Arguments:
+  <ssh_args>...  SSH arguments
+
+Options:
+  -d, --debug    Enable debug mode
+  -L, --log      Enable SSH logging
+  -h, --help     Print help
+  -V, --version  Print version
 ```
 
 ### Example
@@ -61,10 +81,10 @@ This runs an SSH session while applying the syntax highlighting rules defined in
 ---
 
 ## Configuration
-The ocnfiguration file is expected to be stored either in the users home directory as `.csh-config.yaml` or in the current directory the `csh` tool is being ran out of.
+The configuration file is expected to be stored either in the users home directory under `.csh\.csh-config.yaml` or in the current directory the `csh`  binary tool is being ran out of.
 
 Valid Configuration file locations:
-- `$HOME/.csh-config.yaml`
+- `$HOME/.csh/.csh-config.yaml`
 - `$PWD/.csh-config.yaml`
 
 The syntax highlighting rules are defined in a YAML file. Each rule consists of:
@@ -74,159 +94,50 @@ The syntax highlighting rules are defined in a YAML file. Each rule consists of:
 
 ### Example Configuration (`.csh-config.yaml`)
 ```yaml
+# Description: This is the default template created by color-ssh (csh). 
+# It contains information on the template layout and how to create a custom template.
+# color-ssh templates can be found at https://github.com/karsyboy/color-ssh
+
+# The palette section is used to define the colors that can be used in the rules section.
+# The colors are defined in hex format.
 palette:
-  Sunrise-Orange: '#e67549'
-  Aqua-Blue: '#00e0d1'
-  Hot-Pink: '#FF69B4'
-  Celestial-Blue: '#5698c8'
-  Rich-Gold: '#a35a00'
-  Bright-Ube: '#df99f0'
-  Caribbean-Green: '#03d28d'
-  Milano-Red: '#c71800'
-  Sedona: '#c96901'
-  Ochre: '#ca9102'
-  Mustard: '#cab902'
-  Bright-Olive: '#a2bc02'
-  Dark-Lime-Green: '#79bf02'
-  Kelly-Green: '#28c501'
+  Red: '#c71800'
+  Green: '#28c501'
+  Blue: '#5698c8'
 
 rules:
-# Switch Prompt
-- description: Prompt in enabled mode for network switches
-  regex: (\S+)#
-  color: Rich-Gold
+# example rule with all possible options
+# - description: Match on the word "example"
+#   regex: |
+#     (?ix)
+#       \b
+#       example
+#       \b
+#   color: Kelly-Green
+# create a rule that matches on the word "connected" or "up" and color it Kelly-Green
 
-- description: Match prompt in disable for mode network switches
-  regex: (\S+)>
-  color: Rich-Gold
-
-# Interfaces
-- description: Always color the word "interface"
-  regex: |
-    (?ix)
-      \b(
-      interfaces?|
-      \w+-interface
-      )\b
-  color: Kelly-Green
-
-- description: Match on interface type "Ethernet"
-  regex: |
-    (?ix)
-      \b(
-      (ethernet|eth|et)
-      (\d{1,2})?
-      (/\d{1,2})?
-      (/\d{1,2})?
-      (\.\d{1,4})?
-      )\b
-  color: Sedona
-
-- description: Match on Cisco interface types
-  regex: |
-    (?ix)
-      \b
-      (gigabitethernet|gi|gig|
-      twogigabitethernet|tw|
-      tengigabitethernet|te|
-      twentyfivegige|twe|
-      fortygigabitethernet|fo|
-      appgigabitethernet|ap)
-      (\d{1,2})?
-      (/\d{1,2})?
-      (/\d{1,2})?
-      (\.\d{1,4})?
-      \b
-  color: Sedona
-
-- description: Match on type "Vlan"
-  regex: |
-    (?ix)
-      \b
-      (vlan|vl)
-      (\d{1,4}|\s\d{1,4})?
-      ((?:,\d{1,4})*)?
-      \b
-  color: Dark-Lime-Green
-
-- description: Match on type "Port-Channel"
-  regex: |
-    (?ix)
-      \b(
-      (port-channel|po)
-      (\d{1,4})?
-      (\.\d{1,4})?
-      )\b
-  color: Bright-Olive
-
-- description: Match on Extra interface types
-  regex: |
-    (?ix)
-      \b
-      (management|mgmt|
-      loopback|lo|
-      tunnel|tu)
-      (\d{1,4})?
-      \b
-  color: Mustard
-
-# Keywords
+# Example of a rule that uses a one line regex to match on "good" or "up" and color it Green
 - description: Match on good keywords
+  regex: (?ix)\b(good|up)\b
+  color: Green
+
+
+- description: Match on neutral keywords
   regex: |
     (?ix)
       \b
-      (connected|up)
+      neutral
       \b
-  color: Kelly-Green
+  color: Blue
 
-- description: Match on nutral keywords
-  regex: |
-    (?ix)
-      \b
-      (xcvrAbsen|noOperMem|notconnect)
-      \b
-  color: Sunrise-Orange
-
+# create a rule that matches on the word "down" or "error" or "disabled" and color it Red
 - description: Match on bad keywords
   regex: |
     (?ix)
       \b
-      (down|shutdown)
+      (down|error|disabled)
       \b
-  color: Milano-Red
-
-# URLs and IPs 
-- description: URL
-  regex: (?i)\b(((htt|ft|lda)ps?|telnet|ssh|tftp)://[^\s/$.?#].[^\s]*)\b
-  color: Aqua-Blue
-
-- description: IPv4
-  regex: ([0-9]{1,3}\.){3}[0-9]{1,3}($|/\d{1,2})?
-  color: Celestial-Blue
-
-- description: Subnet Mask
-  regex: (?:)(?:0|255)\.(?:[0-9]{1,3}\.){2}[0-9]{1,3}
-  color: Celestial-Blue
-
-- description: IPv6
-  regex: |
-    (([0-9a-fA-F]{1,4}:){7,7}[0-9a-fA-F]{1,4}|
-    ([0-9a-fA-F]{1,4}:){1,7}:|
-    ([0-9a-fA-F]{1,4}:){1,6}:[0-9a-fA-F]{1,4}|
-    ([0-9a-fA-F]{1,4}:){1,5}(:[0-9a-fA-F]{1,4}){1,2}|
-    ([0-9a-fA-F]{1,4}:){1,4}(:[0-9a-fA-F]{1,4}){1,3}|
-    ([0-9a-fA-F]{1,4}:){1,3}(:[0-9a-fA-F]{1,4}){1,4}|
-    ([0-9a-fA-F]{1,4}:){1,2}(:[0-9a-fA-F]{1,4}){1,5}|
-    [0-9a-fA-F]{1,4}:((:[0-9a-fA-F]{1,4}){1,6})|
-    :((:[0-9a-fA-F]{1,4}){1,7}|:)|
-    fe80:(:[0-9a-fA-F]{0,4}){0,4}%[0-9a-zA-Z]{1,}|
-    ::(ffff(:0{1,4}){0,1}:){0,1}
-    ((25[0-5]|(2[0-4]|1{0,1}[0-9]){0,1}[0-9])\.){3,3}
-    (25[0-5]|(2[0-4]|1{0,1}[0-9]){0,1}[0-9])|
-    ([0-9a-fA-F]{1,4}:){1,4}:
-    ((25[0-5]|(2[0-4]|1{0,1}[0-9]){0,1}[0-9])\.){3,3}
-    (25[0-5]|(2[0-4]|1{0,1}[0-9]){0,1}[0-9]))
-  color: Celestial-Blue
+  color: Red
 ```
 
 ### Explanation of Configuration
@@ -234,6 +145,9 @@ rules:
    - The `palette` section defines reusable colors using hex codes (e.g., `#32cd32` for green).
 2. **Rules**:
    - Each rule includes a description, regex, and a reference to a color in the `palette`.
+
+## Logging 
+The `.csh` folder is also used to stored ssh logs if the `-L or --log` argument is used. Logs will be stored in `.csh/ssh-logs/MM-DD-YYYY/HOSTNAME-MM-DD-YYYY.log`
 
 ---
 
@@ -291,8 +205,11 @@ Contributions are welcome! To contribute:
 
 ## Future Improvements
 
+- Add vault functionality 
+  - `csh-vault.yaml` encrypted file for storing host information like passwords used to connect.
+  - File with be encrypted with quantum computer resistance encryption methods.
+  - Feature to unlock csh which spawns a csh process that has the ability to decrypt the `csh-vault.yaml` after the users provides there unlock password.
+  - and many more features around this...
 - Add support for themes or predefined configurations.
-- Enhance error reporting for invalid regex patterns in the config file.
-- Add the ability to have the tool output all text out to a log file
 
 ---
