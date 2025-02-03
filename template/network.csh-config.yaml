@@ -1,3 +1,7 @@
+# Description: This is a template for network devices. 
+# It is based industry standard networking devices.
+# color-ssh templates can be found at https://github.com/karsyboy/color-ssh
+
 palette:
   Sunrise-Orange: '#e67549'
   Aqua-Blue: '#00e0d1'
