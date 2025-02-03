@@ -1,16 +1,20 @@
-# <span style="color:#FF8585">C</span><span style="color:#FFB985">o</span><span style="color:#FFEE85">l</span><span style="color:#DCFF85">o</span><span style="color:#A8FF85">r</span> <span style="color:#85FF96">S</span><span style="color:#85FFCB">S</span><span style="color:#85FFFF">H</span> <span style="color:#85CBFF">-</span> <span style="color:#8596FF">(</span><span style="color:#A885FF">c</span><span style="color:#DC85FF">s</span><span style="color:#FF85EE">h</span><span style="color:#FF85B9">)</span>
+<h1 style="font-size: value;" align="center">
+  <span style="color:#FF8585">C</span><span style="color:#FFB985">o</span><span style="color:#FFEE85">l</span><span style="color:#DCFF85">o</span><span style="color:#A8FF85">r</span> <span style="color:#85FF96">S</span><span style="color:#85FFCB">S</span><span style="color:#85FFFF">H</span> <span style="color:#85CBFF">-</span> <span style="color:#8596FF">(</span><span style="color:#A885FF">c</span><span style="color:#DC85FF">s</span><span style="color:#FF85EE">h</span><span style="color:#FF85B9">)</span>
+</h1>
+
 
 <p align="center">
     <a href="https://github.com/karsyboy/color-ssh/releases">
         <img src="https://img.shields.io/github/v/release/karsyboy/color-ssh?include_prereleases&logo=GitHub"></a>
     <a href="https://crates.io/crates/color-ssh">
         <img src="https://img.shields.io/crates/v/color-ssh?logo=Rust"></a>
-    <br>
+  <br>
     <a href="https://github.com/karsyboy/color-ssh/actions/workflows/release-plz.yml">
         <img src="https://img.shields.io/github/actions/workflow/status/karsyboy/color-ssh/release-plz.yml?logo=githubactions&logoColor=white&label=CI%2FCD"></a>
     <a href="https://github.com/karsyboy/color-ssh/actions/workflows/release.yml">
         <img src="https://img.shields.io/github/actions/workflow/status/karsyboy/color-ssh/release.yml?logo=Rust&label=Release%20Build"></a>
-    <br>
+<p>
+
     
 Color SSH, `csh` for short, is a Rust-based wrapper for `ssh` that provides syntax-highlighted output using configurable rules. This tool enhances the usability of SSH by allowing regex-based syntax highlighting for specific text patterns in the output.
 
