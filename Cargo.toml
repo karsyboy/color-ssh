@@ -12,6 +12,10 @@ license = "MIT"
 keywords = ["ssh", "client", "syntax", "highlighting"]
 categories = ["command-line-interface", "command-line-utilities", "network-programming"]
 
+[[bin]]
+name = "csh"
+path = "src/main.rs"
+
 [dependencies]
 chrono = "0.4.39"
 clap = { version = "4.5.27", features = ["derive"] }
@@ -21,7 +25,8 @@ regex = "1.11.1"
 serde = {version ="1.0.217", features = ["derive"] }
 serde_yaml = "0.9.34"
 
-# The profile that 'dist' will build with
+# The profile that 'cargo dist' will build with
 [profile.dist]
 inherits = "release"
 lto = "thin"
+
