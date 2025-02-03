@@ -96,7 +96,10 @@ The syntax highlighting rules are defined in a YAML file. Each rule consists of:
 - **`regex`**: The pattern to match in SSH output.
 - **`color`**: The color to apply, specified as a key from the `palette` section.
 
-### Example Configuration (`.csh-config.yaml`)
+
+If no configuration file is found then `csh` will create the configuration file `~/.csh/.csh-config.yaml` using the template `default.csh-config.yaml`.
+
+### Example Configuration (`.\templates\default.csh-config.yaml`)
 ```yaml
 # Description: This is the default template created by color-ssh (csh). 
 # It contains information on the template layout and how to create a custom template.
