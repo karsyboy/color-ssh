@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="https://raw.githubusercontent.com/karsyboy/color-ssh/refs/heads/main/.resources/csh.svg" />
+  <img src="https://raw.githubusercontent.com/karsyboy/color-ssh/refs/heads/main/.resources/title.svg" />
 </p>
 
 
