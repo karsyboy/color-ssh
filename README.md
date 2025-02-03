@@ -5,7 +5,7 @@
 
 <p align="center">
     <a href="https://github.com/karsyboy/color-ssh/releases">
-        <img src="https://img.shields.io/github/v/release/karsyboy/color-ssh?include_prereleases&logo=GitHub"></a>
+        <img src="https://img.shields.io/github/v/release/karsyboy/color-ssh?include_prereleases&logo=GitHub&label=Github"></a>
     <a href="https://crates.io/crates/color-ssh">
         <img src="https://img.shields.io/crates/v/color-ssh?logo=Rust"></a>
   <br>
