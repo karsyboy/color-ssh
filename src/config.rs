@@ -23,55 +23,9 @@ pub struct HighlightRule {
     pub color: String, // Color name (key in the palette) to use for the matched text
 }
 
-/// Reads the configuration file and parses it into a Config struct
-/// Returns an io::Result containing the Config struct or an error
-pub fn load_config() -> io::Result<Config> {
-    let config_path = find_config_file().expect("Configuration file not found.");
-
-    if DEBUG_MODE.load(Ordering::Relaxed) {
-        log_debug(&format!("Using configuration file: {:?}", config_path)).unwrap();
-    }
-
-    let config_content = fs::read_to_string(config_path)?;
-    let mut config: Config =
-        serde_yaml::from_str(&config_content).expect("Failed to parse the configuration file.");
-
-    // Convert hex color codes to ANSI escape sequences
-    for (_, value) in config.palette.iter_mut() {
-        *value = hex_to_ansi(value);
-    }
-
-    Ok(config)
-}
-
-/// Compiles the highlighting rules from the configuration into a vector of regex patterns and their corresponding colors
-///
-///  - `config`: A reference to the Config struct containing the color palette and highlighting rules
-///
-/// Returns a vector of tuples, each containing a regex pattern and the corresponding color
-pub fn compile_rules(config: &Config) -> Vec<(Regex, String)> {
-    let rules: Vec<(Regex, String)> = config
-        .rules
-        .iter()
-        .map(|rule| {
-            // Retrieve the already-converted ANSI escape sequence from the palette.
-            let color = config
-                .palette
-                .get(&rule.color)
-                .cloned()
-                .unwrap_or_else(|| "\x1b[0m".to_string()); // Default to reset color if not found
-
-            // Compile the regex pattern for matching
-            let regex = Regex::new(&rule.regex).expect("Invalid regex in configuration.");
-            (regex, color)
-        })
-        .collect();
-    rules
-}
-
 /// Search for the configuration file in the current directory or home directory
 /// Returns the path to the configuration file if found, or None if not found
-fn find_config_file() -> Option<PathBuf> {
+pub fn find_config_file() -> Option<PathBuf> {
     // look for .csh-config.yaml in the .csh directory under the users home directory
     if let Some(home_dir) = dirs::home_dir() {
         let csh_dir_path = home_dir.join(".csh").join(".csh-config.yaml");
@@ -103,6 +57,55 @@ fn find_config_file() -> Option<PathBuf> {
         }
     }
 
+}
+
+/// Reads the configuration file and parses it into a Config struct
+/// Returns an io::Result containing the Config struct or an error
+pub fn load_config(config_path: &PathBuf) -> io::Result<Config> {
+    if DEBUG_MODE.load(Ordering::Relaxed) {
+        log_debug(&format!("Using configuration file: {:?}", config_path)).unwrap();
+    }
+
+    let config_content = fs::read_to_string(config_path)?;
+
+    match serde_yaml::from_str::<Config>(&config_content) {
+        Ok(mut config) => {
+            // Convert hex color codes to ANSI escape sequences
+            for (_, value) in config.palette.iter_mut() {
+                *value = hex_to_ansi(value);
+            }
+            Ok(config)
+        }
+        Err(err) => {
+            eprintln!("Error parsing configuration file: {:?}", err);
+            Err(io::Error::new(io::ErrorKind::InvalidData, "Failed to parse configuration file."))
+        }
+    }
+}
+
+/// Compiles the highlighting rules from the configuration into a vector of regex patterns and their corresponding colors
+///
+///  - `config`: A reference to the Config struct containing the color palette and highlighting rules
+///
+/// Returns a vector of tuples, each containing a regex pattern and the corresponding color
+pub fn compile_rules(config: &Config) -> Vec<(Regex, String)> {
+    let rules: Vec<(Regex, String)> = config
+        .rules
+        .iter()
+        .map(|rule| {
+            // Retrieve the already-converted ANSI escape sequence from the palette.
+            let color = config
+                .palette
+                .get(&rule.color)
+                .cloned()
+                .unwrap_or_else(|| "\x1b[0m".to_string()); // Default to reset color if not found
+
+            // Compile the regex pattern for matching
+            let regex = Regex::new(&rule.regex).expect("Invalid regex in configuration.");
+            (regex, color)
+        })
+        .collect();
+    rules
 }
 
 /// Converts a hex color code (e.g., "#FFFFFF") to an ANSI escape sequence for terminal color
