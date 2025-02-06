@@ -1,5 +1,5 @@
 use chrono::Local;
-use lazy_static::lazy_static;
+use once_cell::sync::Lazy;
 use std::fs::OpenOptions;
 use std::io::{self, Write};
 use std::path::PathBuf;
@@ -7,9 +7,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Mutex;
 
 // A global buffer to accumulate output until full lines are available.
-lazy_static! {
-    static ref OUTPUT_BUFFER: Mutex<String> = Mutex::new(String::new());
-}
+static OUTPUT_BUFFER: Lazy<Mutex<String>> = Lazy::new(|| Mutex::new(String::new()));
 
 // Flag for enabling/disabling debug mode
 pub static DEBUG_MODE: AtomicBool = AtomicBool::new(false);
@@ -32,10 +30,10 @@ pub fn log_debug(message: &str) -> io::Result<()> {
 }
 
 /// Log SSH output to a log file, if SSH_LOGGING is enabled
-/// 
+///
 /// - `chunk`: The chunk of output to log
 /// - `args`: The arguments passed to the SSH command
-/// 
+///
 /// Writes the output to a file named "HOSTNAME-MM-DD-YYYY.log" in the ".csh/ssh-logs" directory.
 pub fn log_ssh_output(chunk: &str, args: &[String]) -> io::Result<()> {
     // Lock the global output buffer and append the new chunk.

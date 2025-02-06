@@ -1,21 +1,26 @@
 use std::io::{self, BufReader, Read, Write};
 use std::sync::atomic::Ordering;
 use std::sync::mpsc::{self, Receiver, Sender};
-use std::{thread, time::Duration};
-use std::sync::{Arc, RwLock};
-use notify::{Error, Event, RecommendedWatcher, RecursiveMode, Watcher};
-use std::path::Path;
+use std::sync::Arc;
+use std::thread;
+
+#[cfg(unix)]
+use socket::unix_socket;
+
+#[cfg(windows)]
+use socket::windows_pipe;
 
 // Imports CSH specific modules
 mod cli;
 mod config;
 mod highlighter;
 mod logging;
+mod socket;
 mod ssh;
 mod vault;
 
 use cli::{parse_args, SSH_LOGGING};
-use config::{compile_rules, load_config, find_config_file};
+use config::{compile_rules, load_config, COMPILED_RULES, CONFIG};
 use highlighter::process_chunk;
 use logging::{enable_debug_mode, log_debug, log_ssh_output, DEBUG_MODE};
 use ssh::spawn_ssh;
@@ -39,16 +44,10 @@ fn main() -> io::Result<()> {
         log_debug(&format!("SSH arguments: {:?}", args)).unwrap();
     }
 
-    // Load initial config path, config, and compiled rules for use in config watcher thread and rest of program
-    let config_path = find_config_file().expect("Configuration file not found.");
-    let config = Arc::new(RwLock::new(load_config(&config_path).expect("Failed to load configuration.")));
-    let compiled_rules = Arc::new(RwLock::new(compile_rules(&config.read().unwrap())));
-
     // If debugging, log the compiled rules
     if DEBUG_MODE.load(Ordering::Relaxed) {
-        let rules = compiled_rules.read().unwrap().clone();
         log_debug("Compiled rules:").unwrap();
-        for (i, (regex, color)) in rules.iter().enumerate() {
+        for (i, (regex, color)) in COMPILED_RULES.read().unwrap().iter().enumerate() {
             log_debug(&format!(
                 "  Rule {}: regex = {:?}, color = {:?}",
                 i + 1,
@@ -59,72 +58,52 @@ fn main() -> io::Result<()> {
         }
     }
 
-    // Create the needed Arc clones for the file watcher thread
-    let watch_config_path = config_path.clone();
-    let watch_config = Arc::clone(&config);
-    let watch_compiled_rules = Arc::clone(&compiled_rules);
+    // Callback function that gets executed to reload csh configuration when the reload command is sent to the socket
+    let reload_callback = Arc::new(|| {
 
-    // Spawn a thread to watch the configuration file for changes
-    // If changes are done to the configuration file it will reload the configuration and recompile the rules
-    thread::spawn(move || {
-        let (tx, rx) = mpsc::channel();
-        let mut config_watcher = RecommendedWatcher::new(
-            move |result: Result<Event, Error>| {
-                if let Ok(event) = result {
-                    if event.kind.is_modify() {
-                        tx.send(()).unwrap();
-                    }
+        let new_config = load_config();
+        {
+            match new_config {
+                Ok(config) => {
+                    let mut config_write = CONFIG.write().unwrap();
+                    *config_write = config;
                 }
-            },
-            notify::Config::default(),
-        ).expect("Failed to initialize watcher");
-    
-        config_watcher.watch(Path::new(&watch_config_path), RecursiveMode::NonRecursive)
-            .expect("Failed to watch configuration file");
-    
-        for _ in rx.iter() {
-            println!("Config file changed, reloading...");
-            thread::sleep(Duration::from_millis(500)); // Avoid race conditions
-
-            match load_config(&watch_config_path) {
-                Ok(new_config) => {
-                    // Update the config first
-                    {
-                        let mut config_write = watch_config.write().unwrap();
-                        *config_write = new_config;
-                    }
-    
-                    // Then use the updated config to compile new rules
-                    let new_rules = {
-                        let config_read = watch_config.read().unwrap();
-                        compile_rules(&config_read)
-                    };
-
-                    println!("Configuration reloaded successfully.");
-
-                    // If debugging, log the compiled rules
-                    if DEBUG_MODE.load(Ordering::Relaxed) {
-                        log_debug("Compiled rules:").unwrap();
-                        for (i, (regex, color)) in new_rules.iter().enumerate() {
-                            log_debug(&format!(
-                                "  Rule {}: regex = {:?}, color = {:?}",
-                                i + 1,
-                                regex,
-                                color
-                            ))
-                            .unwrap();
-                        }
-                    }
-
-                    // Update the compiled rules
-                    *watch_compiled_rules.write().unwrap() = new_rules;
-                }
-                Err(error) => {
-                    eprintln!("Error reloading config: {:?}. Retaining old configuration.", error);
+                Err(e) => {
+                    eprintln!("Failed to reload configuration: {}", e);
                 }
             }
         }
+
+        let new_rules = {
+            let config_read = CONFIG.read().unwrap();
+            compile_rules(&*config_read)
+        };
+
+        {
+            let mut rules_write = COMPILED_RULES.write().unwrap();
+            *rules_write = new_rules;
+        }
+
+        // If debugging, log the compiled rules
+        if DEBUG_MODE.load(Ordering::Relaxed) {
+            log_debug("Compiled rules:").unwrap();
+            for (i, (regex, color)) in COMPILED_RULES.read().unwrap().iter().enumerate() {
+                log_debug(&format!(
+                    "  Rule {}: regex = {:?}, color = {:?}",
+                    i + 1,
+                    regex,
+                    color
+                ))
+                .unwrap();
+            }
+        }
     });
+
+    #[cfg(unix)]
+    unix_socket::start_socket_listener(move || reload_callback());
+
+    #[cfg(windows)]
+    windows_pipe::start_socket_listener(move || reload_callback());
 
     // Launch the SSH process with the provided arguments
     let mut child = spawn_ssh(&args)?;
@@ -134,10 +113,9 @@ fn main() -> io::Result<()> {
     // Create a channel for sending and receiving output chunks
     let (tx, rx): (Sender<String>, Receiver<String>) = mpsc::channel();
 
-
     // Create needed values for chunk reading thread
     let proc_reset_color = "\x1b[0m"; // ANSI reset color sequence
-    let proc_compiled_rules = Arc::clone(&compiled_rules);
+    let proc_compiled_rules = Arc::clone(&COMPILED_RULES);
 
     // Spawn thread for reading chunks sent by ssh
     // This is the main thread that reads the chunks and applies the highlighter
@@ -168,8 +146,19 @@ fn main() -> io::Result<()> {
             .expect("Failed to send data to processing thread");
     }
 
+    //Close and clean up Socket/Pipe
+    #[cfg(unix)]
+    {
+        unix_socket::send_command("exit");
+    }
+
+    #[cfg(windows)]
+    {
+        windows_pipe::send_command("exit");
+    }
+
     // Wait for the SSH process to finish and exit with the process's status code
     let status = child.wait()?;
     std::process::exit(status.code().unwrap_or(1));
-
+    
 }
