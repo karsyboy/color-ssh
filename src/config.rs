@@ -1,3 +1,4 @@
+use once_cell::sync::Lazy;
 use regex::Regex;
 use serde::Deserialize;
 use std::collections::HashMap;
@@ -6,6 +7,7 @@ use std::fs;
 use std::io;
 use std::path::PathBuf;
 use std::sync::atomic::Ordering;
+use std::sync::{Arc, RwLock};
 
 use crate::{log_debug, DEBUG_MODE};
 
@@ -23,50 +25,64 @@ pub struct HighlightRule {
     pub color: String, // Color name (key in the palette) to use for the matched text
 }
 
-/// Search for the configuration file in the current directory or home directory
-/// Returns the path to the configuration file if found, or None if not found
-pub fn find_config_file() -> Option<PathBuf> {
-    // look for .csh-config.yaml in the .csh directory under the users home directory
+// Find the configuration path and set once as a global varible to be used anywhere
+// This is done so we dont have to keep worrying about passing the config path to functions inorder for them to get config information when its reloaded
+pub const CONFIG_PATH: Lazy<PathBuf> = Lazy::new(|| {
+    // Check first possible location: ~/.csh/.csh-config.yaml
     if let Some(home_dir) = dirs::home_dir() {
         let csh_dir_path = home_dir.join(".csh").join(".csh-config.yaml");
         if csh_dir_path.exists() {
-            return Some(csh_dir_path);
+            return csh_dir_path;
         }
     }
 
-    // Look for .csh-config.yaml in the home directory if not found in the current directory
+    // Check second possible location: ~/.csh-config.yaml
     if let Some(home_dir) = dirs::home_dir() {
         let home_dir_path = home_dir.join(".csh-config.yaml");
         if home_dir_path.exists() {
-            return Some(home_dir_path);
+            return home_dir_path;
         }
     }
 
-    // Look for .csh-config.yaml in the current directory
-    let current_dir_path = env::current_dir().unwrap().join(".csh-config.yaml");
+    // Check third possible location: current working directory
+    let current_dir_path = env::current_dir()
+        .unwrap_or_else(|e| {
+            eprintln!("Failed to get current directory: {}", e);
+            std::process::exit(1);
+        })
+        .join(".csh-config.yaml");
     if current_dir_path.exists() {
-        return Some(current_dir_path);
+        return current_dir_path;
     }
 
-    // Create a default configuration file if no configuration file is found
+    // None of the config files exist; try to create a default configuration.
     match create_default_config() {
-        Ok(path) => Some(path),
+        Ok(path) => path,
         Err(e) => {
             eprintln!("Failed to create default configuration file: {}", e);
-            None
+            std::process::exit(1);
         }
     }
+});
 
-}
+// Load initial config, and compiled rules as statics so that they can be updated and changed when the socket calls a reload this also alows them to be used globally
+pub static CONFIG: Lazy<Arc<RwLock<Config>>> = Lazy::new(|| {
+    Arc::new(RwLock::new(
+        load_config().expect("Failed to load configuration."),
+    ))
+});
+
+pub static COMPILED_RULES: Lazy<Arc<RwLock<Vec<(Regex, String)>>>> =
+    Lazy::new(|| Arc::new(RwLock::new(compile_rules(&*CONFIG.read().unwrap()))));
 
 /// Reads the configuration file and parses it into a Config struct
 /// Returns an io::Result containing the Config struct or an error
-pub fn load_config(config_path: &PathBuf) -> io::Result<Config> {
+pub fn load_config() -> io::Result<Config> {
     if DEBUG_MODE.load(Ordering::Relaxed) {
-        log_debug(&format!("Using configuration file: {:?}", config_path)).unwrap();
+        log_debug(&format!("Using configuration file: {:?}", CONFIG_PATH)).unwrap();
     }
 
-    let config_content = fs::read_to_string(config_path)?;
+    let config_content = fs::read_to_string(&*CONFIG_PATH)?;
 
     match serde_yaml::from_str::<Config>(&config_content) {
         Ok(mut config) => {
@@ -78,7 +94,10 @@ pub fn load_config(config_path: &PathBuf) -> io::Result<Config> {
         }
         Err(err) => {
             eprintln!("Error parsing configuration file: {:?}", err);
-            Err(io::Error::new(io::ErrorKind::InvalidData, "Failed to parse configuration file."))
+            Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                "Failed to parse configuration file.",
+            ))
         }
     }
 }
@@ -89,22 +108,21 @@ pub fn load_config(config_path: &PathBuf) -> io::Result<Config> {
 ///
 /// Returns a vector of tuples, each containing a regex pattern and the corresponding color
 pub fn compile_rules(config: &Config) -> Vec<(Regex, String)> {
-    let rules: Vec<(Regex, String)> = config
-        .rules
-        .iter()
-        .map(|rule| {
-            // Retrieve the already-converted ANSI escape sequence from the palette.
-            let color = config
-                .palette
-                .get(&rule.color)
-                .cloned()
-                .unwrap_or_else(|| "\x1b[0m".to_string()); // Default to reset color if not found
+    let mut rules = Vec::new();
 
-            // Compile the regex pattern for matching
-            let regex = Regex::new(&rule.regex).expect("Invalid regex in configuration.");
-            (regex, color)
-        })
-        .collect();
+    for rule in &config.rules {
+        let color = config
+            .palette
+            .get(&rule.color)
+            .cloned()
+            .unwrap_or_else(|| "\x1b[0m".to_string()); // Default to reset color if not found
+
+        match Regex::new(&rule.regex) {
+            Ok(regex) => rules.push((regex, color)),
+            Err(err) => eprintln!("Warning: Invalid regex '{}' - {}", rule.regex, err),
+        }
+    }
+
     rules
 }
 
