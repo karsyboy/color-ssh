@@ -193,9 +193,11 @@ pub fn compile_rules(config: &Config) -> Vec<(Regex, String)> {
             .cloned()
             .unwrap_or_else(|| "\x1b[0m".to_string()); // Default to reset color if not found
 
-        match Regex::new(&rule.regex) {
+        let clean_regex=  rule.regex.replace('\n', "").trim().to_string();
+
+        match Regex::new(&clean_regex) {
             Ok(regex) => rules.push((regex, color)),
-            Err(err) => eprintln!("Warning: Invalid regex '{}' - {}\r", rule.regex, err),
+            Err(err) => eprintln!("Warning: Invalid regex '{}' - {}\r", clean_regex, err),
         }
     }
 
@@ -281,18 +283,18 @@ rules:
 - description: Match on neutral keywords
   regex: |
     (?ix)
-      \b
-      neutral
-      \b
+    \b
+    neutral
+    \b
   color: Blue
 
 # create a rule that matches on the word "down" or "error" or "disabled" and color it Red
 - description: Match on bad keywords
   regex: |
     (?ix)
-      \b
-      (down|error|disabled)
-      \b
+    \b
+    (down|error|disabled)
+    \b
   color: Red"#;
     fs::write(&config_path, config_content)?;
 
