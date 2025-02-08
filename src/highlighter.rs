@@ -121,7 +121,7 @@ pub fn process_chunk(
         ))
         .unwrap();
         log_debug(&format!(
-            "[{:?}] Chunk[{:?}]4:Filtered matches: {:?}",
+            "[{:?}] Chunk[{:?}] 4:Filtered matches: {:?}",
             thread_id, chunk_id, filtered_matches
         ))
         .unwrap();
