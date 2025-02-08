@@ -29,16 +29,16 @@ rules:
 - description: Match on neutral keywords
   regex: |
     (?ix)
-      \b
-      neutral
-      \b
+    \b
+    neutral
+    \b
   color: Blue
 
 # create a rule that matches on the word "down" or "error" or "disabled" and color it Red
 - description: Match on bad keywords
   regex: |
     (?ix)
-      \b
-      (down|error|disabled)
-      \b
+    \b
+    (down|error|disabled)
+    \b
   color: Red
