@@ -1,13 +1,7 @@
-use crate::enable_debug_mode;
-
-#[cfg(unix)]
-use crate::socket::unix_socket;
-
-#[cfg(windows)]
-use crate::socket::windows_pipe;
-
 use clap::{Arg, Command};
 use std::sync::atomic::{AtomicBool, Ordering};
+
+use crate::enable_debug_mode;
 
 // Used to enable SSH logging in the logging module
 pub static SSH_LOGGING: AtomicBool = AtomicBool::new(false);
@@ -19,7 +13,7 @@ fn enable_ssh_logging() {
 /// Returns a vector of strings representing the SSH arguments.
 pub fn parse_args() -> Vec<String> {
     let matches = Command::new("csh")
-        .version("v0.3.11")
+        .version("v0.3.12")
         .author("@karsyboy")
         .about("A Rust-based SSH client with syntax highlighting.")
         .arg(
@@ -37,16 +31,10 @@ pub fn parse_args() -> Vec<String> {
                 .action(clap::ArgAction::SetTrue),
         )
         .arg(
-            Arg::new("reload")
-                .long("reload")
-                .help("Reload configuration for all running csh instances")
-                .action(clap::ArgAction::SetTrue),
-        )
-        .arg(
             Arg::new("ssh_args")
                 .help("SSH arguments")
                 .num_args(1..)
-                .required_unless_present("reload"),
+                .required(true),
         )
         .get_matches();
 
@@ -58,18 +46,6 @@ pub fn parse_args() -> Vec<String> {
     // Enable SSH logging if the flag is set
     if matches.get_flag("log") {
         enable_ssh_logging();
-    }
-    #[cfg(unix)]
-    {
-        if matches.get_flag("reload") {
-            unix_socket::send_command_to_all("reload");
-        }
-    }
-    #[cfg(windows)]
-    {
-        if matches.get_flag("reload") {
-            windows_pipe::send_command_to_all("reload");
-        }
     }
 
     // Retrieve remaining SSH arguments
