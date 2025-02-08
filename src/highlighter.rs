@@ -126,8 +126,8 @@ pub fn process_chunk(
         ))
         .unwrap();
         log_debug(&format!(
-            "[{:?}] Chunk[{:?}] 5:Raw chunk: {:?}",
-            thread_id, chunk_id, chunk
+            "[{:?}] Chunk[{:?}] 5:Highlighted chunk: {:?}",
+            thread_id, chunk_id, highlighted
         ))
         .unwrap();
     }
