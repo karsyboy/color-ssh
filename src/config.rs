@@ -1,17 +1,13 @@
+use notify::{Error, Event, RecommendedWatcher, RecursiveMode, Watcher};
 use once_cell::sync::Lazy;
 use regex::Regex;
 use serde::Deserialize;
+use std::{env, fs, io, thread};
 use std::collections::HashMap;
-use std::env;
-use std::fs;
-use std::io;
 use std::path::{Path, PathBuf};
+use std::sync::{Arc, RwLock, mpsc};
 use std::sync::atomic::Ordering;
-use std::sync::{Arc, RwLock};
-use notify::{Event, Error, RecommendedWatcher, RecursiveMode, Watcher};
-use std::sync::mpsc;
 use std::time::Duration;
-use std::thread;
 
 use crate::{log_debug, DEBUG_MODE};
 
@@ -50,8 +46,8 @@ pub const CONFIG_PATH: Lazy<PathBuf> = Lazy::new(|| {
 
     // Check third possible location: current working directory
     let current_dir_path = env::current_dir()
-        .unwrap_or_else(|e| {
-            eprintln!("Failed to get current directory: {}", e);
+        .unwrap_or_else(|err| {
+            eprintln!("Failed to get current directory: {}", err);
             std::process::exit(1);
         })
         .join(".csh-config.yaml");
@@ -62,8 +58,8 @@ pub const CONFIG_PATH: Lazy<PathBuf> = Lazy::new(|| {
     // None of the config files exist; try to create a default configuration.
     match create_default_config() {
         Ok(path) => path,
-        Err(e) => {
-            eprintln!("Failed to create default configuration file: {}", e);
+        Err(err) => {
+            eprintln!("Failed to create default configuration file: {}\r", err);
             std::process::exit(1);
         }
     }
@@ -72,7 +68,7 @@ pub const CONFIG_PATH: Lazy<PathBuf> = Lazy::new(|| {
 // Load initial config, and compiled rules as statics so that they can be updated and changed when the socket calls a reload this also alows them to be used globally
 pub static CONFIG: Lazy<Arc<RwLock<Config>>> = Lazy::new(|| {
     Arc::new(RwLock::new(
-        load_config().expect("Failed to load configuration."),
+        load_config().expect("Failed to load configuration.\r"),
     ))
 });
 
@@ -83,7 +79,11 @@ pub static COMPILED_RULES: Lazy<Arc<RwLock<Vec<(Regex, String)>>>> =
 /// Returns an io::Result containing the Config struct or an error
 pub fn load_config() -> io::Result<Config> {
     if DEBUG_MODE.load(Ordering::Relaxed) {
-        log_debug(&format!("Using configuration file: {:?}", CONFIG_PATH.to_str())).unwrap();
+        log_debug(&format!(
+            "Using configuration file: {:?}\r",
+            CONFIG_PATH.to_str()
+        ))
+        .unwrap();
     }
 
     let config_content = fs::read_to_string(&*CONFIG_PATH)?;
@@ -97,10 +97,10 @@ pub fn load_config() -> io::Result<Config> {
             Ok(config)
         }
         Err(err) => {
-            eprintln!("Error parsing configuration file: {:?}", err);
+            eprintln!("Error parsing configuration file: {:?}\r", err);
             Err(io::Error::new(
                 io::ErrorKind::InvalidData,
-                "Failed to parse configuration file.",
+                "Failed to parse configuration file.\r",
             ))
         }
     }
@@ -112,39 +112,52 @@ pub fn config_watcher() -> RecommendedWatcher {
 
     let mut watcher = RecommendedWatcher::new(
         move |res: Result<Event, Error>| {
-            match res {
-                Ok(event) => {
-                    println!("Filesystem event detected: {:?}", event);
-                    let _ = tx.send(()); // Notify main thread
+            if let Ok(event) = res {
+                if event.kind.is_modify() {
+                    // println!("Event info {:?}\r", event);
+                    tx.send(()).unwrap();
                 }
-                Err(e) => eprintln!("Watch error: {:?}", e),
             }
         },
         notify::Config::default(),
-    ).expect("Failed to initialize file watcher");
+    )
+    .expect("Failed to initialize file watcher\r");
 
     watcher
-        .watch(Path::new(CONFIG_PATH.to_str().unwrap()), RecursiveMode::NonRecursive)
-        .expect("Failed to watch configuration file");
+        .watch(
+            Path::new(CONFIG_PATH.to_str().unwrap()),
+            RecursiveMode::NonRecursive,
+        )
+        .expect("Failed to watch configuration file\r");
 
     thread::spawn(move || {
-        for _ in rx.iter() {
-            println!("Config file changed, reloading...");
-            thread::sleep(Duration::from_millis(500)); // Prevent race conditions
-            if let Err(err) = reload_config() {
-                eprintln!("Error reloading config: {}", err);
-            } else {
-                println!("Configuration reloaded successfully.");
+        loop {
+            match rx.recv() {
+                Ok(()) => {
+                    while let Ok(_) = rx.recv_timeout(Duration::from_millis(500)) {
+                        // Keeps reciving events until itd done
+                    }
+                    println!("\r\nConfig file changed, reloading...\r");
+                    if let Err(err) = reload_config() {
+                        eprintln!("Error reloading config: {}\r", err);
+                    } else {
+                        println!("Configuration reload successfully.\r");
+                    }
+                }
+                Err(err) => {
+                    eprintln!("Error receiving from chennel: {:?}\r", err);
+                }
             }
         }
     });
-
     watcher // Return the watcher so it stays in scope
+
 }
 
 /// Loads and applies new configuration.
 pub fn reload_config() -> Result<(), String> {
-    let new_config = load_config().map_err(|e| format!("Failed to load configuration: {}", e))?;
+    let new_config = load_config().map_err(|err| 
+        format!("Failed to load configuration: {}\r", err))?;
 
     // Update the global configuration
     {
@@ -164,7 +177,6 @@ pub fn reload_config() -> Result<(), String> {
     }
 
     Ok(())
-
 }
 
 /// Compiles the highlighting rules from the configuration into a vector of regex patterns and their corresponding colors
@@ -184,7 +196,7 @@ pub fn compile_rules(config: &Config) -> Vec<(Regex, String)> {
 
         match Regex::new(&rule.regex) {
             Ok(regex) => rules.push((regex, color)),
-            Err(err) => eprintln!("Warning: Invalid regex '{}' - {}", rule.regex, err),
+            Err(err) => eprintln!("Warning: Invalid regex '{}' - {}\r", rule.regex, err),
         }
     }
 
@@ -229,7 +241,7 @@ fn hex_to_ansi(hex: &str) -> String {
 /// Creates a default configuration file with sample content if config does not exist in home directory .csh
 /// Returns an io::Result containing the path to the created configuration file or an error
 fn create_default_config() -> io::Result<PathBuf> {
-    let home_dir = dirs::home_dir().expect("Failed to get home directory.");
+    let home_dir = dirs::home_dir().expect("Failed to get home directory.\r");
     let csh_dir = home_dir.join(".csh");
     let config_path = csh_dir.join(".csh-config.yaml");
 

@@ -48,7 +48,7 @@ pub fn log_ssh_output(chunk: &str, args: &[String]) -> io::Result<()> {
         *buffer = buffer[newline_pos + 1..].to_string();
 
         // Build the log file path.
-        let mut path = dirs::home_dir().expect("Unable to get home directory");
+        let mut path = dirs::home_dir().expect("Unable to get home directory\r");
         path.push(".csh");
         path.push("ssh-logs");
         // Use the current date for the folder name.
@@ -60,7 +60,7 @@ pub fn log_ssh_output(chunk: &str, args: &[String]) -> io::Result<()> {
         // Build the log filename: HOSTNAME-MM-DD-YYYY.log
         let hostname = args
             .get(0)
-            .expect("Expected at least one argument for hostname");
+            .expect("Expected at least one argument for hostname\r");
         let file_name = format!("{}-{}.log", hostname, now.format("%m-%d-%Y"));
 
         let mut file_path = PathBuf::from(&path);

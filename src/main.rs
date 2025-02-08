@@ -1,30 +1,36 @@
 use std::io::{self, BufReader, Read, Write};
+use std::process::{Command, Stdio};
+use std::sync::Arc;
 use std::sync::atomic::Ordering;
 use std::sync::mpsc::{self, Receiver, Sender};
-use std::sync::Arc;
 use std::thread;
-
-#[cfg(unix)]
-//use socket::unix_socket;
-
-#[cfg(windows)]
-use socket::windows_pipe;
 
 // Imports CSH specific modules
 mod cli;
 mod config;
 mod highlighter;
 mod logging;
-// mod socket;
-mod watcher;
-mod ssh;
 mod vault;
 
 use cli::{parse_args, SSH_LOGGING};
 use config::{config_watcher, COMPILED_RULES};
 use highlighter::process_chunk;
 use logging::{enable_debug_mode, log_debug, log_ssh_output, DEBUG_MODE};
-use ssh::spawn_ssh;
+
+/// Spawns an SSH process with the provided arguments.
+///
+///  `args`: CLI arguments provided by the user.
+///
+/// Returns the spawned child process.
+pub fn spawn_ssh(args: &[String]) -> std::io::Result<std::process::Child> {
+    let child = Command::new("ssh")
+        .args(args)
+        .stdin(Stdio::inherit()) // Inherit the input from the current terminal
+        .stdout(Stdio::piped()) // Pipe the output for processing
+        .stderr(Stdio::inherit()) // Inherit the error stream from the SSH process
+        .spawn()?;
+    Ok(child)
+}
 
 fn main() -> io::Result<()> {
     // Get the command-line arguments from the clap function in cli.rs
@@ -45,11 +51,12 @@ fn main() -> io::Result<()> {
         log_debug(&format!("SSH arguments: {:?}", args)).unwrap();
     }
 
+    // Starts the config file watcher in the background under the _watcher context
     let _watcher = config_watcher();
 
     // Launch the SSH process with the provided arguments
     let mut child = spawn_ssh(&args)?;
-    let stdout = child.stdout.take().expect("Failed to capture stdout");
+    let stdout = child.stdout.take().expect("Failed to capture stdout\r");
     let mut reader = BufReader::new(stdout);
 
     // Create a channel for sending and receiving output chunks
@@ -85,11 +92,11 @@ fn main() -> io::Result<()> {
             log_ssh_output(&chunk, &args).unwrap();
         }
         tx.send(chunk)
-            .expect("Failed to send data to processing thread");
+            .expect("Failed to send data to processing thread\r");
     }
 
     // Wait for the SSH process to finish and exit with the process's status code
     let status = child.wait()?;
     std::process::exit(status.code().unwrap_or(1));
-    
+
 }
