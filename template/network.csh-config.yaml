@@ -22,7 +22,7 @@ rules:
 # Switch Prompt
 - description: Prompt in enabled mode for network switches
   regex: (\S+)#
-  color: Rich-Gold
+  color: Milano-Red
 
 - description: Match prompt in disable for mode network switches
   regex: (\S+)>
@@ -32,103 +32,103 @@ rules:
 - description: Always color the word "interface"
   regex: |
     (?ix)
-      \b(
-      interfaces?|
-      \w+-interface
-      )\b
+    \b(
+    interfaces?|
+    \w+-interface
+    )\b
   color: Kelly-Green
 
 - description: Match on interface type "Ethernet"
   regex: |
     (?ix)
-      \b(
-      (ethernet|eth|et)
-      (\d{1,2})?
-      (/\d{1,2})?
-      (/\d{1,2})?
-      (\.\d{1,4})?
-      )\b
+    \b(
+    (ethernet|eth|et)
+    (\d{1,2})?
+    (/\d{1,2})?
+    (/\d{1,2})?
+    (\.\d{1,4})?
+    )\b
   color: Sedona
 
 - description: Match on Cisco interface types
   regex: |
     (?ix)
-      \b
-      (gigabitethernet|gi|gig|
-      twogigabitethernet|tw|
-      tengigabitethernet|te|
-      twentyfivegige|twe|
-      fortygigabitethernet|fo|
-      appgigabitethernet|ap)
-      (\d{1,2})?
-      (/\d{1,2})?
-      (/\d{1,2})?
-      (\.\d{1,4})?
-      \b
+    \b
+    (gigabitethernet|gi|gig|
+    twogigabitethernet|tw|
+    tengigabitethernet|te|
+    twentyfivegige|twe|
+    fortygigabitethernet|fo|
+    appgigabitethernet|ap)
+    (\d{1,2})?
+    (/\d{1,2})?
+    (/\d{1,2})?
+    (\.\d{1,4})?
+    \b
   color: Sedona
 
 - description: Match on type "Vlan"
   regex: |
     (?ix)
-      \b
-      (vlan|vl)
-      (\d{1,4}|\s\d{1,4})?
-      ((?:,\d{1,4})*)?
-      \b
+    \b
+    (vlan|vl)
+    (\d{1,4}|\s\d{1,4})?
+    ((?:,\d{1,4})*)?
+    \b
   color: Dark-Lime-Green
 
 - description: Match on type "Port-Channel"
   regex: |
     (?ix)
-      \b(
-      (port-channel|po)
-      (\d{1,4})?
-      (\.\d{1,4})?
-      )\b
+    \b(
+    (port-channel|po)
+    (\d{1,4})?
+    (\.\d{1,4})?
+    )\b
   color: Bright-Olive
 
 - description: Match on Extra interface types
   regex: |
     (?ix)
-      \b
-      (management|mgmt|
-      loopback|lo|
-      tunnel|tu)
-      (\d{1,4})?
-      \b
+    \b
+    (management|mgmt|
+    loopback|lo|
+    tunnel|tu)
+    (\d{1,4})?
+    \b
   color: Mustard
 
 # Keywords
 - description: Match on good keywords
   regex: |
     (?ix)
-      \b
-      (connected|up)
-      \b
+    \b
+    (connected|up)
+    \b
   color: Kelly-Green
 
 - description: Match on nutral keywords
   regex: |
     (?ix)
-      \b
-      (xcvrAbsen|noOperMem|notconnect|notpresent)
-      \b
+    \b
+    (xcvrAbsen|noOperMem|notconnect|notpresent)
+    \b
   color: Sunrise-Orange
 
 - description: Match on bad keywords
   regex: |
     (?ix)
-      \b
-      (down|shutdown)
-      \b
+    \b
+    (down|shutdown)
+    \b
   color: Milano-Red
 
 - description: Match on words of intresest
   regex: |
     (?ix)
-      \b
-      (show|description)
-      \b
+    \b
+    (show|description)
+    \b
   color: Caribbean-Green
 
 - description: Match on description highlighters ***
@@ -138,9 +138,9 @@ rules:
 - description: Match on words networking words
   regex: |
     (?ix)
-      \b
-      (status|protocol|ip|address)
-      \b
+    \b
+    (status|protocol|ip|address)
+    \b
   color: Ochre
 
 # URLs and IPs 
