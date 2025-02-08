@@ -117,9 +117,9 @@ rules:
 # - description: Match on the word "example"
 #   regex: |
 #     (?ix)
-#       \b
-#       example
-#       \b
+#     \b
+#     example
+#     \b
 #   color: Kelly-Green
 # create a rule that matches on the word "connected" or "up" and color it Kelly-Green
 
@@ -132,18 +132,18 @@ rules:
 - description: Match on neutral keywords
   regex: |
     (?ix)
-      \b
-      neutral
-      \b
+    \b
+    neutral
+    \b
   color: Blue
 
 # create a rule that matches on the word "down" or "error" or "disabled" and color it Red
 - description: Match on bad keywords
   regex: |
     (?ix)
-      \b
-      (down|error|disabled)
-      \b
+    \b
+    (down|error|disabled)
+    \b
   color: Red
 ```
 

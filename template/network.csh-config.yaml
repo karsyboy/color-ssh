@@ -22,7 +22,7 @@ rules:
 # Switch Prompt
 - description: Prompt in enabled mode for network switches
   regex: (\S+)#
-  color: Milano-Red
+  color: Rich-Gold
 
 - description: Match prompt in disable for mode network switches
   regex: (?:\u001b\[[^m]*m)?([A-Z0-9-]+)>
