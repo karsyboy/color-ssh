@@ -2,12 +2,12 @@ use notify::{Error, Event, RecommendedWatcher, RecursiveMode, Watcher};
 use once_cell::sync::Lazy;
 use regex::Regex;
 use serde::Deserialize;
-use std::{env, fs, io, thread};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
-use std::sync::{Arc, RwLock, mpsc};
 use std::sync::atomic::Ordering;
+use std::sync::{mpsc, Arc, RwLock};
 use std::time::Duration;
+use std::{env, fs, io, thread};
 
 use crate::{log_debug, DEBUG_MODE};
 
@@ -151,13 +151,12 @@ pub fn config_watcher() -> RecommendedWatcher {
         }
     });
     watcher // Return the watcher so it stays in scope
-
 }
 
 /// Loads and applies new configuration.
 pub fn reload_config() -> Result<(), String> {
-    let new_config = load_config().map_err(|err| 
-        format!("Failed to load configuration: {}\r", err))?;
+    let new_config =
+        load_config().map_err(|err| format!("Failed to load configuration: {}\r", err))?;
 
     // Update the global configuration
     {

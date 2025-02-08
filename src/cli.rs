@@ -34,7 +34,7 @@ pub fn parse_args() -> Vec<String> {
             Arg::new("ssh_args")
                 .help("SSH arguments")
                 .num_args(1..)
-                .required(true)
+                .required(true),
         )
         .get_matches();
 

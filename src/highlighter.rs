@@ -1,6 +1,6 @@
 use regex::Regex;
-use std::thread;
 use std::sync::atomic::Ordering;
+use std::thread;
 
 use crate::{log_debug, DEBUG_MODE};
 

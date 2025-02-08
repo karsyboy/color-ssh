@@ -1,8 +1,8 @@
 use std::io::{self, BufReader, Read, Write};
 use std::process::{Command, Stdio};
-use std::sync::Arc;
 use std::sync::atomic::Ordering;
 use std::sync::mpsc::{self, Receiver, Sender};
+use std::sync::Arc;
 use std::thread;
 
 // Imports CSH specific modules
@@ -98,5 +98,4 @@ fn main() -> io::Result<()> {
     // Wait for the SSH process to finish and exit with the process's status code
     let status = child.wait()?;
     std::process::exit(status.code().unwrap_or(1));
-
 }
