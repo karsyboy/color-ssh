@@ -1,10 +1,10 @@
 use crate::enable_debug_mode;
 
-#[cfg(unix)]
-use crate::socket::unix_socket;
+// #[cfg(unix)]
+// use crate::socket::unix_socket;
 
-#[cfg(windows)]
-use crate::socket::windows_pipe;
+// #[cfg(windows)]
+// use crate::socket::windows_pipe;
 
 use clap::{Arg, Command};
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -59,18 +59,18 @@ pub fn parse_args() -> Vec<String> {
     if matches.get_flag("log") {
         enable_ssh_logging();
     }
-    #[cfg(unix)]
-    {
-        if matches.get_flag("reload") {
-            unix_socket::send_command_to_all("reload");
-        }
-    }
-    #[cfg(windows)]
-    {
-        if matches.get_flag("reload") {
-            windows_pipe::send_command_to_all("reload");
-        }
-    }
+    // #[cfg(unix)]
+    // {
+    //     if matches.get_flag("reload") {
+    //         unix_socket::send_command_to_all("reload");
+    //     }
+    // }
+    // #[cfg(windows)]
+    // {
+    //     if matches.get_flag("reload") {
+    //         windows_pipe::send_command_to_all("reload");
+    //     }
+    // }
 
     // Retrieve remaining SSH arguments
     matches

@@ -5,7 +5,7 @@ use std::sync::Arc;
 use std::thread;
 
 #[cfg(unix)]
-use socket::unix_socket;
+//use socket::unix_socket;
 
 #[cfg(windows)]
 use socket::windows_pipe;
@@ -15,12 +15,13 @@ mod cli;
 mod config;
 mod highlighter;
 mod logging;
-mod socket;
+// mod socket;
+mod watcher;
 mod ssh;
 mod vault;
 
 use cli::{parse_args, SSH_LOGGING};
-use config::{compile_rules, load_config, COMPILED_RULES, CONFIG};
+use config::{config_watcher, COMPILED_RULES};
 use highlighter::process_chunk;
 use logging::{enable_debug_mode, log_debug, log_ssh_output, DEBUG_MODE};
 use ssh::spawn_ssh;
@@ -44,66 +45,7 @@ fn main() -> io::Result<()> {
         log_debug(&format!("SSH arguments: {:?}", args)).unwrap();
     }
 
-    // If debugging, log the compiled rules
-    if DEBUG_MODE.load(Ordering::Relaxed) {
-        log_debug("Compiled rules:").unwrap();
-        for (i, (regex, color)) in COMPILED_RULES.read().unwrap().iter().enumerate() {
-            log_debug(&format!(
-                "  Rule {}: regex = {:?}, color = {:?}",
-                i + 1,
-                regex,
-                color
-            ))
-            .unwrap();
-        }
-    }
-
-    // Callback function that gets executed to reload csh configuration when the reload command is sent to the socket
-    let reload_callback = Arc::new(|| {
-
-        let new_config = load_config();
-        {
-            match new_config {
-                Ok(config) => {
-                    let mut config_write = CONFIG.write().unwrap();
-                    *config_write = config;
-                }
-                Err(e) => {
-                    eprintln!("Failed to reload configuration: {}", e);
-                }
-            }
-        }
-
-        let new_rules = {
-            let config_read = CONFIG.read().unwrap();
-            compile_rules(&*config_read)
-        };
-
-        {
-            let mut rules_write = COMPILED_RULES.write().unwrap();
-            *rules_write = new_rules;
-        }
-
-        // If debugging, log the compiled rules
-        if DEBUG_MODE.load(Ordering::Relaxed) {
-            log_debug("Compiled rules:").unwrap();
-            for (i, (regex, color)) in COMPILED_RULES.read().unwrap().iter().enumerate() {
-                log_debug(&format!(
-                    "  Rule {}: regex = {:?}, color = {:?}",
-                    i + 1,
-                    regex,
-                    color
-                ))
-                .unwrap();
-            }
-        }
-    });
-
-    #[cfg(unix)]
-    unix_socket::start_socket_listener(move || reload_callback());
-
-    #[cfg(windows)]
-    windows_pipe::start_socket_listener(move || reload_callback());
+    let _watcher = config_watcher();
 
     // Launch the SSH process with the provided arguments
     let mut child = spawn_ssh(&args)?;
@@ -144,17 +86,6 @@ fn main() -> io::Result<()> {
         }
         tx.send(chunk)
             .expect("Failed to send data to processing thread");
-    }
-
-    //Close and clean up Socket/Pipe
-    #[cfg(unix)]
-    {
-        unix_socket::send_command("exit");
-    }
-
-    #[cfg(windows)]
-    {
-        windows_pipe::send_command("exit");
     }
 
     // Wait for the SSH process to finish and exit with the process's status code

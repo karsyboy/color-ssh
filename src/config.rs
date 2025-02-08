@@ -5,9 +5,13 @@ use std::collections::HashMap;
 use std::env;
 use std::fs;
 use std::io;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::atomic::Ordering;
 use std::sync::{Arc, RwLock};
+use notify::{Event, Error, RecommendedWatcher, RecursiveMode, Watcher};
+use std::sync::mpsc;
+use std::time::Duration;
+use std::thread;
 
 use crate::{log_debug, DEBUG_MODE};
 
@@ -25,8 +29,8 @@ pub struct HighlightRule {
     pub color: String, // Color name (key in the palette) to use for the matched text
 }
 
-// Find the configuration path and set once as a global varible to be used anywhere
-// This is done so we dont have to keep worrying about passing the config path to functions inorder for them to get config information when its reloaded
+// Find the configuration path and set once as a global variable to be used anywhere
+// This is done so we don't have to keep worrying about passing the config path to functions in order for them to get config information when its reloaded
 pub const CONFIG_PATH: Lazy<PathBuf> = Lazy::new(|| {
     // Check first possible location: ~/.csh/.csh-config.yaml
     if let Some(home_dir) = dirs::home_dir() {
@@ -79,7 +83,7 @@ pub static COMPILED_RULES: Lazy<Arc<RwLock<Vec<(Regex, String)>>>> =
 /// Returns an io::Result containing the Config struct or an error
 pub fn load_config() -> io::Result<Config> {
     if DEBUG_MODE.load(Ordering::Relaxed) {
-        log_debug(&format!("Using configuration file: {:?}", CONFIG_PATH)).unwrap();
+        log_debug(&format!("Using configuration file: {:?}", CONFIG_PATH.to_str())).unwrap();
     }
 
     let config_content = fs::read_to_string(&*CONFIG_PATH)?;
@@ -100,6 +104,67 @@ pub fn load_config() -> io::Result<Config> {
             ))
         }
     }
+}
+
+/// Watches the config file and reloads it on modification.
+pub fn config_watcher() -> RecommendedWatcher {
+    let (tx, rx) = mpsc::channel();
+
+    let mut watcher = RecommendedWatcher::new(
+        move |res: Result<Event, Error>| {
+            match res {
+                Ok(event) => {
+                    println!("Filesystem event detected: {:?}", event);
+                    let _ = tx.send(()); // Notify main thread
+                }
+                Err(e) => eprintln!("Watch error: {:?}", e),
+            }
+        },
+        notify::Config::default(),
+    ).expect("Failed to initialize file watcher");
+
+    watcher
+        .watch(Path::new(CONFIG_PATH.to_str().unwrap()), RecursiveMode::NonRecursive)
+        .expect("Failed to watch configuration file");
+
+    thread::spawn(move || {
+        for _ in rx.iter() {
+            println!("Config file changed, reloading...");
+            thread::sleep(Duration::from_millis(500)); // Prevent race conditions
+            if let Err(err) = reload_config() {
+                eprintln!("Error reloading config: {}", err);
+            } else {
+                println!("Configuration reloaded successfully.");
+            }
+        }
+    });
+
+    watcher // Return the watcher so it stays in scope
+}
+
+/// Loads and applies new configuration.
+pub fn reload_config() -> Result<(), String> {
+    let new_config = load_config().map_err(|e| format!("Failed to load configuration: {}", e))?;
+
+    // Update the global configuration
+    {
+        let mut config_write = CONFIG.write().unwrap();
+        *config_write = new_config;
+    }
+
+    // Compile new rules
+    let new_rules = {
+        let config_read = CONFIG.read().unwrap();
+        compile_rules(&*config_read)
+    };
+
+    {
+        let mut rules_write = COMPILED_RULES.write().unwrap();
+        *rules_write = new_rules;
+    }
+
+    Ok(())
+
 }
 
 /// Compiles the highlighting rules from the configuration into a vector of regex patterns and their corresponding colors
@@ -123,6 +188,19 @@ pub fn compile_rules(config: &Config) -> Vec<(Regex, String)> {
         }
     }
 
+    // If debugging, log the compiled rules
+    if DEBUG_MODE.load(Ordering::Relaxed) {
+        log_debug("Compiled rules:").unwrap();
+        for (i, (regex, color)) in rules.iter().enumerate() {
+            log_debug(&format!(
+                "  Rule {}: regex = {:?}, color = {:?}",
+                i + 1,
+                regex,
+                color
+            ))
+            .unwrap();
+        }
+    }
     rules
 }
 
