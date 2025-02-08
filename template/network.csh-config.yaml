@@ -107,7 +107,7 @@ rules:
     \b
   color: Kelly-Green
 
-- description: Match on nutral keywords
+- description: Match on neutral keywords
   regex: |
     (?ix)
     \b
@@ -123,7 +123,7 @@ rules:
     \b
   color: Milano-Red
 
-- description: Match on words of intresest
+- description: Match on words of interest
   regex: |
     (?ix)
     \b
