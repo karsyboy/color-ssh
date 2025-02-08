@@ -111,7 +111,7 @@ rules:
   regex: |
     (?ix)
       \b
-      (xcvrAbsen|noOperMem|notconnect)
+      (xcvrAbsen|noOperMem|notconnect|notpresent)
       \b
   color: Sunrise-Orange
 
@@ -122,6 +122,26 @@ rules:
       (down|shutdown)
       \b
   color: Milano-Red
+
+- description: Match on words of intresest
+  regex: |
+    (?ix)
+      \b
+      (show|description)
+      \b
+  color: Caribbean-Green
+
+- description: Match on description highlighters ***
+  regex: \*\*\*
+  color: Hot-Pink
+
+- description: Match on words networking words
+  regex: |
+    (?ix)
+      \b
+      (status|protocol|ip|address)
+      \b
+  color: Ochre
 
 # URLs and IPs 
 - description: URL
