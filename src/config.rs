@@ -270,9 +270,9 @@ rules:
 # - description: Match on the word "example"
 #   regex: |
 #     (?ix)
-#       \b
-#       example
-#       \b
+#     \b
+#     example
+#     \b
 #   color: Kelly-Green
 # create a rule that matches on the word "connected" or "up" and color it Kelly-Green
 
