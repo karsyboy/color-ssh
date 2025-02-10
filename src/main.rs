@@ -10,6 +10,7 @@ mod cli;
 mod config;
 mod highlighter;
 mod logging;
+mod vault_cmds;
 mod vault;
 
 use cli::{parse_args, SSH_LOGGING};
