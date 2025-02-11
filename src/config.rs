@@ -194,7 +194,7 @@ pub fn compile_rules(config: &Config) -> Vec<(Regex, String)> {
             .unwrap_or_else(|| "\x1b[0m".to_string()); // Default to reset color if not found
 
         // This is done to make sure newline characters are removed form the string before they are loaded into a Regex value
-        // This will not remove the string value "\n" just actually new line characters Ex. "Hellow\nWorld" will not have "\n" replaced because it is the string "\n" instead of the actual newline character 
+        // This will not remove the string value "\n" just actually new line characters Ex. "Hellow\nWorld" will not have "\n" replaced because it is the string "\n" instead of the actual newline character
         let clean_regex = rule.regex.replace('\n', "").trim().to_string();
 
         match Regex::new(&clean_regex) {

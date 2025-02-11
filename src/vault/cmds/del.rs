@@ -4,14 +4,12 @@ use std::io::{self, Write};
 /// Returns a `clap::Command` for the "del" subcommand,
 /// which deletes a vault entry.
 pub fn del_args() -> Command {
-    Command::new("del")
-        .about("Delete a vault entry")
-        .arg(
-            Arg::new("entry_name")
-                .help("Name of the vault entry to delete")
-                .required(true)
-                .index(1), // This is a required positional argument.
-        )
+    Command::new("del").about("Delete a vault entry").arg(
+        Arg::new("entry_name")
+            .help("Name of the vault entry to delete")
+            .required(true)
+            .index(1), // This is a required positional argument.
+    )
 }
 
 /// Processes the "del" subcommand by asking the user for confirmation.
@@ -23,7 +21,10 @@ pub fn run(matches: &ArgMatches) {
         .expect("entry_name is required");
 
     // Inform the user and prompt for confirmation.
-    println!("You are about to delete the vault entry: \"{}\"", entry_name);
+    println!(
+        "You are about to delete the vault entry: \"{}\"",
+        entry_name
+    );
     println!("To confirm deletion, please type the entry name again:");
 
     // Flush stdout to ensure the prompt is displayed.

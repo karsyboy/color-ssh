@@ -1,14 +1,5 @@
 use clap::{Arg, Command};
-use std::{process, sync::atomic::{AtomicBool, Ordering}};
-
-use crate::{enable_debug_mode, vault};
-
-// Used to enable SSH logging in the logging module
-pub static SSH_LOGGING: AtomicBool = AtomicBool::new(false);
-
-fn enable_ssh_logging() {
-    SSH_LOGGING.store(true, Ordering::Relaxed);
-}
+use crate::{logging::{enable_debug_mode, enable_ssh_logging}, vault};
 
 /// Parses command-line arguments using clap.
 /// Returns a vector of strings representing the SSH arguments.
@@ -19,8 +10,8 @@ pub fn parse_args() -> Vec<String> {
         .about("A Rust-based SSH client with syntax highlighting.")
         .arg_required_else_help(true)
         .subcommand_negates_reqs(true) //set so that sub commands are not required to provide ssh_args
-        .propagate_version(true) 
-        .subcommand(vault::vault_args())
+        .propagate_version(true)
+        .subcommand(vault::lib::vault_args())
         .arg(
             Arg::new("debug")
                 .short('d')
@@ -56,8 +47,8 @@ pub fn parse_args() -> Vec<String> {
     // If the vault subcommand is provided, handle it exclusively
     // and then exit without processing any further logic.
     if let Some(("vault", sub_matches)) = matches.subcommand() {
-        vault::run(sub_matches);
-        process::exit(0); // Exits after processing vault commands
+        vault::lib::run(sub_matches);
+        std::process::exit(0); // Exits after processing vault commands
     }
 
     // Retrieve remaining SSH arguments
@@ -66,5 +57,4 @@ pub fn parse_args() -> Vec<String> {
         .unwrap()
         .cloned()
         .collect()
-        
 }

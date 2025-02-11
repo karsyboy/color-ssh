@@ -16,6 +16,13 @@ pub fn enable_debug_mode() {
     DEBUG_MODE.store(true, Ordering::Relaxed);
 }
 
+// Used to enable SSH logging in the logging module
+pub static SSH_LOGGING: AtomicBool = AtomicBool::new(false);
+
+pub fn enable_ssh_logging() {
+    SSH_LOGGING.store(true, Ordering::Relaxed);
+}
+
 /// Log messages to a debug log file, if DEBUG_MODE is enabled
 ///
 ///  - `message`: The message to log

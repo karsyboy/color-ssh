@@ -1,4 +1,4 @@
-use clap::{Arg, Command, ArgMatches};
+use clap::{Arg, ArgMatches, Command};
 use rpassword;
 
 /// Returns a `clap::Command` for the "add" subcommand,
@@ -28,7 +28,7 @@ pub fn add_args() -> Command {
                 .short('k')
                 .long("key")
                 .help("Path to a key file (if provided, password prompt is optional)")
-                .num_args(1)
+                .num_args(1),
         )
 }
 
@@ -68,5 +68,4 @@ pub fn run(matches: &ArgMatches) {
         println!("No password was provided.");
     }
     // Insert your logic here to add the vault entry using the provided data.
-    
 }

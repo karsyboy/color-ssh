@@ -1,17 +1,20 @@
+use crate::vault::cmds::{add, del, init, show};
 use clap::{Arg, ArgMatches, Command};
-use crate::vault_cmds::{add,del,init,show};
+use keepass::{
+    db::{Entry, Group, Node},
+    error::DatabaseOpenError,
+    Database, DatabaseKey,
+};
 
 pub fn vault_args() -> Command {
     Command::new("vault")
         .about("Interact with CSH credential vault")
         .arg_required_else_help(true)
-        
         // Nested subcommands from their own modules:
         .subcommand(add::add_args())
         .subcommand(del::del_args())
         .subcommand(init::init_args())
         .subcommand(show::list_args())
-
         // Additional flags that are valid when no subcommand is used:
         .arg(
             Arg::new("unlock")
@@ -44,11 +47,9 @@ pub fn run(matches: &ArgMatches) {
         if matches.get_flag("unlock") {
             println!("Unlocking vault...");
             // Insert logic for unlocking the vault here.
-
         } else if matches.get_flag("lock") {
             println!("Locking vault...");
             // Insert logic for locking the vault here.
-            
         }
     }
 }

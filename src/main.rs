@@ -1,5 +1,4 @@
 use std::io::{self, BufReader, Read, Write};
-use std::process::{Command, Stdio};
 use std::sync::atomic::Ordering;
 use std::sync::mpsc::{self, Receiver, Sender};
 use std::sync::Arc;
@@ -10,28 +9,14 @@ mod cli;
 mod config;
 mod highlighter;
 mod logging;
-mod vault_cmds;
+mod process;
 mod vault;
 
-use cli::{parse_args, SSH_LOGGING};
+use cli::parse_args;
 use config::{config_watcher, COMPILED_RULES};
 use highlighter::process_chunk;
-use logging::{enable_debug_mode, log_debug, log_ssh_output, DEBUG_MODE};
-
-/// Spawns an SSH process with the provided arguments.
-///
-///  `args`: CLI arguments provided by the user.
-///
-/// Returns the spawned child process.
-pub fn spawn_ssh(args: &[String]) -> std::io::Result<std::process::Child> {
-    let child = Command::new("ssh")
-        .args(args)
-        .stdin(Stdio::inherit()) // Inherit the input from the current terminal
-        .stdout(Stdio::piped()) // Pipe the output for processing
-        .stderr(Stdio::inherit()) // Inherit the error stream from the SSH process
-        .spawn()?;
-    Ok(child)
-}
+use logging::{log_debug, log_ssh_output, DEBUG_MODE, SSH_LOGGING};
+use process::spawn_ssh;
 
 fn main() -> io::Result<()> {
     // Get the command-line arguments from the clap function in cli.rs
