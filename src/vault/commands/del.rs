@@ -1,16 +1,5 @@
-use clap::{Arg, ArgMatches, Command};
+use clap::ArgMatches;
 use std::io::{self, Write};
-
-/// Returns a `clap::Command` for the "del" subcommand,
-/// which deletes a vault entry.
-pub fn del_args() -> Command {
-    Command::new("del").about("Delete a vault entry").arg(
-        Arg::new("entry_name")
-            .help("Name of the vault entry to delete")
-            .required(true)
-            .index(1), // This is a required positional argument.
-    )
-}
 
 /// Processes the "del" subcommand by asking the user for confirmation.
 /// The user must type the same entry name that was provided at the command line.

@@ -1,3 +1,13 @@
+/*
+TODO:
+    - Develop process.rs to handle subprocess interaction. Write the code so that the interaction can handle multiple subprocesses to expand support.
+        - Subprocesses to handle:
+            - SSH
+            - Telnet
+            - Console
+            - SSHPASS
+*/
+
 use std::process::{Command, Stdio};
 
 /// Spawns an SSH process with the provided arguments.

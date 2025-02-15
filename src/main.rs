@@ -1,47 +1,71 @@
-use std::io::{self, BufReader, Read, Write};
-use std::sync::atomic::Ordering;
-use std::sync::mpsc::{self, Receiver, Sender};
-use std::sync::Arc;
-use std::thread;
+/*
+TODO:
+    - Change debug logging call to use log level
+    - Clean comments
+    - Add more error handling
+    - Go through each file and clean up use and crate imports to all have the same format
+    - Split main.rs into app.rs and main.rs. Main.rs will act as an entry point and app.rs will contain the processing functions.
+    - Improve error support to expand error handling across all modules for clean logging?
+*/
 
-// Imports CSH specific modules
-mod cli;
-mod config;
-mod highlighter;
-mod logging;
-mod process;
-mod vault;
+use std::{
+    io::{self, BufReader, Read, Write},
+    process::ExitCode,
+    sync::mpsc::{self, Receiver, Sender},
+    thread,
+};
 
-use cli::parse_args;
-use config::{config_watcher, COMPILED_RULES};
-use highlighter::process_chunk;
-use logging::{log_debug, log_ssh_output, DEBUG_MODE, SSH_LOGGING};
-use process::spawn_ssh;
+use csh::{
+    cli::main_args,
+    config::{watcher::config_watcher, CONFIG},
+    highlighter::process_chunk,
+    log_debug, log_ssh,
+    logging::Logger,
+    process::spawn_ssh,
+    Result,
+};
 
-fn main() -> io::Result<()> {
+fn main() -> Result<ExitCode> {
     // Get the command-line arguments from the clap function in cli.rs
-    let args = parse_args();
+    let args = main_args();
 
-    // If debugging, log the provided SSH arguments for verification
-    if DEBUG_MODE.load(Ordering::Relaxed) {
-        log_debug(&format!(
-            "Debug mode: {}",
-            DEBUG_MODE.load(Ordering::Relaxed)
-        ))
-        .unwrap();
-        log_debug(&format!(
-            "SSH logging: {}",
-            SSH_LOGGING.load(Ordering::Relaxed)
-        ))
-        .unwrap();
-        log_debug(&format!("SSH arguments: {:?}", args)).unwrap();
+    // Initialize logging in a separate scope so the lock is released
+    let logger = Logger::global().lock().unwrap();
+    if args.debug {
+        logger.enable_debug();
+        if let Err(e) = logger.log_debug("Debug mode enabled") {
+            eprintln!("Failed to initialize debug logging: {}", e);
+            return Ok(ExitCode::FAILURE);
+        }
     }
+
+    if args.ssh_logging {
+        logger.enable_ssh_logging();
+        if let Err(e) = logger.log_debug("SSH logging enabled") {
+            eprintln!("Failed to initialize SSH logging: {}", e);
+            return Ok(ExitCode::FAILURE);
+        }
+
+        // Set the session name for the ssh log file based on the first argument
+        // Note: this may need to change if the user provides a different session name
+        let session_hostname = args
+            .ssh_args
+            .get(0)
+            .map(|arg| arg.splitn(2, '@').nth(1).unwrap_or(arg))
+            .unwrap_or("unknown");
+        CONFIG.write().unwrap().metadata.session_name = session_hostname.to_string();
+    }
+
+    drop(logger); // Release the lock on the logger
+
+    // Load the configuration file
+    log_debug!("SSH arguments: {:?}", args.ssh_args);
 
     // Starts the config file watcher in the background under the _watcher context
     let _watcher = config_watcher();
 
     // Launch the SSH process with the provided arguments
-    let mut child = spawn_ssh(&args)?;
+    let mut child = spawn_ssh(&args.ssh_args).expect("Failed to spawn SSH process\r");
     let stdout = child.stdout.take().expect("Failed to capture stdout\r");
     let mut reader = BufReader::new(stdout);
 
@@ -49,16 +73,15 @@ fn main() -> io::Result<()> {
     let (tx, rx): (Sender<String>, Receiver<String>) = mpsc::channel();
 
     // Create needed values for chunk reading thread
-    let proc_reset_color = "\x1b[0m"; // ANSI reset color sequence
-    let proc_compiled_rules = Arc::clone(&COMPILED_RULES);
+    let reset_color = "\x1b[0m"; // ANSI reset color sequence
 
     // Spawn thread for reading chunks sent by ssh
     // This is the main thread that reads the chunks and applies the highlighter
     thread::spawn(move || {
         let mut chunk_id = 0;
         while let Ok(chunk) = rx.recv() {
-            let rules = proc_compiled_rules.read().unwrap().clone();
-            let processed = process_chunk(chunk, chunk_id, &rules, proc_reset_color);
+            let rules = CONFIG.read().unwrap().metadata.compiled_rules.clone();
+            let processed = process_chunk(chunk, chunk_id, &rules, reset_color);
             chunk_id += 1;
             print!("{}", processed); // Print the processed chunk
             io::stdout().flush().unwrap(); // Flush to ensure immediate display
@@ -74,14 +97,16 @@ fn main() -> io::Result<()> {
         }
         // Convert the read data to a String and send it to the processing thread
         let chunk = String::from_utf8_lossy(&buffer[..n]).to_string();
-        if SSH_LOGGING.load(Ordering::Relaxed) {
-            log_ssh_output(&chunk, &args).unwrap();
-        }
+        log_ssh!("{}", chunk);
         tx.send(chunk)
             .expect("Failed to send data to processing thread\r");
     }
 
-    // Wait for the SSH process to finish and exit with the process's status code
+    // Wait for the SSH process to finish and use its status code
     let status = child.wait()?;
-    std::process::exit(status.code().unwrap_or(1));
+    if status.success() {
+        Ok(ExitCode::SUCCESS)
+    } else {
+        Ok(ExitCode::from(status.code().unwrap_or(1) as u8))
+    }
 }

@@ -1,8 +1,13 @@
-use regex::Regex;
-use std::sync::atomic::Ordering;
-use std::thread;
+/*
+TODO:
+    - Split the highlighter code into struct engine and highlighter?
+    - Investigate the use of .lines() and .split() for chunk processing.
+        - Note: this may make it easier to just regex match per line. May also need a buffer for this???
+*/
 
-use crate::{log_debug, DEBUG_MODE};
+use crate::log_debug;
+use regex::Regex;
+use std::thread;
 
 /// Build a mapping of the original string to a cleaned version with newlines replaced by spaces.
 ///
@@ -75,14 +80,6 @@ pub fn process_chunk(
     matches.sort_by_key(|&(start, _, _, _)| start);
     let mut filtered_matches = matches.clone();
 
-    // need to decide if this should be kept or not
-    // filtered_matches.retain(|&(s_start, s_end, _, _)| {
-    //     !matches.iter().any(|&(other_start, other_end, _, _)| {
-    //         (other_start <= s_start && other_end >= s_end) &&
-    //         ((other_end - other_start) > (s_end - s_start))
-    //     })
-    // });
-
     // Sort the matches by their starting position in the raw chunk
     filtered_matches.sort_by_key(|&(start, _, _, _)| start);
 
@@ -104,34 +101,36 @@ pub fn process_chunk(
     highlighted.push_str(&chunk[last_index..]);
 
     // If debugging, log clean chunk and the matches
-    if DEBUG_MODE.load(Ordering::Relaxed) {
-        log_debug(&format!(
-            "[{:?}] Chunk[{:?}] 1:Raw chunk: {:?}",
-            thread_id, chunk_id, chunk
-        ))
-        .unwrap();
-        log_debug(&format!(
-            "[{:?}] Chunk[{:?}] 2:Clean chunk: {:?}",
-            thread_id, chunk_id, clean_chunk
-        ))
-        .unwrap();
-        log_debug(&format!(
-            "[{:?}] Chunk[{:?}] 3:Matches: {:?}",
-            thread_id, chunk_id, matches
-        ))
-        .unwrap();
-        log_debug(&format!(
-            "[{:?}] Chunk[{:?}] 4:Filtered matches: {:?}",
-            thread_id, chunk_id, filtered_matches
-        ))
-        .unwrap();
-        log_debug(&format!(
-            "[{:?}] Chunk[{:?}] 5:Highlighted chunk: {:?}",
-            thread_id, chunk_id, highlighted
-        ))
-        .unwrap();
-    }
+    log_debug!(
+        "[{:?}] Chunk[{:?}] 1:Raw chunk: {:?}",
+        thread_id,
+        chunk_id,
+        chunk
+    );
+    log_debug!(
+        "[{:?}] Chunk[{:?}] 2:Clean chunk: {:?}",
+        thread_id,
+        chunk_id,
+        clean_chunk
+    );
+    log_debug!(
+        "[{:?}] Chunk[{:?}] 3:Matches: {:?}",
+        thread_id,
+        chunk_id,
+        matches
+    );
+    log_debug!(
+        "[{:?}] Chunk[{:?}] 4:Filtered matches: {:?}",
+        thread_id,
+        chunk_id,
+        filtered_matches
+    );
+    log_debug!(
+        "[{:?}] Chunk[{:?}] 5:Highlighted chunk: {:?}",
+        thread_id,
+        chunk_id,
+        highlighted
+    );
 
-    // Return the chunk with syntax highlighting applied
     highlighted
 }

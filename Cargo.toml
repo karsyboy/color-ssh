@@ -16,11 +16,15 @@ categories = ["command-line-interface", "command-line-utilities", "network-progr
 name = "csh"
 path = "src/main.rs"
 
+[lib]
+name = "csh"
+path = "src/lib.rs"
+
 [dependencies]
 chrono = "0.4.39"
 clap = { version = "4.5.28", features = ["derive"] }
 dirs = "6.0.0"
-keepass = "0.7.29"
+keepass = { version = "0.7.29", features = ["save_kdbx4"] }
 notify = "8.0.0"
 once_cell = "1.20.3"
 regex = "1.11.1"
