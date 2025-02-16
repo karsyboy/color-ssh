@@ -22,6 +22,7 @@ use csh::{
     log_debug, log_ssh,
     logging::Logger,
     process::spawn_ssh,
+    vault::VaultManager,
     Result,
 };
 
@@ -54,6 +55,11 @@ fn main() -> Result<ExitCode> {
             .map(|arg| arg.splitn(2, '@').nth(1).unwrap_or(arg))
             .unwrap_or("unknown");
         CONFIG.write().unwrap().metadata.session_name = session_hostname.to_string();
+    }
+
+    if args.vault_command.is_some() {
+        VaultManager::start(args.vault_command.clone().unwrap());
+        return Ok(ExitCode::SUCCESS);
     }
 
     drop(logger); // Release the lock on the logger

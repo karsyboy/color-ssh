@@ -17,7 +17,7 @@ pub enum Error {
     // Config(config::ConfigError),
     // Highlight(highlighter::HighlightError),
     Log(logging::LogError),
-    // Vault(vault::VaultError),
+    Vault(vault::VaultError),
 }
 
 impl std::fmt::Display for Error {
@@ -27,7 +27,7 @@ impl std::fmt::Display for Error {
             // Error::Config(e) => write!(f, "Configuration error: {}", e),
             // Error::Highlight(e) => write!(f, "Highlighting error: {}", e),
             Error::Log(e) => write!(f, "Logging error: {}", e),
-            // Error::Vault(e) => write!(f, "Vault error: {}", e),
+            Error::Vault(e) => write!(f, "Vault error: {}", e),
         }
     }
 }
@@ -59,8 +59,8 @@ impl From<io::Error> for Error {
 //     }
 // }
 
-// impl From<vault::VaultError> for Error {
-//     fn from(err: vault::VaultError) -> Self {
-//         Error::Vault(err)
-//     }
-// }
+impl From<vault::VaultError> for Error {
+    fn from(err: vault::VaultError) -> Self {
+        Error::Vault(err)
+    }
+}

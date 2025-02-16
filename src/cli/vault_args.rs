@@ -3,7 +3,7 @@ use std::path::PathBuf;
 
 /// Enum representing different vault subcommands
 #[derive(Debug, Clone)]
-pub enum VaultCommand {
+pub enum VaultArgs {
     /// Initialize a new vault
     Init { vault_name: String },
     /// Add a new entry to the vault
@@ -17,15 +17,19 @@ pub enum VaultCommand {
     /// Show a vault entry
     Show { entry_name: String },
     /// Lock the vault
-    Lock,
+    Lock { vault_file: PathBuf },
     /// Unlock the vault
-    Unlock,
+    Unlock {
+        vault_file: PathBuf,
+        key_file: Option<PathBuf>,
+    },
 }
 
 pub fn vault_args() -> Command {
     Command::new("vault")
         .about("Interact with CSH credential vault")
         .arg_required_else_help(true)
+        .subcommand_negates_reqs(true)
         // Nested subcommands from their own modules:
         .subcommand(add_args())
         .subcommand(del_args())
@@ -43,6 +47,25 @@ pub fn vault_args() -> Command {
                 .long("lock")
                 .help("Lock Vault")
                 .action(clap::ArgAction::SetTrue),
+        )
+        .arg(
+            Arg::new("vault_file")
+                .short('v')
+                .long("vault-file")
+                .value_name("VAULT_FILE")
+                .help("Path to the vault file")
+                .num_args(1)
+                .value_parser(clap::value_parser!(PathBuf))
+                .required(true),
+        )
+        .arg(
+            Arg::new("key_file")
+                .short('k')
+                .long("key")
+                .value_name("KEY_FILE")
+                .help("Path to a key file (if provided, password prompt is optional)")
+                .num_args(1)
+                .value_parser(clap::value_parser!(PathBuf)),
         )
 }
 
@@ -72,8 +95,10 @@ pub fn add_args() -> Command {
             Arg::new("key_file")
                 .short('k')
                 .long("key")
+                .value_name("KEY_FILE")
                 .help("Path to a key file (if provided, password prompt is optional)")
-                .num_args(1),
+                .num_args(1)
+                .value_parser(clap::value_parser!(PathBuf)),
         )
 }
 
@@ -110,15 +135,15 @@ pub fn list_args() -> Command {
     )
 }
 
-pub fn parse_vault_subcommand(matches: &clap::ArgMatches) -> VaultCommand {
+pub fn parse_vault_subcommand(matches: &clap::ArgMatches) -> VaultArgs {
     match matches.subcommand() {
-        Some(("init", sub_matches)) => VaultCommand::Init {
+        Some(("init", sub_matches)) => VaultArgs::Init {
             vault_name: sub_matches
                 .get_one::<String>("vault_name")
                 .expect("vault_name is required")
                 .clone(),
         },
-        Some(("add", sub_matches)) => VaultCommand::Add {
+        Some(("add", sub_matches)) => VaultArgs::Add {
             entry_name: sub_matches
                 .get_one::<String>("entry_name")
                 .expect("entry_name is required")
@@ -126,13 +151,13 @@ pub fn parse_vault_subcommand(matches: &clap::ArgMatches) -> VaultCommand {
             key_file: sub_matches.get_one::<PathBuf>("key_file").cloned(),
             use_password: sub_matches.get_flag("password_flag"),
         },
-        Some(("del", sub_matches)) => VaultCommand::Delete {
+        Some(("del", sub_matches)) => VaultArgs::Delete {
             entry_name: sub_matches
                 .get_one::<String>("entry_name")
                 .expect("entry_name is required")
                 .clone(),
         },
-        Some(("show", sub_matches)) => VaultCommand::Show {
+        Some(("show", sub_matches)) => VaultArgs::Show {
             entry_name: sub_matches
                 .get_one::<String>("entry_name")
                 .expect("entry_name is required")
@@ -140,9 +165,20 @@ pub fn parse_vault_subcommand(matches: &clap::ArgMatches) -> VaultCommand {
         },
         _ => {
             if matches.get_flag("unlock") {
-                VaultCommand::Unlock
+                VaultArgs::Unlock {
+                    vault_file: matches
+                        .get_one::<PathBuf>("vault_file")
+                        .expect("vault_file is required")
+                        .clone(),
+                    key_file: matches.get_one::<PathBuf>("key_file").cloned(),
+                }
             } else if matches.get_flag("lock") {
-                VaultCommand::Lock
+                VaultArgs::Lock {
+                    vault_file: matches
+                        .get_one::<PathBuf>("vault_file")
+                        .expect("vault_file is required")
+                        .clone(),
+                }
             } else {
                 panic!("Invalid vault subcommand");
             }

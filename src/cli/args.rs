@@ -1,8 +1,4 @@
-use crate::{
-    cli::vault_args::{parse_vault_subcommand, vault_args, VaultCommand},
-    // logging::{enable_debug_mode, enable_ssh_logging},
-    // vault,
-};
+use crate::cli::vault_args::{parse_vault_subcommand, vault_args, VaultArgs};
 use clap::{Arg, Command};
 
 #[derive(Debug, Clone)]
@@ -10,7 +6,7 @@ pub struct CliArgs {
     pub debug: bool,
     pub ssh_logging: bool,
     pub ssh_args: Vec<String>,
-    pub vault_command: Option<VaultCommand>,
+    pub vault_command: Option<VaultArgs>,
 }
 
 /// Parses command-line arguments using clap.
@@ -45,23 +41,6 @@ pub fn main_args() -> CliArgs {
                 .required(true),
         )
         .get_matches();
-
-    // // Enable debugging if the flag is set
-    // if matches.get_flag("debug") {
-    //     enable_debug_mode();
-    // }
-
-    // // Enable SSH logging if the flag is set
-    // if matches.get_flag("log") {
-    //     enable_ssh_logging();
-    // }
-
-    // // If the vault subcommand is provided, handle it exclusively
-    // // and then exit without processing any further logic.
-    // if let Some(("vault", sub_matches)) = matches.subcommand() {
-    //     vault::core::run(sub_matches);
-    //     std::process::exit(0); // Exits after processing vault commands
-    // }
 
     let vault_command = if let Some(("vault", sub_matches)) = matches.subcommand() {
         Some(parse_vault_subcommand(sub_matches))
