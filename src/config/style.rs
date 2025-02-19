@@ -13,10 +13,33 @@ use std::{collections::HashMap, path::PathBuf};
 
 #[derive(Debug, Deserialize)]
 pub struct Config {
+    pub settings: Settings,               // User settings for the application
     pub palette: HashMap<String, String>, // Map of color names (keys) to their respective hex codes (values)
     pub rules: Vec<HighlightRule>, // List of highlighting rules with a regex pattern and the corresponding color
     #[serde(default)]
     pub metadata: Metadata, // Metadata configuration
+}
+
+#[derive(Debug, Deserialize)]
+pub struct Settings {
+    pub vault_path: Option<PathBuf>,         // Path to the vault
+    pub vault_key: Option<PathBuf>,          // Path to the vault
+    pub remove_passwords_from_ssh_log: bool, // Flag to indicate if passwords should be removed from SSH logs
+    pub debug_mode: bool,                    // Flag to enable debug mode
+    pub ssh_logging: bool,                   // Flag to enable SSH logging
+}
+
+//create defaults for settings
+impl Default for Settings {
+    fn default() -> Self {
+        Self {
+            vault_path: Some(PathBuf::new()), // Default vault path
+            vault_key: Some(PathBuf::new()),  // Default vault key path
+            remove_passwords_from_ssh_log: false,
+            debug_mode: false,
+            ssh_logging: false,
+        }
+    }
 }
 
 // Structure representing a single highlight rule

@@ -21,9 +21,6 @@ use std::sync::Mutex;
 static DEBUG_MODE: AtomicBool = AtomicBool::new(false);
 static SSH_LOGGING: AtomicBool = AtomicBool::new(false);
 
-// Global logger instance
-static GLOBAL_LOGGER: Lazy<Mutex<Logger>> = Lazy::new(|| Mutex::new(Logger::new()));
-
 #[derive(Debug, Clone, Copy)]
 pub enum LogLevel {
     Debug,
@@ -57,10 +54,6 @@ impl Logger {
         }
     }
 
-    pub fn global() -> &'static Lazy<Mutex<Logger>> {
-        &GLOBAL_LOGGER
-    }
-
     pub fn enable_debug(&self) {
         DEBUG_MODE.store(true, Ordering::SeqCst);
     }
@@ -80,7 +73,10 @@ impl Logger {
     pub fn log_debug(&self, message: &str) -> Result<(), LogError> {
         if self.is_debug_enabled() {
             self.debug_logger.log(LogLevel::Debug, message)?;
+        } else {
+            println!("Debug not enabled{:?}", message);
         }
+
         Ok(())
     }
 

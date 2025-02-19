@@ -31,8 +31,8 @@ fn main() -> Result<ExitCode> {
     let args = main_args();
 
     // Initialize logging in a separate scope so the lock is released
-    let logger = Logger::global().lock().unwrap();
-    if args.debug {
+    let logger = Logger::new();
+    if args.debug || CONFIG.read().unwrap().settings.debug_mode {
         logger.enable_debug();
         if let Err(e) = logger.log_debug("Debug mode enabled") {
             eprintln!("Failed to initialize debug logging: {}", e);
@@ -40,7 +40,7 @@ fn main() -> Result<ExitCode> {
         }
     }
 
-    if args.ssh_logging {
+    if args.ssh_logging || CONFIG.read().unwrap().settings.ssh_logging {
         logger.enable_ssh_logging();
         if let Err(e) = logger.log_debug("SSH logging enabled") {
             eprintln!("Failed to initialize SSH logging: {}", e);
@@ -58,7 +58,7 @@ fn main() -> Result<ExitCode> {
     }
 
     if args.vault_command.is_some() {
-        VaultManager::start(args.vault_command.clone().unwrap());
+        let _ = VaultManager::start(args.vault_command.clone().unwrap());
         return Ok(ExitCode::SUCCESS);
     }
 

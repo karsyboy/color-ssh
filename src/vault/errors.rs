@@ -15,6 +15,8 @@ pub enum VaultError {
     LockError(String),
     UnlockError(String),
     KeyringError(keyring::Error),
+    VaultAlreadyExists,
+    KeyFileCreationFailed,
 }
 
 impl fmt::Display for VaultError {
@@ -31,6 +33,8 @@ impl fmt::Display for VaultError {
             VaultError::LockError(msg) => write!(f, "Lock error: {}", msg),
             VaultError::UnlockError(msg) => write!(f, "Unlock error: {}", msg),
             VaultError::KeyringError(e) => write!(f, "Keyring error: {}", e),
+            VaultError::VaultAlreadyExists => write!(f, "Vault already exists"),
+            VaultError::KeyFileCreationFailed => write!(f, "Key file creation failed"),
         }
     }
 }

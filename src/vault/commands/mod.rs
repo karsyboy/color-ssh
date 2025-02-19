@@ -8,3 +8,4 @@ mod unlock;
 pub use crate::vault::errors::VaultError;
 pub use lock::run as lock_vault;
 pub use unlock::run as unlock_vault;
+pub use init::run as init_vault;

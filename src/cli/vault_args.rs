@@ -5,7 +5,10 @@ use std::path::PathBuf;
 #[derive(Debug, Clone)]
 pub enum VaultArgs {
     /// Initialize a new vault
-    Init { vault_name: String },
+    Init {
+        vault_file: PathBuf,
+        key_file: Option<PathBuf>,
+    },
     /// Add a new entry to the vault
     Add {
         entry_name: String,
@@ -17,10 +20,10 @@ pub enum VaultArgs {
     /// Show a vault entry
     Show { entry_name: String },
     /// Lock the vault
-    Lock { vault_file: PathBuf },
+    Lock { vault_file: Option<PathBuf> },
     /// Unlock the vault
     Unlock {
-        vault_file: PathBuf,
+        vault_file: Option<PathBuf>,
         key_file: Option<PathBuf>,
     },
 }
@@ -55,8 +58,8 @@ pub fn vault_args() -> Command {
                 .value_name("VAULT_FILE")
                 .help("Path to the vault file")
                 .num_args(1)
-                .value_parser(clap::value_parser!(PathBuf))
-                .required(true),
+                .global(true)
+                .value_parser(clap::value_parser!(PathBuf)),
         )
         .arg(
             Arg::new("key_file")
@@ -116,12 +119,27 @@ pub fn del_args() -> Command {
 /// Returns a `clap::Command` for the "init" subcommand,
 /// which initializes a CSH vault and requires a vault name.
 pub fn init_args() -> Command {
-    Command::new("init").about("Initialize CSH vault").arg(
-        Arg::new("vault_name")
-            .help("Name of the vault to initialize")
-            .required(true)
-            .index(1), // Positional argument at index 1.
-    )
+    Command::new("init")
+        .about("Initialize CSH vault")
+        .arg(
+            Arg::new("vault_file")
+                .short('v')
+                .long("vault-file")
+                .value_name("VAULT_FILE")
+                .help("Path to the vault file")
+                .num_args(1)
+                .required(true)
+                .value_parser(clap::value_parser!(PathBuf)),
+        )
+        .arg(
+            Arg::new("key_file")
+                .short('k')
+                .long("key")
+                .value_name("KEY_FILE")
+                .help("Path to a key file (if provided, password prompt is optional)")
+                .num_args(1)
+                .value_parser(clap::value_parser!(PathBuf)),
+        )
 }
 
 /// Returns a `clap::Command` for the "show" subcommand,
@@ -138,10 +156,8 @@ pub fn list_args() -> Command {
 pub fn parse_vault_subcommand(matches: &clap::ArgMatches) -> VaultArgs {
     match matches.subcommand() {
         Some(("init", sub_matches)) => VaultArgs::Init {
-            vault_name: sub_matches
-                .get_one::<String>("vault_name")
-                .expect("vault_name is required")
-                .clone(),
+            vault_file: sub_matches.get_one::<PathBuf>("vault_file").cloned().unwrap(),
+            key_file: sub_matches.get_one::<PathBuf>("key_file").cloned(),
         },
         Some(("add", sub_matches)) => VaultArgs::Add {
             entry_name: sub_matches
@@ -166,18 +182,12 @@ pub fn parse_vault_subcommand(matches: &clap::ArgMatches) -> VaultArgs {
         _ => {
             if matches.get_flag("unlock") {
                 VaultArgs::Unlock {
-                    vault_file: matches
-                        .get_one::<PathBuf>("vault_file")
-                        .expect("vault_file is required")
-                        .clone(),
+                    vault_file: matches.get_one::<PathBuf>("vault_file").cloned(),
                     key_file: matches.get_one::<PathBuf>("key_file").cloned(),
                 }
             } else if matches.get_flag("lock") {
                 VaultArgs::Lock {
-                    vault_file: matches
-                        .get_one::<PathBuf>("vault_file")
-                        .expect("vault_file is required")
-                        .clone(),
+                    vault_file: matches.get_one::<PathBuf>("vault_file").cloned(),
                 }
             } else {
                 panic!("Invalid vault subcommand");
