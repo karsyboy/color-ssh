@@ -17,6 +17,7 @@ pub enum VaultError {
     KeyringError(keyring::Error),
     VaultAlreadyExists,
     KeyFileCreationFailed,
+    NoVaultFile,
 }
 
 impl fmt::Display for VaultError {
@@ -35,6 +36,7 @@ impl fmt::Display for VaultError {
             VaultError::KeyringError(e) => write!(f, "Keyring error: {}", e),
             VaultError::VaultAlreadyExists => write!(f, "Vault already exists"),
             VaultError::KeyFileCreationFailed => write!(f, "Key file creation failed"),
+            VaultError::NoVaultFile => write!(f, "No vault file"),
         }
     }
 }

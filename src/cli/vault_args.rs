@@ -11,14 +11,19 @@ pub enum VaultArgs {
     },
     /// Add a new entry to the vault
     Add {
-        entry_name: String,
+        vault_file: Option<PathBuf>,
         key_file: Option<PathBuf>,
-        use_password: bool,
     },
     /// Delete an entry from the vault
-    Delete { entry_name: String },
+    Delete {
+        vault_file: Option<PathBuf>,
+        key_file: Option<PathBuf>,
+    },
     /// Show a vault entry
-    Show { entry_name: String },
+    Show {
+        vault_file: Option<PathBuf>,
+        key_file: Option<PathBuf>,
+    },
     /// Lock the vault
     Lock { vault_file: Option<PathBuf> },
     /// Unlock the vault
@@ -34,10 +39,10 @@ pub fn vault_args() -> Command {
         .arg_required_else_help(true)
         .subcommand_negates_reqs(true)
         // Nested subcommands from their own modules:
+        .subcommand(init_args())
+        .subcommand(show_args())
         .subcommand(add_args())
         .subcommand(del_args())
-        .subcommand(init_args())
-        .subcommand(list_args())
         // Additional flags that are valid when no subcommand is used:
         .arg(
             Arg::new("unlock")
@@ -72,52 +77,6 @@ pub fn vault_args() -> Command {
         )
 }
 
-/// Returns a `clap::Command` for the "add" subcommand,
-/// which adds a new vault entry. It requires an entry name and either
-/// the `-p` flag (to prompt for a password) or a key file via `--key`.
-pub fn add_args() -> Command {
-    Command::new("add")
-        .about("Add a new vault entry")
-        .arg(
-            Arg::new("entry_name")
-                .help("Name of the vault entry to add")
-                .required(true)
-                .index(1), // Positional argument for the entry name.
-        )
-        // The password flag: if provided, prompt the user for the password.
-        // This flag is required unless a key file is provided.
-        .arg(
-            Arg::new("password_flag")
-                .short('p')
-                .help("Prompt for password to add to the vault entry")
-                .action(clap::ArgAction::SetTrue)
-                .required_unless_present("key_file"),
-        )
-        // Optional key file path.
-        .arg(
-            Arg::new("key_file")
-                .short('k')
-                .long("key")
-                .value_name("KEY_FILE")
-                .help("Path to a key file (if provided, password prompt is optional)")
-                .num_args(1)
-                .value_parser(clap::value_parser!(PathBuf)),
-        )
-}
-
-/// Returns a `clap::Command` for the "del" subcommand,
-/// which deletes a vault entry.
-pub fn del_args() -> Command {
-    Command::new("del").about("Delete a vault entry").arg(
-        Arg::new("entry_name")
-            .help("Name of the vault entry to delete")
-            .required(true)
-            .index(1), // This is a required positional argument.
-    )
-}
-
-/// Returns a `clap::Command` for the "init" subcommand,
-/// which initializes a CSH vault and requires a vault name.
 pub fn init_args() -> Command {
     Command::new("init")
         .about("Initialize CSH vault")
@@ -142,42 +101,98 @@ pub fn init_args() -> Command {
         )
 }
 
-/// Returns a `clap::Command` for the "show" subcommand,
-/// which is used to display a specific vault entry.
-pub fn list_args() -> Command {
-    Command::new("show").about("Show a vault entry").arg(
-        Arg::new("entry_name")
-            .help("Name of the vault entry to show")
-            .required(true)
-            .index(1), // Positional argument at index 1
-    )
+pub fn show_args() -> Command {
+    Command::new("show")
+        .about("Show a vault entry")
+        .arg(
+            Arg::new("vault_file")
+                .short('v')
+                .long("vault-file")
+                .value_name("VAULT_FILE")
+                .help("Path to the vault file")
+                .num_args(1)
+                .global(true)
+                .value_parser(clap::value_parser!(PathBuf)),
+        )
+        .arg(
+            Arg::new("key_file")
+                .short('k')
+                .long("key")
+                .value_name("KEY_FILE")
+                .help("Path to a key file (if provided, password prompt is optional)")
+                .num_args(1)
+                .value_parser(clap::value_parser!(PathBuf)),
+        )
+}
+
+pub fn add_args() -> Command {
+    Command::new("add")
+        .about("Add a new vault entry")
+        .arg(
+            Arg::new("vault_file")
+                .short('v')
+                .long("vault-file")
+                .value_name("VAULT_FILE")
+                .help("Path to the vault file")
+                .num_args(1)
+                .global(true)
+                .value_parser(clap::value_parser!(PathBuf)),
+        )
+        .arg(
+            Arg::new("key_file")
+                .short('k')
+                .long("key")
+                .value_name("KEY_FILE")
+                .help("Path to a key file (if provided, password prompt is optional)")
+                .num_args(1)
+                .value_parser(clap::value_parser!(PathBuf)),
+        )
+}
+
+pub fn del_args() -> Command {
+    Command::new("del")
+        .about("Delete a vault entry")
+        .arg(
+            Arg::new("vault_file")
+                .short('v')
+                .long("vault-file")
+                .value_name("VAULT_FILE")
+                .help("Path to the vault file")
+                .num_args(1)
+                .global(true)
+                .value_parser(clap::value_parser!(PathBuf)),
+        )
+        .arg(
+            Arg::new("key_file")
+                .short('k')
+                .long("key")
+                .value_name("KEY_FILE")
+                .help("Path to a key file (if provided, password prompt is optional)")
+                .num_args(1)
+                .value_parser(clap::value_parser!(PathBuf)),
+        )
 }
 
 pub fn parse_vault_subcommand(matches: &clap::ArgMatches) -> VaultArgs {
     match matches.subcommand() {
         Some(("init", sub_matches)) => VaultArgs::Init {
-            vault_file: sub_matches.get_one::<PathBuf>("vault_file").cloned().unwrap(),
+            vault_file: sub_matches
+                .get_one::<PathBuf>("vault_file")
+                .cloned()
+                .unwrap(),
+            key_file: sub_matches.get_one::<PathBuf>("key_file").cloned(),
+        },
+        Some(("show", sub_matches)) => VaultArgs::Show {
+            vault_file: sub_matches.get_one::<PathBuf>("vault_file").cloned(),
             key_file: sub_matches.get_one::<PathBuf>("key_file").cloned(),
         },
         Some(("add", sub_matches)) => VaultArgs::Add {
-            entry_name: sub_matches
-                .get_one::<String>("entry_name")
-                .expect("entry_name is required")
-                .clone(),
+            vault_file: sub_matches.get_one::<PathBuf>("vault_file").cloned(),
             key_file: sub_matches.get_one::<PathBuf>("key_file").cloned(),
-            use_password: sub_matches.get_flag("password_flag"),
         },
         Some(("del", sub_matches)) => VaultArgs::Delete {
-            entry_name: sub_matches
-                .get_one::<String>("entry_name")
-                .expect("entry_name is required")
-                .clone(),
-        },
-        Some(("show", sub_matches)) => VaultArgs::Show {
-            entry_name: sub_matches
-                .get_one::<String>("entry_name")
-                .expect("entry_name is required")
-                .clone(),
+            vault_file: sub_matches.get_one::<PathBuf>("vault_file").cloned(),
+            key_file: sub_matches.get_one::<PathBuf>("key_file").cloned(),
         },
         _ => {
             if matches.get_flag("unlock") {

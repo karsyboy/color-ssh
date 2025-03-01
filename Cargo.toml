@@ -2,7 +2,7 @@
 name = "color-ssh"
 description = "A Rust-based SSH client with syntax highlighting."
 version = "0.4.1"
-edition = "2021"
+edition = "2024"
 authors = ["Karsyboy"]
 documentation = "https://github.com/karsyboy/color-ssh"
 readme = "README.md"
@@ -26,7 +26,6 @@ clap = { version = "4.5.28", features = ["derive"] }
 dirs = "6.0.0"
 keepass = { version = "0.7.29", features = ["save_kdbx4"] }
 keyring = { version = "3.6.1", features = ["linux-native", "windows-native", "apple-native"] }
-md5 = "0.7.0"
 notify = "8.0.0"
 once_cell = "1.20.3"
 rand = "0.9.0"

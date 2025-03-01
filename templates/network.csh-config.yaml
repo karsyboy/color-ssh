@@ -2,6 +2,13 @@
 # It is based industry standard networking devices.
 # color-ssh templates can be found at https://github.com/karsyboy/color-ssh
 
+settings:
+  # vault_path: vault.kdbx
+  # vault_key: vualt.key
+  # remove_passwords_from_ssh_log: true
+  # debug_mode: false
+  # ssh_logging: true
+
 palette:
   Sunrise-Orange: '#e67549'
   Aqua-Blue: '#00e0d1'
@@ -22,7 +29,7 @@ rules:
 # Switch Prompt
 - description: Prompt in enabled mode for network switches
   regex: (\S+)#
-  color: Rich-Gold
+  color: Sunrise-Orange
 
 - description: Match prompt in disable for mode network switches
   regex: (\S+)>

@@ -1,13 +1,16 @@
-use clap::ArgMatches;
+use crate::vault::VaultManager;
+use secrecy::ExposeSecret;
 
 /// Processes the "show" subcommand.
 /// It retrieves the vault entry name from the command-line arguments and prints it.
-pub fn run(matches: &ArgMatches) {
-    // Retrieve the vault entry name; this is safe because it's a required argument.
-    let entry_name = matches
-        .get_one::<String>("entry_name")
-        .expect("Entry name is required");
+pub fn run(vault_manager: &VaultManager) {
+    let vault_file_name = vault_manager.get_vault_file_name();
+    let vault_file = vault_manager.get_vault_path();
+    let vault_key = vault_manager.get_vault_key();
+    let vault_password = vault_manager.get_vault_password();
 
-    // Simulate printing the vault entry.
-    println!("Vault entry: {}", entry_name);
+    println!("Vault file: {}", vault_file.display());
+    println!("Vault file name: {}", vault_file_name);
+    println!("Vault key: {:?}", vault_key);
+    println!("Vault password: {}", vault_password.expose_secret());
 }

@@ -22,13 +22,29 @@ use csh::{
     log_debug, log_ssh,
     logging::Logger,
     process::spawn_ssh,
-    vault::VaultManager,
+    vault::vault_handler,
     Result,
 };
 
 fn main() -> Result<ExitCode> {
     // Get the command-line arguments from the clap function in cli.rs
     let args = main_args();
+
+    let title = [
+        " ",
+        "\x1b[31m ██████╗ ██████╗ ██╗      ██████╗ ██████╗       ███████╗███████╗██╗  ██╗",
+        "\x1b[33m██╔════╝██╔═══██╗██║     ██╔═══██╗██╔══██╗      ██╔════╝██╔════╝██║  ██║",
+        "\x1b[32m██║     ██║   ██║██║     ██║   ██║██████╔╝█████╗███████╗███████╗███████║",
+        "\x1b[36m██║     ██║   ██║██║     ██║   ██║██╔══██╗╚════╝╚════██║╚════██║██╔══██║",
+        "\x1b[34m╚██████╗╚██████╔╝███████╗╚██████╔╝██║  ██║      ███████║███████║██║  ██║",
+        "\x1b[35m ╚═════╝ ╚═════╝ ╚══════╝ ╚═════╝ ╚═╝  ╚═╝      ╚══════╝╚══════╝╚═╝  ╚═╝",
+        "\x1b[31mVersion: \x1b[33m1.0\x1b[0m    \x1b[31mBy: \x1b[32m@Karyboy\x1b[0m    \x1b[31mGithub: \x1b[34mhttps://github.com/karsyboy/color-ssh\x1b[0m",
+        " ",
+    ];
+
+    for (_, line) in title.iter().enumerate() {
+        println!("{}\x1b[0m", line); // Reset color after each line
+    }
 
     // Initialize logging in a separate scope so the lock is released
     let logger = Logger::new();
@@ -38,6 +54,11 @@ fn main() -> Result<ExitCode> {
             eprintln!("Failed to initialize debug logging: {}", e);
             return Ok(ExitCode::FAILURE);
         }
+    }
+
+    if args.vault_command.is_some() {
+        let _ = vault_handler(args.vault_command.clone().unwrap());
+        return Ok(ExitCode::SUCCESS);
     }
 
     if args.ssh_logging || CONFIG.read().unwrap().settings.ssh_logging {
@@ -51,15 +72,10 @@ fn main() -> Result<ExitCode> {
         // Note: this may need to change if the user provides a different session name
         let session_hostname = args
             .ssh_args
-            .get(0)
+            .get(args.ssh_args.len() - 1)
             .map(|arg| arg.splitn(2, '@').nth(1).unwrap_or(arg))
             .unwrap_or("unknown");
         CONFIG.write().unwrap().metadata.session_name = session_hostname.to_string();
-    }
-
-    if args.vault_command.is_some() {
-        let _ = VaultManager::start(args.vault_command.clone().unwrap());
-        return Ok(ExitCode::SUCCESS);
     }
 
     drop(logger); // Release the lock on the logger

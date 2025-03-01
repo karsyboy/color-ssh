@@ -13,9 +13,7 @@ pub use errors::LogError;
 pub use formatter::LogFormatter;
 pub use ssh::SshLogger;
 
-use once_cell::sync::Lazy;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::Mutex;
 
 // Global flags for enabling different logging types
 static DEBUG_MODE: AtomicBool = AtomicBool::new(false);
@@ -73,10 +71,7 @@ impl Logger {
     pub fn log_debug(&self, message: &str) -> Result<(), LogError> {
         if self.is_debug_enabled() {
             self.debug_logger.log(LogLevel::Debug, message)?;
-        } else {
-            println!("Debug not enabled{:?}", message);
         }
-
         Ok(())
     }
 

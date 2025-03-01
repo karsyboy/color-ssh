@@ -24,8 +24,11 @@ pub struct Config {
 pub struct Settings {
     pub vault_path: Option<PathBuf>,         // Path to the vault
     pub vault_key: Option<PathBuf>,          // Path to the vault
+    #[serde(default)]
     pub remove_passwords_from_ssh_log: bool, // Flag to indicate if passwords should be removed from SSH logs
+    #[serde(default)]
     pub debug_mode: bool,                    // Flag to enable debug mode
+    #[serde(default)]
     pub ssh_logging: bool,                   // Flag to enable SSH logging
 }
 
