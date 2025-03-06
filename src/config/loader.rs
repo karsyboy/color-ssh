@@ -10,10 +10,8 @@ use std::{
     {env, fs, io},
 };
 
-use crate::{
-    config::{style::Config, CONFIG},
-    debug_enabled, log_debug,
-};
+use super::{CONFIG, style::Config};
+use crate::{debug_enabled, log_debug};
 
 pub struct ConfigLoader {
     config_path: PathBuf,
@@ -23,10 +21,6 @@ impl ConfigLoader {
     pub fn new() -> Self {
         let config_path = Self::find_config_path();
         Self { config_path }
-    }
-
-    pub fn get_config_path(&self) -> PathBuf {
-        self.config_path.clone()
     }
 
     fn find_config_path() -> PathBuf {

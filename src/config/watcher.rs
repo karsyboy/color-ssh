@@ -1,4 +1,4 @@
-use crate::config::{loader::ConfigLoader, CONFIG};
+use crate::config::{CONFIG, loader::ConfigLoader};
 use notify::{Error, Event, RecommendedWatcher, RecursiveMode, Watcher};
 use std::{path::Path, sync::mpsc, thread, time::Duration};
 
@@ -45,7 +45,7 @@ pub fn config_watcher() -> RecommendedWatcher {
                     if let Err(err) = config_loader.reload_config() {
                         eprintln!("❌Error reloading config: {}\r", err);
                     } else {
-                        println!("💾 Configuration reloaded [ ⌨️ Press Enter ]:\r");
+                        println!("💾 Configuration reloaded [⌨️  Press Enter]:\r");
                     }
                 }
                 Err(err) => {

@@ -7,6 +7,7 @@ mod debug;
 mod errors;
 mod formatter;
 mod ssh;
+mod utils;
 
 pub use debug::DebugLogger;
 pub use errors::LogError;

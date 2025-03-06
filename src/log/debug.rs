@@ -4,7 +4,7 @@ use std::io::Write;
 use std::path::PathBuf;
 use std::sync::Mutex;
 
-use crate::logging::{LogError, LogFormatter, LogLevel};
+use crate::log::{LogError, LogFormatter, LogLevel};
 
 static DEBUG_LOG_FILE: Lazy<Mutex<Option<File>>> = Lazy::new(|| Mutex::new(None));
 

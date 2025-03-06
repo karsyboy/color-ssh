@@ -7,56 +7,68 @@ TODO:
         - ssh logging
 */
 
+use dirs::home_dir;
 use regex::Regex;
 use serde::Deserialize;
 use std::{collections::HashMap, path::PathBuf};
 
 #[derive(Debug, Deserialize)]
 pub struct Config {
-    pub settings: Settings,               // User settings for the application
-    pub palette: HashMap<String, String>, // Map of color names (keys) to their respective hex codes (values)
-    pub rules: Vec<HighlightRule>, // List of highlighting rules with a regex pattern and the corresponding color
     #[serde(default)]
-    pub metadata: Metadata, // Metadata configuration
+    pub settings: Settings,
+    pub palette: HashMap<String, String>,
+    pub rules: Vec<HighlightRule>,
+    #[serde(default)]
+    pub metadata: Metadata,
 }
 
 #[derive(Debug, Deserialize)]
 pub struct Settings {
-    pub vault_path: Option<PathBuf>,         // Path to the vault
-    pub vault_key: Option<PathBuf>,          // Path to the vault
+    pub vault_path: Option<PathBuf>,
+    pub vault_key: Option<PathBuf>,
     #[serde(default)]
-    pub remove_passwords_from_ssh_log: bool, // Flag to indicate if passwords should be removed from SSH logs
+    pub remove_passwords_from_ssh_log: bool,
+    #[serde(default = "default_show_title")]
+    pub show_title: bool,
     #[serde(default)]
-    pub debug_mode: bool,                    // Flag to enable debug mode
+    pub debug_mode: bool,
     #[serde(default)]
-    pub ssh_logging: bool,                   // Flag to enable SSH logging
+    pub ssh_logging: bool,
 }
 
-//create defaults for settings
 impl Default for Settings {
     fn default() -> Self {
         Self {
-            vault_path: Some(PathBuf::new()), // Default vault path
-            vault_key: Some(PathBuf::new()),  // Default vault key path
+            vault_path: home_dir().map(|mut path| {
+                path.push(".csh");
+                path.push("vault");
+                path.push("vault.kdbx");
+                path
+            }),
+            vault_key: None,
             remove_passwords_from_ssh_log: false,
+            show_title: true,
             debug_mode: false,
             ssh_logging: false,
         }
     }
 }
 
-// Structure representing a single highlight rule
+fn default_show_title() -> bool {
+    true
+}
+
 #[derive(Debug, Deserialize)]
 pub struct HighlightRule {
-    pub regex: String, // Regex pattern to match text for highlighting
-    pub color: String, // Color name (key in the palette) to use for the matched text
+    pub regex: String,
+    pub color: String,
 }
 
 #[derive(Debug, Deserialize, Default)]
 pub struct Metadata {
     #[serde(default)]
-    pub config_path: PathBuf, // Path to the configuration file
-    pub session_name: String, // Name of the current session
+    pub config_path: PathBuf,
+    pub session_name: String,
     #[serde(skip)]
-    pub compiled_rules: Vec<(Regex, String)>, // Compiled regex rules for highlighting
+    pub compiled_rules: Vec<(Regex, String)>,
 }

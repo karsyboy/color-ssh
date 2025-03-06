@@ -11,7 +11,7 @@ use std::path::PathBuf;
 use std::sync::Mutex;
 
 use crate::config::CONFIG;
-use crate::logging::{LogError, LogFormatter};
+use crate::log::{LogError, LogFormatter};
 
 // A global buffer to accumulate output until full lines are available.
 static SSH_LOG_BUFFER: Lazy<Mutex<String>> = Lazy::new(|| Mutex::new(String::new()));

@@ -6,6 +6,7 @@ TODO:
     - Go through each file and clean up use and crate imports to all have the same format
     - Split main.rs into app.rs and main.rs. Main.rs will act as an entry point and app.rs will contain the processing functions.
     - Improve error support to expand error handling across all modules for clean logging?
+    - Replace
 */
 
 use std::{
@@ -16,37 +17,38 @@ use std::{
 };
 
 use csh::{
-    cli::main_args,
-    config::{watcher::config_watcher, CONFIG},
+    Result,
+    args::main_args,
+    config::{CONFIG, config_watcher},
     highlighter::process_chunk,
+    log::Logger,
     log_debug, log_ssh,
-    logging::Logger,
     process::spawn_ssh,
     vault::vault_handler,
-    Result,
 };
 
 fn main() -> Result<ExitCode> {
-    // Get the command-line arguments from the clap function in cli.rs
     let args = main_args();
 
-    let title = [
-        " ",
-        "\x1b[31m ██████╗ ██████╗ ██╗      ██████╗ ██████╗       ███████╗███████╗██╗  ██╗",
-        "\x1b[33m██╔════╝██╔═══██╗██║     ██╔═══██╗██╔══██╗      ██╔════╝██╔════╝██║  ██║",
-        "\x1b[32m██║     ██║   ██║██║     ██║   ██║██████╔╝█████╗███████╗███████╗███████║",
-        "\x1b[36m██║     ██║   ██║██║     ██║   ██║██╔══██╗╚════╝╚════██║╚════██║██╔══██║",
-        "\x1b[34m╚██████╗╚██████╔╝███████╗╚██████╔╝██║  ██║      ███████║███████║██║  ██║",
-        "\x1b[35m ╚═════╝ ╚═════╝ ╚══════╝ ╚═════╝ ╚═╝  ╚═╝      ╚══════╝╚══════╝╚═╝  ╚═╝",
-        "\x1b[31mVersion: \x1b[33m1.0\x1b[0m    \x1b[31mBy: \x1b[32m@Karyboy\x1b[0m    \x1b[31mGithub: \x1b[34mhttps://github.com/karsyboy/color-ssh\x1b[0m",
-        " ",
-    ];
+    if CONFIG.read().unwrap().settings.show_title {
+        let title = [
+            " ",
+            "\x1b[31m ██████╗ ██████╗ ██╗      ██████╗ ██████╗       ███████╗███████╗██╗  ██╗",
+            "\x1b[33m██╔════╝██╔═══██╗██║     ██╔═══██╗██╔══██╗      ██╔════╝██╔════╝██║  ██║",
+            "\x1b[32m██║     ██║   ██║██║     ██║   ██║██████╔╝█████╗███████╗███████╗███████║",
+            "\x1b[36m██║     ██║   ██║██║     ██║   ██║██╔══██╗╚════╝╚════██║╚════██║██╔══██║",
+            "\x1b[34m╚██████╗╚██████╔╝███████╗╚██████╔╝██║  ██║      ███████║███████║██║  ██║",
+            "\x1b[35m ╚═════╝ ╚═════╝ ╚══════╝ ╚═════╝ ╚═╝  ╚═╝      ╚══════╝╚══════╝╚═╝  ╚═╝",
+            "\x1b[31mVersion: \x1b[33m1.0\x1b[0m    \x1b[31mBy: \x1b[32m@Karyboy\x1b[0m    \x1b[31mGithub: \x1b[34mhttps://github.com/karsyboy/color-ssh\x1b[0m",
+            " ",
+        ];
 
-    for (_, line) in title.iter().enumerate() {
-        println!("{}\x1b[0m", line); // Reset color after each line
+        for (_, line) in title.iter().enumerate() {
+            println!("{}\x1b[0m", line);
+        }
     }
 
-    // Initialize logging in a separate scope so the lock is released
+    // Initialize logging in a separate scope so the lock is released on logger when done initializing
     let logger = Logger::new();
     if args.debug || CONFIG.read().unwrap().settings.debug_mode {
         logger.enable_debug();
@@ -80,13 +82,11 @@ fn main() -> Result<ExitCode> {
 
     drop(logger); // Release the lock on the logger
 
-    // Load the configuration file
-    log_debug!("SSH arguments: {:?}", args.ssh_args);
-
     // Starts the config file watcher in the background under the _watcher context
     let _watcher = config_watcher();
 
     // Launch the SSH process with the provided arguments
+    log_debug!("SSH arguments: {:?}", args.ssh_args);
     let mut child = spawn_ssh(&args.ssh_args).expect("Failed to spawn SSH process\r");
     let stdout = child.stdout.take().expect("Failed to capture stdout\r");
     let mut reader = BufReader::new(stdout);
@@ -113,7 +113,9 @@ fn main() -> Result<ExitCode> {
     // Buffer for reading data from SSH output
     let mut buffer = [0; 4096];
     loop {
-        let n = reader.read(&mut buffer)?;
+        let n = reader
+            .read(&mut buffer)
+            .expect("Failed to read data from SSH process\r");
         if n == 0 {
             break; // Exit loop when EOF is reached
         }
@@ -125,7 +127,7 @@ fn main() -> Result<ExitCode> {
     }
 
     // Wait for the SSH process to finish and use its status code
-    let status = child.wait()?;
+    let status = child.wait().expect("Failed to wait for SSH process\r");
     if status.success() {
         Ok(ExitCode::SUCCESS)
     } else {

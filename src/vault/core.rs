@@ -9,15 +9,8 @@ use secrecy::{ExposeSecret, SecretBox};
 use std::io::{self, Write};
 use std::path::PathBuf;
 
-use keepass::{
-    // db::{Entry as KeepassEntry, Group, Node},
-    error::DatabaseOpenError,
-    Database,
-    DatabaseKey,
-};
-
 use super::VaultError;
-use crate::cli::VaultArgs;
+use crate::args::VaultArgs;
 use crate::config::CONFIG;
 use crate::log_debug;
 use crate::vault::commands::{
@@ -135,25 +128,6 @@ impl VaultManager {
         Ok(vault_file_name)
     }
 
-    pub fn create_keyring_entry(
-        service: &str,
-        user: &str,
-        password: Option<&str>,
-        secret: Option<&str>,
-    ) -> Result<(), keyring::Error> {
-        let keyring = KeyringEntry::new(service, user)?;
-
-        if let Some(password) = password {
-            keyring.set_password(password)?;
-        }
-
-        if let Some(secret) = secret {
-            keyring.set_password(secret)?;
-        }
-
-        Ok(())
-    }
-
     pub fn get_keyring_entry(service: &str, user: &str) -> Result<KeyringEntry, keyring::Error> {
         let keyring = KeyringEntry::new(service, user)?;
         Ok(keyring)
@@ -177,7 +151,7 @@ impl VaultManager {
         }
     }
 
-    pub fn vault_key_exists(key_file: Option<&PathBuf>) -> bool {
+    pub fn vault_key_exists(key_file: &Option<PathBuf>) -> bool {
         if let Some(key_file) = key_file {
             if key_file.exists() {
                 println!("Key file exists: {}", key_file.display());
@@ -187,71 +161,6 @@ impl VaultManager {
             }
         }
         false
-    }
-
-    pub fn new_keepass_db() -> Result<Database, DatabaseOpenError> {
-        let db = Database::new(Default::default());
-        Ok(db)
-    }
-
-    pub fn new_vault_key(
-        key_file: Option<&PathBuf>,
-        password: SecretBox<String>,
-    ) -> Result<DatabaseKey, VaultError> {
-        let password = if password.expose_secret().is_empty() {
-            None
-        } else {
-            Some(password.expose_secret().clone())
-        };
-        let key_file = if let Some(key_file) = key_file {
-            Some(key_file.to_path_buf())
-        } else {
-            None
-        };
-        let vault_key = DatabaseKey::new();
-
-        let vault_key = match password {
-            Some(password) => vault_key.with_password(password.as_str()),
-            None => vault_key,
-        };
-
-        if key_file.is_none() {
-            return Ok(vault_key);
-        } else {
-            let mut file = std::fs::File::open(key_file.clone().unwrap())?;
-
-            let vault_key = match key_file {
-                Some(_) => vault_key.with_keyfile(&mut file)?,
-                None => vault_key,
-            };
-            Ok(vault_key)
-        }
-    }
-
-    pub fn create_key_file(key_path: Option<&PathBuf>) -> Result<&PathBuf, VaultError> {
-        if key_path.is_some() {
-            let mut key_file = std::fs::File::create(&key_path.unwrap())?;
-
-            let random_bytes = rand::random::<[u8; 32]>();
-            key_file.write_all(&random_bytes)?;
-        } else {
-            let home_dir = dirs::home_dir().expect("Failed to get home directory.\r");
-            let csh_dir = home_dir.join(".csh");
-            let vault_dir = csh_dir.join("vault");
-            let key_path = vault_dir.join("vault.key");
-
-            if !vault_dir.exists() {
-                std::fs::create_dir_all(&vault_dir)?;
-            }
-
-            let mut key_file = std::fs::File::create(&key_path)?;
-
-            // write random bytes to the file
-            let random_bytes = rand::random::<[u8; 32]>();
-            key_file.write_all(&random_bytes)?;
-        }
-
-        Ok(key_path.unwrap())
     }
 
     pub fn unlock_vault(
@@ -284,7 +193,7 @@ pub fn vault_handler(vault_commands: VaultArgs) {
             vault_file,
             key_file,
         } => {
-            init_vault(&vault_file, key_file.as_ref()).unwrap_or_else(|err| {
+            init_vault(vault_file, key_file).unwrap_or_else(|err| {
                 println!("Failed to initialize vault: {}", err);
             });
         }

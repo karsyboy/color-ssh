@@ -1,6 +1,10 @@
-pub mod loader;
-pub mod style;
-pub mod watcher;
+mod errors;
+mod loader;
+mod style;
+mod watcher;
+
+pub use errors::ConfigError;
+pub use watcher::config_watcher;
 
 use once_cell::sync::Lazy;
 use std::sync::{Arc, RwLock};

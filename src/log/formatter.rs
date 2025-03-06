@@ -3,7 +3,7 @@ TODO:
     - Add a formatter option to remove passwords form the log file
 */
 
-use crate::logging::LogLevel;
+use crate::log::LogLevel;
 use chrono::Local;
 
 #[derive(Clone)]

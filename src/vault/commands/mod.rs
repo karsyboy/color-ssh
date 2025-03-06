@@ -5,7 +5,10 @@ mod lock;
 mod show;
 mod unlock;
 
-pub use crate::vault::errors::VaultError;
+use super::KeepassVault;
+use super::VaultError;
+use super::VaultManager;
+
 pub use add::run as add_entry;
 pub use del::run as del_entry;
 pub use init::run as init_vault;
