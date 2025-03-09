@@ -1,28 +1,19 @@
-use super::VaultError;
+use super::{VaultError, VaultManager, keyring};
 use crate::log_debug;
-use crate::vault::VaultManager;
 use secrecy::{ExposeSecret, SecretBox};
-use std::ffi::OsStr;
-use std::path::PathBuf;
+use std::{ffi::OsStr, path::PathBuf};
 
 pub fn run(vault_path: &PathBuf, key_file: Option<&PathBuf>) -> Result<VaultManager, VaultError> {
     let mut vault_manager = VaultManager::new();
 
     let service = "vault";
     let service_key = "vault_key";
-    let vault_file_name = vault_path
-        .file_name()
-        .and_then(OsStr::to_str)
-        .expect("Failed to get file name");
-    let entry = VaultManager::get_keyring_entry(service, &vault_file_name)
-        .expect("Failed to get keyring entry");
-    let entry_key = VaultManager::get_keyring_entry(service_key, &vault_file_name)?;
+    let vault_file_name = vault_path.file_name().and_then(OsStr::to_str).expect("Failed to get file name");
+    let entry = keyring::get_keyring_entry(service, &vault_file_name).expect("Failed to get keyring entry");
+    let entry_key = keyring::get_keyring_entry(service_key, &vault_file_name)?;
 
     log_debug!("Vault file: {}", vault_path.display());
-    log_debug!(
-        "Key file: {}",
-        key_file.unwrap_or(&PathBuf::new()).display()
-    );
+    log_debug!("Key file: {}", key_file.unwrap_or(&PathBuf::new()).display());
     log_debug!("Service: {}", service);
     log_debug!("Vault File Name: {}", vault_file_name);
     log_debug!("Entry: {:?}", entry);
@@ -55,8 +46,7 @@ pub fn run(vault_path: &PathBuf, key_file: Option<&PathBuf>) -> Result<VaultMana
 
             if key_file.is_some() {
                 println!("🔑 Using key file.");
-                entry_key
-                    .set_password(key_file.unwrap().to_str().expect("Failed to set keyfile"))?;
+                entry_key.set_password(key_file.unwrap().to_str().expect("Failed to set keyfile"))?;
                 vault_manager.set_vault_key(key_file.unwrap().clone());
             } else {
                 println!("🔑 No key file provided.");

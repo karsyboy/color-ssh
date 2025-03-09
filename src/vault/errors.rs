@@ -23,9 +23,9 @@ pub enum VaultError {
 impl fmt::Display for VaultError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            VaultError::IoError(e) => write!(f, "IO error: {}", e),
-            VaultError::KeepassError(e) => write!(f, "KeePass error: {}", e),
-            VaultError::SaveError(e) => write!(f, "Save error: {}", e),
+            VaultError::IoError(err) => write!(f, "IO error: {}", err),
+            VaultError::KeepassError(err) => write!(f, "KeePass error: {}", err),
+            VaultError::SaveError(err) => write!(f, "Save error: {}", err),
             VaultError::VaultNotFound(msg) => write!(f, "Vault not found: {}", msg),
             VaultError::EntryNotFound(msg) => write!(f, "Entry not found: {}", msg),
             VaultError::InvalidPassword => write!(f, "Invalid password"),
@@ -33,7 +33,7 @@ impl fmt::Display for VaultError {
             VaultError::KeyFileError(msg) => write!(f, "Key file error: {}", msg),
             VaultError::LockError(msg) => write!(f, "Lock error: {}", msg),
             VaultError::UnlockError(msg) => write!(f, "Unlock error: {}", msg),
-            VaultError::KeyringError(e) => write!(f, "Keyring error: {}", e),
+            VaultError::KeyringError(err) => write!(f, "Keyring error: {}", err),
             VaultError::VaultAlreadyExists => write!(f, "Vault already exists"),
             VaultError::KeyFileCreationFailed => write!(f, "Key file creation failed"),
             VaultError::NoVaultFile => write!(f, "No vault file"),
@@ -42,25 +42,25 @@ impl fmt::Display for VaultError {
 }
 
 impl From<DatabaseOpenError> for VaultError {
-    fn from(error: DatabaseOpenError) -> Self {
-        VaultError::KeepassError(error)
+    fn from(err: DatabaseOpenError) -> Self {
+        VaultError::KeepassError(err)
     }
 }
 
 impl From<io::Error> for VaultError {
-    fn from(error: io::Error) -> Self {
-        VaultError::IoError(error)
+    fn from(err: io::Error) -> Self {
+        VaultError::IoError(err)
     }
 }
 
 impl From<DatabaseSaveError> for VaultError {
-    fn from(error: DatabaseSaveError) -> Self {
-        VaultError::SaveError(error)
+    fn from(err: DatabaseSaveError) -> Self {
+        VaultError::SaveError(err)
     }
 }
 
 impl From<keyring::Error> for VaultError {
-    fn from(error: keyring::Error) -> Self {
-        VaultError::KeyringError(error)
+    fn from(err: keyring::Error) -> Self {
+        VaultError::KeyringError(err)
     }
 }

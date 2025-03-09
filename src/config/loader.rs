@@ -3,15 +3,13 @@ TODO:
     - Add config profiles by allowing to pass -p <profile_name> to the cli which would then call <profile>.csh-config.yaml. Default config would be .csh-config.yaml.
         - Allow for a default profile to be set in the config file???
 */
-
+use super::{SESSION_CONFIG, style::Config};
+use crate::{debug_enabled, log_debug};
 use regex::Regex;
 use std::{
     path::PathBuf,
     {env, fs, io},
 };
-
-use super::{CONFIG, style::Config};
-use crate::{debug_enabled, log_debug};
 
 pub struct ConfigLoader {
     config_path: PathBuf,
@@ -74,19 +72,13 @@ impl ConfigLoader {
         // Create the configuration file with sample content
         let config_content = include_str!("../../templates/default.csh-config.yaml");
         fs::write(&config_path, config_content)?;
-        log_debug!(
-            "Default configuration file created at: {:?}\r",
-            config_path.to_str()
-        );
+        log_debug!("Default configuration file created at: {:?}\r", config_path.to_str());
 
         Ok(config_path)
     }
 
     pub fn load_config(self) -> io::Result<Config> {
-        log_debug!(
-            "Loading configuration from: {:?}\r",
-            self.config_path.to_str()
-        );
+        log_debug!("Loading configuration from: {:?}\r", self.config_path.to_str());
 
         // Read the configuration file
         let config_content = fs::read_to_string(self.config_path.clone())?;
@@ -103,21 +95,18 @@ impl ConfigLoader {
             }
             Err(err) => {
                 eprintln!("Error parsing configuration file: {:?}\r", err);
-                Err(io::Error::new(
-                    io::ErrorKind::InvalidData,
-                    "Failed to parse configuration file.\r",
-                ))
+                Err(io::Error::new(io::ErrorKind::InvalidData, "Failed to parse configuration file.\r"))
             }
         }
     }
 
     /// Loads and applies new configuration.
     pub fn reload_config(self) -> Result<(), String> {
-        let mut current_config = CONFIG.write().unwrap();
+        let mut current_config = SESSION_CONFIG.write().unwrap();
 
-        let new_config = self
-            .load_config()
-            .map_err(|err| format!("Failed to load configuration: {}\r", err))?;
+        let mut new_config = self.load_config().map_err(|err| format!("Failed to load configuration: {}\r", err))?;
+
+        new_config.metadata.session_name = current_config.metadata.session_name.clone();
 
         *current_config = new_config;
 
@@ -138,11 +127,7 @@ fn compile_rules(config: &Config) -> Vec<(Regex, String)> {
     let mut rules = Vec::new();
 
     for rule in &config.rules {
-        let color = config
-            .palette
-            .get(&rule.color)
-            .cloned()
-            .unwrap_or_else(|| "\x1b[0m".to_string()); // Default to reset color if not found
+        let color = config.palette.get(&rule.color).cloned().unwrap_or_else(|| "\x1b[0m".to_string()); // Default to reset color if not found
 
         // This is done to make sure newline characters are removed form the string before they are loaded into a Regex value
         // This will not remove the string value "\n" just actually new line characters Ex. "Hello\nWorld" will not have "\n" replaced because it is the string "\n" instead of the actual newline character

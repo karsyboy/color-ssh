@@ -1,16 +1,12 @@
-use rand::RngCore;
-use secrecy::{ExposeSecret, SecretBox};
-use std::io::Write;
-use std::path::PathBuf;
-use std::{fs::File, io::BufWriter};
-
+use super::VaultError;
 use keepass::{
     Database, DatabaseKey,
     db::{Entry as KeepassEntry, Group, Node},
     error::DatabaseOpenError,
 };
-
-use super::VaultError;
+use rand::RngCore;
+use secrecy::{ExposeSecret, SecretBox};
+use std::{fs::File, io::BufWriter, io::Write, path::PathBuf};
 
 pub struct KeepassVault {
     pub db_file: PathBuf,
@@ -22,11 +18,7 @@ pub struct KeepassVault {
 
 impl KeepassVault {
     // this should always be ran first
-    pub fn new(
-        db_file: PathBuf,
-        password: Option<SecretBox<String>>,
-        key_file: Option<PathBuf>,
-    ) -> KeepassVault {
+    pub fn new(db_file: PathBuf, password: Option<SecretBox<String>>, key_file: Option<PathBuf>) -> KeepassVault {
         KeepassVault {
             db_file,
             password,
@@ -48,18 +40,14 @@ impl KeepassVault {
         let file = File::create(&key_file).map_err(|err| VaultError::from(err))?;
 
         let mut writer = BufWriter::new(file);
-        writer
-            .write_all(&key)
-            .map_err(|err| VaultError::from(err))?;
+        writer.write_all(&key).map_err(|err| VaultError::from(err))?;
 
         Ok(key_file)
     }
 
     pub fn create(&mut self) -> Result<(), VaultError> {
         let mut db_file = File::create(&self.db_file).map_err(|err| VaultError::from(err))?;
-        self.db
-            .save(&mut db_file, self.key.clone())
-            .map_err(|err| VaultError::from(err))?;
+        self.db.save(&mut db_file, self.key.clone()).map_err(|err| VaultError::from(err))?;
         Ok(())
     }
 
@@ -72,9 +60,7 @@ impl KeepassVault {
 
     pub fn save(&self) -> Result<(), VaultError> {
         let mut db_file = File::open(&self.db_file).map_err(|err| VaultError::from(err))?;
-        self.db
-            .save(&mut db_file, self.key.clone())
-            .map_err(|err| VaultError::from(err))?;
+        self.db.save(&mut db_file, self.key.clone()).map_err(|err| VaultError::from(err))?;
         Ok(())
     }
 
@@ -85,11 +71,7 @@ impl KeepassVault {
             None
         };
 
-        let key_file = if let Some(key_file) = &self.key_file {
-            Some(key_file.clone())
-        } else {
-            None
-        };
+        let key_file = if let Some(key_file) = &self.key_file { Some(key_file.clone()) } else { None };
 
         let key = DatabaseKey::new();
 
@@ -100,7 +82,7 @@ impl KeepassVault {
 
         let key = match key_file {
             Some(key_file) => {
-                let mut file = File::open(key_file).map_err(|e| VaultError::from(e))?;
+                let mut file = File::open(key_file).map_err(|err| VaultError::from(err))?;
                 key.with_keyfile(&mut file).unwrap()
             }
             None => key,

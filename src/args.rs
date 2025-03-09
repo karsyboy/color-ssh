@@ -34,12 +34,7 @@ pub fn main_args() -> MainArgs {
                 .help("Enable SSH logging")
                 .action(clap::ArgAction::SetTrue),
         )
-        .arg(
-            Arg::new("ssh_args")
-                .help("SSH arguments")
-                .num_args(1..)
-                .required(true),
-        )
+        .arg(Arg::new("ssh_args").help("SSH arguments").num_args(1..).required(true))
         .get_matches();
 
     let vault_command = if let Some(("vault", sub_matches)) = matches.subcommand() {
@@ -52,10 +47,7 @@ pub fn main_args() -> MainArgs {
     MainArgs {
         debug: matches.get_flag("debug"),
         ssh_logging: matches.get_flag("log"),
-        ssh_args: matches
-            .get_many::<String>("ssh_args")
-            .map(|vals| vals.cloned().collect())
-            .unwrap_or_default(),
+        ssh_args: matches.get_many::<String>("ssh_args").map(|vals| vals.cloned().collect()).unwrap_or_default(),
         vault_command,
     }
 }
@@ -64,32 +56,17 @@ pub fn main_args() -> MainArgs {
 #[derive(Debug, Clone)]
 pub enum VaultArgs {
     /// Initialize a new vault
-    Init {
-        vault_file: PathBuf,
-        key_file: Option<PathBuf>,
-    },
+    Init { vault_file: PathBuf, key_file: Option<PathBuf> },
     /// Add a new entry to the vault
-    Add {
-        vault_file: Option<PathBuf>,
-        key_file: Option<PathBuf>,
-    },
+    Add { vault_file: Option<PathBuf>, key_file: Option<PathBuf> },
     /// Delete an entry from the vault
-    Delete {
-        vault_file: Option<PathBuf>,
-        key_file: Option<PathBuf>,
-    },
+    Delete { vault_file: Option<PathBuf>, key_file: Option<PathBuf> },
     /// Show a vault entry
-    Show {
-        vault_file: Option<PathBuf>,
-        key_file: Option<PathBuf>,
-    },
+    Show { vault_file: Option<PathBuf>, key_file: Option<PathBuf> },
     /// Lock the vault
     Lock { vault_file: Option<PathBuf> },
     /// Unlock the vault
-    Unlock {
-        vault_file: Option<PathBuf>,
-        key_file: Option<PathBuf>,
-    },
+    Unlock { vault_file: Option<PathBuf>, key_file: Option<PathBuf> },
 }
 
 fn vault_args() -> Command {
@@ -103,18 +80,8 @@ fn vault_args() -> Command {
         .subcommand(add_args())
         .subcommand(del_args())
         // Additional flags that are valid when no subcommand is used:
-        .arg(
-            Arg::new("unlock")
-                .long("unlock")
-                .help("Unlock Vault")
-                .action(clap::ArgAction::SetTrue),
-        )
-        .arg(
-            Arg::new("lock")
-                .long("lock")
-                .help("Lock Vault")
-                .action(clap::ArgAction::SetTrue),
-        )
+        .arg(Arg::new("unlock").long("unlock").help("Unlock Vault").action(clap::ArgAction::SetTrue))
+        .arg(Arg::new("lock").long("lock").help("Lock Vault").action(clap::ArgAction::SetTrue))
         .arg(
             Arg::new("vault_file")
                 .short('v')
@@ -235,10 +202,7 @@ fn del_args() -> Command {
 fn parse_vault_subcommand(matches: &clap::ArgMatches) -> VaultArgs {
     match matches.subcommand() {
         Some(("init", sub_matches)) => VaultArgs::Init {
-            vault_file: sub_matches
-                .get_one::<PathBuf>("vault_file")
-                .cloned()
-                .unwrap(),
+            vault_file: sub_matches.get_one::<PathBuf>("vault_file").cloned().unwrap(),
             key_file: sub_matches.get_one::<PathBuf>("key_file").cloned(),
         },
         Some(("show", sub_matches)) => VaultArgs::Show {

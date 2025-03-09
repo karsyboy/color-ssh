@@ -2,16 +2,17 @@
 TODO:
     - Figure out how to remove weir ASCII characters from the log file
 */
-
+use super::{LogError, formatter::LogFormatter};
+use crate::config::SESSION_CONFIG;
 use chrono::Local;
 use once_cell::sync::Lazy;
-use std::fs::{File, OpenOptions};
-use std::io::Write;
-use std::path::PathBuf;
-use std::sync::Mutex;
-
-use crate::config::CONFIG;
-use crate::log::{LogError, LogFormatter};
+use regex::Regex;
+use std::{
+    fs::{File, OpenOptions},
+    io::Write,
+    path::PathBuf,
+    sync::Mutex,
+};
 
 // A global buffer to accumulate output until full lines are available.
 static SSH_LOG_BUFFER: Lazy<Mutex<String>> = Lazy::new(|| Mutex::new(String::new()));
@@ -23,9 +24,27 @@ pub struct SshLogger {
 
 impl SshLogger {
     pub fn new() -> Self {
+        let mut formatter = LogFormatter::new();
+        formatter.set_include_timestamp(true);
+        formatter.set_include_break(true);
+
         Self {
-            formatter: LogFormatter::new(true, false),
+            formatter: LogFormatter::new(),
         }
+    }
+
+    fn remove_secrets(&self, message: &str) -> String {
+        let secret_patterns = SESSION_CONFIG.read().unwrap().settings.remove_secrets.clone();
+        let mut redacted_message = message.to_string();
+
+        if let Some(secret_pattern) = secret_patterns {
+            for pattern in secret_pattern {
+                if let Ok(regex) = Regex::new(&pattern) {
+                    redacted_message = regex.replace_all(&redacted_message, "[REDACTED]").to_string();
+                }
+            }
+        }
+        redacted_message
     }
 
     pub fn log(&self, message: &str) -> Result<(), LogError> {
@@ -41,7 +60,18 @@ impl SshLogger {
             *buffer = buffer[newline_pos + 1..].to_string();
 
             // Filter out special ASCII characters
-            // let message: String = message.chars().filter(|c| c.is_alphanumeric() || c.is_whitespace() || c.is_ascii_punctuation()).collect();
+            let ansi_escape = Regex::new(r"(\x1B\[[0-9;]*[mK]|\x1B\][0-9];.*?\x07|\x1B\][0-9];.*?\x1B\\)").unwrap();
+            let cleaned_message = ansi_escape.replace_all(&message, "").to_string();
+            let message: String = cleaned_message
+                .chars()
+                .filter(|c| c.is_alphanumeric() || c.is_ascii_punctuation() || c.is_whitespace() && *c != '\n' && *c != '\r')
+                .collect();
+
+            let message = if SESSION_CONFIG.read().unwrap().settings.remove_secrets.is_some() {
+                self.remove_secrets(&message)
+            } else {
+                message
+            };
 
             // format one line at a time with date and time and write to the log file
             for msg in message.lines() {
@@ -59,35 +89,17 @@ impl SshLogger {
     fn get_or_create_log_file(&self) -> Result<File, LogError> {
         let log_path = self.get_ssh_log_path()?;
 
-        OpenOptions::new()
-            .create(true)
-            .append(true)
-            .open(log_path)
-            .map_err(LogError::from)
+        OpenOptions::new().create(true).append(true).open(log_path).map_err(LogError::from)
     }
 
     fn get_ssh_log_path(&self) -> Result<PathBuf, LogError> {
-        let home_dir = dirs::home_dir().ok_or_else(|| {
-            LogError::DirectoryCreationError("Home directory not found".to_string())
-        })?;
+        let home_dir = dirs::home_dir().ok_or_else(|| LogError::DirectoryCreationError("Home directory not found".to_string()))?;
 
         let date = Local::now().format("%Y-%m-%d");
-        let log_dir = home_dir
-            .join(".csh")
-            .join("logs")
-            .join("ssh_sessions")
-            .join(date.to_string());
+        let log_dir = home_dir.join(".csh").join("logs").join("ssh_sessions").join(date.to_string());
 
         std::fs::create_dir_all(&log_dir)?;
 
-        Ok(log_dir.join(format!(
-            "{}.log",
-            CONFIG
-                .read()
-                .unwrap()
-                .metadata
-                .session_name
-                .replace(".", "_")
-        )))
+        Ok(log_dir.join(format!("{}.log", SESSION_CONFIG.read().unwrap().metadata.session_name.replace(".", "_"))))
     }
 }

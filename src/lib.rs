@@ -24,12 +24,12 @@ pub enum Error {
 impl std::fmt::Display for Error {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Error::Io(e) => write!(f, "IO error: {}", e),
-            Error::Config(e) => write!(f, "Configuration error: {}", e),
-            Error::Highlight(e) => write!(f, "Highlighting error: {}", e),
-            Error::Log(e) => write!(f, "Logging error: {}", e),
-            Error::UI(e) => write!(f, "UI error: {}", e),
-            Error::Vault(e) => write!(f, "Vault error: {}", e),
+            Error::Io(err) => write!(f, "IO error: {}", err),
+            Error::Config(err) => write!(f, "Configuration error: {}", err),
+            Error::Highlight(err) => write!(f, "Highlighting error: {}", err),
+            Error::Log(err) => write!(f, "Logging error: {}", err),
+            Error::UI(err) => write!(f, "UI error: {}", err),
+            Error::Vault(err) => write!(f, "Vault error: {}", err),
         }
     }
 }

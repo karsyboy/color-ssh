@@ -6,13 +6,10 @@ TODO:
 mod debug;
 mod errors;
 mod formatter;
+mod macros;
 mod ssh;
-mod utils;
 
-pub use debug::DebugLogger;
 pub use errors::LogError;
-pub use formatter::LogFormatter;
-pub use ssh::SshLogger;
 
 use std::sync::atomic::{AtomicBool, Ordering};
 
@@ -41,15 +38,15 @@ impl LogLevel {
 
 #[derive(Clone)]
 pub struct Logger {
-    debug_logger: DebugLogger,
-    ssh_logger: SshLogger,
+    debug_logger: debug::DebugLogger,
+    ssh_logger: ssh::SshLogger,
 }
 
 impl Logger {
     pub fn new() -> Self {
         Self {
-            debug_logger: DebugLogger::new(),
-            ssh_logger: SshLogger::new(),
+            debug_logger: debug::DebugLogger::new(),
+            ssh_logger: ssh::SshLogger::new(),
         }
     }
 

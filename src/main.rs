@@ -4,33 +4,18 @@ TODO:
     - Clean comments
     - Add more error handling
     - Go through each file and clean up use and crate imports to all have the same format
-    - Split main.rs into app.rs and main.rs. Main.rs will act as an entry point and app.rs will contain the processing functions.
     - Improve error support to expand error handling across all modules for clean logging?
-    - Replace
 */
+use csh::{Result, args, config, log, process, vault};
 
-use std::{
-    io::{self, BufReader, Read, Write},
-    process::ExitCode,
-    sync::mpsc::{self, Receiver, Sender},
-    thread,
-};
-
-use csh::{
-    Result,
-    args::main_args,
-    config::{CONFIG, config_watcher},
-    highlighter::process_chunk,
-    log::Logger,
-    log_debug, log_ssh,
-    process::spawn_ssh,
-    vault::vault_handler,
-};
+use std::process::ExitCode;
 
 fn main() -> Result<ExitCode> {
-    let args = main_args();
+    // test::prompt_tests();
 
-    if CONFIG.read().unwrap().settings.show_title {
+    let args = args::main_args();
+
+    if config::SESSION_CONFIG.read().unwrap().settings.show_title {
         let title = [
             " ",
             "\x1b[31m ██████╗ ██████╗ ██╗      ██████╗ ██████╗       ███████╗███████╗██╗  ██╗",
@@ -48,89 +33,81 @@ fn main() -> Result<ExitCode> {
         }
     }
 
-    // Initialize logging in a separate scope so the lock is released on logger when done initializing
-    let logger = Logger::new();
-    if args.debug || CONFIG.read().unwrap().settings.debug_mode {
+    // Initialize logging
+    let logger = log::Logger::new();
+    if args.debug || config::SESSION_CONFIG.read().unwrap().settings.debug_mode {
         logger.enable_debug();
-        if let Err(e) = logger.log_debug("Debug mode enabled") {
-            eprintln!("Failed to initialize debug logging: {}", e);
+        if let Err(err) = logger.log_debug("Debug mode enabled") {
+            eprintln!("Failed to initialize debug logging: {}", err);
             return Ok(ExitCode::FAILURE);
         }
     }
 
-    if args.vault_command.is_some() {
-        let _ = vault_handler(args.vault_command.clone().unwrap());
-        return Ok(ExitCode::SUCCESS);
-    }
-
-    if args.ssh_logging || CONFIG.read().unwrap().settings.ssh_logging {
+    if (args.ssh_logging || config::SESSION_CONFIG.read().unwrap().settings.ssh_logging) && args.vault_command.is_none() {
         logger.enable_ssh_logging();
-        if let Err(e) = logger.log_debug("SSH logging enabled") {
-            eprintln!("Failed to initialize SSH logging: {}", e);
+        if let Err(err) = logger.log_debug("SSH logging enabled") {
+            eprintln!("Failed to initialize SSH logging: {}", err);
             return Ok(ExitCode::FAILURE);
         }
-
-        // Set the session name for the ssh log file based on the first argument
-        // Note: this may need to change if the user provides a different session name
         let session_hostname = args
             .ssh_args
             .get(args.ssh_args.len() - 1)
             .map(|arg| arg.splitn(2, '@').nth(1).unwrap_or(arg))
             .unwrap_or("unknown");
-        CONFIG.write().unwrap().metadata.session_name = session_hostname.to_string();
+        config::SESSION_CONFIG.write().unwrap().metadata.session_name = session_hostname.to_string();
     }
 
     drop(logger); // Release the lock on the logger
 
+    // Handle vault commands if they are present
+    if args.vault_command.is_some() {
+        if let Err(err) = vault::vault_handler(args.vault_command.clone().unwrap()) {
+            eprintln!("Vault handler error: {}", err);
+            return Ok(ExitCode::FAILURE);
+        }
+        return Ok(ExitCode::SUCCESS);
+    }
+
     // Starts the config file watcher in the background under the _watcher context
-    let _watcher = config_watcher();
+    let _watcher = config::config_watcher();
 
-    // Launch the SSH process with the provided arguments
-    log_debug!("SSH arguments: {:?}", args.ssh_args);
-    let mut child = spawn_ssh(&args.ssh_args).expect("Failed to spawn SSH process\r");
-    let stdout = child.stdout.take().expect("Failed to capture stdout\r");
-    let mut reader = BufReader::new(stdout);
-
-    // Create a channel for sending and receiving output chunks
-    let (tx, rx): (Sender<String>, Receiver<String>) = mpsc::channel();
-
-    // Create needed values for chunk reading thread
-    let reset_color = "\x1b[0m"; // ANSI reset color sequence
-
-    // Spawn thread for reading chunks sent by ssh
-    // This is the main thread that reads the chunks and applies the highlighter
-    thread::spawn(move || {
-        let mut chunk_id = 0;
-        while let Ok(chunk) = rx.recv() {
-            let rules = CONFIG.read().unwrap().metadata.compiled_rules.clone();
-            let processed = process_chunk(chunk, chunk_id, &rules, reset_color);
-            chunk_id += 1;
-            print!("{}", processed); // Print the processed chunk
-            io::stdout().flush().unwrap(); // Flush to ensure immediate display
-        }
-    });
-
-    // Buffer for reading data from SSH output
-    let mut buffer = [0; 4096];
-    loop {
-        let n = reader
-            .read(&mut buffer)
-            .expect("Failed to read data from SSH process\r");
-        if n == 0 {
-            break; // Exit loop when EOF is reached
-        }
-        // Convert the read data to a String and send it to the processing thread
-        let chunk = String::from_utf8_lossy(&buffer[..n]).to_string();
-        log_ssh!("{}", chunk);
-        tx.send(chunk)
-            .expect("Failed to send data to processing thread\r");
-    }
-
-    // Wait for the SSH process to finish and use its status code
-    let status = child.wait().expect("Failed to wait for SSH process\r");
-    if status.success() {
-        Ok(ExitCode::SUCCESS)
-    } else {
-        Ok(ExitCode::from(status.code().unwrap_or(1) as u8))
-    }
+    // Start the process with the provided arguments and begin processing output
+    process::process_handler(args.ssh_args)
 }
+
+// mod test {
+//     use csh::ui::Prompt;
+
+//     pub fn prompt_tests() {
+//         let mut prompt = Prompt::default();
+
+//         prompt.set_help_msg(false);
+
+//         let yes_no = prompt.yes_no_prompt("Do you want to continue", true);
+//         println!("Yes/No: {}", yes_no);
+//         println!("");
+
+//         let true_false = prompt.true_false_prompt("Do you want to continue", false);
+//         println!("True/False: {}", true_false);
+//         println!("");
+
+//         let name = prompt.validated_input_prompt("Enter a name", ".*", "Name not entered");
+//         println!("Name: {}", name);
+//         println!("");
+
+//         let password = prompt.password_prompt().unwrap();
+//         println!("Password: {}", password);
+//         println!("");
+
+//         let options = vec!["Option 1", "Option 2", "Option 3"];
+//         let selected = prompt.selectable_prompt("Select an Option: ", &options, true);
+//         println!("Selected: {}", selected.unwrap());
+//         println!("");
+
+//         let selected = prompt.selectable_prompt("Select an Option: ", &options, false);
+//         println!("Selected: {}", selected.unwrap());
+//         println!("");
+
+//         std::process::exit(0);
+//     }
+// }

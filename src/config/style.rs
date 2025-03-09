@@ -1,12 +1,3 @@
-/*
-TODO:
-    - Add a settings struct to Config that contains user specified settings for this like:
-        - Vault path
-        - Attempt to remove passwords from ssh log file
-        - debug mode
-        - ssh logging
-*/
-
 use dirs::home_dir;
 use regex::Regex;
 use serde::Deserialize;
@@ -27,7 +18,7 @@ pub struct Settings {
     pub vault_path: Option<PathBuf>,
     pub vault_key: Option<PathBuf>,
     #[serde(default)]
-    pub remove_passwords_from_ssh_log: bool,
+    pub remove_secrets: Option<Vec<String>>,
     #[serde(default = "default_show_title")]
     pub show_title: bool,
     #[serde(default)]
@@ -46,7 +37,7 @@ impl Default for Settings {
                 path
             }),
             vault_key: None,
-            remove_passwords_from_ssh_log: false,
+            remove_secrets: None,
             show_title: true,
             debug_mode: false,
             ssh_logging: false,

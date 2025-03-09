@@ -1,4 +1,4 @@
-use crate::vault::VaultManager;
+use super::VaultManager;
 use secrecy::ExposeSecret;
 
 /// Processes the "del" subcommand by asking the user for confirmation.

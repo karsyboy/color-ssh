@@ -4,32 +4,13 @@ TODO:
     - Investigate the use of .lines() and .split() for chunk processing.
         - Note: this may make it easier to just regex match per line. May also need a buffer for this???
 */
+mod errors;
+
+pub use errors::HighlightError;
 
 use crate::log_debug;
 use regex::Regex;
 use std::thread;
-
-/// Build a mapping of the original string to a cleaned version with newlines replaced by spaces.
-///
-///  - `raw`: The original string with newlines
-///
-/// Returns a tuple containing the cleaned string and a vector of indices mapping the cleaned string back to the original string.
-fn build_index_mapping(raw: &str) -> (String, Vec<usize>) {
-    let mut clean = String::with_capacity(raw.len());
-    let mut mapping = Vec::with_capacity(raw.len());
-
-    let mut raw_idx = 0;
-    for ch in raw.chars() {
-        if ch == '\n' || ch == '\r' {
-            clean.push(' ');
-        } else {
-            clean.push(ch);
-        }
-        mapping.push(raw_idx);
-        raw_idx += ch.len_utf8(); // Keep track of the character's byte length
-    }
-    (clean, mapping)
-}
 
 /// Processes a chunk of text by applying syntax highlighting based on the provided rules.
 ///
@@ -38,12 +19,7 @@ fn build_index_mapping(raw: &str) -> (String, Vec<usize>) {
 /// - `reset_color`: ANSI escape sequence to reset the color.
 ///
 /// Returns the processed text with ANSI color sequences applied.
-pub fn process_chunk(
-    chunk: String,
-    chunk_id: i32,
-    rules: &[(Regex, String)],
-    reset_color: &str,
-) -> String {
+pub fn process_chunk(chunk: String, chunk_id: i32, rules: &[(Regex, String)], reset_color: &str) -> String {
     // If debugging, log the raw chunk
     let thread_id = thread::current().id();
 
@@ -101,36 +77,33 @@ pub fn process_chunk(
     highlighted.push_str(&chunk[last_index..]);
 
     // If debugging, log clean chunk and the matches
-    log_debug!(
-        "[{:?}] Chunk[{:?}] 1:Raw chunk: {:?}",
-        thread_id,
-        chunk_id,
-        chunk
-    );
-    log_debug!(
-        "[{:?}] Chunk[{:?}] 2:Clean chunk: {:?}",
-        thread_id,
-        chunk_id,
-        clean_chunk
-    );
-    log_debug!(
-        "[{:?}] Chunk[{:?}] 3:Matches: {:?}",
-        thread_id,
-        chunk_id,
-        matches
-    );
-    log_debug!(
-        "[{:?}] Chunk[{:?}] 4:Filtered matches: {:?}",
-        thread_id,
-        chunk_id,
-        filtered_matches
-    );
-    log_debug!(
-        "[{:?}] Chunk[{:?}] 5:Highlighted chunk: {:?}",
-        thread_id,
-        chunk_id,
-        highlighted
-    );
+    log_debug!("[{:?}] Chunk[{:?}] 1:Raw chunk: {:?}", thread_id, chunk_id, chunk);
+    log_debug!("[{:?}] Chunk[{:?}] 2:Clean chunk: {:?}", thread_id, chunk_id, clean_chunk);
+    log_debug!("[{:?}] Chunk[{:?}] 3:Matches: {:?}", thread_id, chunk_id, matches);
+    log_debug!("[{:?}] Chunk[{:?}] 4:Filtered matches: {:?}", thread_id, chunk_id, filtered_matches);
+    log_debug!("[{:?}] Chunk[{:?}] 5:Highlighted chunk: {:?}", thread_id, chunk_id, highlighted);
 
     highlighted
+}
+
+/// Build a mapping of the original string to a cleaned version with newlines replaced by spaces.
+///
+///  - `raw`: The original string with newlines
+///
+/// Returns a tuple containing the cleaned string and a vector of indices mapping the cleaned string back to the original string.
+fn build_index_mapping(raw: &str) -> (String, Vec<usize>) {
+    let mut clean = String::with_capacity(raw.len());
+    let mut mapping = Vec::with_capacity(raw.len());
+
+    let mut raw_idx = 0;
+    for ch in raw.chars() {
+        if ch == '\n' || ch == '\r' {
+            clean.push(' ');
+        } else {
+            clean.push(ch);
+        }
+        mapping.push(raw_idx);
+        raw_idx += ch.len_utf8(); // Keep track of the character's byte length
+    }
+    (clean, mapping)
 }

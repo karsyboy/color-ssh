@@ -8,6 +8,7 @@ mod unlock;
 use super::KeepassVault;
 use super::VaultError;
 use super::VaultManager;
+use super::keyring;
 
 pub use add::run as add_entry;
 pub use del::run as del_entry;

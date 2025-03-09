@@ -1,6 +1,4 @@
-use std::error::Error;
-use std::fmt;
-use std::io;
+use std::{error::Error, fmt, io};
 
 #[derive(Debug)]
 pub enum LogError {
@@ -12,7 +10,7 @@ pub enum LogError {
 impl fmt::Display for LogError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            LogError::IoError(e) => write!(f, "I/O error: {}", e),
+            LogError::IoError(err) => write!(f, "I/O error: {}", err),
             LogError::DirectoryCreationError(msg) => {
                 write!(f, "Failed to create directory: {}", msg)
             }
@@ -24,7 +22,7 @@ impl fmt::Display for LogError {
 impl Error for LogError {}
 
 impl From<io::Error> for LogError {
-    fn from(error: io::Error) -> Self {
-        LogError::IoError(error)
+    fn from(err: io::Error) -> Self {
+        LogError::IoError(err)
     }
 }

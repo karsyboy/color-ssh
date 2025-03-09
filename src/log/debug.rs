@@ -1,10 +1,11 @@
+use super::{LogError, LogLevel, formatter::LogFormatter};
 use once_cell::sync::Lazy;
-use std::fs::{File, OpenOptions};
-use std::io::Write;
-use std::path::PathBuf;
-use std::sync::Mutex;
-
-use crate::log::{LogError, LogFormatter, LogLevel};
+use std::{
+    fs::{File, OpenOptions},
+    io::Write,
+    path::PathBuf,
+    sync::Mutex,
+};
 
 static DEBUG_LOG_FILE: Lazy<Mutex<Option<File>>> = Lazy::new(|| Mutex::new(None));
 
@@ -15,9 +16,11 @@ pub struct DebugLogger {
 
 impl DebugLogger {
     pub fn new() -> Self {
-        Self {
-            formatter: LogFormatter::new(true, true),
-        }
+        let mut formatter = LogFormatter::new();
+        formatter.set_include_timestamp(true);
+        formatter.set_include_level(true);
+
+        Self { formatter: formatter }
     }
 
     pub fn log(&self, level: LogLevel, message: &str) -> Result<(), LogError> {
@@ -39,17 +42,11 @@ impl DebugLogger {
     fn create_log_file(&self) -> Result<File, LogError> {
         let log_path = self.get_debug_log_path()?;
 
-        OpenOptions::new()
-            .create(true)
-            .append(true)
-            .open(log_path)
-            .map_err(LogError::from)
+        OpenOptions::new().create(true).append(true).open(log_path).map_err(LogError::from)
     }
 
     fn get_debug_log_path(&self) -> Result<PathBuf, LogError> {
-        let home_dir = dirs::home_dir().ok_or_else(|| {
-            LogError::DirectoryCreationError("Home directory not found".to_string())
-        })?;
+        let home_dir = dirs::home_dir().ok_or_else(|| LogError::DirectoryCreationError("Home directory not found".to_string()))?;
 
         let log_dir = home_dir.join(".csh").join("logs");
         std::fs::create_dir_all(&log_dir)?;

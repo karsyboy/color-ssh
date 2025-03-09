@@ -10,7 +10,7 @@ use once_cell::sync::Lazy;
 use std::sync::{Arc, RwLock};
 
 // Load initial config, and compiled rules as statics so that they can be updated and changed when the socket calls a reload this also allows them to be used globally
-pub static CONFIG: Lazy<Arc<RwLock<style::Config>>> = Lazy::new(|| {
+pub static SESSION_CONFIG: Lazy<Arc<RwLock<style::Config>>> = Lazy::new(|| {
     Arc::new(RwLock::new({
         let config_loader = loader::ConfigLoader::new();
         let config = {

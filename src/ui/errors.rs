@@ -1,6 +1,4 @@
-use std::error::Error;
-use std::fmt;
-use std::io;
+use std::{error::Error, fmt, io};
 
 #[derive(Debug)]
 pub enum UIError {
@@ -12,7 +10,7 @@ pub enum UIError {
 impl fmt::Display for UIError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            UIError::IoError(e) => write!(f, "I/O error: {}", e),
+            UIError::IoError(err) => write!(f, "I/O error: {}", err),
             UIError::DirectoryCreationError(msg) => {
                 write!(f, "Failed to create directory: {}", msg)
             }
@@ -24,7 +22,7 @@ impl fmt::Display for UIError {
 impl Error for UIError {}
 
 impl From<io::Error> for UIError {
-    fn from(error: io::Error) -> Self {
-        UIError::IoError(error)
+    fn from(err: io::Error) -> Self {
+        UIError::IoError(err)
     }
 }

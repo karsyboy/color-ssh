@@ -1,6 +1,4 @@
-use std::error::Error;
-use std::fmt;
-use std::io;
+use std::{error::Error, fmt, io};
 
 #[derive(Debug)]
 pub enum ConfigError {
@@ -12,7 +10,7 @@ pub enum ConfigError {
 impl fmt::Display for ConfigError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            ConfigError::IoError(e) => write!(f, "I/O error: {}", e),
+            ConfigError::IoError(err) => write!(f, "I/O error: {}", err),
             ConfigError::DirectoryCreationError(msg) => {
                 write!(f, "Failed to create directory: {}", msg)
             }
@@ -24,7 +22,7 @@ impl fmt::Display for ConfigError {
 impl Error for ConfigError {}
 
 impl From<io::Error> for ConfigError {
-    fn from(error: io::Error) -> Self {
-        ConfigError::IoError(error)
+    fn from(err: io::Error) -> Self {
+        ConfigError::IoError(err)
     }
 }
