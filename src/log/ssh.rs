@@ -28,9 +28,7 @@ impl SshLogger {
         formatter.set_include_timestamp(true);
         formatter.set_include_break(true);
 
-        Self {
-            formatter: LogFormatter::new(),
-        }
+        Self { formatter: formatter }
     }
 
     fn remove_secrets(&self, message: &str) -> String {
