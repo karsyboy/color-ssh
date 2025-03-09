@@ -25,7 +25,7 @@ impl LogFormatter {
         let mut formatted = String::new();
 
         if self.include_timestamp {
-            formatted.push_str(&Local::now().format("%Y-%m-%d %H:%M:%S%.3f █ ").to_string());
+            formatted.push_str(&Local::now().format("%Y-%m-%d %H:%M:%S%.3f ").to_string());
             formatted.push(' ');
         }
 
