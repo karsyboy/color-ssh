@@ -86,28 +86,21 @@ impl VaultManager {
     }
 
     pub fn vault_exists(vault_file: &PathBuf) -> bool {
-        if vault_file.exists() {
-            println!("Vault file exists: {}", vault_file.display());
-            true
-        } else {
-            println!("Vault file does not exist: {}", vault_file.display());
-            false
-        }
+        if vault_file.exists() { true } else { false }
     }
 
     pub fn vault_key_exists(key_file: &Option<PathBuf>) -> bool {
         if let Some(key_file) = key_file {
             if key_file.exists() {
-                println!("Key file exists: {}", key_file.display());
                 return true;
             } else {
-                println!("Key file does not exist: {}", key_file.display());
+                return false;
             }
         }
         false
     }
 
-    pub fn unlock_vault(vault_file: Option<PathBuf>, key_file: Option<PathBuf>) -> Result<VaultManager, VaultError> {
+    pub fn unlock_vault(vault_file: Option<PathBuf>, key_file: Option<PathBuf>) -> Result<KeepassVault, VaultError> {
         if let Some(vault_file) = vault_file {
             config::SESSION_CONFIG.write().unwrap().settings.vault_path = Some(vault_file.clone());
         }
@@ -119,10 +112,9 @@ impl VaultManager {
         let key_file = config::SESSION_CONFIG.read().unwrap().settings.vault_key.clone();
 
         if let Some(vault_file) = vault_file {
-            let vault_manager = commands::unlock_vault(&vault_file, key_file.as_ref());
-            vault_manager
+            let keepass_vault = commands::unlock_vault(vault_file, key_file);
+            keepass_vault
         } else {
-            println!("No vault file found.");
             Err(VaultError::NoVaultFile)
         }
     }
@@ -131,21 +123,25 @@ impl VaultManager {
 pub fn vault_handler(vault_commands: args::VaultArgs) -> Result<ExitCode, VaultError> {
     match vault_commands {
         args::VaultArgs::Init { vault_file, key_file } => {
-            commands::init_vault(vault_file, key_file).unwrap_or_else(|err| {
-                println!("Failed to initialize vault: {}", err);
-            });
+            commands::init_vault(vault_file, key_file)?;
         }
         args::VaultArgs::Show { vault_file, key_file } => {
-            let vault_manager = VaultManager::unlock_vault(vault_file, key_file).expect("❌ Failed to unlock vault");
-            commands::show_vault(&vault_manager);
+            let mut keepass_vault = VaultManager::unlock_vault(vault_file, key_file)?;
+            keepass_vault.set_key()?;
+            keepass_vault.open()?;
+            commands::show_vault(&keepass_vault);
         }
         args::VaultArgs::Add { vault_file, key_file } => {
-            let vault_manager = VaultManager::unlock_vault(vault_file, key_file).expect("❌ Failed to unlock vault");
-            commands::add_entry(&vault_manager);
+            let mut keepass_vault = VaultManager::unlock_vault(vault_file, key_file)?;
+            keepass_vault.set_key()?;
+            keepass_vault.open()?;
+            commands::add_entry(&mut keepass_vault);
         }
         args::VaultArgs::Delete { vault_file, key_file } => {
-            let vault_manager = VaultManager::unlock_vault(vault_file, key_file).expect("❌ Failed to unlock vault");
-            commands::del_entry(&vault_manager);
+            let mut keepass_vault = VaultManager::unlock_vault(vault_file, key_file)?;
+            keepass_vault.set_key()?;
+            keepass_vault.open()?;
+            commands::del_entry(&mut keepass_vault);
         }
         args::VaultArgs::Lock { vault_file } => {
             if let Some(vault_file) = vault_file {
@@ -160,7 +156,7 @@ pub fn vault_handler(vault_commands: args::VaultArgs) -> Result<ExitCode, VaultE
             }
         }
         args::VaultArgs::Unlock { vault_file, key_file } => {
-            VaultManager::unlock_vault(vault_file, key_file).expect("❌ Failed to unlock vault");
+            VaultManager::unlock_vault(vault_file, key_file)?;
         }
     }
 

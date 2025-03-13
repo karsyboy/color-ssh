@@ -8,9 +8,10 @@ use rand::RngCore;
 use secrecy::{ExposeSecret, SecretBox};
 use std::{fs::File, io::BufWriter, io::Write, path::PathBuf};
 
+#[derive(Debug)]
 pub struct KeepassVault {
     pub db_file: PathBuf,
-    pub password: Option<SecretBox<String>>,
+    pub password: SecretBox<String>,
     pub key_file: Option<PathBuf>,
     pub db: Database,
     pub key: DatabaseKey,
@@ -18,7 +19,7 @@ pub struct KeepassVault {
 
 impl KeepassVault {
     // this should always be ran first
-    pub fn new(db_file: PathBuf, password: Option<SecretBox<String>>, key_file: Option<PathBuf>) -> KeepassVault {
+    pub fn new(db_file: PathBuf, password: SecretBox<String>, key_file: Option<PathBuf>) -> KeepassVault {
         KeepassVault {
             db_file,
             password,
@@ -65,20 +66,13 @@ impl KeepassVault {
     }
 
     pub fn set_key(&mut self) -> Result<(), VaultError> {
-        let password = if let Some(password) = &self.password {
-            Some(password.expose_secret().clone())
-        } else {
-            None
-        };
+        let password = self.password.expose_secret().clone();
 
         let key_file = if let Some(key_file) = &self.key_file { Some(key_file.clone()) } else { None };
 
         let key = DatabaseKey::new();
 
-        let key = match password {
-            Some(password) => key.with_password(password.as_str()),
-            None => key,
-        };
+        let key = key.with_password(password.as_str());
 
         let key = match key_file {
             Some(key_file) => {

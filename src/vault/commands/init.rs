@@ -13,42 +13,53 @@ use std::path::PathBuf;
 pub fn run(vault_file: PathBuf, key_file: Option<PathBuf>) -> Result<(), VaultError> {
     // Check if the vault file exists
     if VaultManager::vault_exists(&vault_file) {
-        return Err(VaultError::VaultAlreadyExists);
+        return Err(VaultError::VaultAlreadyExists(vault_file.display().to_string()));
     }
     if VaultManager::vault_key_exists(&key_file) {
-        return Err(VaultError::VaultAlreadyExists);
+        return Err(VaultError::KeyAlreadyExists(key_file.unwrap_or_default().display().to_string()));
     }
 
-    let prompt = Prompt::default();
+    let mut prompt = Prompt::default();
+    prompt.set_help_msg(false);
+    let password;
+    let mut key_file = key_file;
 
-    let use_password = prompt.yes_no_prompt("Do you want to use a password?", true);
-    let use_key_file = prompt.yes_no_prompt("Do you want to use a key file?", false);
+    loop {
+        // let use_password = prompt.yes_no_prompt("📝 Do you want to use a password?", true);
+        let use_password = true;
+        let use_key_file = prompt.yes_no_prompt("📝 Do you want to use a key file?", false);
 
-    let password = if use_password {
-        SecretBox::new(Box::new(prompt.password_prompt().expect("Failed to get password.")))
-    } else {
-        SecretBox::new(Box::new(String::new()))
-    };
+        // make sure at least one is true
+        if use_password || use_key_file {
+            password = if use_password {
+                SecretBox::new(Box::new(prompt.password_prompt()))
+            } else {
+                SecretBox::new(Box::new(String::new()))
+            };
 
-    let key_file = if use_key_file {
-        let key_file = KeepassVault::create_key_file(
-            key_file.unwrap_or(
-                home_dir()
-                    .expect("Failed to get home directory.\r")
-                    .join(".csh")
-                    .join("vault")
-                    .join("vault.key"),
-            ),
-        )?;
-        Some(key_file)
-    } else {
-        None
-    };
+            key_file = if use_key_file {
+                let key_file = KeepassVault::create_key_file(
+                    key_file.unwrap_or(
+                        home_dir()
+                            .expect("❌ Failed to get home directory.\r")
+                            .join(".csh")
+                            .join("vault")
+                            .join("vault.key"),
+                    ),
+                )?;
+                Some(key_file)
+            } else {
+                None
+            };
+            break;
+        }
+        prompt.print_prompt("❌ You must choose at least one authentication method.");
+    }
 
     // Get vault name from user
-    let vault_name = prompt.validated_input_prompt("Enter the name of the vault", "^[a-zA-Z0-9_-]+$", "Vault name cannot be empty");
+    let vault_name = prompt.validated_input_prompt("📝 Enter the name of the vault", "^[a-zA-Z0-9_-]+$", "❌ Vault name cannot be empty.");
 
-    let mut vault = KeepassVault::new(vault_file, Some(password), key_file);
+    let mut vault = KeepassVault::new(vault_file, password, key_file);
 
     vault.set_key()?;
     vault.create()?;

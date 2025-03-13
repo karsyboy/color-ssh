@@ -6,7 +6,7 @@ TODO:
     - Go through each file and clean up use and crate imports to all have the same format
     - Improve error support to expand error handling across all modules for clean logging?
 */
-use csh::{Result, args, config, log, process, vault};
+use csh::{Result, args, config, log, log_debug, process, vault};
 
 use std::process::ExitCode;
 
@@ -38,7 +38,7 @@ fn main() -> Result<ExitCode> {
     if args.debug || config::SESSION_CONFIG.read().unwrap().settings.debug_mode {
         logger.enable_debug();
         if let Err(err) = logger.log_debug("Debug mode enabled") {
-            eprintln!("Failed to initialize debug logging: {}", err);
+            eprintln!("❌ Failed to initialize debug logging: {}", err);
             return Ok(ExitCode::FAILURE);
         }
     }
@@ -46,7 +46,7 @@ fn main() -> Result<ExitCode> {
     if (args.ssh_logging || config::SESSION_CONFIG.read().unwrap().settings.ssh_logging) && args.vault_command.is_none() {
         logger.enable_ssh_logging();
         if let Err(err) = logger.log_debug("SSH logging enabled") {
-            eprintln!("Failed to initialize SSH logging: {}", err);
+            eprintln!("❌ Failed to initialize SSH logging: {}", err);
             return Ok(ExitCode::FAILURE);
         }
         let session_hostname = args
@@ -62,7 +62,8 @@ fn main() -> Result<ExitCode> {
     // Handle vault commands if they are present
     if args.vault_command.is_some() {
         if let Err(err) = vault::vault_handler(args.vault_command.clone().unwrap()) {
-            eprintln!("Vault handler error: {}", err);
+            log_debug!("Vault handler error: [ {} ]", err);
+            eprintln!("❌ Vault handler error: [ {} ]", err);
             return Ok(ExitCode::FAILURE);
         }
         return Ok(ExitCode::SUCCESS);

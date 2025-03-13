@@ -1,4 +1,4 @@
-use super::{PromptClearMode, UIError};
+use super::PromptClearMode;
 use crossterm::{
     cursor,
     event::{self, KeyCode, KeyEvent, KeyModifiers},
@@ -169,7 +169,7 @@ impl Prompt {
         if self.help_msg {
             write!(stdout, "\r\n{} (Use ←/→ or ↑/↓ to navigate, Enter to select): ", question).unwrap();
         } else {
-            write!(stdout, "\r\n{}: ", question).unwrap();
+            write!(stdout, "\r\n{} ", question).unwrap();
         }
 
         stdout.flush().unwrap();
@@ -246,7 +246,7 @@ impl Prompt {
         }
     }
 
-    pub fn password_prompt(&self) -> Result<String, UIError> {
+    pub fn password_prompt(&self) -> String {
         let mut stdout = stdout();
         let mut move_up = 1;
         println!("");
@@ -258,28 +258,50 @@ impl Prompt {
                 queue!(stdout, terminal::Clear(self.clear_mode.into())).unwrap();
             }
             // Prompt for passwords
-            let password = SecretBox::new(Box::new(prompt_password("Enter your password: ")?));
+            let password = SecretBox::new(Box::new(
+                prompt_password("🔏 Enter your password: ").unwrap_or_else(|err| panic!("❌ Failed to read password: {}", err)),
+            ));
             if password.expose_secret().is_empty() {
                 execute!(stdout, cursor::MoveUp(move_up), terminal::Clear(PromptClearMode::FromCursorDown.into())).unwrap();
                 if move_up == 1 {
                     move_up += 1;
                 }
-                println!("Password cannot be empty. Please try again.");
+                println!("❌ Password cannot be empty. Please try again.");
                 continue;
             }
 
-            let verified_password = SecretBox::new(Box::new(prompt_password("Verify your password: ")?));
+            let verified_password = SecretBox::new(Box::new(
+                prompt_password("🔏 Verify your password: ").unwrap_or_else(|err| panic!("❌ Failed to read password: {}", err)),
+            ));
             if password.expose_secret() != verified_password.expose_secret() {
                 execute!(stdout, cursor::MoveUp(2), terminal::Clear(PromptClearMode::FromCursorDown.into())).unwrap();
                 if move_up == 1 {
                     move_up += 1;
                 }
-                println!("Passwords do not match. Please try again.");
+                println!("❌ Passwords do not match. Please try again.");
                 continue;
             }
 
-            return Ok(password.expose_secret().to_string());
+            return password.expose_secret().to_string();
         }
+    }
+
+    pub fn print_prompt(&self, message: &str) {
+        let _guard = TerminalGuard;
+        let mut stdout = stdout();
+
+        terminal::enable_raw_mode().expect("Failed to enable raw mode");
+        // move to newlines
+
+        // Print the initial prompt
+        if let Some((x, y)) = self.cursor_pos {
+            queue!(stdout, cursor::MoveTo(x, y), terminal::Clear(self.clear_mode.into())).unwrap();
+        } else {
+            queue!(stdout, terminal::Clear(self.clear_mode.into())).unwrap();
+        }
+
+        write!(stdout, "\r\n{}", message).unwrap();
+        stdout.flush().unwrap();
     }
 }
 

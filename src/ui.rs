@@ -1,8 +1,6 @@
-mod errors;
 mod macros;
 mod prompt;
 
-pub use errors::UIError;
 pub use prompt::Prompt;
 
 use crossterm::terminal::ClearType;

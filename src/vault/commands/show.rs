@@ -1,16 +1,21 @@
-use super::VaultManager;
-use secrecy::ExposeSecret;
+use super::KeepassVault;
+use crate::log_debug;
+use keepass::db::NodeRef;
+//     db::{Database, NodeRef},
+//     error::{DatabaseKeyError, DatabaseOpenError},
+//     DatabaseKey,
+// };
 
 /// Processes the "show" subcommand.
 /// It retrieves the vault entry name from the command-line arguments and prints it.
-pub fn run(vault_manager: &VaultManager) {
-    let vault_file_name = vault_manager.get_vault_file_name();
-    let vault_file = vault_manager.get_vault_path();
-    let vault_key = vault_manager.get_vault_key();
-    let vault_password = vault_manager.get_vault_password();
+pub fn run(keepass_vault: &KeepassVault) {
+    log_debug!("Vault file: {:?}", keepass_vault);
+    println!("🔐 Vault file: {:?}", keepass_vault);
 
-    println!("Vault file: {}", vault_file.display());
-    println!("Vault file name: {}", vault_file_name);
-    println!("Vault key: {:?}", vault_key);
-    println!("Vault password: {}", vault_password.expose_secret());
+    let keepass_db = keepass_vault.db.clone();
+
+    if let Some(NodeRef::Entry(entry)) = keepass_db.root.get(&["dick"]) {
+        println!("Title: {:?}", entry.get_password())
+
+    }
 }
