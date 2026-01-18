@@ -15,8 +15,6 @@
         <img src="https://img.shields.io/github/actions/workflow/status/karsyboy/color-ssh/release.yml?logo=Rust&label=Release%20Build"></a>
 <p>
 
- THIS BRANCH IS DEAD
-
 Color SSH, `csh` for short, is a Rust-based wrapper for `ssh` that provides syntax-highlighted output using configurable rules. This tool enhances the usability of SSH by allowing regex-based syntax highlighting for specific text patterns in the output.
 
 ## Features
