@@ -1,7 +1,7 @@
 use super::VaultError;
 use keepass::{
     Database, DatabaseKey,
-    db::{Entry as KeepassEntry, Group, Node},
+    db::{Entry, Group, Node},
     error::DatabaseOpenError,
 };
 use rand::RngCore;
@@ -85,4 +85,68 @@ impl KeepassVault {
         self.key = key;
         Ok(())
     }
+
+    pub fn get_all_entries(&self) -> Vec<WrappedEntry<'_>> {
+            get_entries(&self.db.root, "")
+    }
+    
+}
+
+fn get_entries(group: &Group, path: impl ToString) -> Vec<WrappedEntry<'_>> {
+    let mut entries = Vec::with_capacity(
+        group
+            .children
+            .iter()
+            .filter(|v| match v {
+                Node::Entry(_) => true,
+                Node::Group(_) => false,
+            })
+            .count(),
+    );
+    group.children.iter().for_each(|v| match v {
+        Node::Entry(entry) => entries.push(WrappedEntry {
+            path: format!("{}/{}", path.to_string(), group.name),
+            entry,
+        }),
+        Node::Group(child) => {
+            if !child.children.is_empty() {
+                entries.extend(get_entries(
+                    child,
+                    format!("{}/{}", path.to_string(), group.name),
+                ))
+            }
+        }
+    });
+    entries
+}
+
+#[derive(Debug, Clone)]
+pub struct WrappedEntry<'a> {
+    pub path: String,
+    pub entry: &'a Entry,
+}
+
+pub trait EntryPath {
+    fn entry_path(&self) -> String;
+    fn get_entry(&self) -> &Entry;
+    fn get_title(&self) -> String;
+}
+
+impl EntryPath for WrappedEntry<'_> {
+    fn entry_path(&self) -> String {
+        format!(
+            "{}/{}",
+            self.path,
+            self.entry.get_title().unwrap_or_default().to_owned(),
+        )
+    }
+
+    fn get_entry(&self) -> &Entry {
+        self.entry
+    }
+
+    fn get_title(&self) -> String {
+        self.entry.get_title().unwrap_or_default().to_owned()
+    }
+
 }
