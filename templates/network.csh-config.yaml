@@ -3,19 +3,17 @@
 # color-ssh templates can be found at https://github.com/karsyboy/color-ssh
 
 settings:
-  vault_path: ~/.csh/vault/vault.kdbx
-  vault_key: ~/.csh/vault/vualt.key
   remove_secrets:
     - '9[\s]\$9\$.*'
     - 'sha512[\s]\$6\$.*'
     - 'ssh-ed25519[\s].*'
     - '7[\s][0-9]{2}[0-9A-Fa-f]+$'
   show_title: true
-  debug_mode: true
+  debug_mode: false
   ssh_logging: true
 
 palette:
-  Sunrise-Orange: '#e67549'
+  Sunrise-Orange: '#e67547'
   Aqua-Blue: '#00e0d1'
   Hot-Pink: '#FF69B4'
   Celestial-Blue: '#5698c8'
@@ -115,7 +113,7 @@ rules:
   regex: |
     (?ix)
     \b
-    (connected|up)
+    (connected|up|access)
     \b
   color: Kelly-Green
 
@@ -123,7 +121,7 @@ rules:
   regex: |
     (?ix)
     \b
-    (xcvrAbsen|noOperMem|notconnect|notpresent)
+    (xcvrAbsen|noOperMem|notconnect|notpresent|trunk)
     \b
   color: Sunrise-Orange
 

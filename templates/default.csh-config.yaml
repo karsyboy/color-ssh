@@ -4,8 +4,6 @@
 
 # The settings are used to define the path to the vault, the vault key, and other settings.
 settings:
-  # vault_path: ~/.csh/vault/vault.kdbx
-  # vault_key: ~/.csh/vault/vualt.key
   # remove_secrets:
   #  - '9[\s]\$9\$.*'
   # show_title: true

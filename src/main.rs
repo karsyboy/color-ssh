@@ -6,7 +6,7 @@ TODO:
     - Go through each file and clean up use and crate imports to all have the same format
     - Improve error support to expand error handling across all modules for clean logging?
 */
-use csh::{Result, args, config, log, log_debug, process, vault};
+use csh::{Result, args, config, log, log_debug, process};
 
 use std::process::ExitCode;
 
@@ -43,7 +43,7 @@ fn main() -> Result<ExitCode> {
         }
     }
 
-    if (args.ssh_logging || config::SESSION_CONFIG.read().unwrap().settings.ssh_logging) && args.vault_command.is_none() {
+    if args.ssh_logging || config::SESSION_CONFIG.read().unwrap().settings.ssh_logging {
         logger.enable_ssh_logging();
         if let Err(err) = logger.log_debug("SSH logging enabled") {
             eprintln!("❌ Failed to initialize SSH logging: {}", err);
@@ -59,56 +59,9 @@ fn main() -> Result<ExitCode> {
 
     drop(logger); // Release the lock on the logger
 
-    // Handle vault commands if they are present
-    if args.vault_command.is_some() {
-        if let Err(err) = vault::vault_handler(args.vault_command.clone().unwrap()) {
-            log_debug!("Vault handler error: [ {} ]", err);
-            eprintln!("❌ Vault handler error: [ {} ]", err);
-            return Ok(ExitCode::FAILURE);
-        }
-        return Ok(ExitCode::SUCCESS);
-    }
-
     // Starts the config file watcher in the background under the _watcher context
     let _watcher = config::config_watcher();
 
     // Start the process with the provided arguments and begin processing output
     process::process_handler(args.ssh_args)
 }
-
-// mod test {
-//     use csh::ui::Prompt;
-
-//     pub fn prompt_tests() {
-//         let mut prompt = Prompt::default();
-
-//         prompt.set_help_msg(false);
-
-//         let yes_no = prompt.yes_no_prompt("Do you want to continue", true);
-//         println!("Yes/No: {}", yes_no);
-//         println!("");
-
-//         let true_false = prompt.true_false_prompt("Do you want to continue", false);
-//         println!("True/False: {}", true_false);
-//         println!("");
-
-//         let name = prompt.validated_input_prompt("Enter a name", ".*", "Name not entered");
-//         println!("Name: {}", name);
-//         println!("");
-
-//         let password = prompt.password_prompt().unwrap();
-//         println!("Password: {}", password);
-//         println!("");
-
-//         let options = vec!["Option 1", "Option 2", "Option 3"];
-//         let selected = prompt.selectable_prompt("Select an Option: ", &options, true);
-//         println!("Selected: {}", selected.unwrap());
-//         println!("");
-
-//         let selected = prompt.selectable_prompt("Select an Option: ", &options, false);
-//         println!("Selected: {}", selected.unwrap());
-//         println!("");
-
-//         std::process::exit(0);
-//     }
-// }

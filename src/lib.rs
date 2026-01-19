@@ -4,8 +4,6 @@ pub mod config;
 pub mod highlighter;
 pub mod log;
 pub mod process;
-pub mod ui;
-pub mod vault;
 
 use std::io;
 
@@ -17,7 +15,6 @@ pub enum Error {
     Config(config::ConfigError),
     Highlight(highlighter::HighlightError),
     Log(log::LogError),
-    Vault(vault::VaultError),
 }
 
 impl std::fmt::Display for Error {
@@ -26,8 +23,7 @@ impl std::fmt::Display for Error {
             Error::Io(err) => write!(f, "IO error: {}", err),
             Error::Config(err) => write!(f, "Configuration error: {}", err),
             Error::Highlight(err) => write!(f, "Highlighting error: {}", err),
-            Error::Log(err) => write!(f, "Logging error: {}", err),
-            Error::Vault(err) => write!(f, "Vault error: {}", err),
+            Error::Log(err) => write!(f, "Logging error: {}", err)
         }
     }
 }
@@ -56,11 +52,5 @@ impl From<highlighter::HighlightError> for Error {
 impl From<log::LogError> for Error {
     fn from(err: log::LogError) -> Self {
         Error::Log(err)
-    }
-}
-
-impl From<vault::VaultError> for Error {
-    fn from(err: vault::VaultError) -> Self {
-        Error::Vault(err)
     }
 }
