@@ -40,7 +40,7 @@ impl LogFormatter {
                 formatted.push_str(&format!("[{:5}] ", lvl.as_str()));
             }
         }
-        
+
         // Add visual separator
         if self.include_break {
             formatted.push_str("█ ");

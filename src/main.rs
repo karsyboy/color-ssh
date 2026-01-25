@@ -6,7 +6,7 @@
 //! - Configuration loading and watching
 //! - SSH process spawning and management
 
-use csh::{Result, args, config, log, log_debug, log_info, log_error, process};
+use csh::{Result, args, config, log, log_debug, log_error, log_info, process};
 use std::process::ExitCode;
 
 fn main() -> Result<ExitCode> {
@@ -15,27 +15,33 @@ fn main() -> Result<ExitCode> {
 
     // Initialize logging system
     let logger = log::Logger::new();
-    
+
     // ALWAYS enable debug logging initially to capture config load
     // We'll check the config settings and potentially disable it after
     logger.enable_debug();
     log_info!("color-ssh v0.5 starting");
-    
-    // Force initialization of SESSION_CONFIG - this will now be logged
+
+    // Initialize config with profile
+    if let Err(err) = config::init_session_config(args.profile.clone()) {
+        eprintln!("Failed to initialize config: {}", err);
+        std::process::exit(1);
+    }
+
+    // Force initialization of SESSION_CONFIG
     let (debug_from_config, ssh_log_from_config, show_title) = {
-        let config_guard = config::SESSION_CONFIG.read().unwrap();
+        let config_guard = config::SESSION_CONFIG.get().unwrap().read().unwrap();
         (
             config_guard.settings.debug_mode,
             config_guard.settings.ssh_logging,
             config_guard.settings.show_title,
         )
     };
-    
+
     // Determine final debug mode: CLI arg takes precedence, then config setting
     let _final_debug = args.debug || debug_from_config;
     let final_ssh_log = args.ssh_logging || ssh_log_from_config;
-    
-    // Log how debug mode was enabled (or if it should be disabled)
+
+    // Log how debug mode was enabled or if it should be disabled
     if args.debug {
         log_debug!("Debug mode enabled via CLI argument");
     } else if debug_from_config {
@@ -45,7 +51,7 @@ fn main() -> Result<ExitCode> {
         log_debug!("Debug mode not requested, disabling after initial config load");
         logger.disable_debug();
     }
-    
+
     // Enable SSH logging if requested
     if final_ssh_log {
         logger.enable_ssh_logging();
@@ -55,8 +61,8 @@ fn main() -> Result<ExitCode> {
             log_info!("SSH logging enabled via config file");
         }
     }
-    
-    // Log parsed arguments (only if debug is still enabled)
+
+    // Log parsed arguments if debug is still enabled
     log_debug!("Parsed arguments: {:?}", args);
 
     // Display banner if enabled in config
@@ -80,35 +86,29 @@ fn main() -> Result<ExitCode> {
 
     // Configure SSH session logging if enabled
     if logger.is_ssh_logging_enabled() {
-        
         // Extract hostname from SSH arguments for log file naming
         // Use the last argument which is typically the hostname/user@hostname
-        let session_hostname = args
-            .ssh_args
-            .last()
-            .map(|arg| arg.splitn(2, '@').nth(1).unwrap_or(arg))
-            .unwrap_or("unknown");
-        
-        config::SESSION_CONFIG.write().unwrap().metadata.session_name = session_hostname.to_string();
+        let session_hostname = args.ssh_args.last().map(|arg| arg.splitn(2, '@').nth(1).unwrap_or(arg)).unwrap_or("unknown");
+
+        config::SESSION_CONFIG.get().unwrap().write().unwrap().metadata.session_name = session_hostname.to_string();
         log_debug!("Session name set to: {}", session_hostname);
     }
 
-    // Release the logger (drop the lock)
+    // Release the logger
     drop(logger);
 
     // Start the config file watcher in the background
     log_debug!("Starting configuration file watcher");
-    let _watcher = config::config_watcher();
+    let _watcher = config::config_watcher(args.profile.clone());
 
     // Start the SSH process with the provided arguments and begin processing output
     log_info!("Launching SSH process handler");
-    let exit_code = process::process_handler(args.ssh_args, args.is_non_interactive)
-        .map_err(|e| {
-            log_error!("Process handler failed: {}", e);
-            eprintln!("Process failed: {}", e);
-            e
-        })?;
-    
+    let exit_code = process::process_handler(args.ssh_args, args.is_non_interactive).map_err(|err| {
+        log_error!("Process handler failed: {}", err);
+        eprintln!("Process failed: {}", err);
+        err
+    })?;
+
     log_info!("color-ssh exiting with code: {:?}", exit_code);
     Ok(exit_code)
 }

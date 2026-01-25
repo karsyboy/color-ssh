@@ -4,12 +4,12 @@
 //! when modifications are detected.
 
 use super::{SESSION_CONFIG, loader::ConfigLoader};
-use crate::{log_debug, log_info, log_error};
+use crate::{log_debug, log_error, log_info};
 use notify::{Error, Event, RecommendedWatcher, RecursiveMode, Watcher};
 use std::{sync::mpsc, thread, time::Duration};
 
 /// Start watching the configuration file for changes
-pub fn config_watcher() -> RecommendedWatcher {
+pub fn config_watcher(profile: Option<String>) -> RecommendedWatcher {
     let (tx, rx) = mpsc::channel();
 
     log_debug!("Initializing configuration file watcher");
@@ -30,18 +30,13 @@ pub fn config_watcher() -> RecommendedWatcher {
         panic!("Failed to create watcher: {}", err);
     });
 
-    let config_path = SESSION_CONFIG.read().unwrap().metadata.config_path.clone();
+    let config_path = SESSION_CONFIG.get().unwrap().read().unwrap().metadata.config_path.clone();
     log_info!("Starting config watcher for: {:?}", config_path);
 
-    watcher
-        .watch(
-            &config_path,
-            RecursiveMode::NonRecursive,
-        )
-        .unwrap_or_else(|err| {
-            log_error!("Failed to watch config file: {}", err);
-            eprintln!("Failed to watch config file: {}", err);
-        });
+    watcher.watch(&config_path, RecursiveMode::NonRecursive).unwrap_or_else(|err| {
+        log_error!("Failed to watch config file: {}", err);
+        eprintln!("Failed to watch config file: {}", err);
+    });
 
     // Spawn a named thread for config watching
     thread::Builder::new()
@@ -53,11 +48,18 @@ pub fn config_watcher() -> RecommendedWatcher {
                     Ok(()) => {
                         // Debounce: wait for additional events and discard them
                         while let Ok(_) = rx.recv_timeout(Duration::from_millis(500)) {}
-                        
+
                         log_info!("Configuration change detected, reloading...");
                         println!("\r\nConfiguration change detected...\r");
-                        
-                        let config_loader = ConfigLoader::new();
+
+                        let config_loader = match ConfigLoader::new(profile.clone()) {
+                            Ok(loader) => loader,
+                            Err(err) => {
+                                log_error!("Error creating config loader for reload: {}", err);
+                                eprintln!("Error creating config loader for reload: {}", err);
+                                continue;
+                            }
+                        };
                         if let Err(err) = config_loader.reload_config() {
                             log_error!("Error reloading config: {}", err);
                             eprintln!("Error reloading config: {}", err);
@@ -68,7 +70,6 @@ pub fn config_watcher() -> RecommendedWatcher {
                     }
                     Err(err) => {
                         log_error!("Error receiving from channel: {}", err);
-                        eprintln!("Error receiving from channel: {}", err);
                     }
                 }
             }

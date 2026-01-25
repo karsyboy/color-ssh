@@ -38,13 +38,13 @@ use std::thread;
 /// - Regex compilation is done at config load time, not here
 pub fn process_chunk(chunk: String, chunk_id: i32, rules: &[(Regex, String)], reset_color: &str) -> String {
     let thread_id = thread::current().id();
-    
+
     // Clean up the chunk and build the index mapping
     // This replaces newlines with spaces so regex patterns can match across lines
     let (clean_chunk, mapping) = build_index_mapping(&chunk);
 
     let mut matches: Vec<(usize, usize, String, String)> = Vec::new();
-    
+
     // Find all matches in the chunk using the provided regex rules
     for (regex, color) in rules {
         for mat in regex.find_iter(&clean_chunk) {
@@ -56,16 +56,26 @@ pub fn process_chunk(chunk: String, chunk_id: i32, rules: &[(Regex, String)], re
             let raw_start = if clean_start < mapping.len() {
                 mapping[clean_start]
             } else {
-                log_debug!("[{:?}] Chunk[{:?}] Index mapping fallback: clean_start {} >= mapping.len() {}", 
-                           thread_id, chunk_id, clean_start, mapping.len());
+                log_debug!(
+                    "[{:?}] Chunk[{:?}] Index mapping fallback: clean_start {} >= mapping.len() {}",
+                    thread_id,
+                    chunk_id,
+                    clean_start,
+                    mapping.len()
+                );
                 0 // Fallback to 0 if clean_start is out of bounds
             };
 
             let raw_end = if clean_end < mapping.len() {
                 mapping[clean_end]
             } else {
-                log_debug!("[{:?}] Chunk[{:?}] Index mapping fallback: clean_end {} >= mapping.len() {}", 
-                           thread_id, chunk_id, clean_end, mapping.len());
+                log_debug!(
+                    "[{:?}] Chunk[{:?}] Index mapping fallback: clean_end {} >= mapping.len() {}",
+                    thread_id,
+                    chunk_id,
+                    clean_end,
+                    mapping.len()
+                );
                 chunk.len() // Fallback to the full length of the chunk if clean_end is out of bounds
             };
 
@@ -84,16 +94,16 @@ pub fn process_chunk(chunk: String, chunk_id: i32, rules: &[(Regex, String)], re
     let estimated_capacity = chunk.len() + (filtered_matches.len() * 20);
     let mut highlighted = String::with_capacity(estimated_capacity);
     let mut last_index = 0;
-    
+
     for (start, end, matched_text, color) in filtered_matches.clone() {
         // Skip overlapping matches (first match wins)
         if last_index > start {
             continue;
         }
-        
+
         // Append the text between the last match and the current match (unhighlighted)
         highlighted.push_str(&chunk[last_index..start]);
-        
+
         // Append the matched text with color formatting
         highlighted.push_str(&format!("{}{}{}", color, matched_text, reset_color));
         last_index = end;

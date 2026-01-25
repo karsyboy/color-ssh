@@ -11,6 +11,8 @@ pub enum ConfigError {
     DirectoryCreationError(String),
     /// Error formatting configuration data
     FormattingError(String),
+    /// Configuration has already been initialized
+    AlreadyInitialized,
 }
 
 impl fmt::Display for ConfigError {
@@ -21,6 +23,7 @@ impl fmt::Display for ConfigError {
                 write!(f, "Failed to create directory: {}", msg)
             }
             ConfigError::FormattingError(msg) => write!(f, "Formatting error: {}", msg),
+            ConfigError::AlreadyInitialized => write!(f, "Configuration has already been initialized"),
         }
     }
 }

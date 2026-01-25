@@ -28,7 +28,6 @@ pub struct Config {
 /// Application settings
 #[derive(Debug, Deserialize)]
 pub struct Settings {
-
     /// Regex patterns for secrets to redact from logs
     #[serde(default)]
     pub remove_secrets: Option<Vec<String>>,

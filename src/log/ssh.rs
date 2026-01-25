@@ -22,9 +22,7 @@ use std::{
 static SSH_LOG_BUFFER: Lazy<Mutex<String>> = Lazy::new(|| Mutex::new(String::new()));
 
 // Compiled regex for removing ANSI escape sequences
-static ANSI_ESCAPE_REGEX: Lazy<Regex> = Lazy::new(|| {
-    Regex::new(r"(\x1B\[[0-9;]*[mK]|\x1B\][0-9];.*?\x07|\x1B\][0-9];.*?\x1B\\)").unwrap()
-});
+static ANSI_ESCAPE_REGEX: Lazy<Regex> = Lazy::new(|| Regex::new(r"(\x1B\[[0-9;]*[mK]|\x1B\][0-9];.*?\x07|\x1B\][0-9];.*?\x1B\\)").unwrap());
 
 #[derive(Clone)]
 pub struct SshLogger {
@@ -41,7 +39,7 @@ impl SshLogger {
     }
 
     fn remove_secrets(&self, message: &str) -> String {
-        let secret_patterns = SESSION_CONFIG.read().unwrap().settings.remove_secrets.clone();
+        let secret_patterns = SESSION_CONFIG.get().unwrap().read().unwrap().settings.remove_secrets.clone();
         let mut redacted_message = message.to_string();
 
         if let Some(secret_pattern) = secret_patterns {
@@ -73,7 +71,7 @@ impl SshLogger {
                 .filter(|c| c.is_alphanumeric() || c.is_ascii_punctuation() || c.is_whitespace() && *c != '\n' && *c != '\r')
                 .collect();
 
-            let message = if SESSION_CONFIG.read().unwrap().settings.remove_secrets.is_some() {
+            let message = if SESSION_CONFIG.get().unwrap().read().unwrap().settings.remove_secrets.is_some() {
                 self.remove_secrets(&message)
             } else {
                 message
@@ -106,6 +104,9 @@ impl SshLogger {
 
         std::fs::create_dir_all(&log_dir)?;
 
-        Ok(log_dir.join(format!("{}.log", SESSION_CONFIG.read().unwrap().metadata.session_name.replace(".", "_"))))
+        Ok(log_dir.join(format!(
+            "{}.log",
+            SESSION_CONFIG.get().unwrap().read().unwrap().metadata.session_name.replace(".", "_")
+        )))
     }
 }

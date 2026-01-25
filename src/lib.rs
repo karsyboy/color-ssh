@@ -68,7 +68,7 @@ impl std::fmt::Display for Error {
             Error::Io(err) => write!(f, "IO error: {}", err),
             Error::Config(err) => write!(f, "Configuration error: {}", err),
             Error::Highlight(err) => write!(f, "Highlighting error: {}", err),
-            Error::Log(err) => write!(f, "Logging error: {}", err)
+            Error::Log(err) => write!(f, "Logging error: {}", err),
         }
     }
 }
