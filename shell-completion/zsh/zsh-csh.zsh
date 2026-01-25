@@ -10,7 +10,7 @@
 setopt no_beep # don't beep
 zstyle ':completion:*:csh:*' hosts off # disable built-in hosts completion
 
-csh_CONFIG_FILE="${csh_CONFIG_FILE:-$HOME/.ssh/config}"
+CSH_CONFIG_FILE="${CSH_CONFIG_FILE:-$HOME/.ssh/config}"
 
 # Parse the file and handle the include directive.
 _parse_config_file() {
@@ -57,7 +57,7 @@ _parse_config_file() {
 _csh_host_list() {
   local csh_config host_list
 
-  csh_config=$(_parse_config_file $csh_CONFIG_FILE)
+  csh_config=$(_parse_config_file $CSH_CONFIG_FILE)
   csh_config=$(echo $csh_config | command grep -v -E "^\s*#[^_]")
 
   host_list=$(echo $csh_config | command awk '
