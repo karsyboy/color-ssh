@@ -1,9 +1,15 @@
+//! Logging-related error types
+
 use std::{error::Error, fmt, io};
 
+/// Errors that can occur during logging operations
 #[derive(Debug)]
 pub enum LogError {
+    /// I/O error when writing to log files
     IoError(io::Error),
+    /// Failed to create log directories
     DirectoryCreationError(String),
+    /// Error formatting log messages
     FormattingError(String),
 }
 

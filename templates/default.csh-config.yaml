@@ -2,7 +2,7 @@
 # It contains information on the template layout and how to create a custom template.
 # color-ssh templates can be found at https://github.com/karsyboy/color-ssh
 
-# The settings are used to define the path to the vault, the vault key, and other settings.
+# The settings are used to define csh settings.
 settings:
   # remove_secrets:
   #  - '9[\s]\$9\$.*'

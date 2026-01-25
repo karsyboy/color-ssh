@@ -1,10 +1,14 @@
-/*
-TODO:
-    - Add config profiles by allowing to pass -p <profile_name> to the cli which would then call <profile>.csh-config.yaml. Default config would be .csh-config.yaml.
-        - Allow for a default profile to be set in the config file???
-*/
+//! Configuration file loading and management
+//!
+//! Handles:
+//! - Searching for config files in multiple locations
+//! - Creating default configuration if none exists
+//! - Parsing YAML configuration
+//! - Compiling regex patterns from rules
+//! - Hot-reloading configuration changes
+
 use super::{SESSION_CONFIG, style::Config};
-use crate::{debug_enabled, log_debug};
+use crate::{debug_enabled, log_debug, log_info, log_warn};
 use regex::Regex;
 use std::{
     path::PathBuf,
@@ -21,11 +25,16 @@ impl ConfigLoader {
         Self { config_path }
     }
 
+    /// Find the configuration file in standard locations
     fn find_config_path() -> PathBuf {
+        log_debug!("Searching for configuration file...");
+        
         // Check first possible location: ~/.csh/.csh-config.yaml
         if let Some(home_dir) = dirs::home_dir() {
             let csh_dir_path = home_dir.join(".csh").join(".csh-config.yaml");
+            log_debug!("Checking: {:?}", csh_dir_path);
             if csh_dir_path.exists() {
+                log_info!("Found config at: {:?}", csh_dir_path);
                 return csh_dir_path;
             }
         }
@@ -33,7 +42,9 @@ impl ConfigLoader {
         // Check second possible location: ~/.csh-config.yaml
         if let Some(home_dir) = dirs::home_dir() {
             let home_dir_path = home_dir.join(".csh-config.yaml");
+            log_debug!("Checking: {:?}", home_dir_path);
             if home_dir_path.exists() {
+                log_info!("Found config at: {:?}", home_dir_path);
                 return home_dir_path;
             }
         }
@@ -45,11 +56,14 @@ impl ConfigLoader {
                 std::process::exit(1);
             })
             .join(".csh-config.yaml");
+        log_debug!("Checking: {:?}", current_dir_path);
         if current_dir_path.exists() {
+            log_info!("Found config at: {:?}", current_dir_path);
             return current_dir_path;
         }
 
         // None of the config files exist; try to create a default configuration.
+        log_warn!("No config file found, creating default configuration");
         match Self::create_default_config() {
             Ok(path) => path,
             Err(err) => {
@@ -59,6 +73,7 @@ impl ConfigLoader {
         }
     }
 
+    /// Create a default configuration file if none exists
     fn create_default_config() -> io::Result<PathBuf> {
         let home_dir = dirs::home_dir().expect("Failed to get home directory.\r");
         let csh_dir = home_dir.join(".csh");
@@ -66,34 +81,49 @@ impl ConfigLoader {
 
         // Create the .csh directory if it does not exist
         if !csh_dir.exists() {
+            log_debug!("Creating directory: {:?}", csh_dir);
             fs::create_dir(&csh_dir)?;
         }
 
         // Create the configuration file with sample content
         let config_content = include_str!("../../templates/default.csh-config.yaml");
         fs::write(&config_path, config_content)?;
-        log_debug!("Default configuration file created at: {:?}\r", config_path.to_str());
+        log_info!("Default configuration file created at: {:?}", config_path);
 
         Ok(config_path)
     }
 
+    /// Load the configuration from the config file
     pub fn load_config(self) -> io::Result<Config> {
-        log_debug!("Loading configuration from: {:?}\r", self.config_path.to_str());
+        log_info!("Loading configuration from: {:?}", self.config_path);
 
         // Read the configuration file
-        let config_content = fs::read_to_string(self.config_path.clone())?;
+        let config_content = fs::read_to_string(self.config_path.clone())
+            .map_err(|e| {
+                log_warn!("Failed to read config file: {}", e);
+                e
+            })?;
+        
         match serde_yaml::from_str::<Config>(&config_content) {
             Ok(mut config) => {
                 config.metadata.config_path = self.config_path;
-                for (_, value) in config.palette.iter_mut() {
-                    *value = hex_to_ansi(value);
+                log_debug!("Parsed configuration successfully");
+                
+                // Convert hex colors to ANSI codes
+                for (color_name, value) in config.palette.iter_mut() {
+                    let ansi_code = hex_to_ansi(value);
+                    log_debug!("Converted color '{}': {} -> {}", color_name, value, ansi_code.escape_debug());
+                    *value = ansi_code;
                 }
+                
                 // Compile the rules
                 let compiled_rules = compile_rules(&config);
+                log_info!("Compiled {} highlight rules", compiled_rules.len());
                 config.metadata.compiled_rules = compiled_rules;
                 Ok(config)
             }
             Err(err) => {
+                log_warn!("Error parsing configuration file: {:?}", err);
                 eprintln!("Error parsing configuration file: {:?}\r", err);
                 Err(io::Error::new(io::ErrorKind::InvalidData, "Failed to parse configuration file.\r"))
             }
@@ -102,17 +132,25 @@ impl ConfigLoader {
 
     /// Loads and applies new configuration.
     pub fn reload_config(self) -> Result<(), String> {
+        log_info!("Reloading configuration...");
         let mut current_config = SESSION_CONFIG.write().unwrap();
 
-        let mut new_config = self.load_config().map_err(|err| format!("Failed to load configuration: {}\r", err))?;
+        let mut new_config = self.load_config()
+            .map_err(|err| {
+                log_warn!("Failed to reload configuration: {}", err);
+                format!("Failed to load configuration: {}\r", err)
+            })?;
 
+        // Preserve session name across reloads
         new_config.metadata.session_name = current_config.metadata.session_name.clone();
 
         *current_config = new_config;
 
         let new_rules = compile_rules(&*current_config);
+        log_info!("Recompiled {} highlight rules", new_rules.len());
 
         current_config.metadata.compiled_rules = new_rules;
+        log_info!("Configuration reloaded successfully");
 
         Ok(())
     }

@@ -1,7 +1,10 @@
-/*
-TODO:
-    - Add a formatter option to remove passwords form the log file
-*/
+//! Log message formatting utilities
+//!
+//! Provides customizable formatting for log messages with support for:
+//! - Timestamps in RFC3339 format
+//! - Log level indicators
+//! - Visual separators
+
 use super::LogLevel;
 use chrono::Local;
 
@@ -21,19 +24,24 @@ impl LogFormatter {
         }
     }
 
+    /// Format a log message with optional timestamp, level, and separator
     pub fn format(&self, level: Option<LogLevel>, message: &str) -> String {
         let mut formatted = String::new();
 
+        // Add timestamp with consistent formatting (e.g., "2026-01-25 14:30:45.123")
         if self.include_timestamp {
-            formatted.push_str(&Local::now().format("%Y-%m-%d %H:%M:%S%.3f ").to_string());
+            formatted.push_str(&Local::now().format("%Y-%m-%d %H:%M:%S%.3f").to_string());
             formatted.push(' ');
         }
 
+        // Add log level with consistent padding for alignment
         if self.include_level {
             if let Some(lvl) = level {
-                formatted.push_str(&format!("[{}] ", lvl.as_str()));
+                formatted.push_str(&format!("[{:5}] ", lvl.as_str()));
             }
         }
+        
+        // Add visual separator
         if self.include_break {
             formatted.push_str("█ ");
         }

@@ -1,9 +1,15 @@
+//! Syntax highlighting error types
+
 use std::{error::Error, fmt, io};
 
+/// Errors that can occur during syntax highlighting
 #[derive(Debug)]
 pub enum HighlightError {
+    /// I/O error during highlighting operations
     IoError(io::Error),
+    /// Failed to create required directories
     DirectoryCreationError(String),
+    /// Error formatting highlighted output
     FormattingError(String),
 }
 

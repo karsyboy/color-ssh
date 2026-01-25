@@ -1,7 +1,12 @@
-/*
-TODO:
-    - Create log_info, log_warn, log_error methods for different log levels
-*/
+//! Logging module for color-ssh
+//!
+//! Provides structured logging capabilities with different levels:
+//! - DEBUG: Detailed diagnostic information
+//! - INFO: General informational messages
+//! - WARN: Warning messages for potentially problematic situations
+//! - ERROR: Error messages for failures
+//!
+//! Also includes specialized SSH session logging.
 
 mod debug;
 mod errors;
@@ -54,8 +59,16 @@ impl Logger {
         DEBUG_MODE.store(true, Ordering::SeqCst);
     }
 
+    pub fn disable_debug(&self) {
+        DEBUG_MODE.store(false, Ordering::SeqCst);
+    }
+
     pub fn enable_ssh_logging(&self) {
         SSH_LOGGING.store(true, Ordering::SeqCst);
+    }
+
+    pub fn disable_ssh_logging(&self) {
+        SSH_LOGGING.store(false, Ordering::SeqCst);
     }
 
     pub fn is_debug_enabled(&self) -> bool {
@@ -66,6 +79,7 @@ impl Logger {
         SSH_LOGGING.load(Ordering::SeqCst)
     }
 
+    /// Log a debug message (only when debug mode is enabled)
     pub fn log_debug(&self, message: &str) -> Result<(), LogError> {
         if self.is_debug_enabled() {
             self.debug_logger.log(LogLevel::Debug, message)?;
@@ -73,6 +87,31 @@ impl Logger {
         Ok(())
     }
 
+    /// Log an informational message (only when debug mode is enabled)
+    pub fn log_info(&self, message: &str) -> Result<(), LogError> {
+        if self.is_debug_enabled() {
+            self.debug_logger.log(LogLevel::Info, message)?;
+        }
+        Ok(())
+    }
+
+    /// Log a warning message (only when debug mode is enabled)
+    pub fn log_warn(&self, message: &str) -> Result<(), LogError> {
+        if self.is_debug_enabled() {
+            self.debug_logger.log(LogLevel::Warning, message)?;
+        }
+        Ok(())
+    }
+
+    /// Log an error message (only when debug mode is enabled)
+    pub fn log_error(&self, message: &str) -> Result<(), LogError> {
+        if self.is_debug_enabled() {
+            self.debug_logger.log(LogLevel::Error, message)?;
+        }
+        Ok(())
+    }
+
+    /// Log SSH session output
     pub fn log_ssh(&self, message: &str) -> Result<(), LogError> {
         if self.is_ssh_logging_enabled() {
             self.ssh_logger.log(message)?;

@@ -1,9 +1,15 @@
+//! Configuration-related error types
+
 use std::{error::Error, fmt, io};
 
+/// Errors that can occur during configuration loading and processing
 #[derive(Debug)]
 pub enum ConfigError {
+    /// I/O error when reading config files
     IoError(io::Error),
+    /// Failed to create required directories
     DirectoryCreationError(String),
+    /// Error formatting configuration data
     FormattingError(String),
 }
 

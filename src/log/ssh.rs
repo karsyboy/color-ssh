@@ -1,7 +1,11 @@
-/*
-TODO:
-    - Figure out how to remove weir ASCII characters from the log file
-*/
+//! SSH session logging utilities
+//!
+//! Provides structured logging for SSH sessions with:
+//! - Session output logging
+//! - Secret redaction based on patterns
+//! - ANSI escape sequence filtering
+//! - Per-session log files organized by date
+
 use super::{LogError, formatter::LogFormatter};
 use crate::config::SESSION_CONFIG;
 use chrono::Local;
