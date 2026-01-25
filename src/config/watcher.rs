@@ -6,7 +6,7 @@
 use super::{SESSION_CONFIG, loader::ConfigLoader};
 use crate::{log_debug, log_info, log_error};
 use notify::{Error, Event, RecommendedWatcher, RecursiveMode, Watcher};
-use std::{path::Path, sync::mpsc, thread, time::Duration};
+use std::{sync::mpsc, thread, time::Duration};
 
 /// Start watching the configuration file for changes
 pub fn config_watcher() -> RecommendedWatcher {
@@ -35,7 +35,7 @@ pub fn config_watcher() -> RecommendedWatcher {
 
     watcher
         .watch(
-            Path::new(config_path.to_str().unwrap()),
+            &config_path,
             RecursiveMode::NonRecursive,
         )
         .unwrap_or_else(|err| {

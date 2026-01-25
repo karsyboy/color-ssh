@@ -128,7 +128,7 @@ pub fn process_handler(process_args: Vec<String>, is_non_interactive: bool) -> R
     // Wait for the SSH process to finish and use its status code
     let status = child.wait()
         .map_err(|e| {
-            log_error!("Failed to wait for SSH process: {}", e);
+            log_error!("Failed to wait for SSH process (PID: {:?}): {}", child.id(), e);
             e
         })?;
     

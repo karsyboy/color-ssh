@@ -56,12 +56,16 @@ pub fn process_chunk(chunk: String, chunk_id: i32, rules: &[(Regex, String)], re
             let raw_start = if clean_start < mapping.len() {
                 mapping[clean_start]
             } else {
+                log_debug!("[{:?}] Chunk[{:?}] Index mapping fallback: clean_start {} >= mapping.len() {}", 
+                           thread_id, chunk_id, clean_start, mapping.len());
                 0 // Fallback to 0 if clean_start is out of bounds
             };
 
             let raw_end = if clean_end < mapping.len() {
                 mapping[clean_end]
             } else {
+                log_debug!("[{:?}] Chunk[{:?}] Index mapping fallback: clean_end {} >= mapping.len() {}", 
+                           thread_id, chunk_id, clean_end, mapping.len());
                 chunk.len() // Fallback to the full length of the chunk if clean_end is out of bounds
             };
 
@@ -76,7 +80,9 @@ pub fn process_chunk(chunk: String, chunk_id: i32, rules: &[(Regex, String)], re
     let filtered_matches = matches.clone();
 
     // Apply the color formatting to the chunk based on the matches
-    let mut highlighted = String::with_capacity(chunk.len());
+    // Reserve extra capacity for ANSI escape sequences (approximately 20 bytes per match)
+    let estimated_capacity = chunk.len() + (filtered_matches.len() * 20);
+    let mut highlighted = String::with_capacity(estimated_capacity);
     let mut last_index = 0;
     
     for (start, end, matched_text, color) in filtered_matches.clone() {

@@ -21,6 +21,11 @@ use std::{
 // A global buffer to accumulate output until full lines are available.
 static SSH_LOG_BUFFER: Lazy<Mutex<String>> = Lazy::new(|| Mutex::new(String::new()));
 
+// Compiled regex for removing ANSI escape sequences
+static ANSI_ESCAPE_REGEX: Lazy<Regex> = Lazy::new(|| {
+    Regex::new(r"(\x1B\[[0-9;]*[mK]|\x1B\][0-9];.*?\x07|\x1B\][0-9];.*?\x1B\\)").unwrap()
+});
+
 #[derive(Clone)]
 pub struct SshLogger {
     formatter: LogFormatter,
@@ -62,8 +67,7 @@ impl SshLogger {
             *buffer = buffer[newline_pos + 1..].to_string();
 
             // Filter out special ASCII characters
-            let ansi_escape = Regex::new(r"(\x1B\[[0-9;]*[mK]|\x1B\][0-9];.*?\x07|\x1B\][0-9];.*?\x1B\\)").unwrap();
-            let cleaned_message = ansi_escape.replace_all(&message, "").to_string();
+            let cleaned_message = ANSI_ESCAPE_REGEX.replace_all(&message, "").to_string();
             let message: String = cleaned_message
                 .chars()
                 .filter(|c| c.is_alphanumeric() || c.is_ascii_punctuation() || c.is_whitespace() && *c != '\n' && *c != '\r')

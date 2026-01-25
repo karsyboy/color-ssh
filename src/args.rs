@@ -51,7 +51,7 @@ pub fn main_args() -> MainArgs {
         )
         .arg(
             Arg::new("log")
-                .short('L')
+                .short('l')
                 .long("log")
                 .help("Enable SSH session logging to ~/.csh/logs/ssh_sessions/")
                 .action(clap::ArgAction::SetTrue),

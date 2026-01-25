@@ -78,33 +78,14 @@ fn main() -> Result<ExitCode> {
         }
     }
 
-    // Update logging settings based on config file settings (if different from CLI)
-    if !args.debug && config::SESSION_CONFIG.read().unwrap().settings.debug_mode {
-        logger.enable_debug();
-        log_info!("color-ssh v0.5 starting");
-        log_debug!("Debug mode enabled via config file");
-    } else if args.debug {
-        log_info!("color-ssh v0.5 starting");
-        log_debug!("Debug mode enabled via CLI argument");
-    }
-
-    if !args.ssh_logging && config::SESSION_CONFIG.read().unwrap().settings.ssh_logging {
-        logger.enable_ssh_logging();
-        log_info!("SSH logging enabled via config file");
-    } else if args.ssh_logging {
-        log_info!("SSH logging enabled via CLI argument");
-    }
-
-    // Log parsed arguments
-    log_debug!("Parsed arguments: {:?}", args);
-
     // Configure SSH session logging if enabled
     if logger.is_ssh_logging_enabled() {
         
         // Extract hostname from SSH arguments for log file naming
+        // Use the last argument which is typically the hostname/user@hostname
         let session_hostname = args
             .ssh_args
-            .get(args.ssh_args.len() - 1)
+            .last()
             .map(|arg| arg.splitn(2, '@').nth(1).unwrap_or(arg))
             .unwrap_or("unknown");
         

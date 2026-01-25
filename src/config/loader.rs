@@ -75,7 +75,8 @@ impl ConfigLoader {
 
     /// Create a default configuration file if none exists
     fn create_default_config() -> io::Result<PathBuf> {
-        let home_dir = dirs::home_dir().expect("Failed to get home directory.\r");
+        let home_dir = dirs::home_dir()
+            .ok_or_else(|| io::Error::new(io::ErrorKind::NotFound, "Failed to get home directory"))?;
         let csh_dir = home_dir.join(".csh");
         let config_path = csh_dir.join(".csh-config.yaml");
 
@@ -109,11 +110,21 @@ impl ConfigLoader {
                 config.metadata.config_path = self.config_path;
                 log_debug!("Parsed configuration successfully");
                 
-                // Convert hex colors to ANSI codes
+                // Validate and convert hex colors to ANSI codes
+                let mut invalid_colors = Vec::new();
                 for (color_name, value) in config.palette.iter_mut() {
+                    // Validate hex color format before conversion
+                    if !is_valid_hex_color(value) {
+                        log_warn!("Invalid hex color '{}' for palette entry '{}', using reset", value, color_name);
+                        invalid_colors.push(color_name.clone());
+                    }
                     let ansi_code = hex_to_ansi(value);
                     log_debug!("Converted color '{}': {} -> {}", color_name, value, ansi_code.escape_debug());
                     *value = ansi_code;
+                }
+                
+                if !invalid_colors.is_empty() {
+                    log_warn!("Found {} invalid color(s): {:?}", invalid_colors.len(), invalid_colors);
                 }
                 
                 // Compile the rules
@@ -156,6 +167,20 @@ impl ConfigLoader {
     }
 }
 
+/// Validates that a color string is a valid hex color code
+///
+/// # Arguments
+/// * `color` - The color string to validate
+///
+/// # Returns
+/// `true` if the color is a valid hex code (#RRGGBB), `false` otherwise
+fn is_valid_hex_color(color: &str) -> bool {
+    if color.len() != 7 || !color.starts_with('#') {
+        return false;
+    }
+    color[1..].chars().all(|c| c.is_ascii_hexdigit())
+}
+
 /// Compiles the highlighting rules from the configuration into a vector of regex patterns and their corresponding colors
 ///
 ///  - `config`: A reference to the Config struct containing the color palette and highlighting rules
@@ -163,9 +188,18 @@ impl ConfigLoader {
 /// Returns a vector of tuples, each containing a regex pattern and the corresponding color
 fn compile_rules(config: &Config) -> Vec<(Regex, String)> {
     let mut rules = Vec::new();
+    let mut failed_rules = Vec::new();
+    let mut missing_colors = Vec::new();
 
-    for rule in &config.rules {
-        let color = config.palette.get(&rule.color).cloned().unwrap_or_else(|| "\x1b[0m".to_string()); // Default to reset color if not found
+    for (idx, rule) in config.rules.iter().enumerate() {
+        // Check if the referenced color exists in the palette
+        let color = match config.palette.get(&rule.color) {
+            Some(c) => c.clone(),
+            None => {
+                missing_colors.push((idx + 1, rule.color.clone()));
+                "\x1b[0m".to_string() // Default to reset color if not found
+            }
+        };
 
         // This is done to make sure newline characters are removed form the string before they are loaded into a Regex value
         // This will not remove the string value "\n" just actually new line characters Ex. "Hello\nWorld" will not have "\n" replaced because it is the string "\n" instead of the actual newline character
@@ -173,8 +207,19 @@ fn compile_rules(config: &Config) -> Vec<(Regex, String)> {
 
         match Regex::new(&clean_regex) {
             Ok(regex) => rules.push((regex, color)),
-            Err(err) => eprintln!("Warning: Invalid regex '{}' - {}\r", clean_regex, err),
+            Err(err) => {
+                eprintln!("Warning: Invalid regex '{}' - {}\r", clean_regex, err);
+                failed_rules.push((idx + 1, clean_regex));
+            }
         }
+    }
+    
+    // Log validation summary
+    if !missing_colors.is_empty() {
+        log_warn!("Rules referencing missing palette colors: {:?}", missing_colors);
+    }
+    if !failed_rules.is_empty() {
+        log_warn!("Failed to compile {} regex rule(s)", failed_rules.len());
     }
 
     if debug_enabled!() {
