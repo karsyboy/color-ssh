@@ -124,7 +124,7 @@ fn main() -> Result<ExitCode> {
     let exit_code = process::process_handler(args.ssh_args, args.is_non_interactive)
         .map_err(|e| {
             log_error!("Process handler failed: {}", e);
-            eprintln!("❌ Process failed: {}", e);
+            eprintln!("Process failed: {}", e);
             e
         })?;
     
