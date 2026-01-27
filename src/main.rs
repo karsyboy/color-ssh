@@ -1,101 +1,143 @@
-use std::io::{self, BufReader, Read, Write};
-use std::process::{Command, Stdio};
-use std::sync::atomic::Ordering;
-use std::sync::mpsc::{self, Receiver, Sender};
-use std::sync::Arc;
-use std::thread;
+//! color-ssh (csh) - A Rust-based SSH client wrapper with syntax highlighting
+//!
+//! Main entry point that coordinates:
+//! - Command-line argument parsing
+//! - Logging initialization
+//! - Configuration loading and watching
+//! - SSH process spawning and management
 
-// Imports CSH specific modules
-mod cli;
-mod config;
-mod highlighter;
-mod logging;
-mod vault;
+use csh::{Result, args, config, log, log_debug, log_error, log_info, process};
+use std::process::ExitCode;
 
-use cli::{parse_args, SSH_LOGGING};
-use config::{config_watcher, COMPILED_RULES};
-use highlighter::process_chunk;
-use logging::{enable_debug_mode, log_debug, log_ssh_output, DEBUG_MODE};
+/// Extracts the SSH destination hostname from the provided SSH arguments.
+fn extract_ssh_destination(ssh_args: &[String]) -> Option<String> {
+    // SSH flags that take an argument based off ssh version "OpenSSH_10.2p1, OpenSSL 3.6.0 1 Oct 2025"
+    let flags_with_args = [
+        "-b", "-B", "-c", "-D", "-E", "-e", "-F", "-I", "-i", "-J", "-L", "-l", "-m", "-O", "-o", "-p", "-P", "-Q","-R", "-S", "-w", "-W"
+    ];
 
-/// Spawns an SSH process with the provided arguments.
-///
-///  `args`: CLI arguments provided by the user.
-///
-/// Returns the spawned child process.
-pub fn spawn_ssh(args: &[String]) -> std::io::Result<std::process::Child> {
-    let child = Command::new("ssh")
-        .args(args)
-        .stdin(Stdio::inherit()) // Inherit the input from the current terminal
-        .stdout(Stdio::piped()) // Pipe the output for processing
-        .stderr(Stdio::inherit()) // Inherit the error stream from the SSH process
-        .spawn()?;
-    Ok(child)
+    let mut skip_next = false;
+
+    for arg in ssh_args {
+        if skip_next {
+            skip_next = false;
+            continue;
+        }
+
+        // Skip flags (arguments starting with -)
+        if arg.starts_with('-') {
+            // Check if this flag takes an argument
+            if flags_with_args.contains(&arg.as_str()) {
+                skip_next = true;
+            }
+            continue;
+        }
+
+        // First non-flag argument is the destination
+        // Extract just the hostname part (after @)
+        return Some(arg.split_once('@').map_or_else(|| arg.to_string(), |(_, host)| host.to_string()));
+    }
+
+    None
 }
 
-fn main() -> io::Result<()> {
-    // Get the command-line arguments from the clap function in cli.rs
-    let args = parse_args();
+fn main() -> Result<ExitCode> {
+    // Parse command-line arguments
+    let args = args::main_args();
 
-    // If debugging, log the provided SSH arguments for verification
-    if DEBUG_MODE.load(Ordering::Relaxed) {
-        log_debug(&format!(
-            "Debug mode: {}",
-            DEBUG_MODE.load(Ordering::Relaxed)
-        ))
-        .unwrap();
-        log_debug(&format!(
-            "SSH logging: {}",
-            SSH_LOGGING.load(Ordering::Relaxed)
-        ))
-        .unwrap();
-        log_debug(&format!("SSH arguments: {:?}", args)).unwrap();
+    // Initialize logging system
+    let logger = log::Logger::new();
+
+    // Enable debug logging initially to capture config load
+    logger.enable_debug();
+    log_info!("color-ssh v0.5 starting");
+
+    // Initialize config with profile
+    if let Err(err) = config::init_session_config(args.profile.clone()) {
+        eprintln!("Failed to initialize config: {}", err);
+        std::process::exit(1);
     }
 
-    // Starts the config file watcher in the background under the _watcher context
-    let _watcher = config_watcher();
+    // Get global settings from config
+    let (debug_from_config, ssh_log_from_config, show_title) = {
+        let config_guard = config::get_config().read().unwrap();
+        (
+            config_guard.settings.debug_mode,
+            config_guard.settings.ssh_logging,
+            config_guard.settings.show_title,
+        )
+    };
 
-    // Launch the SSH process with the provided arguments
-    let mut child = spawn_ssh(&args)?;
-    let stdout = child.stdout.take().expect("Failed to capture stdout\r");
-    let mut reader = BufReader::new(stdout);
+    // Determine final debug mode: CLI arg takes precedence, then config setting
+    let final_debug = args.debug || debug_from_config;
+    let final_ssh_log = args.ssh_logging || ssh_log_from_config;
 
-    // Create a channel for sending and receiving output chunks
-    let (tx, rx): (Sender<String>, Receiver<String>) = mpsc::channel();
-
-    // Create needed values for chunk reading thread
-    let proc_reset_color = "\x1b[0m"; // ANSI reset color sequence
-    let proc_compiled_rules = Arc::clone(&COMPILED_RULES);
-
-    // Spawn thread for reading chunks sent by ssh
-    // This is the main thread that reads the chunks and applies the highlighter
-    thread::spawn(move || {
-        let mut chunk_id = 0;
-        while let Ok(chunk) = rx.recv() {
-            let rules = proc_compiled_rules.read().unwrap().clone();
-            let processed = process_chunk(chunk, chunk_id, &rules, proc_reset_color);
-            chunk_id += 1;
-            print!("{}", processed); // Print the processed chunk
-            io::stdout().flush().unwrap(); // Flush to ensure immediate display
+    // Log how debug mode was enabled or if it should be disabled
+    if final_debug {
+        if args.debug {
+            log_debug!("Debug mode enabled via CLI argument");
+        } else {
+            log_debug!("Debug mode enabled via config file");
         }
-    });
-
-    // Buffer for reading data from SSH output
-    let mut buffer = [0; 4096];
-    loop {
-        let n = reader.read(&mut buffer)?;
-        if n == 0 {
-            break; // Exit loop when EOF is reached
-        }
-        // Convert the read data to a String and send it to the processing thread
-        let chunk = String::from_utf8_lossy(&buffer[..n]).to_string();
-        if SSH_LOGGING.load(Ordering::Relaxed) {
-            log_ssh_output(&chunk, &args).unwrap();
-        }
-        tx.send(chunk)
-            .expect("Failed to send data to processing thread\r");
+    } else {
+        log_debug!("Debug mode not requested, disabling after initial config load");
+        logger.disable_debug();
     }
 
-    // Wait for the SSH process to finish and exit with the process's status code
-    let status = child.wait()?;
-    std::process::exit(status.code().unwrap_or(1));
+    // Enable SSH logging if requested
+    if final_ssh_log {
+        logger.enable_ssh_logging();
+        if args.ssh_logging {
+            log_info!("SSH logging enabled via CLI argument");
+        } else {
+            log_info!("SSH logging enabled via config file");
+        }
+    }
+
+    // Log parsed arguments if debug is still enabled
+    log_debug!("Parsed arguments: {:?}", args);
+
+    // Display banner if enabled in config
+    if show_title {
+        log_debug!("Banner display enabled in config, printing banner");
+        let title = [
+            " ",
+            "\x1b[31m ██████╗ ██████╗ ██╗      ██████╗ ██████╗       ███████╗███████╗██╗  ██╗",
+            "\x1b[33m██╔════╝██╔═══██╗██║     ██╔═══██╗██╔══██╗      ██╔════╝██╔════╝██║  ██║",
+            "\x1b[32m██║     ██║   ██║██║     ██║   ██║██████╔╝█████╗███████╗███████╗███████║",
+            "\x1b[36m██║     ██║   ██║██║     ██║   ██║██╔══██╗╚════╝╚════██║╚════██║██╔══██║",
+            "\x1b[34m╚██████╗╚██████╔╝███████╗╚██████╔╝██║  ██║      ███████║███████║██║  ██║",
+            "\x1b[35m ╚═════╝ ╚═════╝ ╚══════╝ ╚═════╝ ╚═╝  ╚═╝      ╚══════╝╚══════╝╚═╝  ╚═╝",
+            "\x1b[31mVersion: \x1b[33m0.5\x1b[0m    \x1b[31mBy: \x1b[32m@Karsyboy\x1b[0m    \x1b[31mGithub: \x1b[34mhttps://github.com/karsyboy/color-ssh\x1b[0m",
+            " ",
+        ];
+
+        for line in title.iter() {
+            println!("{}\x1b[0m", line);
+        }
+    }
+
+    // Configure SSH session logging if enabled
+    if logger.is_ssh_logging_enabled() {
+        // Extract hostname from SSH arguments for log file naming
+        let session_hostname = extract_ssh_destination(&args.ssh_args).unwrap_or_else(|| "unknown".to_string());
+
+        config::get_config().write().unwrap().metadata.session_name = session_hostname.to_string();
+        log_debug!("Session name set to: {}", session_hostname);
+    }
+
+    // Start the config file watcher in the background
+    log_debug!("Starting configuration file watcher");
+    let _watcher = config::config_watcher(args.profile.clone());
+
+    // Start the SSH process with the provided arguments and begin processing output
+    log_info!("Launching SSH process handler");
+    let exit_code = process::process_handler(args.ssh_args, args.is_non_interactive).map_err(|err| {
+        log_error!("Process handler failed: {}", err);
+        eprintln!("Process failed: {}", err);
+        err
+    })?;
+
+    log_info!("color-ssh exiting with code: {:?}", exit_code);
+    Ok(exit_code)
 }
