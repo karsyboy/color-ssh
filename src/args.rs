@@ -75,11 +75,11 @@ pub fn main_args() -> MainArgs {
         )
         .after_help(
             r#"
-csh -d user@example.com                # Debug mode enabled
-csh -l user@example.com                # SSH logging enabled
-csh -P network user@example.com        # Use 'network' config profile
-csh -d -l -- -p 22 user@example.com    # Both modes with SSH args (Always start with ssh args or else ssh log file wont be named right)
-csh -- -G user@example.com             # Non-interactive command
+csh -d user@example.com                          # Debug mode enabled
+csh -l user@example.com                          # SSH logging enabled
+csh -l -P network user@firewall.example.com      # Use 'network' config profile
+csh -l user@host -p 2222 -i ~/.ssh/custom_key    # Both modes with SSH args (Always start with ssh args or else ssh log file wont be named right)
+csh user@host -G                                 # Non-interactive command
 "#,
         )
         .get_matches();
