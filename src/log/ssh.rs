@@ -21,6 +21,9 @@ use std::{
 // A global buffer to accumulate output until full lines are available.
 static SSH_LOG_BUFFER: Lazy<Mutex<String>> = Lazy::new(|| Mutex::new(String::new()));
 
+// Global SSH log file handle to avoid reopening on every write
+static SSH_LOG_FILE: Lazy<Mutex<Option<File>>> = Lazy::new(|| Mutex::new(None));
+
 // Compiled regex for removing ANSI escape sequences
 static ANSI_ESCAPE_REGEX: Lazy<Regex> = Lazy::new(|| Regex::new(r"(\x1B\[[0-9;]*[mK]|\x1B\][0-9];.*?\x07|\x1B\][0-9];.*?\x1B\\)").unwrap());
 
@@ -54,7 +57,6 @@ impl SshLogger {
 
     pub fn log(&self, message: &str) -> Result<(), LogError> {
         let mut buffer = SSH_LOG_BUFFER.lock().unwrap();
-        let mut log_file = self.get_or_create_log_file()?;
         buffer.push_str(message);
 
         while let Some(newline_pos) = buffer.find('\n') {
@@ -83,14 +85,24 @@ impl SshLogger {
                     continue; // Skip empty lines
                 }
                 let formatted = self.formatter.format(None, msg);
-                writeln!(log_file, "{}", formatted)?; // Write each line to the log file
+
+                // Get or create log file with caching
+                let mut file_guard = SSH_LOG_FILE.lock().unwrap();
+                if file_guard.is_none() {
+                    *file_guard = Some(self.create_log_file()?);
+                }
+
+                if let Some(file) = file_guard.as_mut() {
+                    writeln!(file, "{}", formatted)?;
+                    file.flush()?; // Ensure logs are written immediately
+                }
             }
         }
 
         Ok(())
     }
 
-    fn get_or_create_log_file(&self) -> Result<File, LogError> {
+    fn create_log_file(&self) -> Result<File, LogError> {
         let log_path = self.get_ssh_log_path()?;
 
         OpenOptions::new().create(true).append(true).open(log_path).map_err(LogError::from)
