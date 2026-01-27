@@ -68,7 +68,7 @@ impl SshLogger {
             let cleaned_message = ANSI_ESCAPE_REGEX.replace_all(&message, "").to_string();
             let message: String = cleaned_message
                 .chars()
-                .filter(|c| c.is_alphanumeric() || c.is_ascii_punctuation() || c.is_whitespace() && *c != '\n' && *c != '\r')
+                .filter(|c| (c.is_alphanumeric() || c.is_ascii_punctuation() || c.is_whitespace()) && *c != '\n' && *c != '\r')
                 .collect();
 
             let message = if SESSION_CONFIG.get().unwrap().read().unwrap().settings.remove_secrets.is_some() {
