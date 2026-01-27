@@ -33,8 +33,8 @@ _parse_config_file() {
         eval "local expanded=\${(e)raw_path}"
 
         # If path is relative, resolve it relative to the current config file
-        if [[ "$expanded" != /* ]]; then
-          expanded="$(dirname "$config_file_path")/$expanded"
+        if [[ "$expanded" != /* && "$expanded" != ~* ]]; then
+          expanded="$HOME/.ssh/$expanded"
         fi
 
         # Expand wildcards (e.g. *.conf) and loop over each matched file

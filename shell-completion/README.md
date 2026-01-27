@@ -70,9 +70,6 @@ Host myserver
    ```bash
    # Source the completion script
    source ~/.zsh/zsh-csh/zsh-csh.zsh
-   
-   # Enable completion for csh (uses same completion as ssh)
-   compdef csh=ssh
    ```
 
 3. **Reload your Zsh configuration**:
@@ -83,6 +80,68 @@ Host myserver
 4. **Usage**:
    - Type `csh` and press `Tab` to see available hosts
    - Continue typing to filter, or select from the list
+
+## Auto Login with sshpass using GPG Encryption
+
+This section describes how to use `sshpass` with GPG-encrypted passwords for automated SSH login.
+
+### Setup
+
+1. **Encrypt your password** with GPG:
+   ```bash
+   nano .sshpasswd              # Create and store password in temp file
+   gpg -c .sshpasswd            # Encrypt file with gpg
+   rm .sshpasswd                # Remove clear text file
+   ```
+
+2. **Load the password** into an environment variable:
+   ```bash
+   source ssh-in.sh             # Creates SSHPASS env from GPG file
+   ```
+
+3. **Connect using sshpass**:
+   ```bash
+   sshpass -e csh <hostname>
+   ```
+
+4. **Clear the password** from the environment when done:
+   ```bash
+   source ssh-out.sh            # Removes the SSHPASS env variable
+   ```
+
+### Tab Completion for sshpass Aliases
+
+If you create an alias (e.g., `cshp`) for the sshpass command, you can set up tab completion:
+
+#### Fish
+
+Create a new completion file for your alias:
+```bash
+cp fish/completions/csh.fish ~/.config/fish/completions/cshp.fish
+sed -i 's/csh/cshp/g' ~/.config/fish/completions/cshp.fish
+```
+Then add to your `~/.config/fish/config.fish`:
+```bash
+alias cshp='sshpass -e csh'
+```
+
+#### Zsh
+
+Create a new completion script for your alias:
+```bash
+cp zsh/zsh-csh.zsh ~/.zsh/zsh-cshp/zsh-cshp.zsh
+sed -i 's/csh/cshp/g' ~/.zsh/zsh-cshp/zsh-cshp.zsh
+```
+
+Then add to your `~/.zshrc`:
+```bash
+source ~/.zsh/zsh-cshp/zsh-cshp.zsh
+alias cshp='sshpass -e csh'
+
+# Optional for auto loading gpg key in
+source ~/ssh-in.sh
+
+```
 
 ## Troubleshooting
 

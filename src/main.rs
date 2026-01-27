@@ -9,6 +9,38 @@
 use csh::{Result, args, config, log, log_debug, log_error, log_info, process};
 use std::process::ExitCode;
 
+/// Extracts the SSH destination hostname from the provided SSH arguments.
+fn extract_ssh_destination(ssh_args: &[String]) -> Option<String> {
+    // SSH flags that take an argument
+    let flags_with_args = [
+        "-b", "-c", "-D", "-E", "-e", "-F", "-I", "-i", "-J", "-L", "-l", "-m", "-O", "-o", "-p", "-Q", "-R", "-S", "-W", "-w",
+    ];
+
+    let mut skip_next = false;
+
+    for arg in ssh_args {
+        if skip_next {
+            skip_next = false;
+            continue;
+        }
+
+        // Skip flags (arguments starting with -)
+        if arg.starts_with('-') {
+            // Check if this flag takes an argument
+            if flags_with_args.contains(&arg.as_str()) {
+                skip_next = true;
+            }
+            continue;
+        }
+
+        // First non-flag argument is the destination
+        // Extract just the hostname part (after @)
+        return Some(arg.splitn(2, '@').nth(1).unwrap_or(arg).to_string());
+    }
+
+    None
+}
+
 fn main() -> Result<ExitCode> {
     // Parse command-line arguments
     let args = args::main_args();
@@ -16,8 +48,7 @@ fn main() -> Result<ExitCode> {
     // Initialize logging system
     let logger = log::Logger::new();
 
-    // ALWAYS enable debug logging initially to capture config load
-    // We'll check the config settings and potentially disable it after
+    // Enable debug logging initially to capture config load
     logger.enable_debug();
     log_info!("color-ssh v0.5 starting");
 
@@ -27,7 +58,7 @@ fn main() -> Result<ExitCode> {
         std::process::exit(1);
     }
 
-    // Force initialization of SESSION_CONFIG
+    // Get global settings from config
     let (debug_from_config, ssh_log_from_config, show_title) = {
         let config_guard = config::SESSION_CONFIG.get().unwrap().read().unwrap();
         (
@@ -38,16 +69,17 @@ fn main() -> Result<ExitCode> {
     };
 
     // Determine final debug mode: CLI arg takes precedence, then config setting
-    let _final_debug = args.debug || debug_from_config;
+    let final_debug = args.debug || debug_from_config;
     let final_ssh_log = args.ssh_logging || ssh_log_from_config;
 
     // Log how debug mode was enabled or if it should be disabled
-    if args.debug {
-        log_debug!("Debug mode enabled via CLI argument");
-    } else if debug_from_config {
-        log_debug!("Debug mode enabled via config file");
+    if final_debug {
+        if args.debug {
+            log_debug!("Debug mode enabled via CLI argument");
+        } else {
+            log_debug!("Debug mode enabled via config file");
+        }
     } else {
-        // Neither CLI nor config wants debug - disable it after initial config load
         log_debug!("Debug mode not requested, disabling after initial config load");
         logger.disable_debug();
     }
@@ -67,6 +99,7 @@ fn main() -> Result<ExitCode> {
 
     // Display banner if enabled in config
     if show_title {
+        log_debug!("Banner display enabled in config, printing banner");
         let title = [
             " ",
             "\x1b[31m ██████╗ ██████╗ ██╗      ██████╗ ██████╗       ███████╗███████╗██╗  ██╗",
@@ -88,7 +121,8 @@ fn main() -> Result<ExitCode> {
     if logger.is_ssh_logging_enabled() {
         // Extract hostname from SSH arguments for log file naming
         // Use the last argument which is typically the hostname/user@hostname
-        let session_hostname = args.ssh_args.last().map(|arg| arg.splitn(2, '@').nth(1).unwrap_or(arg)).unwrap_or("unknown");
+        // let session_hostname = args.ssh_args.last().map(|arg| arg.splitn(2, '@').nth(1).unwrap_or(arg)).unwrap_or("unknown");
+        let session_hostname = extract_ssh_destination(&args.ssh_args).unwrap_or_else(|| "unknown".to_string());
 
         config::SESSION_CONFIG.get().unwrap().write().unwrap().metadata.session_name = session_hostname.to_string();
         log_debug!("Session name set to: {}", session_hostname);

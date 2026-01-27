@@ -2,43 +2,37 @@
 # This flattens the full SSH config into a single stream of lines,
 # preserving order and relative include paths.
 function __csh_parse_config --argument-names file
-    # Exit early if the config file does not exist
     if not test -f "$file"
         return
     end
 
-    # Base directory used to resolve relative Include paths
-    set base (dirname "$file")
+    # SSH resolves relative Includes against ~/.ssh
+    set ssh_base "$HOME/.ssh"
 
-    # Read the file line-by-line (including final line without newline)
     while read -l line
-        # Detect Include directives (case-insensitive)
         if string match -ri '^include\s+' -- $line
-            # Extract paths after "Include"
             set paths (string replace -ri '^include\s+' '' -- $line)
 
-            # Handle multiple include paths on one line
             for p in $paths
-                # Expand ~ and environment variables
-                set p (eval echo $p)
-
-                # Resolve relative paths relative to current config file
-                if not string match -q '/*' -- $p
-                    set p "$base/$p"
+                # Expand leading ~ only (SSH behavior)
+                if string match -q '~*' -- $p
+                    set p (string replace -r '^~' "$HOME" -- $p)
+                else if not string match -q '^/' -- $p
+                    set p "$ssh_base/$p"
                 end
 
-                # Expand globs and recursively parse included files
-                for f in (ls $p 2>/dev/null)
-                    __csh_parse_config $f
+                # Expand globs naturally (no ls, no eval)
+                for f in $p
+                    if test -f "$f"
+                        __csh_parse_config "$f"
+                    end
                 end
             end
         else
-            # Emit non-Include lines unchanged
             echo $line
         end
-    end < $file
+    end < "$file"
 end
-
 
 # Build a structured host table from the SSH config.
 # Output format (pipe-delimited):
@@ -89,7 +83,6 @@ function __csh_host_table
         }
     ' | sort -u
 end
-
 
 # Launch fzf to interactively select a host.
 # Displays a columnized table with a live SSH config preview.
@@ -147,7 +140,6 @@ function __csh_fzf_select --argument-names query
     # Return key + host to caller
     echo "$key|$host"
 end
-
 
 # Fish completion entrypoint.
 # Replaces the current commandline with `csh <host>` and optionally executes it.
