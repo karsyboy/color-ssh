@@ -28,20 +28,25 @@ use std::sync::{Arc, RwLock};
 /// # Examples
 ///
 /// ```no_run
-/// use csh::config::SESSION_CONFIG;
+/// use csh::config;
 ///
-/// // Read configuration
-/// let config = SESSION_CONFIG.get().unwrap();
+/// // Read configuration using helper
+/// let config = config::get_config();
 /// let show_title = config.read().unwrap().settings.show_title;
-/// // Or:
-/// let show_title = SESSION_CONFIG.get().unwrap().read().unwrap().settings.show_title;
 ///
-/// // Write configuration
-/// config.write().unwrap().metadata.session_name = "example".to_string();
-///  // Or:
-/// SESSION_CONFIG.get().unwrap().write().unwrap().metadata.session_name = "example".to_string();
+/// // Write configuration using helper
+/// config::get_config().write().unwrap().metadata.session_name = "example".to_string();
 /// ```
 pub static SESSION_CONFIG: OnceCell<Arc<RwLock<style::Config>>> = OnceCell::new();
+
+/// Get a reference to the global configuration
+///
+/// # Panics
+/// Panics if the configuration has not been initialized via `init_session_config()`.
+/// This should only happen if called before main() completes initial setup.
+pub fn get_config() -> &'static Arc<RwLock<style::Config>> {
+    SESSION_CONFIG.get().expect("Configuration not initialized. Call init_session_config() first.")
+}
 
 /// Loads and initializes the global configuration with an optional profile.
 /// Call this once in main.rs after parsing CLI args.

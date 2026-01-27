@@ -7,7 +7,7 @@
 //! - Compiling regex patterns from rules
 //! - Hot-reloading configuration changes
 
-use super::{SESSION_CONFIG, style::Config};
+use super::style::Config;
 use crate::{debug_enabled, log_debug, log_info, log_warn};
 use regex::Regex;
 use std::{
@@ -143,6 +143,14 @@ impl ConfigLoader {
                 let compiled_rules = compile_rules(&config);
                 log_info!("Compiled {} highlight rules", compiled_rules.len());
                 config.metadata.compiled_rules = compiled_rules;
+                
+                // Compile secret redaction patterns
+                let compiled_secrets = compile_secret_patterns(&config);
+                if !compiled_secrets.is_empty() {
+                    log_info!("Compiled {} secret redaction patterns", compiled_secrets.len());
+                }
+                config.metadata.compiled_secret_patterns = compiled_secrets;
+                
                 Ok(config)
             }
             Err(err) => {
@@ -158,7 +166,7 @@ impl ConfigLoader {
     /// Loads and applies new configuration.
     pub fn reload_config(self) -> Result<(), String> {
         log_info!("Reloading configuration...");
-        let mut current_config = SESSION_CONFIG.get().unwrap().write().unwrap();
+        let mut current_config = super::get_config().write().unwrap();
 
         let mut new_config = self.load_config().map_err(|err| {
             log_warn!("Failed to reload configuration: {}", err);
@@ -176,6 +184,14 @@ impl ConfigLoader {
         log_info!("Recompiled {} highlight rules", new_rules.len());
 
         current_config.metadata.compiled_rules = new_rules;
+        
+        // Recompile secret patterns
+        let new_secrets = compile_secret_patterns(&*current_config);
+        if !new_secrets.is_empty() {
+            log_info!("Recompiled {} secret redaction patterns", new_secrets.len());
+        }
+        current_config.metadata.compiled_secret_patterns = new_secrets;
+        
         log_info!("Configuration reloaded successfully (version {})", current_config.metadata.version);
 
         Ok(())
@@ -216,7 +232,7 @@ fn compile_rules(config: &Config) -> Vec<(Regex, String)> {
             }
         };
 
-        // This is done to make sure newline characters are removed form the string before they are loaded into a Regex value
+        // This is done to make sure newline characters are removed from the string before they are loaded into a Regex value
         // This will not remove the string value "\n" just actually new line characters Ex. "Hello\nWorld" will not have "\n" replaced because it is the string "\n" instead of the actual newline character
         let clean_regex = rule.regex.replace('\n', "").trim().to_string();
 
@@ -266,4 +282,27 @@ fn hex_to_ansi(hex: &str) -> String {
     }
     // Return the reset color sequence if the hex is invalid
     "\x1b[0m".to_string()
+}
+
+/// Compiles secret redaction patterns from the configuration
+///
+/// - `config`: A reference to the Config struct containing secret patterns
+///
+/// Returns a vector of compiled Regex patterns for secret redaction
+fn compile_secret_patterns(config: &Config) -> Vec<Regex> {
+    let mut patterns = Vec::new();
+    
+    if let Some(secret_strings) = &config.settings.remove_secrets {
+        for (idx, pattern) in secret_strings.iter().enumerate() {
+            match Regex::new(pattern) {
+                Ok(regex) => patterns.push(regex),
+                Err(err) => {
+                    log_warn!("Failed to compile secret pattern #{}: '{}' - {}", idx + 1, pattern, err);
+                    eprintln!("Warning: Invalid secret pattern '{}' - {}\r", pattern, err);
+                }
+            }
+        }
+    }
+    
+    patterns
 }

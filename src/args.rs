@@ -32,7 +32,7 @@ pub struct MainArgs {
 /// csh -d user@example.com          # Debug mode enabled
 /// csh -l user@example.com          # SSH logging enabled
 /// csh -d -l user@example.com -p 22 # Both modes with SSH args
-/// csh -- -G user@example.com       # Non-interactive command (config dump). When passing commands to ssh if they are after and ssh logging is enabled the file will not be set to the hostname
+/// csh -- -G user@example.com       # Non-interactive command (config dump).
 /// ```
 ///
 /// # Returns

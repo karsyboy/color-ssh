@@ -11,9 +11,9 @@ use std::process::ExitCode;
 
 /// Extracts the SSH destination hostname from the provided SSH arguments.
 fn extract_ssh_destination(ssh_args: &[String]) -> Option<String> {
-    // SSH flags that take an argument
+    // SSH flags that take an argument based off ssh version "OpenSSH_10.2p1, OpenSSL 3.6.0 1 Oct 2025"
     let flags_with_args = [
-        "-b", "-c", "-D", "-E", "-e", "-F", "-I", "-i", "-J", "-L", "-l", "-m", "-O", "-o", "-p", "-Q", "-R", "-S", "-W", "-w",
+        "-b", "-B", "-c", "-D", "-E", "-e", "-F", "-I", "-i", "-J", "-L", "-l", "-m", "-O", "-o", "-p", "-P", "-Q","-R", "-S", "-w", "-W"
     ];
 
     let mut skip_next = false;
@@ -60,7 +60,7 @@ fn main() -> Result<ExitCode> {
 
     // Get global settings from config
     let (debug_from_config, ssh_log_from_config, show_title) = {
-        let config_guard = config::SESSION_CONFIG.get().unwrap().read().unwrap();
+        let config_guard = config::get_config().read().unwrap();
         (
             config_guard.settings.debug_mode,
             config_guard.settings.ssh_logging,
@@ -122,7 +122,7 @@ fn main() -> Result<ExitCode> {
         // Extract hostname from SSH arguments for log file naming
         let session_hostname = extract_ssh_destination(&args.ssh_args).unwrap_or_else(|| "unknown".to_string());
 
-        config::SESSION_CONFIG.get().unwrap().write().unwrap().metadata.session_name = session_hostname.to_string();
+        config::get_config().write().unwrap().metadata.session_name = session_hostname.to_string();
         log_debug!("Session name set to: {}", session_hostname);
     }
 

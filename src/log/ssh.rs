@@ -7,7 +7,6 @@
 //! - Per-session log files organized by date
 
 use super::{LogError, formatter::LogFormatter};
-use crate::config::SESSION_CONFIG;
 use chrono::Local;
 use once_cell::sync::Lazy;
 use regex::Regex;
@@ -48,16 +47,13 @@ impl SshLogger {
     }
 
     fn remove_secrets(&self, message: &str) -> String {
-        let secret_patterns = SESSION_CONFIG.get().unwrap().read().unwrap().settings.remove_secrets.clone();
+        let compiled_patterns = crate::config::get_config().read().unwrap().metadata.compiled_secret_patterns.clone();
         let mut redacted_message = message.to_string();
 
-        if let Some(secret_pattern) = secret_patterns {
-            for pattern in secret_pattern {
-                if let Ok(regex) = Regex::new(&pattern) {
-                    redacted_message = regex.replace_all(&redacted_message, "[REDACTED]").to_string();
-                }
-            }
+        for regex in &compiled_patterns {
+            redacted_message = regex.replace_all(&redacted_message, "[REDACTED]").to_string();
         }
+        
         redacted_message
     }
 
@@ -79,7 +75,7 @@ impl SshLogger {
                 .filter(|c| (c.is_alphanumeric() || c.is_ascii_punctuation() || c.is_whitespace()) && *c != '\n' && *c != '\r')
                 .collect();
 
-            let message = if SESSION_CONFIG.get().unwrap().read().unwrap().settings.remove_secrets.is_some() {
+            let message = if !crate::config::get_config().read().unwrap().metadata.compiled_secret_patterns.is_empty() {
                 self.remove_secrets(&message)
             } else {
                 message
@@ -124,7 +120,7 @@ impl SshLogger {
 
         Ok(log_dir.join(format!(
             "{}.log",
-            SESSION_CONFIG.get().unwrap().read().unwrap().metadata.session_name.replace(".", "_")
+            crate::config::get_config().read().unwrap().metadata.session_name.replace(".", "_")
         )))
     }
 }

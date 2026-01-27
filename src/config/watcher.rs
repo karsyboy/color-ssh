@@ -3,7 +3,7 @@
 //! Monitors the configuration file for changes and automatically reloads
 //! when modifications are detected.
 
-use super::{SESSION_CONFIG, loader::ConfigLoader};
+use super::loader::ConfigLoader;
 use crate::{log_debug, log_error, log_info};
 use notify::{Error, Event, RecommendedWatcher, RecursiveMode, Watcher};
 use std::{sync::mpsc, thread, time::Duration};
@@ -30,7 +30,7 @@ pub fn config_watcher(profile: Option<String>) -> RecommendedWatcher {
         panic!("Failed to create watcher: {}", err);
     });
 
-    let config_path = SESSION_CONFIG.get().unwrap().read().unwrap().metadata.config_path.clone();
+    let config_path = super::get_config().read().unwrap().metadata.config_path.clone();
     log_info!("Starting config watcher for: {:?}", config_path);
 
     watcher.watch(&config_path, RecursiveMode::NonRecursive).unwrap_or_else(|err| {

@@ -70,14 +70,14 @@ pub fn process_handler(process_args: Vec<String>, is_non_interactive: bool) -> R
             log_debug!("Output processing thread started");
             let mut chunk_id = 0;
             // Cache rules and track config version for hot-reload support
-            let mut cached_rules = config::SESSION_CONFIG.get().unwrap().read().unwrap().metadata.compiled_rules.clone();
-            let mut cached_version = config::SESSION_CONFIG.get().unwrap().read().unwrap().metadata.version;
+            let mut cached_rules = config::get_config().read().unwrap().metadata.compiled_rules.clone();
+            let mut cached_version = config::get_config().read().unwrap().metadata.version;
 
             while let Ok(chunk) = rx.recv() {
                 // Check if config has been reloaded and update rules if needed
-                let current_version = config::SESSION_CONFIG.get().unwrap().read().unwrap().metadata.version;
+                let current_version = config::get_config().read().unwrap().metadata.version;
                 if current_version != cached_version {
-                    cached_rules = config::SESSION_CONFIG.get().unwrap().read().unwrap().metadata.compiled_rules.clone();
+                    cached_rules = config::get_config().read().unwrap().metadata.compiled_rules.clone();
                     cached_version = current_version;
                     log_debug!("Rules updated due to config reload (version {})", cached_version);
                 }
