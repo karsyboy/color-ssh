@@ -12,52 +12,46 @@
 #[macro_export]
 macro_rules! debug_enabled {
     () => {{
-        let logger = $crate::log::Logger::new();
-        logger.is_debug_enabled()
+        $crate::log::LOGGER.is_debug_enabled()
     }};
 }
 
-/// Log a debug message (only when debug mode is enabled)
+/// Log a debug message
 #[macro_export]
 macro_rules! log_debug {
     ($($arg:tt)*) => {
-        let logger = $crate::log::Logger::new();
-        let _ = logger.log_debug(&format!($($arg)*));
+        let _ = $crate::log::LOGGER.log_debug(&format!($($arg)*));
     };
 }
 
-/// Log an informational message (only when debug mode is enabled)
+/// Log an informational message
 #[macro_export]
 macro_rules! log_info {
     ($($arg:tt)*) => {
-        let logger = $crate::log::Logger::new();
-        let _ = logger.log_info(&format!($($arg)*));
+        let _ = $crate::log::LOGGER.log_info(&format!($($arg)*));
     };
 }
 
-/// Log a warning message (only when debug mode is enabled)
+/// Log a warning message
 #[macro_export]
 macro_rules! log_warn {
     ($($arg:tt)*) => {
-        let logger = $crate::log::Logger::new();
-        let _ = logger.log_warn(&format!($($arg)*));
+        let _ = $crate::log::LOGGER.log_warn(&format!($($arg)*));
     };
 }
 
-/// Log an error message (only when debug mode is enabled)
+/// Log an error message
 #[macro_export]
 macro_rules! log_error {
     ($($arg:tt)*) => {
-        let logger = $crate::log::Logger::new();
-        let _ = logger.log_error(&format!($($arg)*));
+        let _ = $crate::log::LOGGER.log_error(&format!($($arg)*));
     };
 }
 
-/// Log SSH session output (only when SSH logging is enabled)
+/// Log SSH session output
 #[macro_export]
 macro_rules! log_ssh {
     ($($arg:tt)*) => {
-        let logger = $crate::log::Logger::new();
-        let _ = logger.log_ssh(&format!($($arg)*));
+        let _ = $crate::log::LOGGER.log_ssh(&format!($($arg)*));
     };
 }
