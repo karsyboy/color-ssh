@@ -1,0 +1,73 @@
+# Description: This is the default template created by color-ssh (csh).
+# It provides basic keyword highlighting for common success/error patterns.
+# For more templates and examples, visit: https://github.com/karsyboy/color-ssh
+
+# ============================================================================
+# SETTINGS SECTION (Optional)
+# ============================================================================
+# Configure any of these settings to customize csh behavior:
+settings:
+  show_title: true              # Display a colored title banner at session start
+  debug_mode: false             # Enable debug logging to ~/.csh/logs/csh.log
+  ssh_logging: false            # Enable SSH session logging by default
+  # remove_secrets:               # Regex patterns to redact from logs (useful for passwords/keys)
+  #   - '9[\s]\$9\$.*'           # Example: Juniper type 9 secrets
+  #   - 'sha512[\s]\$6\$.*'      # Example: SHA-512 password hashes
+
+
+# ============================================================================
+# COLOR PALETTE
+# ============================================================================
+# Define reusable colors using hex codes. Reference these by name in your rules.
+palette:
+  Red: '#c71800'
+  Green: '#28c501'
+  Blue: '#5698c8'
+
+
+# ============================================================================
+# HIGHLIGHTING RULES
+# ============================================================================
+# Each rule consists of:
+#   - description: Human-readable explanation of what the rule matches
+#   - regex: Pattern to match (supports case-insensitive (?i) and extended (?x) modes)
+#   - color: Reference to a color name from the palette above
+#
+# Regex Tips:
+#   - Use (?i) for case-insensitive matching
+#   - Use (?x) to allow whitespace and comments in regex (for readability)
+#   - Use \b for word boundaries to match whole words only
+#   - Combine flags like (?ix) for both case-insensitive and extended mode
+
+rules:
+  # Highlight positive/success indicators in green
+  - description: Match on good keywords
+    regex: (?ix)\b(good|up|success|ok|connected)\b
+    color: Green
+
+  # Highlight neutral/informational keywords in blue
+  - description: Match on neutral keywords
+    regex: (?ix)\b(neutral|info|status)\b
+    color: Blue
+
+  # Highlight negative/error indicators in red
+  - description: Match on bad keywords
+    regex: (?ix)\b(down|error|disabled|fail|denied)\b
+    color: Red
+
+# ============================================================================
+# EXAMPLE: Multi-line Regex Rule
+# ============================================================================
+# For complex patterns, use the | (pipe) character for multi-line YAML strings:
+#
+# - description: Match network interface names
+#   regex: |
+#     (?ix)                        # Case-insensitive, extended mode
+#     \b
+#     (gigabitethernet|gi|
+#      fastethernet|fa|
+#      tengigabitethernet|te)
+#     \d+(/\d+)*                   # Port numbers like 0/1 or 0/0/1
+#     (\.\d+)?                     # Optional subinterface like .100
+#     \b
+#   color: Green

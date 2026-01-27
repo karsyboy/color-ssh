@@ -1,0 +1,1 @@
+complete -c csh -f -n "__fish_use_subcommand" -a "(__csh_fzf_complete)"
