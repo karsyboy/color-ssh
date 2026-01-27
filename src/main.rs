@@ -120,8 +120,6 @@ fn main() -> Result<ExitCode> {
     // Configure SSH session logging if enabled
     if logger.is_ssh_logging_enabled() {
         // Extract hostname from SSH arguments for log file naming
-        // Use the last argument which is typically the hostname/user@hostname
-        // let session_hostname = args.ssh_args.last().map(|arg| arg.splitn(2, '@').nth(1).unwrap_or(arg)).unwrap_or("unknown");
         let session_hostname = extract_ssh_destination(&args.ssh_args).unwrap_or_else(|| "unknown".to_string());
 
         config::SESSION_CONFIG.get().unwrap().write().unwrap().metadata.session_name = session_hostname.to_string();
