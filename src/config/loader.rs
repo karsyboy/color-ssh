@@ -165,6 +165,8 @@ impl ConfigLoader {
 
         // Preserve session name across reloads
         new_config.metadata.session_name = current_config.metadata.session_name.clone();
+        // Increment version to signal config change to active threads
+        new_config.metadata.version = current_config.metadata.version.wrapping_add(1);
 
         *current_config = new_config;
 
@@ -172,7 +174,7 @@ impl ConfigLoader {
         log_info!("Recompiled {} highlight rules", new_rules.len());
 
         current_config.metadata.compiled_rules = new_rules;
-        log_info!("Configuration reloaded successfully");
+        log_info!("Configuration reloaded successfully (version {})", current_config.metadata.version);
 
         Ok(())
     }

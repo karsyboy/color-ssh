@@ -11,9 +11,7 @@
 /// Check if debug logging is enabled
 #[macro_export]
 macro_rules! debug_enabled {
-    () => {{
-        $crate::log::LOGGER.is_debug_enabled()
-    }};
+    () => {{ $crate::log::LOGGER.is_debug_enabled() }};
 }
 
 /// Log a debug message

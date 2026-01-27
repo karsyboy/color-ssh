@@ -77,4 +77,7 @@ pub struct Metadata {
     /// Compiled regex rules (regex + ANSI color code)
     #[serde(skip)]
     pub compiled_rules: Vec<(Regex, String)>,
+    /// Version counter incremented on each config reload
+    #[serde(skip)]
+    pub version: u64,
 }
