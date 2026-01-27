@@ -147,8 +147,10 @@ impl ConfigLoader {
             }
             Err(err) => {
                 log_warn!("Error parsing configuration file: {:?}", err);
-                eprintln!("Error parsing configuration file: {:?}\r", err);
-                Err(io::Error::new(io::ErrorKind::InvalidData, "Failed to parse configuration file.\r"))
+                Err(io::Error::new(
+                    io::ErrorKind::InvalidData,
+                    format!("Error parsing configuration file: {:?}", err),
+                ))
             }
         }
     }
@@ -160,7 +162,7 @@ impl ConfigLoader {
 
         let mut new_config = self.load_config().map_err(|err| {
             log_warn!("Failed to reload configuration: {}", err);
-            format!("Failed to load configuration: {}\r", err)
+            err.to_string()
         })?;
 
         // Preserve session name across reloads

@@ -146,7 +146,9 @@ pub fn process_handler(process_args: Vec<String>, is_non_interactive: bool) -> R
     if status.success() {
         Ok(ExitCode::SUCCESS)
     } else {
-        Ok(ExitCode::from(exit_code as u8))
+        // Clamp exit code to valid u8 range (0-255)
+        let clamped_code = u8::try_from(exit_code).unwrap_or(255);
+        Ok(ExitCode::from(clamped_code))
     }
 }
 
@@ -210,6 +212,8 @@ fn spawn_ssh_passthrough(args: &[String]) -> Result<ExitCode> {
     if status.success() {
         Ok(ExitCode::SUCCESS)
     } else {
-        Ok(ExitCode::from(exit_code as u8))
+        // Clamp exit code to valid u8 range (0-255)
+        let clamped_code = u8::try_from(exit_code).unwrap_or(255);
+        Ok(ExitCode::from(clamped_code))
     }
 }

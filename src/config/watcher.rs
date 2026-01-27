@@ -62,7 +62,7 @@ pub fn config_watcher(profile: Option<String>) -> RecommendedWatcher {
                         };
                         if let Err(err) = config_loader.reload_config() {
                             log_error!("Error reloading config: {}", err);
-                            eprintln!("Error reloading config: {}", err);
+                            eprintln!("Error reloading config: {}\r", err);
                         } else {
                             log_info!("Configuration reloaded successfully");
                             println!("Configuration reloaded [Press Enter]:\r");

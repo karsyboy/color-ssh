@@ -30,7 +30,7 @@
 //!     let args = args::main_args();
 //!     
 //!     // Initialize config watcher
-//!     let _watcher = config::config_watcher();
+//!     let _watcher = config::config_watcher(None);
 //!     
 //!     // Run SSH process
 //!     process::process_handler(args.ssh_args, args.is_non_interactive)

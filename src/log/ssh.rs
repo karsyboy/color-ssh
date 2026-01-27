@@ -21,7 +21,7 @@ use std::{
 // A global buffer to accumulate output until full lines are available.
 static SSH_LOG_BUFFER: Lazy<Mutex<String>> = Lazy::new(|| Mutex::new(String::new()));
 
-// Global SSH log file handle to avoid reopening on every write
+// Global SSH log file handle
 static SSH_LOG_FILE: Lazy<Mutex<Option<File>>> = Lazy::new(|| Mutex::new(None));
 
 // Compiled regex for removing ANSI escape sequences
@@ -32,13 +32,19 @@ pub struct SshLogger {
     formatter: LogFormatter,
 }
 
+impl Default for SshLogger {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl SshLogger {
     pub fn new() -> Self {
         let mut formatter = LogFormatter::new();
         formatter.set_include_timestamp(true);
         formatter.set_include_break(true);
 
-        Self { formatter: formatter }
+        Self { formatter }
     }
 
     fn remove_secrets(&self, message: &str) -> String {

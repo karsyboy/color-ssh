@@ -45,7 +45,7 @@ impl LogLevel {
     }
 }
 
-#[derive(Clone)]
+#[derive(Clone, Default)]
 pub struct Logger {
     debug_logger: debug::DebugLogger,
     ssh_logger: ssh::SshLogger,
@@ -53,10 +53,7 @@ pub struct Logger {
 
 impl Logger {
     pub fn new() -> Self {
-        Self {
-            debug_logger: debug::DebugLogger::new(),
-            ssh_logger: ssh::SshLogger::new(),
-        }
+        Self::default()
     }
 
     pub fn enable_debug(&self) {

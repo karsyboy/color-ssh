@@ -13,9 +13,6 @@ use std::{
 };
 
 /// Global debug log file handle
-///
-/// Uses lazy initialization to create the file only when first accessed.
-/// The Mutex ensures thread-safe access to the file handle.
 static DEBUG_LOG_FILE: Lazy<Mutex<Option<File>>> = Lazy::new(|| Mutex::new(None));
 
 /// Debug logger that writes formatted log messages to a file
@@ -25,12 +22,14 @@ pub struct DebugLogger {
     formatter: LogFormatter,
 }
 
+impl Default for DebugLogger {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl DebugLogger {
-    /// Create a new debug logger
-    ///
-    /// Initializes with a formatter configured to include:
-    /// - Timestamps (for tracking when events occur)
-    /// - Log levels (for filtering and prioritization)
+    // Create a new debug logger
     pub fn new() -> Self {
         let mut formatter = LogFormatter::new();
         formatter.set_include_timestamp(true);
@@ -39,19 +38,7 @@ impl DebugLogger {
         Self { formatter }
     }
 
-    /// Write a log message to the debug log file
-    ///
-    /// # Arguments
-    /// * `level` - The severity level (DEBUG, INFO, WARN, ERROR)
-    /// * `message` - The message to log
-    ///
-    /// # Behavior
-    /// - Lazily creates the log file on first use
-    /// - Formats the message with timestamp and level
-    /// - Flushes immediately to ensure messages are written (important for crash scenarios)
-    ///
-    /// # Returns
-    /// Returns `Ok(())` on success, or a `LogError` if file operations fail
+    // Write a log message to the debug log file
     pub fn log(&self, level: LogLevel, message: &str) -> Result<(), LogError> {
         let formatted = self.formatter.format(Some(level), message);
         let mut file_guard = DEBUG_LOG_FILE.lock().unwrap();
@@ -70,10 +57,7 @@ impl DebugLogger {
         Ok(())
     }
 
-    /// Create or open the debug log file for appending
-    ///
-    /// Opens the file in append mode to preserve existing logs across runs.
-    /// Creates the file if it doesn't exist.
+    // Create or open the debug log file for appending
     fn create_log_file(&self) -> Result<File, LogError> {
         let log_path = self.get_debug_log_path()?;
 
@@ -84,17 +68,7 @@ impl DebugLogger {
             .map_err(LogError::from)
     }
 
-    /// Get the path to the debug log file
-    ///
-    /// # Path Structure
-    /// `~/.csh/logs/csh.log`
-    ///
-    /// # Behavior
-    /// - Creates the directory structure if it doesn't exist
-    /// - Returns an error if home directory cannot be determined
-    ///
-    /// # Returns
-    /// The full path to the debug log file, or a `LogError` on failure
+    // Get the path to the debug log file
     fn get_debug_log_path(&self) -> Result<PathBuf, LogError> {
         let home_dir = dirs::home_dir().ok_or_else(|| LogError::DirectoryCreationError("Home directory not found".to_string()))?;
 
