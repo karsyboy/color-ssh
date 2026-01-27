@@ -87,15 +87,14 @@ pub fn process_chunk(chunk: String, chunk_id: i32, rules: &[(Regex, String)], re
 
     // Sort matches by starting position to handle overlaps
     matches.sort_by_key(|&(start, _, _, _)| start);
-    let filtered_matches = matches.clone();
 
     // Apply the color formatting to the chunk based on the matches
     // Reserve extra capacity for ANSI escape sequences (approximately 20 bytes per match)
-    let estimated_capacity = chunk.len() + (filtered_matches.len() * 20);
+    let estimated_capacity = chunk.len() + (matches.len() * 20);
     let mut highlighted = String::with_capacity(estimated_capacity);
     let mut last_index = 0;
 
-    for (start, end, matched_text, color) in filtered_matches.clone() {
+    for (start, end, matched_text, color) in matches.clone() {
         // Skip overlapping matches (first match wins)
         if last_index > start {
             continue;
@@ -116,7 +115,7 @@ pub fn process_chunk(chunk: String, chunk_id: i32, rules: &[(Regex, String)], re
     log_debug!("[{:?}] Chunk[{:?}] 1:Raw chunk: {:?}", thread_id, chunk_id, chunk);
     log_debug!("[{:?}] Chunk[{:?}] 2:Clean chunk: {:?}", thread_id, chunk_id, clean_chunk);
     log_debug!("[{:?}] Chunk[{:?}] 3:Matches: {:?}", thread_id, chunk_id, matches);
-    log_debug!("[{:?}] Chunk[{:?}] 4:Filtered matches: {:?}", thread_id, chunk_id, filtered_matches);
+    log_debug!("[{:?}] Chunk[{:?}] 4:Filtered matches: {:?}", thread_id, chunk_id, matches);
     log_debug!("[{:?}] Chunk[{:?}] 5:Highlighted chunk: {:?}", thread_id, chunk_id, highlighted);
 
     highlighted
