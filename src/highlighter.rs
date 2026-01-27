@@ -150,5 +150,6 @@ fn build_index_mapping(raw: &str) -> (String, Vec<usize>) {
         mapping.push(raw_idx);
         raw_idx += ch.len_utf8(); // Keep track of the character's byte length
     }
+    mapping.push(raw_idx); // Final entry for end-of-string matching
     (clean, mapping)
 }
