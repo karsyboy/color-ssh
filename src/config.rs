@@ -51,8 +51,8 @@ pub fn get_config() -> &'static Arc<RwLock<style::Config>> {
 /// Loads and initializes the global configuration with an optional profile.
 /// Call this once in main.rs after parsing CLI args.
 pub fn init_session_config(profile: Option<String>) -> Result<(), ConfigError> {
-    let config_loader = loader::ConfigLoader::new(profile).map_err(|err| ConfigError::IoError(err))?;
-    let config = config_loader.load_config().map_err(|err| ConfigError::IoError(err))?;
+    let config_loader = loader::ConfigLoader::new(profile).map_err(ConfigError::IoError)?;
+    let config = config_loader.load_config().map_err(ConfigError::IoError)?;
     SESSION_CONFIG.set(Arc::new(RwLock::new(config))).map_err(|_| ConfigError::AlreadyInitialized)?;
     Ok(())
 }

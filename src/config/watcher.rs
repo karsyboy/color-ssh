@@ -16,13 +16,12 @@ pub fn config_watcher(profile: Option<String>) -> RecommendedWatcher {
 
     let mut watcher = RecommendedWatcher::new(
         move |res: Result<Event, Error>| {
-            if let Ok(event) = res {
-                if event.kind.is_modify() {
+            if let Ok(event) = res
+                && event.kind.is_modify(){
                     log_debug!("Config file modification detected: {:?}", event);
                     let _ = tx.send(());
                 }
-            }
-        },
+            },
         notify::Config::default(),
     )
     .unwrap_or_else(|err| {
@@ -47,7 +46,7 @@ pub fn config_watcher(profile: Option<String>) -> RecommendedWatcher {
                 match rx.recv() {
                     Ok(()) => {
                         // Debounce: wait for additional events and discard them
-                        while let Ok(_) = rx.recv_timeout(Duration::from_millis(500)) {}
+                        while rx.recv_timeout(Duration::from_millis(500)).is_ok() {}
 
                         log_info!("Configuration change detected, reloading...");
                         println!("\r\nConfiguration change detected...\r");

@@ -35,11 +35,10 @@ impl LogFormatter {
         }
 
         // Add log level with consistent padding for alignment
-        if self.include_level {
-            if let Some(lvl) = level {
+        if self.include_level 
+            && let Some(lvl) = level {
                 formatted.push_str(&format!("[{:5}] ", lvl.as_str()));
             }
-        }
 
         // Add visual separator
         if self.include_break {

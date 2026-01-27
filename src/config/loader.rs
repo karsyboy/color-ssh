@@ -180,13 +180,13 @@ impl ConfigLoader {
 
         *current_config = new_config;
 
-        let new_rules = compile_rules(&*current_config);
+        let new_rules = compile_rules(&current_config);
         log_info!("Recompiled {} highlight rules", new_rules.len());
 
         current_config.metadata.compiled_rules = new_rules;
         
         // Recompile secret patterns
-        let new_secrets = compile_secret_patterns(&*current_config);
+        let new_secrets = compile_secret_patterns(&current_config);
         if !new_secrets.is_empty() {
             log_info!("Recompiled {} secret redaction patterns", new_secrets.len());
         }

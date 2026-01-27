@@ -35,7 +35,7 @@ fn extract_ssh_destination(ssh_args: &[String]) -> Option<String> {
 
         // First non-flag argument is the destination
         // Extract just the hostname part (after @)
-        return Some(arg.splitn(2, '@').nth(1).unwrap_or(arg).to_string());
+        return Some(arg.split_once('@').map_or_else(|| arg.to_string(), |(_, host)| host.to_string()));
     }
 
     None
@@ -125,9 +125,6 @@ fn main() -> Result<ExitCode> {
         config::get_config().write().unwrap().metadata.session_name = session_hostname.to_string();
         log_debug!("Session name set to: {}", session_hostname);
     }
-
-    // Release the logger
-    drop(logger);
 
     // Start the config file watcher in the background
     log_debug!("Starting configuration file watcher");

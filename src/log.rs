@@ -24,7 +24,7 @@ static DEBUG_MODE: AtomicBool = AtomicBool::new(false);
 static SSH_LOGGING: AtomicBool = AtomicBool::new(false);
 
 // Global logger instance to avoid recreating loggers on every macro call
-pub static LOGGER: Lazy<Logger> = Lazy::new(|| Logger::new());
+pub static LOGGER: Lazy<Logger> = Lazy::new(Logger::new);
 
 #[derive(Debug, Clone, Copy)]
 pub enum LogLevel {

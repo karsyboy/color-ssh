@@ -52,7 +52,7 @@ pub fn process_handler(process_args: Vec<String>, is_non_interactive: bool) -> R
 
     let stdout = child.stdout.take().ok_or_else(|| {
         log_error!("Failed to capture stdout from SSH process");
-        io::Error::new(io::ErrorKind::Other, "Failed to capture stdout")
+        io::Error::other("Failed to capture stdout")
     })?;
 
     let mut reader = BufReader::new(stdout);
@@ -93,7 +93,7 @@ pub fn process_handler(process_args: Vec<String>, is_non_interactive: bool) -> R
         })
         .map_err(|err| {
             log_error!("Failed to spawn output processing thread: {}", err);
-            io::Error::new(io::ErrorKind::Other, "Failed to spawn processing thread")
+            io::Error::other( "Failed to spawn processing thread")
         })?;
 
     // Buffer for reading data from SSH output (4KB chunks)
