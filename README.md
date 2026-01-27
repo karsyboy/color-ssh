@@ -2,7 +2,6 @@
   <img src="https://raw.githubusercontent.com/karsyboy/color-ssh/refs/heads/main/.resources/title.svg" />
 </p>
 
-
 <p align="center">
     <a href="https://github.com/karsyboy/color-ssh/releases">
         <img src="https://img.shields.io/github/v/release/karsyboy/color-ssh?include_prereleases&logo=GitHub&label=Github"></a>
@@ -15,164 +14,373 @@
         <img src="https://img.shields.io/github/actions/workflow/status/karsyboy/color-ssh/release.yml?logo=Rust&label=Release%20Build"></a>
 <p>
 
-Color SSH, `csh` for short, is a Rust-based wrapper for `ssh` that provides syntax-highlighted output using configurable rules. This tool enhances the usability of SSH by allowing regex-based syntax highlighting for specific text patterns in the output.
+---
+
+## About
+
+**Color SSH** (`csh`) is a powerful Rust-based wrapper for SSH that enhances your terminal experience with real-time syntax highlighting and intelligent logging. Built for network engineers, system administrators, and anyone who works extensively with SSH, `csh` transforms plain SSH output into beautifully highlighted text using customizable, regex-based rules.
+
+Whether you're managing network devices, debugging servers, or analyzing logs, Color SSH makes it easier to spot critical information at a glance. Errors will stand out in red, successful operations will glow green, and everything is configurable to match your workflow.
+
+---
 
 ## Features
 
-- **Regex-based Syntax Highlighting**: Match and highlight specific patterns in SSH output using configurable regex rules.
-- **Customizable Colors**: Define colors for each rule using RGB hex codes.
-- **Configurable Rules**: Use a YAML configuration file to add and manage highlighting rules dynamically.
-- **Multi-line Regex Support**: Supports free-spacing regex for complex matching needs.
-- **Simple Integration**: Works seamlessly with `ssh` as a drop-in replacement.
+- **🎨 Real-time Syntax Highlighting**: Apply regex-based color rules to SSH output as it streams
+- **⚙️ Highly Configurable**: YAML-based configuration with custom color palettes and regex rules
+- **📝 Session Logging**: Automatic logging of SSH sessions with organized date-based storage
+- **🔒 Secret Redaction**: Automatically remove sensitive data (passwords, keys, hashes) from logs
+- **📋 Profile Support**: Multiple configuration profiles for different environments (network devices, servers, etc.)
+- **🎯 Template Library**: Pre-built templates for network equipment and common use cases — community contributions welcome!
+- **🔄 Hot Reload**: Configuration changes apply automatically without restarting
+- **🐚 Shell Integration**: Enhanced tab completion and interactive host selection for Fish and Zsh
+- **🚀 Drop-in Replacement**: Works seamlessly as an SSH wrapper—just use `csh` instead of `ssh`
 
 ---
 
 ## Installation
 
-### [Install using Latest Github Release](https://github.com/karsyboy/color-ssh/releases/)
+### Using Pre-built Binaries (Recommended)
 
-### Install using Cargo
+Download the latest release from [GitHub Releases](https://github.com/karsyboy/color-ssh/releases/) for your platform.
+
+### Using Cargo
+
+If you have Rust installed, install directly from crates.io:
 
 ```bash
 cargo install color-ssh
 ```
 
-### Install using Github Source (Testing & Development)
-1. Clone the repository:
-   ```bash
-   git clone https://github.com/karsyboy/color-ssh.git
-   cd color-ssh
-   ```
+### From Source
 
-2. Build the project:
-   ```bash
-   cargo build --release
-   ```
+For development or testing the latest changes:
 
-3. Install the binary (optional):
-   ```bash
-   cp target/release/csh /usr/local/bin/
-   ```
+```bash
+# Clone the repository
+git clone https://github.com/karsyboy/color-ssh.git
+cd color-ssh
+
+# Build the release binary
+cargo build --release
+
+# Optional: Install to system path
+sudo cp target/release/csh /usr/local/bin/
+```
+
+### Verify Installation
+
+```bash
+csh --version
+```
 
 ---
 
 ## Usage
 
-### Basic Syntax
+### Basic Command Structure
+
 ```bash
-A Rust-based SSH client with syntax highlighting.
-
-Usage: csh [OPTIONS] <ssh_args>...
-
-Arguments:
-  <ssh_args>...  SSH arguments
-
-Options:
-  -d, --debug    Enable debug mode
-  -L, --log      Enable SSH logging
-  -h, --help     Print help
-  -V, --version  Print version
+csh [OPTIONS] <ssh_args>...
 ```
 
-### Example
+### Options
+
+| Option | Description |
+|--------|-------------|
+| `-d, --debug` | Enable debug mode with detailed logging to `~/.csh/logs/csh.log` |
+| `-l, --log` | Enable SSH session logging to `~/.csh/logs/ssh_sessions/` |
+| `-P, --profile <name>` | Use a specific configuration profile |
+| `-h, --help` | Display help information |
+| `-V, --version` | Display version information |
+
+### Examples
+
 ```bash
+# Basic SSH connection with syntax highlighting
 csh user@hostname
+
+# Enable session logging
+csh -l admin@router.example.com
+
+# Use a specific configuration profile
+csh -P network cisco@switch.local
+
+# Debug mode for troubleshooting
+csh -d user@server.com
+
+# Combine options (logging + profile)
+csh -l -P network user@firewall.example.com
+
+# Pass SSH arguments through
+csh -l user@host -p 2222 -i ~/.ssh/custom_key
+
+# Non-interactive SSH commands (highlighting disabled automatically)
+csh user@host -G          # Dump SSH configuration
+csh user@host -T          # Disable pseudo-terminal
 ```
 
-This runs an SSH session while applying the syntax highlighting rules defined in `.csh-config.yaml`.
+### Session Logs
+
+When using the `-l` or `--log` flag, SSH sessions are logged to:
+
+```
+~/.csh/logs/ssh_sessions/YYYY-MM-DD/HOSTNAME.log
+```
+
+Example:
+```
+~/.csh/logs/ssh_sessions/2026-01-26/router1.log
+```
 
 ---
 
 ## Configuration
-The configuration file is expected to be stored either in the users home directory under `.csh\.csh-config.yaml` or in the current directory the `csh`  binary tool is being ran out of.
 
-Valid Configuration file locations:
-- `$HOME/.csh/.csh-config.yaml`
-- `$PWD/.csh-config.yaml`
+### Configuration File Locations
 
-The syntax highlighting rules are defined in a YAML file. Each rule consists of:
-- **`description`**: A human-readable explanation of what the rule does.
-- **`regex`**: The pattern to match in SSH output.
-- **`color`**: The color to apply, specified as a key from the `palette` section.
+Color SSH looks for configuration files in the following order:
 
+1. **Current directory**: `./[profile].csh-config.yaml`
+2. **Home directory**: `~/.csh/[profile].csh-config.yaml`
 
-If no configuration file is found then `csh` will create the configuration file `~/.csh/.csh-config.yaml` using the template `default.csh-config.yaml`.
+If no configuration file exists, Color SSH will automatically create a default configuration at `~/.csh/.csh-config.yaml`.
 
-### Example Configuration (`.\templates\default.csh-config.yaml`)
+### Configuration Profiles
+
+Use profiles to maintain different configurations for different environments:
+
+```bash
+# Default profile
+~/.csh/.csh-config.yaml
+
+# Network devices profile
+~/.csh/network.csh-config.yaml
+
+# Usage
+csh -P network user@switch.local
+```
+
+### Configuration Structure
+
+A configuration file consists of three main sections:
+
+#### 1. Settings
+
+Optional settings for controlling Color SSH behavior:
+
 ```yaml
-# Description: This is the default template created by color-ssh (csh). 
-# It contains information on the template layout and how to create a custom template.
-# color-ssh templates can be found at https://github.com/karsyboy/color-ssh
+settings:
+  show_title: true              # Display a colored title banner
+  debug_mode: false             # Enable debug logging
+  ssh_logging: true             # Enable session logging by default
+  remove_secrets:               # Regex patterns to redact from logs
+    - '9[\s]\$9\$.*'           # Juniper type 9 secrets
+    - 'sha512[\s]\$6\$.*'      # SHA-512 hashes
+    - 'ssh-ed25519[\s].*'      # SSH public keys
+```
 
-# The palette section is used to define the colors that can be used in the rules section.
-# The colors are defined in hex format.
+#### 2. Color Palette
+
+Define reusable colors using hex codes:
+
+```yaml
+palette:
+  Red: '#c71800'
+  Green: '#28c501'
+  Blue: '#5698c8'
+  Orange: '#e67547'
+  Gold: '#a35a00'
+```
+
+#### 3. Highlighting Rules
+
+Define regex patterns and their associated colors:
+
+```yaml
+rules:
+  - description: Highlight successful operations
+    regex: (?ix)\b(success|ok|connected|up|enabled)\b
+    color: Green
+
+  - description: Highlight errors and failures
+    regex: (?ix)\b(error|fail|down|disabled|denied)\b
+    color: Red
+
+  - description: Highlight IP addresses
+    regex: \b(?:\d{1,3}\.){3}\d{1,3}\b
+    color: Blue
+```
+
+### Example: Default Configuration
+
+The default configuration template (`templates/default.csh-config.yaml`) provides basic keyword highlighting:
+
+```yaml
 palette:
   Red: '#c71800'
   Green: '#28c501'
   Blue: '#5698c8'
 
 rules:
-# example rule with all possible options
-# - description: Match on the word "example"
-#   regex: |
-#     (?ix)
-#     \b
-#     example
-#     \b
-#   color: Kelly-Green
-# create a rule that matches on the word "connected" or "up" and color it Kelly-Green
+  - description: Match on good keywords
+    regex: (?ix)\b(good|up|success|ok|connected)\b
+    color: Green
 
-# Example of a rule that uses a one line regex to match on "good" or "up" and color it Green
-- description: Match on good keywords
-  regex: (?ix)\b(good|up)\b
-  color: Green
+  - description: Match on neutral keywords
+    regex: (?ix)\b(neutral|info|status)\b
+    color: Blue
 
-
-- description: Match on neutral keywords
-  regex: |
-    (?ix)
-    \b
-    neutral
-    \b
-  color: Blue
-
-# create a rule that matches on the word "down" or "error" or "disabled" and color it Red
-- description: Match on bad keywords
-  regex: |
-    (?ix)
-    \b
-    (down|error|disabled)
-    \b
-  color: Red
+  - description: Match on bad keywords
+    regex: (?ix)\b(down|error|disabled|fail|denied)\b
+    color: Red
 ```
 
-### Explanation of Configuration
-1. **Palette**:
-   - The `palette` section defines reusable colors using hex codes (e.g., `#32cd32` for green).
-2. **Rules**:
-   - Each rule includes a description, regex, and a reference to a color in the `palette`.
+### Example: Network Devices Configuration
 
-## Logging 
-The `.csh` folder is also used to stored ssh logs if the `-L or --log` argument is used. Logs will be stored in `.csh/ssh-logs/MM-DD-YYYY/HOSTNAME-MM-DD-YYYY.log`
+For network engineers, the `templates/network.csh-config.yaml` template provides extensive highlighting for Cisco and other network devices (Reference the actual file for a detailed config):
+
+```yaml
+settings:
+  remove_secrets:
+    - '9[\s]\$9\$.*'           # Juniper secrets
+    - 'sha512[\s]\$6\$.*'      # Password hashes
+    - '7[\s][0-9]{2}[0-9A-Fa-f]+$'  # Cisco type 7
+  show_title: true
+  ssh_logging: true
+
+palette:
+  Orange: '#e67547'
+  Aqua: '#00e0d1'
+  Gold: '#a35a00'
+  Green: '#28c501'
+  Red: '#c71800'
+
+rules:
+  - description: Cisco enable mode prompt
+    regex: (\S+)#
+    color: Orange
+
+  - description: Cisco user mode prompt
+    regex: (\S+)>
+    color: Gold
+
+  - description: Interface names
+    regex: (?ix)\b(GigabitEthernet|FastEthernet|Vlan|Port-channel)\d+(/\d+)*(\.\d+)?\b
+    color: Green
+```
+
+### Regex Tips
+
+Color SSH uses Rust's `regex` crate with support for:
+
+- **Case-insensitive matching**: Use `(?i)` flag
+- **Extended mode** (ignore whitespace): Use `(?x)` flag
+- **Multi-line patterns**: Use `|` for multi-line regex blocks in YAML
+- **Word boundaries**: Use `\b` to match whole words
+- **Groups**: Use `()` for capturing groups
+
+Example of a well-structured rule:
+
+```yaml
+- description: Match Cisco interface types
+  regex: |
+    (?ix)                          # Case-insensitive, extended mode
+    \b                             # Word boundary
+    (gigabitethernet|gi|
+     tengigabitethernet|te|
+     fastethernet|fa)
+    \d+(/\d+)*(\.\d+)?            # Port numbers
+    \b                             # Word boundary
+  color: Green
+```
+
+### Shell Completion
+
+Color SSH includes advanced shell completion features for Fish and Zsh shells, including:
+
+- Tab completion for SSH hosts from your `~/.ssh/config`
+- Interactive host selection with fuzzy finding (fzf)
+- Host descriptions and previews
+- Support for SSH config `Include` directives
+
+For detailed installation and usage instructions, see the [Shell Completion README](shell-completion/README.md).
 
 ---
 
-## How It Works
+## Contributing
 
-1. **Regex Matching**:
-   - The script processes SSH output chunk by chunk, applying each regex rule to match patterns.
-2. **ANSI Escape Codes**:
-   - Matches are wrapped with ANSI escape codes for colors based on the palette.
-3. **Dynamic Configuration**:
-   - Rules and colors can be updated by modifying the YAML config file without changing the code.
+Contributions are welcomed! Here's how to get started:
+
+### 1. Fork and Clone
+
+```bash
+git clone https://github.com/YOUR-USERNAME/color-ssh.git
+cd color-ssh
+```
+
+### 2. Create a Feature Branch
+
+```bash
+git checkout -b feature/your-feature-name
+```
+
+### 3. Make Your Changes
+
+- Write clean, idiomatic Rust code
+- Add tests for new functionality
+- Update documentation as needed
+- Follow existing code style and conventions
+
+### 4. Test Your Changes
+
+```bash
+# Run tests
+cargo test
+
+# Build and test locally
+cargo build --release
+./target/release/csh user@testhost
+
+# Run linter
+cargo clippy
+
+# Format code
+cargo fmt
+```
+
+### 5. Commit and Push
+
+```bash
+git add .
+git commit -m "feat: add your feature description"
+git push origin feature/your-feature-name
+```
+
+### 6. Open a Pull Request
+
+- Provide a clear description of your changes
+- Reference any related issues
+- Ensure CI/CD checks pass
+
+### Contribution Ideas
+
+- 🎨 New configuration templates for specific platforms
+- 🐛 Bug fixes and performance improvements
+- 📚 Documentation enhancements
+- ✨ New features — check the roadmap or propose your own ideas
+- 🧪 Additional test coverage
+
+### Code of Conduct
+
+Please be respectful and constructive. We're building this together!
 
 ---
 
-## Licensing
+## License
 
-This project is licensed under the MIT License. See the full license below:
+This project is licensed under the **MIT License**.
 
-### MIT License
 ```
 MIT License
 
@@ -199,23 +407,10 @@ SOFTWARE.
 
 ---
 
-## Contributing
+## Roadmap
 
-Contributions are welcome! To contribute:
-1. Fork the repository.
-2. Create a feature branch.
-3. Commit your changes with detailed messages.
-4. Open a pull request.
+- 🔄 **Coming Soon**
 
 ---
 
-## Future Improvements
-
-- Add vault functionality 
-  - `csh-vault.yaml` encrypted file for storing host information like passwords used to connect.
-  - File with be encrypted with quantum computer resistance encryption methods.
-  - Feature to unlock csh which spawns a csh process that has the ability to decrypt the `csh-vault.yaml` after the users provides there unlock password.
-  - and many more features around this...
-- Add support for themes or predefined configurations.
-
----
+<p align="center">Made with ❤️ by <a href="https://github.com/karsyboy">@karsyboy</a></p>
