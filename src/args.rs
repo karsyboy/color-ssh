@@ -39,7 +39,7 @@ pub struct MainArgs {
 /// A MainArgs struct containing all parsed arguments
 pub fn main_args() -> MainArgs {
     let matches = Command::new("csh")
-        .version("v0.5.0")
+        .version("v0.5.1")
         .author("@karsyboy")
         .about("A Rust-based SSH client wrapper with syntax highlighting and logging capabilities")
         .arg_required_else_help(true)
@@ -78,7 +78,7 @@ pub fn main_args() -> MainArgs {
 csh -d user@example.com                          # Debug mode enabled
 csh -l user@example.com                          # SSH logging enabled
 csh -l -P network user@firewall.example.com      # Use 'network' config profile
-csh -l user@host -p 2222 -i ~/.ssh/custom_key    # Both modes with SSH args (Always start with ssh args or else ssh log file wont be named right)
+csh -l user@host -p 2222 -i ~/.ssh/custom_key    # Both modes with SSH args
 csh user@host -G                                 # Non-interactive command
 "#,
         )
