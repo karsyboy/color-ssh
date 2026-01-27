@@ -2,8 +2,18 @@
 # It is based industry standard networking devices.
 # color-ssh templates can be found at https://github.com/karsyboy/color-ssh
 
+settings:
+  remove_secrets:
+    - '9[\s]\$9\$.*'
+    - 'sha512[\s]\$6\$.*'
+    - 'ssh-ed25519[\s].*'
+    - '7[\s][0-9]{2}[0-9A-Fa-f]+$'
+  show_title: true
+  debug_mode: false
+  ssh_logging: true
+
 palette:
-  Sunrise-Orange: '#e67549'
+  Sunrise-Orange: '#e67547'
   Aqua-Blue: '#00e0d1'
   Hot-Pink: '#FF69B4'
   Celestial-Blue: '#5698c8'
@@ -22,7 +32,7 @@ rules:
 # Switch Prompt
 - description: Prompt in enabled mode for network switches
   regex: (\S+)#
-  color: Rich-Gold
+  color: Sunrise-Orange
 
 - description: Match prompt in disable for mode network switches
   regex: (?:\u001b\[[^m]*m)?([A-Z0-9-]+)>
@@ -103,7 +113,7 @@ rules:
   regex: |
     (?ix)
     \b
-    (connected|up)
+    (connected|up|access)
     \b
   color: Kelly-Green
 
@@ -111,7 +121,7 @@ rules:
   regex: |
     (?ix)
     \b
-    (xcvrAbsen|noOperMem|notconnect|notpresent)
+    (xcvrAbsen|noOperMem|notconnect|notpresent|trunk)
     \b
   color: Sunrise-Orange
 
