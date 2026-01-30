@@ -62,8 +62,11 @@ fn default_show_title() -> bool {
 pub struct HighlightRule {
     /// Regex pattern to match (will be compiled at config load time)
     pub regex: String,
-    /// Color name from the palette to apply to matches
+    /// Color name from the palette to apply to matches (foreground)
     pub color: String,
+    /// Optional background color name from the palette
+    #[serde(default)]
+    pub bg_color: Option<String>,
 }
 
 /// Runtime metadata not stored in config file
