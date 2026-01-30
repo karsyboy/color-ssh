@@ -93,7 +93,7 @@ pub fn process_handler(process_args: Vec<String>, is_non_interactive: bool) -> R
         })
         .map_err(|err| {
             log_error!("Failed to spawn output processing thread: {}", err);
-            io::Error::other( "Failed to spawn processing thread")
+            io::Error::other("Failed to spawn processing thread")
         })?;
 
     // Buffer for reading data from SSH output (4KB chunks)

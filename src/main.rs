@@ -13,7 +13,7 @@ use std::process::ExitCode;
 fn extract_ssh_destination(ssh_args: &[String]) -> Option<String> {
     // SSH flags that take an argument based off ssh version "OpenSSH_10.2p1, OpenSSL 3.6.0 1 Oct 2025"
     let flags_with_args = [
-        "-b", "-B", "-c", "-D", "-E", "-e", "-F", "-I", "-i", "-J", "-L", "-l", "-m", "-O", "-o", "-p", "-P", "-Q","-R", "-S", "-w", "-W"
+        "-b", "-B", "-c", "-D", "-E", "-e", "-F", "-I", "-i", "-J", "-L", "-l", "-m", "-O", "-o", "-p", "-P", "-Q", "-R", "-S", "-w", "-W",
     ];
 
     let mut skip_next = false;
