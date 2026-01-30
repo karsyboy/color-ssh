@@ -76,6 +76,85 @@ csh --version
 
 ---
 
+## Uninstall
+
+### Using Cargo
+
+If you installed using cargo:
+
+```bash
+cargo uninstall color-ssh
+```
+
+Note: This only removes the binary. To completely remove configuration files and logs, also run:
+
+```bash
+rm -rf ~/.csh/
+```
+
+### Using Homebrew
+
+If you installed using Homebrew:
+
+```bash
+brew uninstall color-ssh
+```
+
+### Linux/macOS (Manual)
+
+If you installed using the installer script, follow these steps:
+
+```bash
+# 1. Remove the main binary
+rm ~/.cargo/bin/csh
+
+# 2. Remove the updater binary (if installed)
+rm -f ~/.cargo/bin/color-ssh-update
+
+# 3. Remove configuration and logs
+rm -rf ~/.csh/
+
+# 4. Remove the installation receipt
+rm -rf ~/.config/color-ssh/
+```
+
+### Windows
+
+If you installed using the PowerShell installer script:
+
+```powershell
+# 1. Remove the main binary
+Remove-Item "$env:USERPROFILE\.cargo\bin\csh.exe" -Force
+
+# 2. Remove the updater binary (if installed)
+Remove-Item "$env:USERPROFILE\.cargo\bin\color-ssh-update.exe" -Force -ErrorAction SilentlyContinue
+
+# 3. Remove configuration and logs
+Remove-Item "$env:USERPROFILE\.csh" -Recurse -Force -ErrorAction SilentlyContinue
+
+# 4. Remove the installation receipt
+if ($env:XDG_CONFIG_HOME) {
+    Remove-Item "$env:XDG_CONFIG_HOME\color-ssh" -Recurse -Force -ErrorAction SilentlyContinue
+} else {
+    Remove-Item "$env:LOCALAPPDATA\color-ssh" -Recurse -Force -ErrorAction SilentlyContinue
+}
+```
+
+### Shell Completion Cleanup
+
+If you installed shell completions, remove them as well:
+
+```bash
+# Fish
+rm -f ~/.config/fish/completions/csh.fish
+rm -f ~/.config/fish/functions/__csh_fzf_complete.fish
+
+# Zsh
+# Remove the sourcing line from ~/.zshrc that references zsh-csh.zsh
+```
+
+---
+
 ## Usage
 
 ### Basic Command Structure
