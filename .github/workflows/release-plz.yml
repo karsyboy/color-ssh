@@ -6,6 +6,9 @@ on:
   push:
     branches:
       - main
+    paths:
+      - 'Cargo.toml'
+      - 'src/**'
 
 jobs:
   # Create a PR with the new versions and changelog, preparing the next release.
