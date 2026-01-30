@@ -35,7 +35,7 @@ rules:
   color: Sunrise-Orange
 
 - description: Match prompt in disable for mode network switches
-  regex: (?:\u001b\[[^m]*m)?([A-Z0-9-]+)>
+  regex: (\S+)>
   color: Rich-Gold
 
 # Interfaces
