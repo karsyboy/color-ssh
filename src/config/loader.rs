@@ -122,17 +122,14 @@ impl ConfigLoader {
                 config.metadata.config_path = self.config_path;
                 log_debug!("Parsed configuration successfully");
 
-                // Validate and convert hex colors to ANSI codes
+                // Validate hex colors but keep them as hex for now
+                // We'll convert to ANSI during rule compilation
                 let mut invalid_colors = Vec::new();
-                for (color_name, value) in config.palette.iter_mut() {
-                    // Validate hex color format before conversion
+                for (color_name, value) in config.palette.iter() {
                     if !is_valid_hex_color(value) {
-                        log_warn!("Invalid hex color '{}' for palette entry '{}', using reset", value, color_name);
+                        log_warn!("Invalid hex color '{}' for palette entry '{}'", value, color_name);
                         invalid_colors.push(color_name.clone());
                     }
-                    let ansi_code = hex_to_ansi(value);
-                    log_debug!("Converted color '{}': {} -> {}", color_name, value, ansi_code.escape_debug());
-                    *value = ansi_code;
                 }
 
                 if !invalid_colors.is_empty() {
@@ -143,14 +140,14 @@ impl ConfigLoader {
                 let compiled_rules = compile_rules(&config);
                 log_info!("Compiled {} highlight rules", compiled_rules.len());
                 config.metadata.compiled_rules = compiled_rules;
-                
+
                 // Compile secret redaction patterns
                 let compiled_secrets = compile_secret_patterns(&config);
                 if !compiled_secrets.is_empty() {
                     log_info!("Compiled {} secret redaction patterns", compiled_secrets.len());
                 }
                 config.metadata.compiled_secret_patterns = compiled_secrets;
-                
+
                 Ok(config)
             }
             Err(err) => {
@@ -184,14 +181,14 @@ impl ConfigLoader {
         log_info!("Recompiled {} highlight rules", new_rules.len());
 
         current_config.metadata.compiled_rules = new_rules;
-        
+
         // Recompile secret patterns
         let new_secrets = compile_secret_patterns(&current_config);
         if !new_secrets.is_empty() {
             log_info!("Recompiled {} secret redaction patterns", new_secrets.len());
         }
         current_config.metadata.compiled_secret_patterns = new_secrets;
-        
+
         log_info!("Configuration reloaded successfully (version {})", current_config.metadata.version);
 
         Ok(())
@@ -216,20 +213,48 @@ fn is_valid_hex_color(color: &str) -> bool {
 ///
 ///  - `config`: A reference to the Config struct containing the color palette and highlighting rules
 ///
-/// Returns a vector of tuples, each containing a regex pattern and the corresponding color
+/// Returns a vector of tuples, each containing a regex pattern and the corresponding ANSI color code
 fn compile_rules(config: &Config) -> Vec<(Regex, String)> {
     let mut rules = Vec::new();
     let mut failed_rules = Vec::new();
     let mut missing_colors = Vec::new();
 
     for (idx, rule) in config.rules.iter().enumerate() {
-        // Check if the referenced color exists in the palette
-        let color = match config.palette.get(&rule.color) {
-            Some(c) => c.clone(),
+        // Check if the referenced foreground color exists in the palette
+        let fg_color = match config.palette.get(&rule.color) {
+            Some(hex) => hex_to_ansi(hex, ColorType::Foreground),
             None => {
                 missing_colors.push((idx + 1, rule.color.clone()));
-                "\x1b[0m".to_string() // Default to reset color if not found
+                String::new()
             }
+        };
+
+        // Check if there's a background color specified
+        let bg_color = if let Some(bg_name) = &rule.bg_color {
+            match config.palette.get(bg_name) {
+                Some(hex) => hex_to_ansi(hex, ColorType::Background),
+                None => {
+                    missing_colors.push((idx + 1, format!("{} (background)", bg_name)));
+                    String::new()
+                }
+            }
+        } else {
+            String::new()
+        };
+
+        // Combine foreground and background codes
+        let ansi_code = if !fg_color.is_empty() && !bg_color.is_empty() {
+            // Both fg and bg: combine them into single escape sequence
+            // Extract RGB values and combine: \x1b[38;2;r;g;b;48;2;r;g;bm
+            let fg_params = &fg_color[2..fg_color.len() - 1]; // Remove \x1b[ and m
+            let bg_params = &bg_color[2..bg_color.len() - 1];
+            format!("\x1b[{};{}m", fg_params, bg_params)
+        } else if !fg_color.is_empty() {
+            fg_color
+        } else if !bg_color.is_empty() {
+            bg_color
+        } else {
+            "\x1b[0m".to_string() // Reset if no valid colors
         };
 
         // This is done to make sure newline characters are removed from the string before they are loaded into a Regex value
@@ -237,7 +262,7 @@ fn compile_rules(config: &Config) -> Vec<(Regex, String)> {
         let clean_regex = rule.regex.replace('\n', "").trim().to_string();
 
         match Regex::new(&clean_regex) {
-            Ok(regex) => rules.push((regex, color)),
+            Ok(regex) => rules.push((regex, ansi_code)),
             Err(err) => {
                 eprintln!("Warning: Invalid regex '{}' - {}\r", clean_regex, err);
                 failed_rules.push((idx + 1, clean_regex));
@@ -262,12 +287,20 @@ fn compile_rules(config: &Config) -> Vec<(Regex, String)> {
     rules
 }
 
+/// Type of color to convert (foreground or background)
+#[derive(Debug, Clone, Copy)]
+enum ColorType {
+    Foreground,
+    Background,
+}
+
 /// Converts a hex color code (e.g., "#FFFFFF") to an ANSI escape sequence for terminal color
 ///
 /// - `hex`: A string slice representing the hex color code
+/// - `color_type`: Whether this is a foreground or background color
 ///
-/// Returns a string containing the ANSI escape sequence for the RGB color, or a reset sequence if the hex code is invalid
-fn hex_to_ansi(hex: &str) -> String {
+/// Returns a string containing the ANSI escape sequence for the RGB color, or an empty string if invalid
+fn hex_to_ansi(hex: &str, color_type: ColorType) -> String {
     // Check if the hex code is valid (starts with '#' and has 7 characters)
     if hex.len() == 7 && hex.starts_with('#') {
         // Parse the red, green, and blue values from the hex string
@@ -277,11 +310,16 @@ fn hex_to_ansi(hex: &str) -> String {
             u8::from_str_radix(&hex[5..7], 16),
         ) {
             // Return the ANSI escape sequence for the RGB color
-            return format!("\x1b[38;2;{};{};{}m", r, g, b);
+            // 38 = foreground, 48 = background
+            let code = match color_type {
+                ColorType::Foreground => 38,
+                ColorType::Background => 48,
+            };
+            return format!("\x1b[{};2;{};{};{}m", code, r, g, b);
         }
     }
-    // Return the reset color sequence if the hex is invalid
-    "\x1b[0m".to_string()
+    // Return empty string if the hex is invalid (will use reset instead)
+    String::new()
 }
 
 /// Compiles secret redaction patterns from the configuration
@@ -291,7 +329,7 @@ fn hex_to_ansi(hex: &str) -> String {
 /// Returns a vector of compiled Regex patterns for secret redaction
 fn compile_secret_patterns(config: &Config) -> Vec<Regex> {
     let mut patterns = Vec::new();
-    
+
     if let Some(secret_strings) = &config.settings.remove_secrets {
         for (idx, pattern) in secret_strings.iter().enumerate() {
             match Regex::new(pattern) {
@@ -303,6 +341,6 @@ fn compile_secret_patterns(config: &Config) -> Vec<Regex> {
             }
         }
     }
-    
+
     patterns
 }

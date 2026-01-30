@@ -17,11 +17,12 @@ pub fn config_watcher(profile: Option<String>) -> RecommendedWatcher {
     let mut watcher = RecommendedWatcher::new(
         move |res: Result<Event, Error>| {
             if let Ok(event) = res
-                && event.kind.is_modify(){
-                    log_debug!("Config file modification detected: {:?}", event);
-                    let _ = tx.send(());
-                }
-            },
+                && event.kind.is_modify()
+            {
+                log_debug!("Config file modification detected: {:?}", event);
+                let _ = tx.send(());
+            }
+        },
         notify::Config::default(),
     )
     .unwrap_or_else(|err| {

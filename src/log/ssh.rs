@@ -53,7 +53,7 @@ impl SshLogger {
         for regex in &compiled_patterns {
             redacted_message = regex.replace_all(&redacted_message, "[REDACTED]").to_string();
         }
-        
+
         redacted_message
     }
 

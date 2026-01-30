@@ -19,10 +19,15 @@ settings:
 # COLOR PALETTE
 # ============================================================================
 # Define reusable colors using hex codes. Reference these by name in your rules.
+# These colors can be used for both foreground (text) and background.
 palette:
   Red: '#c71800'
   Green: '#28c501'
   Blue: '#5698c8'
+  Yellow: '#ffcc00'
+  Black: '#000000'
+  White: '#ffffff'
+  DarkRed: '#8b0000'
 
 
 # ============================================================================
@@ -31,7 +36,8 @@ palette:
 # Each rule consists of:
 #   - description: Human-readable explanation of what the rule matches
 #   - regex: Pattern to match (supports case-insensitive (?i) and extended (?x) modes)
-#   - color: Reference to a color name from the palette above
+#   - color: Reference to a color name from the palette above (foreground/text color)
+#   - bg_color: (Optional) Reference to a color name for background highlighting
 #
 # Regex Tips:
 #   - Use (?i) for case-insensitive matching
@@ -50,19 +56,29 @@ rules:
     regex: (?ix)\b(neutral|info|status)\b
     color: Blue
 
-  # Highlight negative/error indicators in red
+  # Highlight negative/error indicators in red with dark red background for emphasis
   - description: Match on bad keywords
     regex: (?ix)\b(down|error|disabled|fail|denied)\b
     color: Red
+    bg_color: DarkRed
 
 # ============================================================================
 # EXAMPLE: Multi-line Regex Rule
 # ============================================================================
 # For complex patterns, use the | (pipe) character for multi-line YAML strings:
 #
-# - description: Match network interface names
+# - description: Match network interface names with background
 #   regex: |
 #     (?ix)                        # Case-insensitive, extended mode
+#     \b
+#     (gigabitethernet|gi|
+#      fastethernet|fa|
+#      tengigabitethernet|te)
+#     \d+(/\d+)*                   # Port numbers like 0/1 or 0/0/1
+#     (\.\d+)?                     # Optional subinterface like .100
+#     \b
+#   color: Green
+#   bg_color: Black                # Optional: add background color for extra visibility                   # Case-insensitive, extended mode
 #     \b
 #     (gigabitethernet|gi|
 #      fastethernet|fa|
