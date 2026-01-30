@@ -10,12 +10,19 @@ updates:
   - package-ecosystem: cargo
     directory: "/"
     schedule:
-      interval: daily
-    open-pull-requests-limit: 10
+      interval: weekly
+    open-pull-requests-limit: 5
+    labels:
+      - "dependencies"
+    groups:
+      dependencies:
+        patterns:
+          - "*"  
 
-  # Maintain dependencies for GitHub Actions
-  - package-ecosystem: github-actions
-    directory: "/"
-    schedule:
-      interval: daily
-    open-pull-requests-limit: 10
+  # This seems to cause problems with release-plz and cargo-dist since they control the version of their own github actions.
+  # # Maintain dependencies for GitHub Actions
+  # - package-ecosystem: github-actions
+  #   directory: "/"
+  #   schedule:
+  #     interval: daily
+  #   open-pull-requests-limit: 10
