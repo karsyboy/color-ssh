@@ -29,21 +29,21 @@ impl ConfigLoader {
     fn find_config_path(profile: &Option<String>) -> Result<PathBuf, io::Error> {
         log_debug!("Searching for configuration file...");
         let config_filename = match profile {
-            Some(p) if !p.is_empty() => format!("{}.csh-config.yaml", p),
-            _ => ".csh-config.yaml".to_string(),
+            Some(p) if !p.is_empty() => format!("{}.colorsh-config.yaml", p),
+            _ => ".colorsh-config.yaml".to_string(),
         };
 
-        // Check first possible location: ~/.csh/{profile}.csh-config.yaml
+        // Check first possible location: ~/.colorsh/{profile}.colorsh-config.yaml
         if let Some(home_dir) = dirs::home_dir() {
-            let csh_dir_path = home_dir.join(".csh").join(&config_filename);
-            log_debug!("Checking: {:?}", csh_dir_path);
-            if csh_dir_path.exists() {
-                log_info!("Found config at: {:?}", csh_dir_path);
-                return Ok(csh_dir_path);
+            let colorsh_dir_path = home_dir.join(".colorsh").join(&config_filename);
+            log_debug!("Checking: {:?}", colorsh_dir_path);
+            if colorsh_dir_path.exists() {
+                log_info!("Found config at: {:?}", colorsh_dir_path);
+                return Ok(colorsh_dir_path);
             }
         }
 
-        // Check second possible location: ~/{profile}.csh-config.yaml
+        // Check second possible location: ~/{profile}.colorsh-config.yaml
         if let Some(home_dir) = dirs::home_dir() {
             let home_dir_path = home_dir.join(&config_filename);
             log_debug!("Checking: {:?}", home_dir_path);
@@ -90,17 +90,17 @@ impl ConfigLoader {
     /// Create a default configuration file if none exists
     fn create_default_config() -> io::Result<PathBuf> {
         let home_dir = dirs::home_dir().ok_or_else(|| io::Error::new(io::ErrorKind::NotFound, "Failed to get home directory"))?;
-        let csh_dir = home_dir.join(".csh");
-        let config_path = csh_dir.join(".csh-config.yaml");
+        let colorsh_dir = home_dir.join(".colorsh");
+        let config_path = colorsh_dir.join(".colorsh-config.yaml");
 
-        // Create the .csh directory if it does not exist
-        if !csh_dir.exists() {
-            log_debug!("Creating directory: {:?}", csh_dir);
-            fs::create_dir(&csh_dir)?;
+        // Create the .colorsh directory if it does not exist
+        if !colorsh_dir.exists() {
+            log_debug!("Creating directory: {:?}", colorsh_dir);
+            fs::create_dir(&colorsh_dir)?;
         }
 
         // Create the configuration file with sample content
-        let config_content = include_str!("../../templates/default.csh-config.yaml");
+        let config_content = include_str!("../../templates/default.colorsh-config.yaml");
         fs::write(&config_path, config_content)?;
         log_info!("Default configuration file created at: {:?}", config_path);
 

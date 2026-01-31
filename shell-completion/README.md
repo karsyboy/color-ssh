@@ -1,11 +1,11 @@
-# Shell Completion for CSH (Color SSH)
+# Shell Completion for colorsh (Color SSH)
 
-This directory contains shell completion integrations for `csh` (Color SSH) to provide enhanced tab completion and interactive host selection for both **Fish** and **Zsh** shells.
+This directory contains shell completion integrations for `colorsh` (Color SSH) to provide enhanced tab completion and interactive host selection for both **Fish** and **Zsh** shells.
 
 ## Credits
 
 The completion scripts in this directory are based on:
-- **Zsh**: [zsh-ssh](https://github.com/sunlei/zsh-ssh) by Sunlei - Modified to work with the `csh` CLI utility
+- **Zsh**: [zsh-ssh](https://github.com/sunlei/zsh-ssh) by Sunlei - Modified to work with the `colorsh` CLI utility
 - **Fish**: Custom implementation based off [zsh-ssh](https://github.com/sunlei/zsh-ssh) by Sunlei
 
 ## Features
@@ -31,12 +31,12 @@ The completion scripts in this directory are based on:
    mkdir -p ~/.config/fish/functions
    
    # Copy the completion files
-   cp fish/completions/csh.fish ~/.config/fish/completions/
-   cp fish/functions/__csh_fzf_complete.fish ~/.config/fish/functions/
+   cp fish/completions/colorsh.fish ~/.config/fish/completions/
+   cp fish/functions/__colorsh_fzf_complete.fish ~/.config/fish/functions/
    ```
 
 2. **Usage**:
-   - Type `csh` and press `Tab` to open the interactive fzf selector
+   - Type `colorsh` and press `Tab` to open the interactive fzf selector
    - Use arrow keys or type to filter hosts
    - Press `Enter` to select and execute
    - Press `Alt-Enter` to select without executing
@@ -60,16 +60,16 @@ Host myserver
 1. **Copy the completion script** to your Zsh config directory:
    ```bash
    # Create directory if it doesn't exist
-   mkdir -p ~/.zsh/zsh-csh
+   mkdir -p ~/.zsh/zsh-colorsh
    
    # Copy the completion script
-   cp zsh/zsh-csh.zsh ~/.zsh/zsh-csh/
+   cp zsh/zsh-colorsh.zsh ~/.zsh/zsh-colorsh/
    ```
 
 2. **Add to your `~/.zshrc`**:
    ```bash
    # Source the completion script
-   source ~/.zsh/zsh-csh/zsh-csh.zsh
+   source ~/.zsh/zsh-colorsh/zsh-colorsh.zsh
    ```
 
 3. **Reload your Zsh configuration**:
@@ -78,7 +78,7 @@ Host myserver
    ```
 
 4. **Usage**:
-   - Type `csh` and press `Tab` to see available hosts
+   - Type `colorsh` and press `Tab` to see available hosts
    - Continue typing to filter, or select from the list
 
 ## Auto Login with sshpass using GPG Encryption
@@ -101,7 +101,7 @@ This section describes how to use `sshpass` with GPG-encrypted passwords for aut
 
 3. **Connect using sshpass**:
    ```bash
-   sshpass -e csh <hostname>
+   sshpass -e colorsh <hostname>
    ```
 
 4. **Clear the password** from the environment when done:
@@ -111,32 +111,32 @@ This section describes how to use `sshpass` with GPG-encrypted passwords for aut
 
 ### Tab Completion for sshpass Aliases
 
-If you create an alias (e.g., `cshp`) for the sshpass command, you can set up tab completion:
+If you create an alias (e.g., `colorshp`) for the sshpass command, you can set up tab completion:
 
 #### Fish
 
 Create a new completion file for your alias:
 ```bash
-cp fish/completions/csh.fish ~/.config/fish/completions/cshp.fish
-sed -i 's/csh/cshp/g' ~/.config/fish/completions/cshp.fish
+cp fish/completions/colorsh.fish ~/.config/fish/completions/colorshp.fish
+sed -i 's/colorsh/colorshp/g' ~/.config/fish/completions/colorshp.fish
 ```
 Then add to your `~/.config/fish/config.fish`:
 ```bash
-alias cshp='sshpass -e csh'
+alias colorshp='sshpass -e colorsh'
 ```
 
 #### Zsh
 
 Create a new completion script for your alias:
 ```bash
-cp zsh/zsh-csh.zsh ~/.zsh/zsh-cshp/zsh-cshp.zsh
-sed -i 's/csh/cshp/g' ~/.zsh/zsh-cshp/zsh-cshp.zsh
+cp zsh/zsh-colorsh.zsh ~/.zsh/zsh-colorshp/zsh-colorshp.zsh
+sed -i 's/colorsh/colorshp/g' ~/.zsh/zsh-colorshp/zsh-colorshp.zsh
 ```
 
 Then add to your `~/.zshrc`:
 ```bash
-source ~/.zsh/zsh-cshp/zsh-cshp.zsh
-alias cshp='sshpass -e csh'
+source ~/.zsh/zsh-colorshp/zsh-colorshp.zsh
+alias colorshp='sshpass -e colorsh'
 
 # Optional for auto loading gpg key in
 source ~/ssh-in.sh

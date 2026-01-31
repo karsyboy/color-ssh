@@ -29,17 +29,17 @@ pub struct MainArgs {
 ///
 /// # Examples
 /// ```text
-/// csh -d user@example.com          # Debug mode enabled
-/// csh -l user@example.com          # SSH logging enabled
-/// csh -d -l user@example.com -p 22 # Both modes with SSH args
-/// csh -- -G user@example.com       # Non-interactive command (config dump).
+/// colorsh -d user@example.com          # Debug mode enabled
+/// colorsh -l user@example.com          # SSH logging enabled
+/// colorsh -d -l user@example.com -p 22 # Both modes with SSH args
+/// colorsh -- -G user@example.com       # Non-interactive command (config dump).
 /// ```
 ///
 /// # Returns
 /// A MainArgs struct containing all parsed arguments
 pub fn main_args() -> MainArgs {
-    let matches = Command::new("csh")
-        .version("v0.5.2")
+    let matches = Command::new("colorsh")
+        .version("v0.5.3")
         .author("@karsyboy")
         .about("A Rust-based SSH client wrapper with syntax highlighting and logging capabilities")
         .arg_required_else_help(true)
@@ -48,14 +48,14 @@ pub fn main_args() -> MainArgs {
             Arg::new("debug")
                 .short('d')
                 .long("debug")
-                .help("Enable debug mode with detailed logging to ~/.csh/logs/csh.log")
+                .help("Enable debug mode with detailed logging to ~/.colorsh/logs/colorsh.log")
                 .action(clap::ArgAction::SetTrue),
         )
         .arg(
             Arg::new("log")
                 .short('l')
                 .long("log")
-                .help("Enable SSH session logging to ~/.csh/logs/ssh_sessions/")
+                .help("Enable SSH session logging to ~/.colorsh/logs/ssh_sessions/")
                 .action(clap::ArgAction::SetTrue),
         )
         .arg(
@@ -75,11 +75,11 @@ pub fn main_args() -> MainArgs {
         )
         .after_help(
             r#"
-csh -d user@example.com                          # Debug mode enabled
-csh -l user@example.com                          # SSH logging enabled
-csh -l -P network user@firewall.example.com      # Use 'network' config profile
-csh -l user@host -p 2222 -i ~/.ssh/custom_key    # Both modes with SSH args
-csh user@host -G                                 # Non-interactive command
+colorsh -d user@example.com                          # Debug mode enabled
+colorsh -l user@example.com                          # SSH logging enabled
+colorsh -l -P network user@firewall.example.com      # Use 'network' config profile
+colorsh -l user@host -p 2222 -i ~/.ssh/custom_key    # Both modes with SSH args
+colorsh user@host -G                                 # Non-interactive command
 "#,
         )
         .get_matches();
