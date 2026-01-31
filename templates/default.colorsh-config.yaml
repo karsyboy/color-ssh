@@ -1,14 +1,14 @@
-# Description: This is the default template created by color-ssh (csh).
+# Description: This is the default template created by color-ssh (colorsh).
 # It provides basic keyword highlighting for common success/error patterns.
 # For more templates and examples, visit: https://github.com/karsyboy/color-ssh
 
 # ============================================================================
 # SETTINGS SECTION (Optional)
 # ============================================================================
-# Configure any of these settings to customize csh behavior:
+# Configure any of these settings to customize colorsh behavior:
 settings:
   show_title: true              # Display a colored title banner at session start
-  debug_mode: false             # Enable debug logging to ~/.csh/logs/csh.log
+  debug_mode: false             # Enable debug logging to ~/.colorsh/logs/colorsh.log
   ssh_logging: false            # Enable SSH session logging by default
   # remove_secrets:               # Regex patterns to redact from logs (useful for passwords/keys)
   #   - '9[\s]\$9\$.*'           # Example: Juniper type 9 secrets

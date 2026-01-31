@@ -18,7 +18,7 @@
 
 ## About
 
-**Color SSH** (`csh`) is a powerful Rust-based wrapper for SSH that enhances your terminal experience with real-time syntax highlighting and intelligent logging. Built for network engineers, system administrators, and anyone who works extensively with SSH, `csh` transforms plain SSH output into beautifully highlighted text using customizable, regex-based rules.
+**Color SSH** (`colorsh`) is a powerful Rust-based wrapper for SSH that enhances your terminal experience with real-time syntax highlighting and intelligent logging. Built for network engineers, system administrators, and anyone who works extensively with SSH, `colorsh` transforms plain SSH output into beautifully highlighted text using customizable, regex-based rules.
 
 Whether you're managing network devices, debugging servers, or analyzing logs, Color SSH makes it easier to spot critical information at a glance. Errors will stand out in red, successful operations will glow green, and everything is configurable to match your workflow.
 
@@ -34,7 +34,7 @@ Whether you're managing network devices, debugging servers, or analyzing logs, C
 - **🎯 Template Library**: Pre-built templates for network equipment and common use cases — community contributions welcome!
 - **🔄 Hot Reload**: Configuration changes apply automatically without restarting
 - **🐚 Shell Integration**: Enhanced tab completion and interactive host selection for Fish and Zsh
-- **🚀 Drop-in Replacement**: Works seamlessly as an SSH wrapper—just use `csh` instead of `ssh`
+- **🚀 Drop-in Replacement**: Works seamlessly as an SSH wrapper—just use `colorsh` instead of `ssh`
 
 ---
 
@@ -65,13 +65,13 @@ cd color-ssh
 cargo build --release
 
 # Optional: Install to system path
-sudo cp target/release/csh /usr/local/bin/
+sudo cp target/release/colorsh /usr/local/bin/
 ```
 
 ### Verify Installation
 
 ```bash
-csh --version
+colorsh --version
 ```
 
 ---
@@ -89,7 +89,7 @@ cargo uninstall color-ssh
 Note: This only removes the binary. To completely remove configuration files and logs, also run:
 
 ```bash
-rm -rf ~/.csh/
+rm -rf ~/.colorsh/
 ```
 
 ### Using Homebrew
@@ -106,13 +106,13 @@ If you installed using the installer script, follow these steps:
 
 ```bash
 # 1. Remove the main binary
-rm ~/.cargo/bin/csh
+rm ~/.cargo/bin/colorsh
 
 # 2. Remove the updater binary (if installed)
 rm -f ~/.cargo/bin/color-ssh-update
 
 # 3. Remove configuration and logs
-rm -rf ~/.csh/
+rm -rf ~/.colorsh/
 
 # 4. Remove the installation receipt
 rm -rf ~/.config/color-ssh/
@@ -124,13 +124,13 @@ If you installed using the PowerShell installer script:
 
 ```powershell
 # 1. Remove the main binary
-Remove-Item "$env:USERPROFILE\.cargo\bin\csh.exe" -Force
+Remove-Item "$env:USERPROFILE\.cargo\bin\colorsh.exe" -Force
 
 # 2. Remove the updater binary (if installed)
 Remove-Item "$env:USERPROFILE\.cargo\bin\color-ssh-update.exe" -Force -ErrorAction SilentlyContinue
 
 # 3. Remove configuration and logs
-Remove-Item "$env:USERPROFILE\.csh" -Recurse -Force -ErrorAction SilentlyContinue
+Remove-Item "$env:USERPROFILE\.colorsh" -Recurse -Force -ErrorAction SilentlyContinue
 
 # 4. Remove the installation receipt
 if ($env:XDG_CONFIG_HOME) {
@@ -146,11 +146,11 @@ If you installed shell completions, remove them as well:
 
 ```bash
 # Fish
-rm -f ~/.config/fish/completions/csh.fish
-rm -f ~/.config/fish/functions/__csh_fzf_complete.fish
+rm -f ~/.config/fish/completions/colorsh.fish
+rm -f ~/.config/fish/functions/__colorsh_fzf_complete.fish
 
 # Zsh
-# Remove the sourcing line from ~/.zshrc that references zsh-csh.zsh
+# Remove the sourcing line from ~/.zshrc that references zsh-colorsh.zsh
 ```
 
 ---
@@ -160,15 +160,15 @@ rm -f ~/.config/fish/functions/__csh_fzf_complete.fish
 ### Basic Command Structure
 
 ```bash
-csh [OPTIONS] <ssh_args>...
+colorsh [OPTIONS] <ssh_args>...
 ```
 
 ### Options
 
 | Option | Description |
 |--------|-------------|
-| `-d, --debug` | Enable debug mode with detailed logging to `~/.csh/logs/csh.log` |
-| `-l, --log` | Enable SSH session logging to `~/.csh/logs/ssh_sessions/` |
+| `-d, --debug` | Enable debug mode with detailed logging to `~/.colorsh/logs/colorsh.log` |
+| `-l, --log` | Enable SSH session logging to `~/.colorsh/logs/ssh_sessions/` |
 | `-P, --profile <name>` | Use a specific configuration profile |
 | `-h, --help` | Display help information |
 | `-V, --version` | Display version information |
@@ -177,26 +177,26 @@ csh [OPTIONS] <ssh_args>...
 
 ```bash
 # Basic SSH connection with syntax highlighting
-csh user@hostname
+colorsh user@hostname
 
 # Enable session logging
-csh -l admin@router.example.com
+colorsh -l admin@router.example.com
 
 # Use a specific configuration profile
-csh -P network cisco@switch.local
+colorsh -P network cisco@switch.local
 
 # Debug mode for troubleshooting
-csh -d user@server.com
+colorsh -d user@server.com
 
 # Combine options (logging + profile)
-csh -l -P network user@firewall.example.com
+colorsh -l -P network user@firewall.example.com
 
 # Pass SSH arguments through
-csh -l user@host -p 2222 -i ~/.ssh/custom_key
+colorsh -l user@host -p 2222 -i ~/.ssh/custom_key
 
 # Non-interactive SSH commands (highlighting disabled automatically)
-csh user@host -G          # Dump SSH configuration
-csh user@host -T          # Disable pseudo-terminal
+colorsh user@host -G          # Dump SSH configuration
+colorsh user@host -T          # Disable pseudo-terminal
 ```
 
 ### Session Logs
@@ -204,12 +204,12 @@ csh user@host -T          # Disable pseudo-terminal
 When using the `-l` or `--log` flag, SSH sessions are logged to:
 
 ```
-~/.csh/logs/ssh_sessions/YYYY-MM-DD/HOSTNAME.log
+~/.colorsh/logs/ssh_sessions/YYYY-MM-DD/HOSTNAME.log
 ```
 
 Example:
 ```
-~/.csh/logs/ssh_sessions/2026-01-26/router1.log
+~/.colorsh/logs/ssh_sessions/2026-01-26/router1.log
 ```
 
 ---
@@ -220,10 +220,10 @@ Example:
 
 Color SSH looks for configuration files in the following order:
 
-1. **Current directory**: `./[profile].csh-config.yaml`
-2. **Home directory**: `~/.csh/[profile].csh-config.yaml`
+1. **Current directory**: `./[profile].colorsh-config.yaml`
+2. **Home directory**: `~/.colorsh/[profile].colorsh-config.yaml`
 
-If no configuration file exists, Color SSH will automatically create a default configuration at `~/.csh/.csh-config.yaml`.
+If no configuration file exists, Color SSH will automatically create a default configuration at `~/.colorsh/.colorsh-config.yaml`.
 
 ### Configuration Profiles
 
@@ -231,13 +231,13 @@ Use profiles to maintain different configurations for different environments:
 
 ```bash
 # Default profile
-~/.csh/.csh-config.yaml
+~/.colorsh/.colorsh-config.yaml
 
 # Network devices profile
-~/.csh/network.csh-config.yaml
+~/.colorsh/network.colorsh-config.yaml
 
 # Usage
-csh -P network user@switch.local
+colorsh -P network user@switch.local
 ```
 
 ### Configuration Structure
@@ -293,7 +293,7 @@ rules:
 
 ### Example: Default Configuration
 
-The default configuration template (`templates/default.csh-config.yaml`) provides basic keyword highlighting:
+The default configuration template (`templates/default.colorsh-config.yaml`) provides basic keyword highlighting:
 
 ```yaml
 palette:
@@ -317,7 +317,7 @@ rules:
 
 ### Example: Network Devices Configuration
 
-For network engineers, the `templates/network.csh-config.yaml` template provides extensive highlighting for Cisco and other network devices (Reference the actual file for a detailed config):
+For network engineers, the `templates/network.colorsh-config.yaml` template provides extensive highlighting for Cisco and other network devices (Reference the actual file for a detailed config):
 
 ```yaml
 settings:
@@ -419,7 +419,7 @@ cargo test
 
 # Build and test locally
 cargo build --release
-./target/release/csh user@testhost
+./target/release/colorsh user@testhost
 
 # Run linter
 cargo clippy

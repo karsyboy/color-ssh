@@ -114,7 +114,7 @@ impl SshLogger {
         let home_dir = dirs::home_dir().ok_or_else(|| LogError::DirectoryCreationError("Home directory not found".to_string()))?;
 
         let date = Local::now().format("%Y-%m-%d");
-        let log_dir = home_dir.join(".csh").join("logs").join("ssh_sessions").join(date.to_string());
+        let log_dir = home_dir.join(".colorsh").join("logs").join("ssh_sessions").join(date.to_string());
 
         std::fs::create_dir_all(&log_dir)?;
 
