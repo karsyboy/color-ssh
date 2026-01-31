@@ -1,7 +1,6 @@
-
-<div class="rainbow-text" style="font-size: 5em; text-align: center;">
-  <span class="block-line"><span><span style="color:#ff0000">C</span><span style="color:#ff5500">O</span><span style="color:#ffaa00">L</span><span style="color:#ffff00">O</span><span style="color:#aaff00">R&nbsp;</span></span><span><span style="color:#55ff00">S</span><span style="color:#00ff00">S</span><span style="color:#00ff55">H&nbsp;</span></span><span style="color:#00ffaa">-&nbsp;</span><span><span style="color:#00ffff">(</span><span style="color:#00aaff">c</span><span style="color:#0055ff">o</span><span style="color:#0000ff">l</span><span style="color:#5500ff">o</span><span style="color:#aa00ff">r</span><span style="color:#ff00ff">s</span><span style="color:#ff00aa">h</span><span style="color:#ff0055">)</span></span></span>
-</div>
+<p align="center">
+  <img src="https://raw.githubusercontent.com/karsyboy/color-ssh/refs/heads/main/.resources/title.svg" />
+</p>
 
 <p align="center">
     <a href="https://github.com/karsyboy/color-ssh/releases">
