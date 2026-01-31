@@ -39,7 +39,7 @@ pub struct MainArgs {
 /// A MainArgs struct containing all parsed arguments
 pub fn main_args() -> MainArgs {
     let matches = Command::new("colorsh")
-        .version("v0.5.3")
+        .version("v0.5.4")
         .author("@karsyboy")
         .about("A Rust-based SSH client wrapper with syntax highlighting and logging capabilities")
         .arg_required_else_help(true)
@@ -65,7 +65,7 @@ pub fn main_args() -> MainArgs {
                 .help("Specify a configuration profile to use")
                 .num_args(1)
                 .required(false)
-                .default_value(""),
+                // .default_value(""),
         )
         .arg(
             Arg::new("ssh_args")

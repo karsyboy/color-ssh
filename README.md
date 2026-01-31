@@ -64,7 +64,7 @@ Arguments:
 Options:
   -d, --debug              Enable debug mode with detailed logging to ~/.colorsh/logs/colorsh.log
   -l, --log                Enable SSH session logging to ~/.colorsh/logs/ssh_sessions/
-  -P, --profile <profile>  Specify a configuration profile to use [default: ]
+  -P, --profile <profile>  Specify a configuration profile to use
   -h, --help               Print help
   -V, --version            Print version
 
