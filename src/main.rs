@@ -1,4 +1,4 @@
-//! color-ssh (csh) - A Rust-based SSH client wrapper with syntax highlighting
+//! color-ssh (colorsh) - A Rust-based SSH client wrapper with syntax highlighting
 //!
 //! Main entry point that coordinates:
 //! - Command-line argument parsing
@@ -6,7 +6,7 @@
 //! - Configuration loading and watching
 //! - SSH process spawning and management
 
-use csh::{Result, args, config, log, log_debug, log_error, log_info, process};
+use colorsh::{Result, args, config, log, log_debug, log_error, log_info, process};
 use std::process::ExitCode;
 
 /// Extracts the SSH destination hostname from the provided SSH arguments.
