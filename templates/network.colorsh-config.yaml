@@ -2,6 +2,9 @@
 # It is based industry standard networking devices.
 # color-ssh templates can be found at https://github.com/karsyboy/color-ssh
 
+# ============================================================================
+# SETTINGS SECTION (Optional)
+# ============================================================================
 settings:
   remove_secrets:
     - '9[\s]\$9\$.*'
@@ -12,6 +15,9 @@ settings:
   debug_mode: false
   ssh_logging: true
 
+# ============================================================================
+# COLOR PALETTE
+# ============================================================================
 palette:
   Sunrise-Orange: '#e67547'
   Aqua-Blue: '#00e0d1'
@@ -28,6 +34,9 @@ palette:
   Dark-Lime-Green: '#79bf02'
   Kelly-Green: '#28c501'
 
+# ============================================================================
+# HIGHLIGHTING RULES
+# ============================================================================
 rules:
 # Switch Prompt
 - description: Prompt in enabled mode for network switches
