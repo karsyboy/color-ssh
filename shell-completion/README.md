@@ -1,4 +1,4 @@
-# Shell Completion for colorsh
+# Shell Completion for cossh
 
 ![shell_completion_example](../.resources/shell_example.png)
 
@@ -23,8 +23,8 @@ The completion scripts in this directory are based on:
    mkdir -p ~/.config/fish/functions
    
    # Copy the completion files
-   cp fish/completions/colorsh.fish ~/.config/fish/completions/
-   cp fish/functions/__colorsh_fzf_complete.fish ~/.config/fish/functions/
+   cp fish/completions/cossh.fish ~/.config/fish/completions/
+   cp fish/functions/__cossh_fzf_complete.fish ~/.config/fish/functions/
    ```
 
 ### Zsh Shell
@@ -32,13 +32,13 @@ The completion scripts in this directory are based on:
 #### Installation Steps
    ```bash
    # Create directory if it doesn't exist
-   mkdir -p ~/.zsh/zsh-colorsh
+   mkdir -p ~/.zsh/zsh-cossh
    
    # Copy the completion script
-   cp zsh/zsh-colorsh.zsh ~/.zsh/zsh-colorsh/
+   cp zsh/zsh-cossh.zsh ~/.zsh/zsh-cossh/
 
    # Source the completion script in ~/.zshrc
-   source ~/.zsh/zsh-colorsh/zsh-colorsh.zsh 
+   source ~/.zsh/zsh-cossh/zsh-cossh.zsh 
    ```
 
 #### Adding Custom Descriptions
@@ -54,12 +54,12 @@ Host myserver
 ## Uninstall
 ```bash
 # Fish
-rm -f ~/.config/fish/completions/colorsh.fish
-rm -f ~/.config/fish/functions/__colorsh_fzf_complete.fish
+rm -f ~/.config/fish/completions/cossh.fish
+rm -f ~/.config/fish/functions/__cossh_fzf_complete.fish
 
 # Zsh
-# Remove the sourcing line from ~/.zshrc that references zsh-colorsh.zsh
-rm -f ~/.zsh/zsh-colorsh/zsh-colorsh.zsh
+# Remove the sourcing line from ~/.zshrc that references zsh-cossh.zsh
+rm -f ~/.zsh/zsh-cossh/zsh-cossh.zsh
 ```
 
 ## Auto Login with sshpass using GPG Encryption
@@ -82,7 +82,7 @@ This section describes how to use `sshpass` with GPG-encrypted passwords for aut
 
 3. **Connect using sshpass**:
    ```bash
-   sshpass -e colorsh <hostname>
+   sshpass -e cossh <hostname>
    ```
 
 4. **Clear the password** from the environment when done:
@@ -92,30 +92,30 @@ This section describes how to use `sshpass` with GPG-encrypted passwords for aut
 
 ### Tab Completion for sshpass Aliases
 
-If you create an alias (Ex. `colorshp`) for the sshpass command you can set up tab completion:
+If you create an alias (Ex. `cosshp`) for the sshpass command you can set up tab completion:
 
 #### Fish
 
 Create a new completion file for your alias:
 ```bash
-cp fish/completions/colorsh.fish ~/.config/fish/completions/colorshp.fish
-sed -i 's/colorsh/colorshp/g' ~/.config/fish/completions/colorshp.fish
+cp fish/completions/cossh.fish ~/.config/fish/completions/cosshp.fish
+sed -i 's/cossh/cosshp/g' ~/.config/fish/completions/cosshp.fish
 ```
 Then add to your `~/.config/fish/config.fish`:
 ```bash
-alias colorshp='sshpass -e colorsh'
+alias cosshp='sshpass -e cossh'
 ```
 
 #### Zsh
 
 Create a new completion script for your alias:
 ```bash
-cp zsh/zsh-colorsh.zsh ~/.zsh/zsh-colorshp/zsh-colorshp.zsh
-sed -i 's/colorsh/colorshp/g' ~/.zsh/zsh-colorshp/zsh-colorshp.zsh
+cp zsh/zsh-cossh.zsh ~/.zsh/zsh-cosshp/zsh-cosshp.zsh
+sed -i 's/cossh/cosshp/g' ~/.zsh/zsh-cosshp/zsh-cosshp.zsh
 ```
 
 Then add to your `~/.zshrc`:
 ```bash
-source ~/.zsh/zsh-colorshp/zsh-colorshp.zsh
-alias colorshp='sshpass -e colorsh'
+source ~/.zsh/zsh-cosshp/zsh-cosshp.zsh
+alias cosshp='sshpass -e cossh'
 ```

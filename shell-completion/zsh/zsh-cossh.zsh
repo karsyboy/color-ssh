@@ -4,13 +4,13 @@
 # https://github.com/sunlei/zsh-ssh
 # v0.0.7
 # Copyright (c) 2020 Sunlei <guizaicn@gmail.com>
-# This script is a modified copy of the orginal from above to work with the colorsh cli utility.
-# Minor changes have been mode to refrence of ssh to make it work with colorsh
+# This script is a modified copy of the orginal from above to work with the cossh cli utility.
+# Minor changes have been mode to refrence of ssh to make it work with cossh
 
 setopt no_beep # don't beep
-zstyle ':completion:*:colorsh:*' hosts off # disable built-in hosts completion
+zstyle ':completion:*:cossh:*' hosts off # disable built-in hosts completion
 
-COLORSH_CONFIG_FILE="${COLORSH_CONFIG_FILE:-$HOME/.ssh/config}"
+COSSH_CONFIG_FILE="${COSSH_CONFIG_FILE:-$HOME/.ssh/config}"
 
 # Parse the file and handle the include directive.
 _parse_config_file() {
@@ -54,13 +54,13 @@ _parse_config_file() {
   done < "$config_file_path"
 }
 
-_colorsh_host_list() {
-  local colorsh_config host_list
+_cossh_host_list() {
+  local cossh_config host_list
 
-  colorsh_config=$(_parse_config_file $colorsh_CONFIG_FILE)
-  colorsh_config=$(echo $colorsh_config | command grep -v -E "^\s*#[^_]")
+  cossh_config=$(_parse_config_file $COSSH_CONFIG_FILE)
+  cossh_config=$(echo $cossh_config | command grep -v -E "^\s*#[^_]")
 
-  host_list=$(echo $colorsh_config | command awk '
+  host_list=$(echo $cossh_config | command awk '
     function join(array, start, end, sep, result, i) {
       # https://www.gnu.org/software/gawk/manual/html_node/Join-Function.html
       if (sep == "")
@@ -174,7 +174,7 @@ _fzf_list_generator() {
   if [ -n "$1" ]; then
     host_list="$1"
   else
-    host_list=$(_colorsh_host_list)
+    host_list=$(_cossh_host_list)
   fi
 
   header="
@@ -197,28 +197,28 @@ _set_lbuffer() {
   fi
 
   selected_host=$(cut -f 1 -d " " <<< ${result})
-  connect_cmd="colorsh ${selected_host}"
+  connect_cmd="cossh ${selected_host}"
 
   LBUFFER="$connect_cmd"
 }
 
-fzf_complete_colorsh() {
+fzf_complete_cossh() {
   local tokens cmd result key selection
   setopt localoptions noshwordsplit noksh_arrays noposixbuiltins
 
   tokens=(${(z)LBUFFER})
   cmd=${tokens[1]}
 
-  if [[ "$LBUFFER" =~ "^ *colorsh$" ]]; then
-    zle ${fzf_colorsh_default_completion:-expand-or-complete}
-  elif [[ "$cmd" == "colorsh" ]]; then
-    result=$(_colorsh_host_list ${tokens[2, -1]})
+  if [[ "$LBUFFER" =~ "^ *cossh$" ]]; then
+    zle ${fzf_cossh_default_completion:-expand-or-complete}
+  elif [[ "$cmd" == "cossh" ]]; then
+    result=$(_cossh_host_list ${tokens[2, -1]})
     fuzzy_input="${LBUFFER#"$tokens[1] "}"
 
     if [ -z "$result" ]; then
       # When host parameters exist, don't fall back to default completion to avoid slow hosts enumeration
       if [[ -z "${tokens[2]}" || "${tokens[-1]}" == -* ]]; then
-        zle ${fzf_colorsh_default_completion:-expand-or-complete}
+        zle ${fzf_cossh_default_completion:-expand-or-complete}
       fi
       return
     fi
@@ -238,7 +238,7 @@ fzf_complete_colorsh() {
       --info=inline \
       --header-lines=2 \
       --reverse \
-      --prompt='ColorSH Remote > ' \
+      --prompt='Color SSH > ' \
       --query=$fuzzy_input \
       --no-separator \
       --bind 'shift-tab:up,tab:down,bspace:backward-delete-char/eof' \
@@ -274,19 +274,19 @@ fzf_complete_colorsh() {
 
   # Fall back to default completion
   else
-    zle ${fzf_colorsh_default_completion:-expand-or-complete}
+    zle ${fzf_cossh_default_completion:-expand-or-complete}
   fi
 }
 
 
-[ -z "$fzf_colorsh_default_completion" ] && {
+[ -z "$fzf_cossh_default_completion" ] && {
   binding=$(bindkey '^I')
-  [[ $binding =~ 'undefined-key' ]] || fzf_colorsh_default_completion=$binding[(s: :w)2]
+  [[ $binding =~ 'undefined-key' ]] || fzf_cossh_default_completion=$binding[(s: :w)2]
   unset binding
 }
 
 
-zle -N fzf_complete_colorsh
-bindkey '^I' fzf_complete_colorsh
+zle -N fzf_complete_cossh
+bindkey '^I' fzf_complete_cossh
 
 # vim: set ft=zsh sw=2 ts=2 et

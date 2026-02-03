@@ -5,7 +5,7 @@ Contributions are welcomed just please make sure to do the following before open
 ```bash
 # Build and test locally
 cargo build --release
-./target/release/colorsh user@testhost
+./target/release/cossh user@testhost
 
 # Run linter
 cargo clippy
