@@ -1,4 +1,4 @@
-//! color-ssh (colorsh) - A Rust-based SSH client wrapper with syntax highlighting
+//! color-ssh (cossh) - A Rust-based SSH client wrapper with syntax highlighting
 //!
 //! This library provides the core functionality for the color-ssh tool, which wraps
 //! SSH connections with syntax highlighting and enhanced logging capabilities.
@@ -23,9 +23,9 @@
 //! Basic usage as a library:
 //!
 //! ```no_run
-//! use colorsh::{args, config, process};
+//! use cossh::{args, config, process};
 //!
-//! fn main() -> colorsh::Result<std::process::ExitCode> {
+//! fn main() -> cossh::Result<std::process::ExitCode> {
 //!     // Parse arguments
 //!     let args = args::main_args();
 //!     
@@ -37,7 +37,7 @@
 //! }
 //! ```
 
-// Imports colorsh specific modules
+// Imports cossh specific modules
 pub mod args;
 pub mod config;
 pub mod highlighter;

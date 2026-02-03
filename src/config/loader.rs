@@ -29,21 +29,21 @@ impl ConfigLoader {
     fn find_config_path(profile: &Option<String>) -> Result<PathBuf, io::Error> {
         log_debug!("Searching for configuration file...");
         let config_filename = match profile {
-            Some(p) if !p.is_empty() => format!("{}.colorsh-config.yaml", p),
-            _ => ".colorsh-config.yaml".to_string(),
+            Some(p) if !p.is_empty() => format!("{}.cossh-config.yaml", p),
+            _ => ".cossh-config.yaml".to_string(),
         };
 
-        // Check first possible location: ~/.colorsh/{profile}.colorsh-config.yaml
+        // Check first possible location: ~/.color-ssh/{profile}.cossh-config.yaml
         if let Some(home_dir) = dirs::home_dir() {
-            let colorsh_dir_path = home_dir.join(".colorsh").join(&config_filename);
-            log_debug!("Checking: {:?}", colorsh_dir_path);
-            if colorsh_dir_path.exists() {
-                log_info!("Found config at: {:?}", colorsh_dir_path);
-                return Ok(colorsh_dir_path);
+            let cossh_dir_path = home_dir.join(".color-ssh").join(&config_filename);
+            log_debug!("Checking: {:?}", cossh_dir_path);
+            if cossh_dir_path.exists() {
+                log_info!("Found config at: {:?}", cossh_dir_path);
+                return Ok(cossh_dir_path);
             }
         }
 
-        // Check second possible location: ~/{profile}.colorsh-config.yaml
+        // Check second possible location: ~/{profile}.cossh-config.yaml
         if let Some(home_dir) = dirs::home_dir() {
             let home_dir_path = home_dir.join(&config_filename);
             log_debug!("Checking: {:?}", home_dir_path);
@@ -90,17 +90,17 @@ impl ConfigLoader {
     /// Create a default configuration file if none exists
     fn create_default_config() -> io::Result<PathBuf> {
         let home_dir = dirs::home_dir().ok_or_else(|| io::Error::new(io::ErrorKind::NotFound, "Failed to get home directory"))?;
-        let colorsh_dir = home_dir.join(".colorsh");
-        let config_path = colorsh_dir.join(".colorsh-config.yaml");
+        let cossh_dir = home_dir.join(".color-ssh");
+        let config_path = cossh_dir.join(".cossh-config.yaml");
 
-        // Create the .colorsh directory if it does not exist
-        if !colorsh_dir.exists() {
-            log_debug!("Creating directory: {:?}", colorsh_dir);
-            fs::create_dir(&colorsh_dir)?;
+        // Create the .cossh directory if it does not exist
+        if !cossh_dir.exists() {
+            log_debug!("Creating directory: {:?}", cossh_dir);
+            fs::create_dir(&cossh_dir)?;
         }
 
         // Create the configuration file with sample content
-        let config_content = include_str!("../../templates/default.colorsh-config.yaml");
+        let config_content = include_str!("../../templates/default.cossh-config.yaml");
         fs::write(&config_path, config_content)?;
         log_info!("Default configuration file created at: {:?}", config_path);
 

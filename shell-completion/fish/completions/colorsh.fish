@@ -1,1 +1,1 @@
-complete -c colorsh -f -n "__fish_use_subcommand" -a "(__colorsh_fzf_complete)"
+complete -c cossh -f -n "__fish_use_subcommand" -a "(__cossh_fzf_complete)"

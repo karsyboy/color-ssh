@@ -16,9 +16,9 @@
 
 ## About
 
-**Color SSH** (`colorsh`) is a Rust-based wrapper for SSH that enhances your terminal experience with real-time syntax highlighting and session logging. Built for network engineers, system administrators, and anyone who works with devices that have basic shells.
+**Color SSH** (`cossh`) is a Rust-based wrapper for SSH that enhances your terminal experience with real-time syntax highlighting and session logging. Built for network engineers, system administrators, and anyone who works with devices that have basic shells.
 
-![colorsh_example](./.resources/colorsh_example.png)
+![cossh_example](./.resources/cossh_example.png)
 
 ## Features
 
@@ -56,24 +56,24 @@ Shell completeion scripts are included for `fish` and `zsh`. For instructions se
 ## Usage
 
 ```bash
-Usage: colorsh [OPTIONS] <ssh_args>...
+Usage: cossh [OPTIONS] <ssh_args>...
 
 Arguments:
   <ssh_args>...  SSH arguments to forward to the SSH command
 
 Options:
-  -d, --debug              Enable debug mode with detailed logging to ~/.colorsh/logs/colorsh.log
-  -l, --log                Enable SSH session logging to ~/.colorsh/logs/ssh_sessions/
+  -d, --debug              Enable debug mode with detailed logging to ~/.color-ssh/logs/cossh.log
+  -l, --log                Enable SSH session logging to ~/.color-ssh/logs/ssh_sessions/
   -P, --profile <profile>  Specify a configuration profile to use
   -h, --help               Print help
   -V, --version            Print version
 
 
-colorsh -d user@example.com                          # Debug mode enabled
-colorsh -l user@example.com                          # SSH logging enabled
-colorsh -l -P network user@firewall.example.com      # Use 'network' config profile
-colorsh -l user@host -p 2222 -i ~/.ssh/custom_key    # Both modes with SSH args
-colorsh user@host -G                                 # Non-interactive command
+cossh -d user@example.com                          # Debug mode enabled
+cossh -l user@example.com                          # SSH logging enabled
+cossh -l -P network user@firewall.example.com      # Use 'network' config profile
+cossh -l user@host -p 2222 -i ~/.ssh/custom_key    # Both modes with SSH args
+cossh user@host -G                                 # Non-interactive command
 ```
 
 
@@ -81,10 +81,10 @@ colorsh user@host -G                                 # Non-interactive command
 
 Configuration files are looked for in the following order:
 
-1. **Current directory**: `./[profile].colorsh-config.yaml`
-2. **Home directory**: `~/.colorsh/[profile].colorsh-config.yaml`
+1. **Current directory**: `./[profile].cossh-config.yaml`
+2. **Home directory**: `~/.color-ssh/[profile].cossh-config.yaml`
 
-If no configuration file is found the default configuration will be created at  `~/.colorsh/.colorsh-config.yaml`.
+If no configuration file is found the default configuration will be created at  `~/.color-ssh/.cossh-config.yaml`.
 
 
 ## Uninstall
@@ -102,13 +102,13 @@ brew uninstall color-ssh
 ### Linux/macOS (Manual)
 ```bash
 # 1. Remove the main binary
-rm ~/.cargo/bin/colorsh
+rm ~/.cargo/bin/cossh
 
 # 2. Remove the updater binary
 rm -f ~/.cargo/bin/color-ssh-update
 
 # 3. (Optional) Remove configuration and logs
-rm -rf ~/.colorsh/
+rm -rf ~/.color-ssh/
 
 # 4. Remove the installation receipt
 rm -rf ~/.config/color-ssh/
@@ -117,13 +117,13 @@ rm -rf ~/.config/color-ssh/
 ### Windows
 ```powershell
 # 1. Remove the main binary
-Remove-Item "$env:USERPROFILE\.cargo\bin\colorsh.exe" -Force
+Remove-Item "$env:USERPROFILE\.cargo\bin\cossh.exe" -Force
 
 # 2. Remove the updater binary
 Remove-Item "$env:USERPROFILE\.cargo\bin\color-ssh-update.exe" -Force
 
 # 3. (Optional) Remove configuration and logs
-Remove-Item "$env:USERPROFILE\.colorsh" -Recurse -Force
+Remove-Item "$env:USERPROFILE\.color-ssh" -Recurse -Force
 
 # 4. Remove the installation receipt
 Remove-Item "$env:LOCALAPPDATA\color-ssh" -Recurse -Force

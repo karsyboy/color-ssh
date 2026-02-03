@@ -29,16 +29,16 @@ pub struct MainArgs {
 ///
 /// # Examples
 /// ```text
-/// colorsh -d user@example.com          # Debug mode enabled
-/// colorsh -l user@example.com          # SSH logging enabled
-/// colorsh -d -l user@example.com -p 22 # Both modes with SSH args
-/// colorsh -- -G user@example.com       # Non-interactive command (config dump).
+/// cossh -d user@example.com          # Debug mode enabled
+/// cossh -l user@example.com          # SSH logging enabled
+/// cossh -d -l user@example.com -p 22 # Both modes with SSH args
+/// cossh -- -G user@example.com       # Non-interactive command (config dump).
 /// ```
 ///
 /// # Returns
 /// A MainArgs struct containing all parsed arguments
 pub fn main_args() -> MainArgs {
-    let matches = Command::new("colorsh")
+    let matches = Command::new("cossh")
         .version("v0.5.4")
         .author("@karsyboy")
         .about("A Rust-based SSH client wrapper with syntax highlighting and logging capabilities")
@@ -48,14 +48,14 @@ pub fn main_args() -> MainArgs {
             Arg::new("debug")
                 .short('d')
                 .long("debug")
-                .help("Enable debug mode with detailed logging to ~/.colorsh/logs/colorsh.log")
+                .help("Enable debug mode with detailed logging to ~/.color-ssh/logs/cossh.log")
                 .action(clap::ArgAction::SetTrue),
         )
         .arg(
             Arg::new("log")
                 .short('l')
                 .long("log")
-                .help("Enable SSH session logging to ~/.colorsh/logs/ssh_sessions/")
+                .help("Enable SSH session logging to ~/.color-ssh/logs/ssh_sessions/")
                 .action(clap::ArgAction::SetTrue),
         )
         .arg(
@@ -64,8 +64,7 @@ pub fn main_args() -> MainArgs {
                 .long("profile")
                 .help("Specify a configuration profile to use")
                 .num_args(1)
-                .required(false)
-                // .default_value(""),
+                .required(false), // .default_value(""),
         )
         .arg(
             Arg::new("ssh_args")
@@ -75,11 +74,11 @@ pub fn main_args() -> MainArgs {
         )
         .after_help(
             r#"
-colorsh -d user@example.com                          # Debug mode enabled
-colorsh -l user@example.com                          # SSH logging enabled
-colorsh -l -P network user@firewall.example.com      # Use 'network' config profile
-colorsh -l user@host -p 2222 -i ~/.ssh/custom_key    # Both modes with SSH args
-colorsh user@host -G                                 # Non-interactive command
+cossh -d user@example.com                          # Debug mode enabled
+cossh -l user@example.com                          # SSH logging enabled
+cossh -l -P network user@firewall.example.com      # Use 'network' config profile
+cossh -l user@host -p 2222 -i ~/.ssh/custom_key    # Both modes with SSH args
+cossh user@host -G                                 # Non-interactive command
 "#,
         )
         .get_matches();

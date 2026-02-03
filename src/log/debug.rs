@@ -1,7 +1,7 @@
 //! Debug logging implementation
 //!
 //! Provides file-based logging for debug, info, warn, and error messages.
-//! Logs are written to `~/.colorsh/logs/colorsh.log` with timestamps and log levels.
+//! Logs are written to `~/.color-ssh/logs/cossh.log` with timestamps and log levels.
 
 use super::{LogError, LogLevel, formatter::LogFormatter};
 use once_cell::sync::Lazy;
@@ -72,11 +72,11 @@ impl DebugLogger {
     fn get_debug_log_path(&self) -> Result<PathBuf, LogError> {
         let home_dir = dirs::home_dir().ok_or_else(|| LogError::DirectoryCreationError("Home directory not found".to_string()))?;
 
-        let log_dir = home_dir.join(".colorsh").join("logs");
+        let log_dir = home_dir.join(".color-ssh").join("logs");
 
         // Create directory structure if it doesn't exist
         std::fs::create_dir_all(&log_dir)?;
 
-        Ok(log_dir.join("colorsh.log"))
+        Ok(log_dir.join("cossh.log"))
     }
 }

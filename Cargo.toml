@@ -13,11 +13,11 @@ keywords = ["ssh", "client", "syntax", "highlighting"]
 categories = ["command-line-interface", "command-line-utilities", "network-programming"]
 
 [[bin]]
-name = "colorsh"
+name = "cossh"
 path = "src/main.rs"
 
 [lib]
-name = "colorsh"
+name = "cossh"
 path = "src/lib.rs"
 
 [dependencies]

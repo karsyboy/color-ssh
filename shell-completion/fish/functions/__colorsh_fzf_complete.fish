@@ -1,7 +1,7 @@
 # Recursively parse an SSH config file and all Include directives.
 # This flattens the full SSH config into a single stream of lines,
 # preserving order and relative include paths.
-function __colorsh_parse_config --argument-names file
+function __cossh_parse_config --argument-names file
     if not test -f "$file"
         return
     end
@@ -24,7 +24,7 @@ function __colorsh_parse_config --argument-names file
                 # Expand globs naturally (no ls, no eval)
                 for f in $p
                     if test -f "$f"
-                        __colorsh_parse_config "$f"
+                        __cossh_parse_config "$f"
                     end
                 end
             end
@@ -37,10 +37,10 @@ end
 # Build a structured host table from the SSH config.
 # Output format (pipe-delimited):
 #   alias|hostname|user|description
-function __colorsh_host_table
+function __cossh_host_table
     set config "$HOME/.ssh/config"
 
-    __colorsh_parse_config $config \
+    __cossh_parse_config $config \
     | awk '
         BEGIN {
             IGNORECASE=1
@@ -86,13 +86,13 @@ end
 
 # Launch fzf to interactively select a host.
 # Displays a columnized table with a live SSH config preview.
-function __colorsh_fzf_select --argument-names query
+function __cossh_fzf_select --argument-names query
     # Table header displayed above results
     set header "Alias|Hostname|User|Desc"
     set sep    "─────|────────|────|────"
 
     # Generate host table
-    set data (__colorsh_host_table)
+    set data (__cossh_host_table)
     if test -z "$data"
         return
     end
@@ -109,7 +109,7 @@ function __colorsh_fzf_select --argument-names query
             --reverse \
             --info=inline \
             --header-lines=2 \
-            --prompt 'ColorSH Remote > ' \
+            --prompt 'cossh Remote > ' \
             --query "$query" \
             --no-separator \
             # Tab navigation + backspace-to-exit behavior
@@ -142,12 +142,12 @@ function __colorsh_fzf_select --argument-names query
 end
 
 # Fish completion entrypoint.
-# Replaces the current commandline with `colorsh <host>` and optionally executes it.
-function __colorsh_fzf_complete
+# Replaces the current commandline with `cossh <host>` and optionally executes it.
+function __cossh_fzf_complete
     # Current token under cursor (used as fzf query)
     set query (commandline -ct)
 
-    set res (__colorsh_fzf_select "$query")
+    set res (__cossh_fzf_select "$query")
     if test -z "$res"
         return
     end
@@ -157,7 +157,7 @@ function __colorsh_fzf_complete
     set host (string split '|' $res)[2]
 
     # Replace commandline with selected host
-    commandline -r "colorsh $host"
+    commandline -r "cossh $host"
 
     # Execute immediately unless Alt-Enter was used
     if test "$key" = "enter"

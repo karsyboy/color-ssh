@@ -28,7 +28,7 @@ use std::sync::{Arc, RwLock};
 /// # Examples
 ///
 /// ```no_run
-/// use colorsh::config;
+/// use cossh::config;
 ///
 /// // Read configuration using helper
 /// let config = config::get_config();
