@@ -1,30 +1,22 @@
-# Shell Completion for colorsh (Color SSH)
+# Shell Completion for colorsh
 
-This directory contains shell completion integrations for `colorsh` (Color SSH) to provide enhanced tab completion and interactive host selection for both **Fish** and **Zsh** shells.
+![shell_completion_example](../.resources/shell_example.png)
+
 
 ## Credits
 
 The completion scripts in this directory are based on:
-- **Zsh**: [zsh-ssh](https://github.com/sunlei/zsh-ssh) by Sunlei - Modified to work with the `colorsh` CLI utility
-- **Fish**: Custom implementation based off [zsh-ssh](https://github.com/sunlei/zsh-ssh) by Sunlei
+- [zsh-ssh](https://github.com/sunlei/zsh-ssh) by Sunlei - Thank you for the awesome scripts!
 
-## Features
-
-- **Smart SSH Config Parsing**: Automatically parses your `~/.ssh/config` file and handles `Include` directives
-- **Tab Completion**: Quick access to your configured SSH hosts
-- **Interactive Selection**: Uses fzf for a beautiful interactive host picker with live preview
-- **Host Information Display**: Shows hostname, user, and custom descriptions from your SSH config
 
 ## Installation
 
 ### Fish Shell
 
 #### Prerequisites
-- [fzf](https://github.com/junegunn/fzf) (for interactive completion)
-
+- [fzf](https://github.com/junegunn/fzf)
+- fish or zsh
 #### Installation Steps
-
-1. **Copy completion files** to your Fish config directory:
    ```bash
    # Create directories if they don't exist
    mkdir -p ~/.config/fish/completions
@@ -35,16 +27,23 @@ The completion scripts in this directory are based on:
    cp fish/functions/__colorsh_fzf_complete.fish ~/.config/fish/functions/
    ```
 
-2. **Usage**:
-   - Type `colorsh` and press `Tab` to open the interactive fzf selector
-   - Use arrow keys or type to filter hosts
-   - Press `Enter` to select and execute
-   - Press `Alt-Enter` to select without executing
-   - The preview pane shows the full SSH configuration for the selected host
+### Zsh Shell
+
+#### Installation Steps
+   ```bash
+   # Create directory if it doesn't exist
+   mkdir -p ~/.zsh/zsh-colorsh
+   
+   # Copy the completion script
+   cp zsh/zsh-colorsh.zsh ~/.zsh/zsh-colorsh/
+
+   # Source the completion script in ~/.zshrc
+   source ~/.zsh/zsh-colorsh/zsh-colorsh.zsh 
+   ```
 
 #### Adding Custom Descriptions
 
-You can add descriptions to your SSH hosts by adding `#_desc` comments in your `~/.ssh/config`:
+You can add descriptions to your SSH hosts by adding `#_desc` in your `~/.ssh/config`:
 
 ```ssh-config
 Host myserver
@@ -52,34 +51,16 @@ Host myserver
     User myuser
     #_desc Production web server
 ```
+## Uninstall
+```bash
+# Fish
+rm -f ~/.config/fish/completions/colorsh.fish
+rm -f ~/.config/fish/functions/__colorsh_fzf_complete.fish
 
-### Zsh Shell
-
-#### Installation Steps
-
-1. **Copy the completion script** to your Zsh config directory:
-   ```bash
-   # Create directory if it doesn't exist
-   mkdir -p ~/.zsh/zsh-colorsh
-   
-   # Copy the completion script
-   cp zsh/zsh-colorsh.zsh ~/.zsh/zsh-colorsh/
-   ```
-
-2. **Add to your `~/.zshrc`**:
-   ```bash
-   # Source the completion script
-   source ~/.zsh/zsh-colorsh/zsh-colorsh.zsh
-   ```
-
-3. **Reload your Zsh configuration**:
-   ```bash
-   source ~/.zshrc
-   ```
-
-4. **Usage**:
-   - Type `colorsh` and press `Tab` to see available hosts
-   - Continue typing to filter, or select from the list
+# Zsh
+# Remove the sourcing line from ~/.zshrc that references zsh-colorsh.zsh
+rm -f ~/.zsh/zsh-colorsh/zsh-colorsh.zsh
+```
 
 ## Auto Login with sshpass using GPG Encryption
 
@@ -89,14 +70,14 @@ This section describes how to use `sshpass` with GPG-encrypted passwords for aut
 
 1. **Encrypt your password** with GPG:
    ```bash
-   nano .sshpasswd              # Create and store password in temp file
-   gpg -c .sshpasswd            # Encrypt file with gpg
-   rm .sshpasswd                # Remove clear text file
+   nano .sshpasswd
+   gpg -c .sshpasswd
+   rm .sshpasswd
    ```
 
 2. **Load the password** into an environment variable:
    ```bash
-   source ssh-in.sh             # Creates SSHPASS env from GPG file
+   source ssh-in.sh
    ```
 
 3. **Connect using sshpass**:
@@ -106,12 +87,12 @@ This section describes how to use `sshpass` with GPG-encrypted passwords for aut
 
 4. **Clear the password** from the environment when done:
    ```bash
-   source ssh-out.sh            # Removes the SSHPASS env variable
+   source ssh-out.sh
    ```
 
 ### Tab Completion for sshpass Aliases
 
-If you create an alias (e.g., `colorshp`) for the sshpass command, you can set up tab completion:
+If you create an alias (Ex. `colorshp`) for the sshpass command you can set up tab completion:
 
 #### Fish
 
@@ -137,25 +118,4 @@ Then add to your `~/.zshrc`:
 ```bash
 source ~/.zsh/zsh-colorshp/zsh-colorshp.zsh
 alias colorshp='sshpass -e colorsh'
-
-# Optional for auto loading gpg key in
-source ~/ssh-in.sh
-
 ```
-
-## Troubleshooting
-
-### Fish Completion Not Working
-- Ensure fzf is installed: `fzf --version`
-- Check that the files are in the correct locations
-- Try `fish_update_completions` to refresh Fish's completion cache
-
-### Zsh Completion Not Working
-- Make sure the script is sourced in your `.zshrc`
-- Verify that `compdef` is called after sourcing the script
-- Try `compinit` to reinitialize completions
-
-### No Hosts Appearing
-- Verify your `~/.ssh/config` file exists and contains `Host` entries
-- Make sure host entries don't use wildcards (`*`)
-- Check file permissions on your SSH config
