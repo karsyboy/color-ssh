@@ -238,7 +238,7 @@ fzf_complete_cossh() {
       --info=inline \
       --header-lines=2 \
       --reverse \
-      --prompt='cossh Remote > ' \
+      --prompt='Color SSH > ' \
       --query=$fuzzy_input \
       --no-separator \
       --bind 'shift-tab:up,tab:down,bspace:backward-delete-char/eof' \

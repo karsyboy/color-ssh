@@ -109,7 +109,7 @@ function __cossh_fzf_select --argument-names query
             --reverse \
             --info=inline \
             --header-lines=2 \
-            --prompt 'cossh Remote > ' \
+            --prompt 'Color SSH > ' \
             --query "$query" \
             --no-separator \
             # Tab navigation + backspace-to-exit behavior
