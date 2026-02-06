@@ -75,7 +75,7 @@ rules:
   regex: |
     (?ix)
     \b
-    (management|mgmt|
+    (management|mgmt|ma|
     loopback|lo|
     tunnel|tu)
     (\d{1,4})?
@@ -195,7 +195,7 @@ rules:
   regex: |
     (?ix)
     \b
-    (1000BASE-T|2\.5GBASE-T|100/1000/2\.5GBaseTX|a-1000|a-2500|a-1G|a-2\.5G|1Gb/s|2\.5Gb/s|2500Mb/s|1000Mb/s)
+    (1000BASE-T|2\.5GBASE-T|100/1000/2\.5GBaseTX|a-1000|a-2500|a-1G|a-2\.5G|1Gb/s|2\.5Gb/s|2500Mb/s|1000Mb/s|2G|10/100/1000)
     \b
   color: Jade-Green
 
@@ -203,7 +203,7 @@ rules:
   regex: |
     (?ix)
     \b
-    (5GBASE-T|10GBASE-T|100/1000/2\.5G/5G/10GBaseTX|SFP-10GBase-CX1|SFP-10GBase-SR|
+    (5GBASE-T|10GBASE-T|100/1000/2\.5G/5G/10GBaseTX|SFP-10GBase-CX1|SFP-10GBase-SR|10GBASE-LR|10GBASE-SR|10GBASE-SRL|
     a-5000|a-5G|10G|5Gb/s|10Gb/s|5000Mb/s)
     \b
   color: Lime-Yellow
@@ -220,7 +220,7 @@ rules:
   regex: |
     (?ix)
     \b
-    (10/25GBaseSR|10/25GBaseLR|10/25GBaseER)
+    (10/25GBaseSR|10/25GBaseLR|10/25GBaseER|25G|20G)
     \b
   color: Mustard
 
@@ -237,7 +237,7 @@ rules:
     (?ix)
     \b
     (Tbit/sec|Gpps|Tpps|100GBaseSR|100GBaseLR|100GBaseER|
-    10/25/40/50/100GBaseSR|10/25/40/50/100GBaseLR|10/25/40/50/100GBaseER)
+    10/25/40/50/100GBaseSR|10/25/40/50/100GBaseLR|10/25/40/50/100GBaseER|100G|200G|400G)
     \b
   color: Vivid-Red-Orange
 
@@ -248,7 +248,7 @@ rules:
     \b
     (connected|up|access|yes|permit|OK|success|established|administratively\s+up|passed|
     complete|valid|active|enabled|forwarding|learning|down->up|success|enabled|secure|
-    reachable|resolved|succeeded|running|up/up|up/up/up|a-full|full-duplex|full)
+    reachable|resolved|succeeded|running|up/up|up/up/up|a-full|full-duplex|full|established|estab)
     \b
   color: Kelly-Green
 
@@ -265,7 +265,7 @@ rules:
   regex: |
     (?ix)
     \b
-    (xcvrAbsen|noOperMem|notconnect|notpresent|trunk|collisions|not\spresent|auto|unknown|duplex)
+    (xcvrAbsen|noOperMem|notconnect|notpresent|trunk|collisions|not\spresent|auto|unknown|duplex|Unknown100G|N/A)
     \b
   color: Sunrise-Orange
 
