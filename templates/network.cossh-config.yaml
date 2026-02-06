@@ -195,7 +195,7 @@ rules:
   regex: |
     (?ix)
     \b
-    (1000BASE-T|2\.5GBASE-T|100/1000/2\.5GBaseTX|a-1000|a-2500|a-1G|a-2\.5G|1Gb/s|2\.5Gb/s)
+    (1000BASE-T|2\.5GBASE-T|100/1000/2\.5GBaseTX|a-1000|a-2500|a-1G|a-2\.5G|1Gb/s|2\.5Gb/s|2500Mb/s|1000Mb/s)
     \b
   color: Jade-Green
 
@@ -204,7 +204,7 @@ rules:
     (?ix)
     \b
     (5GBASE-T|10GBASE-T|100/1000/2\.5G/5G/10GBaseTX|SFP-10GBase-CX1|SFP-10GBase-SR|
-    a-5000|a-5G|10G|5Gb/s|10Gb/s)
+    a-5000|a-5G|10G|5Gb/s|10Gb/s|5000Mb/s)
     \b
   color: Lime-Yellow
 
