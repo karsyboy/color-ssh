@@ -248,7 +248,7 @@ rules:
     \b
     (connected|up|access|yes|permit|OK|success|established|administratively\s+up|passed|
     complete|valid|active|enabled|forwarding|learning|down->up|success|enabled|secure|
-    reachable|resolved|succeeded|running|up/up|up/up/up|a-full|full-duplex)
+    reachable|resolved|succeeded|running|up/up|up/up/up|a-full|full-duplex|full)
     \b
   color: Kelly-Green
 
@@ -265,7 +265,7 @@ rules:
   regex: |
     (?ix)
     \b
-    (xcvrAbsen|noOperMem|notconnect|notpresent|trunk|collisions|not\spresent|auto|unknown)
+    (xcvrAbsen|noOperMem|notconnect|notpresent|trunk|collisions|not\spresent|auto|unknown|duplex)
     \b
   color: Sunrise-Orange
 
