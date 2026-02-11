@@ -17,15 +17,11 @@ use regex::Regex;
 use std::thread;
 
 // Compiled regex for stripping ANSI escape sequences before pattern matching
-// Matches:
-// - CSI sequences: ESC [ [params] [intermediates] final_byte
-// - OSC sequences: ESC ] ... (BEL or ESC \)
-// - Other escape sequences and stray ESC characters
 static ANSI_ESCAPE_REGEX: Lazy<Regex> = Lazy::new(|| {
     Regex::new(
         r"(?x)
-        \x1B\[[\x30-\x3F]*[\x20-\x2F]*[\x40-\x7E]  # CSI: ESC [ params intermediates final
-        |\x1B\][^\x07\x1B]*(?:\x07|\x1B\\)          # OSC: ESC ] ... (BEL or ESC \)
+        \x1B\[[\x30-\x3F]*[\x20-\x2F]*[\x40-\x7E]    # CSI: ESC [ params intermediates final
+        |\x1B\][^\x07\x1B]*(?:\x07|\x1B\\)           # OSC: ESC ] ... (BEL or ESC \)
         |\x1B[PX^_].*?\x1B\\                         # DCS/SOS/PM/APC: ESC P/X/^/_ ... ESC \
         |\x1B.                                       # Other ESC sequences (2 bytes)
         |\x1B                                        # Stray ESC character
