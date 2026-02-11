@@ -14,7 +14,7 @@
 
 use crate::{Result, config, highlighter, log_debug, log_error, log_info, log_ssh};
 use std::{
-    io::{self, BufReader, Read, Write},
+    io::{self, Read, Write},
     process::{Command, ExitCode, Stdio},
     sync::mpsc::{self, Receiver, Sender},
     thread,
@@ -50,12 +50,10 @@ pub fn process_handler(process_args: Vec<String>, is_non_interactive: bool) -> R
 
     log_debug!("SSH process spawned successfully (PID: {:?})", child.id());
 
-    let stdout = child.stdout.take().ok_or_else(|| {
+    let mut stdout = child.stdout.take().ok_or_else(|| {
         log_error!("Failed to capture stdout from SSH process");
         io::Error::other("Failed to capture stdout")
     })?;
-
-    let mut reader = BufReader::new(stdout);
 
     // Create a channel for sending and receiving output chunks
     let (tx, rx): (Sender<String>, Receiver<String>) = mpsc::channel();
@@ -96,14 +94,14 @@ pub fn process_handler(process_args: Vec<String>, is_non_interactive: bool) -> R
             io::Error::other("Failed to spawn processing thread")
         })?;
 
-    // Buffer for reading data from SSH output (4KB chunks)
-    let mut buffer = [0; 4096];
+    // Buffer for reading data from SSH output
+    let mut buffer = [0; 8192];
     let mut total_bytes = 0;
 
     log_debug!("Starting to read SSH output...");
 
     loop {
-        match reader.read(&mut buffer) {
+        match stdout.read(&mut buffer) {
             Ok(0) => {
                 log_debug!("EOF reached (total bytes read: {})", total_bytes);
                 break; // Exit loop when EOF is reached
@@ -132,6 +130,11 @@ pub fn process_handler(process_args: Vec<String>, is_non_interactive: bool) -> R
     // Wait for the processing thread to finish
     if let Err(err) = processing_thread.join() {
         log_error!("Processing thread panicked: {:?}", err);
+    }
+
+    // Ensure all output is flushed to terminal
+    if let Err(e) = io::stdout().flush() {
+        log_error!("Failed to flush stdout after processing: {}", e);
     }
 
     // Wait for the SSH process to finish and use its status code
@@ -167,8 +170,12 @@ pub fn process_handler(process_args: Vec<String>, is_non_interactive: bool) -> R
 pub fn spawn_ssh(args: &[String]) -> std::io::Result<std::process::Child> {
     log_debug!("Spawning SSH with args: {:?}", args);
 
+    // Force PTY allocation to ensure proper interactive behavior and prevent buffering issues
+    let mut ssh_args = vec!["-t".to_string()];
+    ssh_args.extend_from_slice(args);
+
     let child = Command::new("ssh")
-        .args(args)
+        .args(&ssh_args)
         .stdin(Stdio::inherit()) // Inherit the input from the current terminal
         .stdout(Stdio::piped()) // Pipe the output for processing
         .stderr(Stdio::inherit()) // Inherit the error stream from the SSH process
