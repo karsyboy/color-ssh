@@ -151,7 +151,7 @@ pub fn process_chunk(chunk: String, chunk_id: i32, rules: &[(Regex, String)], re
 /// # Returns
 /// A tuple containing:
 /// * The cleaned string (ANSI sequences removed, newlines replaced with spaces)
-/// * A vector mapping each character position in the cleaned string to its byte position in the original string
+/// * A vector mapping each byte position in the cleaned string to its byte position in the original string
 fn build_index_mapping(raw: &str) -> (String, Vec<usize>) {
     // First, identify all ANSI escape sequence positions in the raw string
     let ansi_ranges: Vec<(usize, usize)> = ANSI_ESCAPE_REGEX.find_iter(raw).map(|m| (m.start(), m.end())).collect();
@@ -179,13 +179,22 @@ fn build_index_mapping(raw: &str) -> (String, Vec<usize>) {
         }
 
         if !in_ansi {
+            // Track the byte position in clean string for each byte of the character
+            let clean_byte_pos = clean.len();
+
             // Replace newlines and carriage returns with spaces for regex matching
             if ch == '\n' || ch == '\r' {
                 clean.push(' ');
             } else {
                 clean.push(ch);
             }
-            mapping.push(raw_idx);
+
+            // Map each byte position in the clean string to the corresponding byte position in raw
+            // For multi-byte UTF-8 characters, all bytes of the clean char map to the start of the raw char
+            let clean_char_len = clean.len() - clean_byte_pos;
+            for _ in 0..clean_char_len {
+                mapping.push(raw_idx);
+            }
         }
 
         raw_idx += ch_len;
