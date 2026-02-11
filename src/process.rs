@@ -83,8 +83,8 @@ pub fn process_handler(process_args: Vec<String>, is_non_interactive: bool) -> R
                 let processed = highlighter::process_chunk(chunk, chunk_id, &cached_rules, reset_color);
                 chunk_id += 1;
                 print!("{}", processed); // Print the processed chunk
-                if let Err(e) = io::stdout().flush() {
-                    log_error!("Failed to flush stdout: {}", e);
+                if let Err(err) = io::stdout().flush() {
+                    log_error!("Failed to flush stdout: {}", err);
                 }
             }
             log_debug!("Output processing thread finished (processed {} chunks)", chunk_id);
@@ -133,8 +133,8 @@ pub fn process_handler(process_args: Vec<String>, is_non_interactive: bool) -> R
     }
 
     // Ensure all output is flushed to terminal
-    if let Err(e) = io::stdout().flush() {
-        log_error!("Failed to flush stdout after processing: {}", e);
+    if let Err(err) = io::stdout().flush() {
+        log_error!("Failed to flush stdout after processing: {}", err);
     }
 
     // Wait for the SSH process to finish and use its status code
