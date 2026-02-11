@@ -12,8 +12,27 @@ mod errors;
 pub use errors::HighlightError;
 
 use crate::log_debug;
+use once_cell::sync::Lazy;
 use regex::Regex;
 use std::thread;
+
+// Compiled regex for stripping ANSI escape sequences before pattern matching
+// Matches:
+// - CSI sequences: ESC [ [params] [intermediates] final_byte
+// - OSC sequences: ESC ] ... (BEL or ESC \)
+// - Other escape sequences and stray ESC characters
+static ANSI_ESCAPE_REGEX: Lazy<Regex> = Lazy::new(|| {
+    Regex::new(
+        r"(?x)
+        \x1B\[[\x30-\x3F]*[\x20-\x2F]*[\x40-\x7E]  # CSI: ESC [ params intermediates final
+        |\x1B\][^\x07\x1B]*(?:\x07|\x1B\\)          # OSC: ESC ] ... (BEL or ESC \)
+        |\x1B[PX^_].*?\x1B\\                         # DCS/SOS/PM/APC: ESC P/X/^/_ ... ESC \
+        |\x1B.                                       # Other ESC sequences (2 bytes)
+        |\x1B                                        # Stray ESC character
+    ",
+    )
+    .unwrap()
+});
 
 /// Processes a chunk of text by applying syntax highlighting based on the provided rules.
 ///
@@ -121,34 +140,61 @@ pub fn process_chunk(chunk: String, chunk_id: i32, rules: &[(Regex, String)], re
     highlighted
 }
 
-/// Build a mapping of the original string to a cleaned version with newlines replaced by spaces.
+/// Build a mapping of the original string to a cleaned version with ANSI sequences and newlines removed.
 ///
-/// This is necessary because regex patterns typically don't match across newline boundaries.
-/// By replacing newlines with spaces, we can apply regex patterns to multi-line text while
+/// This is necessary because:
+/// 1. ANSI escape sequences (colors, window title commands, etc.) interfere with pattern matching
+/// 2. Regex patterns typically don't match across newline boundaries
+///
+/// By removing these from the clean version, we can apply regex patterns correctly while
 /// maintaining the ability to map matches back to the original string positions.
 ///
 /// # Arguments
-/// * `raw` - The original string with newlines
+/// * `raw` - The original string with ANSI sequences and newlines
 ///
 /// # Returns
 /// A tuple containing:
-/// * The cleaned string (newlines replaced with spaces)
+/// * The cleaned string (ANSI sequences removed, newlines replaced with spaces)
 /// * A vector mapping each character position in the cleaned string to its byte position in the original string
 fn build_index_mapping(raw: &str) -> (String, Vec<usize>) {
+    // First, identify all ANSI escape sequence positions in the raw string
+    let ansi_ranges: Vec<(usize, usize)> = ANSI_ESCAPE_REGEX.find_iter(raw).map(|m| (m.start(), m.end())).collect();
+
     let mut clean = String::with_capacity(raw.len());
     let mut mapping = Vec::with_capacity(raw.len());
 
     let mut raw_idx = 0;
+    let mut ansi_iter = ansi_ranges.iter().peekable();
+
     for ch in raw.chars() {
-        // Replace newlines and carriage returns with spaces for regex matching
-        if ch == '\n' || ch == '\r' {
-            clean.push(' ');
-        } else {
-            clean.push(ch);
+        let ch_len = ch.len_utf8();
+
+        // Skip characters that are part of ANSI escape sequences
+        let mut in_ansi = false;
+        while let Some((start, end)) = ansi_iter.peek() {
+            if raw_idx >= *end {
+                ansi_iter.next();
+            } else if raw_idx >= *start && raw_idx < *end {
+                in_ansi = true;
+                break;
+            } else {
+                break;
+            }
         }
-        mapping.push(raw_idx);
-        raw_idx += ch.len_utf8(); // Keep track of the character's byte length
+
+        if !in_ansi {
+            // Replace newlines and carriage returns with spaces for regex matching
+            if ch == '\n' || ch == '\r' {
+                clean.push(' ');
+            } else {
+                clean.push(ch);
+            }
+            mapping.push(raw_idx);
+        }
+
+        raw_idx += ch_len;
     }
+
     mapping.push(raw_idx); // Final entry for end-of-string matching
     (clean, mapping)
 }
