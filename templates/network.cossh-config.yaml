@@ -277,8 +277,8 @@ rules:
     \b
   color: Caribbean-Green
 
-- description: Match on description highlighters ***
-  regex: \*\*\*
+- description: Match on description highlighters *
+  regex: \*
   color: Bright-Ube
 
 - description: Match on words networking words
