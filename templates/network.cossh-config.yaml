@@ -160,7 +160,7 @@ rules:
   regex: |
     (?ix)
     \b(
-    (port-channel|po)
+    (port-channel|po|ae)
     (\d{1,4})?
     (\.\d{1,4})?
     )\b
@@ -204,7 +204,7 @@ rules:
     (?ix)
     \b
     (5GBASE-T|10GBASE-T|100/1000/2\.5G/5G/10GBaseTX|SFP-10GBase-CX1|SFP-10GBase-SR|10GBASE-LR|10GBASE-SR|10GBASE-SRL|
-    a-5000|a-5G|10G|5Gb/s|10Gb/s|5000Mb/s)
+    a-5000|a-5G|10G|5Gb/s|10Gb/s|5000Mb/s|10GBASE-CR|10GBASE-AR)
     \b
   color: Lime-Yellow
 
@@ -220,7 +220,7 @@ rules:
   regex: |
     (?ix)
     \b
-    (10/25GBaseSR|10/25GBaseLR|10/25GBaseER|25G|20G)
+    (10/25GBaseSR|10/25GBaseLR|10/25GBaseER|25G|20G|25GBASE-SR)
     \b
   color: Mustard
 
@@ -228,7 +228,7 @@ rules:
   regex: |
     (?ix)
     \b
-    (40/50GBaseSR|40/50GBaseLR|40/50GBaseER|40/50/100GBaseSR|40/50/100GBaseLR|40/50/100GBaseER)
+    (40/50GBaseSR|40/50GBaseLR|40/50GBaseER|40G|50G)
     \b
   color: Bright-Orange
 
@@ -237,7 +237,7 @@ rules:
     (?ix)
     \b
     (Tbit/sec|Gpps|Tpps|100GBaseSR|100GBaseLR|100GBaseER|
-    10/25/40/50/100GBaseSR|10/25/40/50/100GBaseLR|10/25/40/50/100GBaseER|100G|200G|400G)
+    10/25/40/50/100GBaseSR|10/25/40/50/100GBaseLR|10/25/40/50/100GBaseER|100G|200G|400G|100GBASE-CR4|40/50/100GBaseSR|40/50/100GBaseLR|40/50/100GBaseER)
     \b
   color: Vivid-Red-Orange
 
@@ -248,7 +248,7 @@ rules:
     \b
     (connected|up|access|yes|permit|OK|success|established|administratively\s+up|passed|
     complete|valid|active|enabled|forwarding|learning|down->up|success|enabled|secure|
-    reachable|resolved|succeeded|running|up/up|up/up/up|a-full|full-duplex|full|established|estab)
+    reachable|resolved|succeeded|running|up/up|up/up/up|a-full|full-duplex|full|established|estab|true)
     \b
   color: Kelly-Green
 
@@ -257,7 +257,7 @@ rules:
     (?ix)
     \b
     (down|shutdown|error|errors|disabled|inactive|invalid|failed|denied|blocked|
-    discarded|unreachable|reset|fail|telnet|half-duplex|err-disabled|up->down|discards|Not\sconnected)
+    discarded|unreachable|reset|fail|telnet|half-duplex|err-disabled|up->down|discards|false|Not\sconnected)
     \b
   color: Red
 
@@ -265,7 +265,8 @@ rules:
   regex: |
     (?ix)
     \b
-    (xcvrAbsen|noOperMem|notconnect|notpresent|trunk|collisions|not\spresent|auto|unknown|duplex|Unknown100G|N/A)
+    (xcvrAbsen|noOperMem|notconnect|notpresent|trunk|collisions|not\spresent|auto|unknown|duplex|Unknown100G|N/A|unconf|
+    mac)
     \b
   color: Sunrise-Orange
 
@@ -277,8 +278,8 @@ rules:
     \b
   color: Caribbean-Green
 
-- description: Match on description highlighters ***
-  regex: \*\*\*
+- description: Match on description highlighters *
+  regex: \*
   color: Bright-Ube
 
 - description: Match on words networking words
@@ -286,7 +287,7 @@ rules:
     (?ix)
     \b
     (status|protocol|ip|address|packets|bytes|input|output|last\s+change|reason|age|
-    type|method|mode|vlan|speed|port|mtu|mac|dns|vrf)
+    type|method|mode|vlan|speed|port|mtu|routed)
     \b
   color: Ochre
 
