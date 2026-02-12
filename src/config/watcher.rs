@@ -6,7 +6,7 @@
 use super::loader::ConfigLoader;
 use crate::{log_debug, log_error, log_info};
 use notify::{Error, Event, RecommendedWatcher, RecursiveMode, Watcher};
-use std::{sync::mpsc, thread, time::Duration};
+use std::{path::PathBuf, sync::mpsc, thread, time::Duration};
 
 /// Start watching the configuration file for changes
 pub fn config_watcher(profile: Option<String>) -> RecommendedWatcher {
@@ -14,13 +14,29 @@ pub fn config_watcher(profile: Option<String>) -> RecommendedWatcher {
 
     log_debug!("Initializing configuration file watcher");
 
+    let config_path = super::get_config().read().unwrap().metadata.config_path.clone();
+    let config_file_name = config_path.file_name().and_then(|n| n.to_str()).unwrap_or("").to_string();
+
+    // Clone for use in the closure
+    let config_file_name_clone = config_file_name.clone();
+
     let mut watcher = RecommendedWatcher::new(
         move |res: Result<Event, Error>| {
             if let Ok(event) = res
                 && (event.kind.is_modify() || event.kind.is_create())
             {
-                log_debug!("Config file change detected: {:?}", event);
-                let _ = tx.send(());
+                // Filter events to only process changes to our config file
+                let is_our_file = event.paths.iter().any(|path| {
+                    path.file_name()
+                        .and_then(|n| n.to_str())
+                        .map(|name| name == config_file_name_clone)
+                        .unwrap_or(false)
+                });
+
+                if is_our_file {
+                    log_debug!("Config file change detected: {:?}", event);
+                    let _ = tx.send(());
+                }
             }
         },
         notify::Config::default(),
@@ -30,12 +46,14 @@ pub fn config_watcher(profile: Option<String>) -> RecommendedWatcher {
         panic!("Failed to create watcher: {}", err);
     });
 
-    let config_path = super::get_config().read().unwrap().metadata.config_path.clone();
-    log_info!("Starting config watcher for: {:?}", config_path);
+    // Watch the parent directory to handle atomic writes (temp file + rename)
+    let fallback = PathBuf::from(".");
+    let watch_path = config_path.parent().unwrap_or(&fallback);
+    log_info!("Starting config watcher for: {:?} (watching directory: {:?})", config_path, watch_path);
 
-    watcher.watch(&config_path, RecursiveMode::NonRecursive).unwrap_or_else(|err| {
-        log_error!("Failed to watch config file: {}", err);
-        eprintln!("Failed to watch config file: {}", err);
+    watcher.watch(watch_path, RecursiveMode::NonRecursive).unwrap_or_else(|err| {
+        log_error!("Failed to watch config directory: {}", err);
+        eprintln!("Failed to watch config directory: {}", err);
     });
 
     // Spawn a named thread for config watching
