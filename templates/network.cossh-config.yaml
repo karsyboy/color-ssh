@@ -257,7 +257,7 @@ rules:
     (?ix)
     \b
     (down|shutdown|error|errors|disabled|inactive|invalid|failed|denied|blocked|
-    discarded|unreachable|reset|fail|telnet|half-duplex|err-disabled|up->down|discards)
+    discarded|unreachable|reset|fail|telnet|half-duplex|err-disabled|up->down|discards|Not\sconnected)
     \b
   color: Red
 
@@ -277,8 +277,8 @@ rules:
     \b
   color: Caribbean-Green
 
-- description: Match on description highlighters *
-  regex: \*
+- description: Match on description highlighters ***
+  regex: \*\*\*
   color: Bright-Ube
 
 - description: Match on words networking words
@@ -286,7 +286,7 @@ rules:
     (?ix)
     \b
     (status|protocol|ip|address|packets|bytes|input|output|last\s+change|reason|age|
-    type|method|mode|vlan|speed|port|mtu)
+    type|method|mode|vlan|speed|port|mtu|mac|dns|vrf)
     \b
   color: Ochre
 
