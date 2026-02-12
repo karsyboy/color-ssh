@@ -17,9 +17,9 @@ pub fn config_watcher(profile: Option<String>) -> RecommendedWatcher {
     let mut watcher = RecommendedWatcher::new(
         move |res: Result<Event, Error>| {
             if let Ok(event) = res
-                && event.kind.is_modify()
+                && (event.kind.is_modify() || event.kind.is_create())
             {
-                log_debug!("Config file modification detected: {:?}", event);
+                log_debug!("Config file change detected: {:?}", event);
                 let _ = tx.send(());
             }
         },
