@@ -1,17 +1,3 @@
-//! SSH process management and output handling
-//!
-//! Handles:
-//! - Spawning SSH subprocess with proper I/O configuration
-//! - Reading and buffering SSH output
-//! - Applying syntax highlighting to output chunks
-//! - Managing non-interactive SSH commands
-//!
-//! # Process Flow
-//! 1. Detect if command is interactive or non-interactive
-//! 2. Spawn SSH process with appropriate stdio configuration
-//! 3. For interactive: read output in chunks, apply highlighting, display
-//! 4. For non-interactive: passthrough directly without processing
-
 use crate::{Result, config, highlighter, log_debug, log_error, log_info, log_ssh};
 use std::{
     io::{self, Read, Write},
@@ -20,23 +6,11 @@ use std::{
     thread,
 };
 
-/// Main process handler for SSH subprocess
-///
-/// Manages the SSH subprocess lifecycle, including spawning, output processing,
-/// and exit code handling. Automatically detects non-interactive commands and
-/// uses passthrough mode for them.
-///
-/// # Arguments
-/// * `process_args` - Command-line arguments to pass to SSH
-/// * `is_non_interactive` - Whether this is a non-interactive command (-G, -V, etc.)
-///
-/// # Returns
-/// Exit code from the SSH process
+/// Main process handler for SSH subprocess returns an exit code based on the SSH process status
 pub fn process_handler(process_args: Vec<String>, is_non_interactive: bool) -> Result<ExitCode> {
     log_info!("Starting SSH process with args: {:?}", process_args);
     log_debug!("Non-interactive mode: {}", is_non_interactive);
 
-    // For non-interactive commands, use direct passthrough
     if is_non_interactive {
         log_info!("Using passthrough mode for non-interactive command");
         return spawn_ssh_passthrough(&process_args);
@@ -55,10 +29,10 @@ pub fn process_handler(process_args: Vec<String>, is_non_interactive: bool) -> R
         io::Error::other("Failed to capture stdout")
     })?;
 
-    // Create a channel for sending and receiving output chunks
+    // Create a channel for sending and receiving chunks from SSH
     let (tx, rx): (Sender<String>, Receiver<String>) = mpsc::channel();
 
-    let reset_color = "\x1b[0m"; // ANSI reset color sequence
+    let reset_color = "\x1b[0m";
 
     // Spawn thread for processing and displaying chunks
     // This thread applies highlighting and outputs to the terminal
@@ -67,6 +41,7 @@ pub fn process_handler(process_args: Vec<String>, is_non_interactive: bool) -> R
         .spawn(move || {
             log_debug!("Output processing thread started");
             let mut chunk_id = 0;
+
             // Cache rules and track config version for hot-reload support
             let mut cached_rules = config::get_config().read().unwrap().metadata.compiled_rules.clone();
             let mut cached_version = config::get_config().read().unwrap().metadata.version;
@@ -80,9 +55,9 @@ pub fn process_handler(process_args: Vec<String>, is_non_interactive: bool) -> R
                     log_debug!("Rules updated due to config reload (version {})", cached_version);
                 }
 
-                let processed = highlighter::process_chunk(chunk, chunk_id, &cached_rules, reset_color);
+                let processed_chunk = highlighter::process_chunk(chunk, chunk_id, &cached_rules, reset_color);
                 chunk_id += 1;
-                print!("{}", processed); // Print the processed chunk
+                print!("{}", processed_chunk);
                 if let Err(err) = io::stdout().flush() {
                     log_error!("Failed to flush stdout: {}", err);
                 }
@@ -104,12 +79,14 @@ pub fn process_handler(process_args: Vec<String>, is_non_interactive: bool) -> R
         match stdout.read(&mut buffer) {
             Ok(0) => {
                 log_debug!("EOF reached (total bytes read: {})", total_bytes);
-                break; // Exit loop when EOF is reached
+                break;
             }
-            Ok(n) => {
-                total_bytes += n;
+            Ok(bytes_read) => {
+                total_bytes += bytes_read;
+                
+
                 // Convert the read data to a String and send it to the processing thread
-                let chunk = String::from_utf8_lossy(&buffer[..n]).to_string();
+                let chunk = String::from_utf8_lossy(&buffer[..bytes_read]).to_string();
                 log_ssh!("{}", chunk);
 
                 if let Err(err) = tx.send(chunk) {
@@ -155,18 +132,7 @@ pub fn process_handler(process_args: Vec<String>, is_non_interactive: bool) -> R
     }
 }
 
-/// Spawns an SSH process with the provided arguments.
-///
-/// Configures the process with:
-/// - Inherited stdin (for user input)
-/// - Piped stdout (for processing and highlighting)
-/// - Inherited stderr (for error messages)
-///
-/// # Arguments
-/// * `args` - CLI arguments provided by the user
-///
-/// # Returns
-/// The spawned child process or an I/O error
+/// Spawns an SSH process with the provided arguments and returns the child process
 pub fn spawn_ssh(args: &[String]) -> std::io::Result<std::process::Child> {
     log_debug!("Spawning SSH with args: {:?}", args);
 
@@ -176,9 +142,9 @@ pub fn spawn_ssh(args: &[String]) -> std::io::Result<std::process::Child> {
 
     let child = Command::new("ssh")
         .args(&ssh_args)
-        .stdin(Stdio::inherit()) // Inherit the input from the current terminal
-        .stdout(Stdio::piped()) // Pipe the output for processing
-        .stderr(Stdio::inherit()) // Inherit the error stream from the SSH process
+        .stdin(Stdio::inherit())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::inherit())
         .spawn()
         .map_err(|err| {
             log_error!("Failed to spawn SSH command: {}", err);
@@ -189,23 +155,14 @@ pub fn spawn_ssh(args: &[String]) -> std::io::Result<std::process::Child> {
     Ok(child)
 }
 
-/// Spawns SSH for non-interactive commands with direct stdout passthrough.
-///
-/// Used for commands like -G, -V, -O, -Q, -T that don't need highlighting.
-/// All stdio streams are inherited for direct passthrough.
-///
-/// # Arguments
-/// * `args` - CLI arguments provided by the user
-///
-/// # Returns
-/// The exit code from the SSH process
+/// Spawns SSH for non-interactive commands with direct stdout passthrough returns SSH exit code
 fn spawn_ssh_passthrough(args: &[String]) -> Result<ExitCode> {
     log_debug!("Spawning SSH in passthrough mode with args: {:?}", args);
 
     let status = Command::new("ssh")
         .args(args)
         .stdin(Stdio::inherit())
-        .stdout(Stdio::inherit()) // Pass through directly, no buffering
+        .stdout(Stdio::inherit())
         .stderr(Stdio::inherit())
         .status()
         .map_err(|err| {
