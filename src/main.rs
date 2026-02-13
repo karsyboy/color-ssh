@@ -1,4 +1,4 @@
-use cossh::{Result, args, config, log, log_debug, log_error, log_info, process};
+use cossh::{Result, args, config, log, log_debug, log_error, log_info, process, session_manager};
 use std::process::ExitCode;
 
 /// Extracts the SSH destination hostname from the provided SSH arguments returns hostname or none
@@ -38,6 +38,16 @@ fn main() -> Result<ExitCode> {
     // Enable debug logging initially to capture config load
     logger.enable_debug();
     log_info!("color-ssh v0.5.9 starting");
+
+    // If interactive mode is requested, launch the session manager
+    if args.interactive {
+        log_info!("Launching interactive session manager");
+        if let Err(e) = session_manager::run_session_manager() {
+            eprintln!("Session manager error: {}", e);
+            std::process::exit(1);
+        }
+        return Ok(ExitCode::SUCCESS);
+    }
 
     if let Err(err) = config::init_session_config(args.profile.clone()) {
         eprintln!("Failed to initialize config: {}", err);

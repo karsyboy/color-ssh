@@ -18,6 +18,8 @@ pub struct MainArgs {
     pub profile: Option<String>,
     /// Whether the SSH command is non-interactive (e.g., -G, -V, -O, -Q, -T)
     pub is_non_interactive: bool,
+    /// Launch interactive session manager TUI
+    pub interactive: bool,
 }
 
 /// Parses command-line arguments using clap.
@@ -25,12 +27,14 @@ pub struct MainArgs {
 /// # Arguments Supported
 /// - `-d, --debug` - Enable debug mode with detailed logging
 /// - `-l, --log` - Enable SSH session logging
+/// - `-i, --interactive` - Launch interactive session manager TUI
 /// - `ssh_args` - All remaining arguments are passed to SSH
 ///
 /// # Examples
 /// ```text
 /// cossh -d user@example.com          # Debug mode enabled
 /// cossh -l user@example.com          # SSH logging enabled
+/// cossh -i                           # Launch interactive session manager
 /// cossh -d -l user@example.com -p 22 # Both modes with SSH args
 /// cossh -- -G user@example.com       # Non-interactive command (config dump).
 /// ```
@@ -59,23 +63,31 @@ pub fn main_args() -> MainArgs {
                 .action(clap::ArgAction::SetTrue),
         )
         .arg(
+            Arg::new("interactive")
+                .short('i')
+                .long("interactive")
+                .help("Launch interactive session manager TUI")
+                .action(clap::ArgAction::SetTrue),
+        )
+        .arg(
             Arg::new("profile")
                 .short('P')
                 .long("profile")
                 .help("Specify a configuration profile to use")
                 .num_args(1)
-                .required(false), // .default_value(""),
+                .required(false),
         )
         .arg(
             Arg::new("ssh_args")
                 .help("SSH arguments to forward to the SSH command")
                 .num_args(1..)
-                .required(true),
+                .required_unless_present("interactive"),
         )
         .after_help(
             r#"
 cossh -d user@example.com                          # Debug mode enabled
 cossh -l user@example.com                          # SSH logging enabled
+cossh -i                                           # Launch interactive session manager
 cossh -l -P network user@firewall.example.com      # Use 'network' config profile
 cossh -l user@host -p 2222 -i ~/.ssh/custom_key    # Both modes with SSH args
 cossh user@host -G                                 # Non-interactive command
@@ -93,6 +105,7 @@ cossh user@host -G                                 # Non-interactive command
     MainArgs {
         debug: matches.get_flag("debug"),
         ssh_logging: matches.get_flag("log"),
+        interactive: matches.get_flag("interactive"),
         profile: matches.get_one::<String>("profile").cloned().filter(|s| !s.is_empty()),
         ssh_args,
         is_non_interactive,

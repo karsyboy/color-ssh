@@ -83,7 +83,6 @@ pub fn process_handler(process_args: Vec<String>, is_non_interactive: bool) -> R
             }
             Ok(bytes_read) => {
                 total_bytes += bytes_read;
-                
 
                 // Convert the read data to a String and send it to the processing thread
                 let chunk = String::from_utf8_lossy(&buffer[..bytes_read]).to_string();
