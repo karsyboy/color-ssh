@@ -1,12 +1,3 @@
-//! Syntax highlighting engine
-//!
-//! Applies ANSI color codes to text based on regex pattern matching.
-//! Handles:
-//! - Regex pattern compilation and caching
-//! - Match detection and overlap resolution
-//! - ANSI escape sequence application
-//! - Newline character handling for regex matching
-
 mod errors;
 
 pub use errors::HighlightError;
@@ -30,32 +21,11 @@ static ANSI_ESCAPE_REGEX: Lazy<Regex> = Lazy::new(|| {
     .unwrap()
 });
 
-/// Processes a chunk of text by applying syntax highlighting based on the provided rules.
-///
-/// This function:
-/// 1. Cleans the chunk by replacing newlines with spaces for regex matching
-/// 2. Applies all regex patterns to find matches
-/// 3. Resolves overlapping matches (first match wins)
-/// 4. Applies ANSI color codes to matched segments
-///
-/// # Arguments
-/// * `chunk` - The input text to highlight
-/// * `chunk_id` - Unique identifier for this chunk (used in debug logging)
-/// * `rules` - Slice of tuples containing (Regex pattern, ANSI color code)
-/// * `reset_color` - ANSI escape sequence to reset color after highlights
-///
-/// # Returns
-/// The processed text with ANSI color sequences applied
-///
-/// # Performance Notes
-/// - All regex patterns are applied to the entire chunk
-/// - For large outputs, consider processing line-by-line
-/// - Regex compilation is done at config load time, not here
+/// Processes a chunk of text by applying syntax highlighting based on the provided rules and returns the highlighted string.
 pub fn process_chunk(chunk: String, chunk_id: i32, rules: &[(Regex, String)], reset_color: &str) -> String {
     let thread_id = thread::current().id();
 
     // Clean up the chunk and build the index mapping
-    // This replaces newlines with spaces so regex patterns can match across lines
     let (clean_chunk, mapping) = build_index_mapping(&chunk);
 
     let mut matches: Vec<(usize, usize, String, String)> = Vec::new();
@@ -67,7 +37,6 @@ pub fn process_chunk(chunk: String, chunk_id: i32, rules: &[(Regex, String)], re
             let clean_end = mat.end();
 
             // Map clean indices back to raw chunk indices
-            // Ensure indices are within bounds before using them
             let raw_start = if clean_start < mapping.len() {
                 mapping[clean_start]
             } else {
@@ -104,18 +73,17 @@ pub fn process_chunk(chunk: String, chunk_id: i32, rules: &[(Regex, String)], re
     matches.sort_by_key(|&(start, _, _, _)| start);
 
     // Apply the color formatting to the chunk based on the matches
-    // Reserve extra capacity for ANSI escape sequences (approximately 20 bytes per match)
     let estimated_capacity = chunk.len() + (matches.len() * 20);
     let mut highlighted = String::with_capacity(estimated_capacity);
     let mut last_index = 0;
 
     for (start, end, matched_text, color) in matches.clone() {
-        // Skip overlapping matches (first match wins)
+        // Skip overlapping matches the first match wins
         if last_index > start {
             continue;
         }
 
-        // Append the text between the last match and the current match (unhighlighted)
+        // Append the text between the last match and the current match
         highlighted.push_str(&chunk[last_index..start]);
 
         // Append the matched text with color formatting
@@ -136,27 +104,12 @@ pub fn process_chunk(chunk: String, chunk_id: i32, rules: &[(Regex, String)], re
     highlighted
 }
 
-/// Build a mapping of the original string to a cleaned version with ANSI sequences and newlines removed.
-///
-/// This is necessary because:
-/// 1. ANSI escape sequences (colors, window title commands, etc.) interfere with pattern matching
-/// 2. Regex patterns typically don't match across newline boundaries
-///
-/// By removing these from the clean version, we can apply regex patterns correctly while
-/// maintaining the ability to map matches back to the original string positions.
-///
-/// # Arguments
-/// * `raw` - The original string with ANSI sequences and newlines
-///
-/// # Returns
-/// A tuple containing:
-/// * The cleaned string (ANSI sequences removed, newlines replaced with spaces)
-/// * A vector mapping each byte position in the cleaned string to its byte position in the original string
+/// Build a mapping of the original string to a cleaned version with ANSI sequences and newlines removed and return both the clean string and mapping.
 fn build_index_mapping(raw: &str) -> (String, Vec<usize>) {
     // First, identify all ANSI escape sequence positions in the raw string
     let ansi_ranges: Vec<(usize, usize)> = ANSI_ESCAPE_REGEX.find_iter(raw).map(|m| (m.start(), m.end())).collect();
 
-    let mut clean = String::with_capacity(raw.len());
+    let mut clean_chunk = String::with_capacity(raw.len());
     let mut mapping = Vec::with_capacity(raw.len());
 
     let mut raw_idx = 0;
@@ -180,18 +133,16 @@ fn build_index_mapping(raw: &str) -> (String, Vec<usize>) {
 
         if !in_ansi {
             // Track the byte position in clean string for each byte of the character
-            let clean_byte_pos = clean.len();
+            let clean_byte_pos = clean_chunk.len();
 
-            // Replace newlines and carriage returns with spaces for regex matching
             if ch == '\n' || ch == '\r' {
-                clean.push(' ');
+                clean_chunk.push(' ');
             } else {
-                clean.push(ch);
+                clean_chunk.push(ch);
             }
 
             // Map each byte position in the clean string to the corresponding byte position in raw
-            // For multi-byte UTF-8 characters, all bytes of the clean char map to the start of the raw char
-            let clean_char_len = clean.len() - clean_byte_pos;
+            let clean_char_len = clean_chunk.len() - clean_byte_pos;
             for _ in 0..clean_char_len {
                 mapping.push(raw_idx);
             }
@@ -200,6 +151,6 @@ fn build_index_mapping(raw: &str) -> (String, Vec<usize>) {
         raw_idx += ch_len;
     }
 
-    mapping.push(raw_idx); // Final entry for end-of-string matching
-    (clean, mapping)
+    mapping.push(raw_idx);
+    (clean_chunk, mapping)
 }
