@@ -22,6 +22,12 @@ pub struct SshHost {
     pub identity_file: Option<String>,
     /// Proxy jump host
     pub proxy_jump: Option<String>,
+    /// Description from #_Desc comment
+    pub description: Option<String>,
+    /// Profile from #_Profile comment (cossh config profile to use)
+    pub profile: Option<String>,
+    /// Whether to use sshpass (from #_sshpass comment)
+    pub use_sshpass: bool,
     /// Local forward settings
     pub local_forward: Vec<String>,
     /// Remote forward settings
@@ -40,6 +46,9 @@ impl SshHost {
             port: None,
             identity_file: None,
             proxy_jump: None,
+            description: None,
+            profile: None,
+            use_sshpass: false,
             local_forward: Vec::new(),
             remote_forward: Vec::new(),
             other_options: HashMap::new(),
@@ -70,6 +79,18 @@ impl SshHost {
 
         if let Some(proxy) = &self.proxy_jump {
             details.push(format!("  ProxyJump: {}", proxy));
+        }
+
+        if let Some(desc) = &self.description {
+            details.push(format!("  Description: {}", desc));
+        }
+
+        if let Some(profile) = &self.profile {
+            details.push(format!("  Profile: {}", profile));
+        }
+
+        if self.use_sshpass {
+            details.push("  SSHPass: enabled".to_string());
         }
 
         if !self.local_forward.is_empty() {
@@ -105,8 +126,29 @@ pub fn parse_ssh_config(config_path: &Path) -> std::io::Result<Vec<SshHost>> {
         let line = line?;
         let trimmed = line.trim();
 
-        // Skip comments and empty lines
-        if trimmed.is_empty() || trimmed.starts_with('#') {
+        // Skip empty lines
+        if trimmed.is_empty() {
+            continue;
+        }
+
+        // Parse #_ comments for host metadata
+        if trimmed.starts_with('#') {
+            if let Some(desc) = trimmed.strip_prefix("#_Desc")
+                && let Some(ref mut host) = current_host
+            {
+                host.description = Some(desc.trim().to_string());
+            }
+            if let Some(profile) = trimmed.strip_prefix("#_Profile")
+                && let Some(ref mut host) = current_host
+            {
+                host.profile = Some(profile.trim().to_string());
+            }
+            if let Some(sshpass_val) = trimmed.strip_prefix("#_sshpass")
+                && let Some(ref mut host) = current_host
+            {
+                let val = sshpass_val.trim().to_lowercase();
+                host.use_sshpass = val == "true" || val == "yes" || val == "1";
+            }
             continue;
         }
 
@@ -144,10 +186,10 @@ pub fn parse_ssh_config(config_path: &Path) -> std::io::Result<Vec<SshHost>> {
                 }
             }
             "port" => {
-                if let Some(ref mut host) = current_host {
-                    if let Ok(port) = value.parse::<u16>() {
-                        host.port = Some(port);
-                    }
+                if let Some(ref mut host) = current_host
+                    && let Ok(port) = value.parse::<u16>()
+                {
+                    host.port = Some(port);
                 }
             }
             "identityfile" => {
@@ -185,10 +227,11 @@ pub fn parse_ssh_config(config_path: &Path) -> std::io::Result<Vec<SshHost>> {
     }
 
     // Don't forget the last host
-    if let Some(host) = current_host {
-        if !host.name.contains('*') && !host.name.contains('?') {
-            hosts.push(host);
-        }
+    if let Some(host) = current_host
+        && !host.name.contains('*')
+        && !host.name.contains('?')
+    {
+        hosts.push(host);
     }
 
     // Process included files
@@ -222,12 +265,11 @@ fn parse_ssh_config_with_glob(pattern: &str) -> std::io::Result<Vec<SshHost>> {
 
     if let Ok(entries) = std::fs::read_dir(parent) {
         for entry in entries.flatten() {
-            if let Ok(file_name) = entry.file_name().into_string() {
-                if matches_pattern(&file_name, filename_pattern) {
-                    if let Ok(hosts) = parse_ssh_config(&entry.path()) {
-                        all_hosts.extend(hosts);
-                    }
-                }
+            if let Ok(file_name) = entry.file_name().into_string()
+                && matches_pattern(&file_name, filename_pattern)
+                && let Ok(hosts) = parse_ssh_config(&entry.path())
+            {
+                all_hosts.extend(hosts);
             }
         }
     }
@@ -284,10 +326,10 @@ fn matches_pattern(text: &str, pattern: &str) -> bool {
 
 /// Expand ~ to home directory
 fn expand_tilde(path: &str) -> String {
-    if path.starts_with("~/") {
-        if let Some(home) = dirs::home_dir() {
-            return path.replacen("~", &home.to_string_lossy(), 1);
-        }
+    if path.starts_with("~/")
+        && let Some(home) = dirs::home_dir()
+    {
+        return path.replacen("~", &home.to_string_lossy(), 1);
     }
     path.to_string()
 }

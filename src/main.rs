@@ -42,6 +42,8 @@ fn main() -> Result<ExitCode> {
     // If interactive mode is requested, launch the session manager
     if args.interactive {
         log_info!("Launching interactive session manager");
+        // Init config so session manager can read settings like history_buffer
+        let _ = config::init_session_config(args.profile.clone());
         if let Err(e) = session_manager::run_session_manager() {
             eprintln!("Session manager error: {}", e);
             std::process::exit(1);
@@ -114,8 +116,10 @@ fn main() -> Result<ExitCode> {
     if logger.is_ssh_logging_enabled() {
         let session_hostname = extract_ssh_destination(&args.ssh_args).unwrap_or_else(|| "unknown".to_string());
 
-        config::get_config().write().unwrap().metadata.session_name = session_hostname.to_string();
-        log_debug!("Session name set to: {}", session_hostname);
+        // Use COSSH_SESSION_NAME env var if set (from session manager tabs), otherwise use hostname
+        let session_name = std::env::var("COSSH_SESSION_NAME").unwrap_or_else(|_| session_hostname.to_string());
+        config::get_config().write().unwrap().metadata.session_name = session_name.clone();
+        log_debug!("Session name set to: {}", session_name);
     }
 
     // Start the config file watcher in the background

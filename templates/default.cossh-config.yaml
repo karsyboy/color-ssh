@@ -10,6 +10,7 @@ settings:
   show_title: true              # Display a colored title banner at session start
   debug_mode: false             # Enable debug logging to ~/.color-ssh/logs/cossh.log
   ssh_logging: false            # Enable SSH session logging by default
+  history_buffer: 1000          # Scrollback buffer size for session manager tabs
   # remove_secrets:               # Regex patterns to redact from logs (useful for passwords/keys)
   #   - '9[\s]\$9\$.*'           # Example: Juniper type 9 secrets
   #   - 'sha512[\s]\$6\$.*'      # Example: SHA-512 password hashes

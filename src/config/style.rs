@@ -40,6 +40,9 @@ pub struct Settings {
     /// Enable SSH session logging
     #[serde(default)]
     pub ssh_logging: bool,
+    /// History buffer size (scrollback lines for session manager tabs)
+    #[serde(default = "default_history_buffer")]
+    pub history_buffer: usize,
 }
 
 impl Default for Settings {
@@ -49,12 +52,17 @@ impl Default for Settings {
             show_title: true,
             debug_mode: false,
             ssh_logging: false,
+            history_buffer: 1000,
         }
     }
 }
 
 fn default_show_title() -> bool {
     true
+}
+
+fn default_history_buffer() -> usize {
+    1000
 }
 
 /// A single highlight rule mapping a regex pattern to a color
