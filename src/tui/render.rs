@@ -232,7 +232,7 @@ impl App {
         if self.search_mode {
             return StatusContext::HostSearch;
         }
-        if self.has_terminal_focus() && self.terminal_search_mode {
+        if self.has_terminal_focus() && self.current_tab_search().map(|s| s.active).unwrap_or(false) {
             return StatusContext::TerminalSearch;
         }
         if self.has_terminal_focus() {
@@ -399,8 +399,14 @@ impl App {
 
     /// Status text while terminal search is active in a tab.
     fn build_terminal_search_status_spans(&self) -> (Vec<Span<'static>>, Vec<Span<'static>>) {
-        let match_info = if !self.terminal_search_matches.is_empty() {
-            format!("{}/{}", self.terminal_search_current + 1, self.terminal_search_matches.len())
+        let (query, matches_len, current_idx) = if let Some(search) = self.current_tab_search() {
+            (search.query.clone(), search.matches.len(), search.current)
+        } else {
+            (String::new(), 0, 0)
+        };
+
+        let match_info = if matches_len > 0 {
+            format!("{}/{}", current_idx + 1, matches_len)
         } else {
             "0/0".to_string()
         };
@@ -408,7 +414,7 @@ impl App {
         let left = vec![
             Span::styled("Terminal Search", Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD)),
             self.context_split_indicator(),
-            Span::styled(self.terminal_search_query.clone(), Style::default().fg(Color::White)),
+            Span::styled(query, Style::default().fg(Color::White)),
             Span::styled("_", Style::default().fg(Color::White)),
             Span::styled(" ", Style::default()),
             Span::styled(format!("({})", match_info), Style::default().fg(Color::Yellow)),
@@ -1014,11 +1020,14 @@ impl App {
 
     /// Check if a cell is part of any search match
     fn is_cell_in_search_match(&self, abs_row: i64, col: u16) -> bool {
-        if !self.terminal_search_mode || self.terminal_search_matches.is_empty() {
+        let Some(search) = self.current_tab_search() else {
+            return false;
+        };
+        if !search.active || search.matches.is_empty() {
             return false;
         }
 
-        for (match_row, match_col, match_len) in &self.terminal_search_matches {
+        for (match_row, match_col, match_len) in &search.matches {
             if *match_row == abs_row && col >= *match_col && (col as usize) < (*match_col as usize + *match_len) {
                 return true;
             }
@@ -1028,11 +1037,14 @@ impl App {
 
     /// Check if a cell is part of the current search match
     fn is_cell_in_current_search_match(&self, abs_row: i64, col: u16) -> bool {
-        if !self.terminal_search_mode || self.terminal_search_matches.is_empty() {
+        let Some(search) = self.current_tab_search() else {
+            return false;
+        };
+        if !search.active || search.matches.is_empty() {
             return false;
         }
 
-        let (match_row, match_col, match_len) = self.terminal_search_matches[self.terminal_search_current];
+        let (match_row, match_col, match_len) = search.matches[search.current];
         match_row == abs_row && col >= match_col && (col as usize) < (match_col as usize + match_len)
     }
 }

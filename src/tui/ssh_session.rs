@@ -1,6 +1,6 @@
 //! SSH session spawning and PTY management
 
-use super::{App, HostTab, SshSession};
+use super::{App, HostTab, SshSession, TerminalSearchState};
 use crate::ssh_config::SshHost;
 use crate::{log_debug, log_error};
 use portable_pty::{CommandBuilder, PtySize, native_pty_system};
@@ -193,6 +193,7 @@ impl App {
             host: host.clone(),
             session,
             scroll_offset: 0,
+            terminal_search: TerminalSearchState::default(),
         };
 
         self.tabs.push(tab);

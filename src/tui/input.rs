@@ -160,36 +160,46 @@ impl App {
     fn handle_terminal_search_key(&mut self, key: KeyEvent) -> io::Result<()> {
         match key.code {
             KeyCode::Esc => {
-                self.terminal_search_mode = false;
-                self.terminal_search_query.clear();
-                self.terminal_search_matches.clear();
-                self.terminal_search_current = 0;
+                if let Some(search) = self.current_tab_search_mut() {
+                    search.active = false;
+                    search.query.clear();
+                    search.matches.clear();
+                    search.current = 0;
+                }
             }
             KeyCode::Enter | KeyCode::Down => {
                 // Next match
-                if !self.terminal_search_matches.is_empty() {
-                    self.terminal_search_current = (self.terminal_search_current + 1) % self.terminal_search_matches.len();
+                if let Some(search) = self.current_tab_search_mut()
+                    && !search.matches.is_empty()
+                {
+                    search.current = (search.current + 1) % search.matches.len();
                     self.scroll_to_search_match();
                 }
             }
             KeyCode::Up => {
                 // Previous match
-                if !self.terminal_search_matches.is_empty() {
-                    if self.terminal_search_current == 0 {
-                        self.terminal_search_current = self.terminal_search_matches.len() - 1;
+                if let Some(search) = self.current_tab_search_mut()
+                    && !search.matches.is_empty()
+                {
+                    if search.current == 0 {
+                        search.current = search.matches.len() - 1;
                     } else {
-                        self.terminal_search_current -= 1;
+                        search.current -= 1;
                     }
                     self.scroll_to_search_match();
                 }
             }
             KeyCode::Backspace => {
-                self.terminal_search_query.pop();
-                self.update_terminal_search();
+                if let Some(search) = self.current_tab_search_mut() {
+                    search.query.pop();
+                    self.update_terminal_search();
+                }
             }
             KeyCode::Char(c) => {
-                self.terminal_search_query.push(c);
-                self.update_terminal_search();
+                if let Some(search) = self.current_tab_search_mut() {
+                    search.query.push(c);
+                    self.update_terminal_search();
+                }
             }
             _ => {}
         }
@@ -199,7 +209,7 @@ impl App {
     /// Handle keys when focused on a tab with an active session
     fn handle_tab_key(&mut self, key: KeyEvent) -> io::Result<()> {
         // If in terminal search mode, handle search keys
-        if self.terminal_search_mode {
+        if self.current_tab_search().map(|s| s.active).unwrap_or(false) {
             return self.handle_terminal_search_key(key);
         }
 
@@ -257,10 +267,9 @@ impl App {
             KeyCode::Char('f') if key.modifiers.contains(KeyModifiers::CONTROL) => {
                 // Ctrl+F: Terminal search (only if no TUI app is running)
                 if !self.is_pty_mouse_mode_active() {
-                    self.terminal_search_mode = true;
-                    self.terminal_search_query.clear();
-                    self.terminal_search_matches.clear();
-                    self.terminal_search_current = 0;
+                    if let Some(search) = self.current_tab_search_mut() {
+                        search.active = true;
+                    }
                 } else {
                     // Forward to PTY if a TUI app is active
                     self.send_key_to_pty(key)?;
@@ -438,11 +447,13 @@ impl App {
     pub(super) fn handle_mouse(&mut self, mouse: event::MouseEvent) -> io::Result<()> {
         // If terminal search mode is active but PTY wants mouse events (TUI app running),
         // exit search mode and forward mouse to PTY
-        if self.terminal_search_mode && self.is_pty_mouse_mode_active() {
-            self.terminal_search_mode = false;
-            self.terminal_search_query.clear();
-            self.terminal_search_matches.clear();
-            self.terminal_search_current = 0;
+        if self.current_tab_search().map(|s| s.active).unwrap_or(false) && self.is_pty_mouse_mode_active() {
+            if let Some(search) = self.current_tab_search_mut() {
+                search.active = false;
+                search.query.clear();
+                search.matches.clear();
+                search.current = 0;
+            }
         }
 
         match mouse.kind {
@@ -1088,107 +1099,131 @@ impl App {
 
     /// Update terminal search matches based on current query
     fn update_terminal_search(&mut self) {
-        self.terminal_search_matches.clear();
-        self.terminal_search_current = 0;
-
-        if self.terminal_search_query.is_empty() || self.tabs.is_empty() || self.selected_tab >= self.tabs.len() {
+        if self.tabs.is_empty() || self.selected_tab >= self.tabs.len() {
             return;
         }
 
-        let tab = &self.tabs[self.selected_tab];
-        if let Some(session) = &tab.session {
-            if let Ok(mut parser) = session.parser.lock() {
-                // Get max scrollback to know how much history exists
-                parser.set_scrollback(usize::MAX);
-                let max_scrollback = parser.screen().scrollback();
+        let selected_tab = self.selected_tab;
+        let query_lower = {
+            let search = &mut self.tabs[selected_tab].terminal_search;
+            search.matches.clear();
+            search.current = 0;
+            if search.query.is_empty() {
+                return;
+            }
+            search.query.to_lowercase()
+        };
 
-                let query_lower = self.terminal_search_query.to_lowercase();
+        let scroll_offset = self.tabs[selected_tab].scroll_offset;
+        let parser_arc = match self.tabs[selected_tab].session.as_ref() {
+            Some(session) => session.parser.clone(),
+            None => return,
+        };
 
-                // Search through entire history
-                // Strategy: iterate through each scrollback position from max to 0
-                // At scrollback > 0, search only row 0 (the top line that changes with each scroll)
-                // At scrollback = 0, search all rows (the current live screen)
-                for scrollback_pos in (0..=max_scrollback).rev() {
-                    parser.set_scrollback(scrollback_pos);
-                    let screen = parser.screen();
-                    let (rows, cols) = screen.size();
+        let mut matches = Vec::new();
+        if let Ok(mut parser) = parser_arc.lock() {
+            // Get max scrollback to know how much history exists
+            parser.set_scrollback(usize::MAX);
+            let max_scrollback = parser.screen().scrollback();
 
-                    // Determine which rows to search at this scrollback position
-                    let search_rows: Vec<u16> = if scrollback_pos == 0 {
-                        // At live view, search all rows to get the remaining lines
-                        (0..rows).collect()
-                    } else {
-                        // At scrollback > 0, search only row 0 to avoid duplicates
-                        vec![0]
-                    };
+            // Search through entire history
+            // Strategy: iterate through each scrollback position from max to 0
+            // At scrollback > 0, search only row 0 (the top line that changes with each scroll)
+            // At scrollback = 0, search all rows (the current live screen)
+            for scrollback_pos in (0..=max_scrollback).rev() {
+                parser.set_scrollback(scrollback_pos);
+                let screen = parser.screen();
+                let (rows, cols) = screen.size();
 
-                    for &row in &search_rows {
-                        // Extract text from this row, tracking column positions
-                        let mut row_text = String::new();
-                        let mut col_to_pos = Vec::new(); // Maps column to string position
+                // Determine which rows to search at this scrollback position
+                let search_rows: Vec<u16> = if scrollback_pos == 0 {
+                    // At live view, search all rows to get the remaining lines
+                    (0..rows).collect()
+                } else {
+                    // At scrollback > 0, search only row 0 to avoid duplicates
+                    vec![0]
+                };
 
-                        for col in 0..cols {
-                            col_to_pos.push(row_text.len());
-                            if let Some(cell) = screen.cell(row, col) {
-                                if cell.has_contents() {
-                                    row_text.push_str(&cell.contents());
-                                } else {
-                                    row_text.push(' ');
-                                }
+                for &row in &search_rows {
+                    // Extract text from this row, tracking column positions
+                    let mut row_text = String::new();
+                    let mut col_to_pos = Vec::new(); // Maps column to string position
+
+                    for col in 0..cols {
+                        col_to_pos.push(row_text.len());
+                        if let Some(cell) = screen.cell(row, col) {
+                            if cell.has_contents() {
+                                row_text.push_str(&cell.contents());
                             } else {
                                 row_text.push(' ');
                             }
-                        }
-
-                        // Search for query in row text (case-insensitive)
-                        let row_text_lower = row_text.to_lowercase();
-                        let mut search_start = 0;
-                        while let Some(pos) = row_text_lower[search_start..].find(&query_lower) {
-                            let match_pos = search_start + pos;
-
-                            // Find which column this match starts at
-                            let mut match_col = 0;
-                            for (col_idx, &string_pos) in col_to_pos.iter().enumerate() {
-                                if string_pos == match_pos {
-                                    match_col = col_idx;
-                                    break;
-                                } else if string_pos > match_pos {
-                                    break;
-                                } else {
-                                    match_col = col_idx;
-                                }
-                            }
-
-                            // Convert to absolute row
-                            // At scrollback=S, row R has absolute position: R - S
-                            let abs_row = row as i64 - scrollback_pos as i64;
-                            self.terminal_search_matches.push((abs_row, match_col as u16, query_lower.chars().count()));
-
-                            search_start = match_pos + 1; // Allow overlapping matches
+                        } else {
+                            row_text.push(' ');
                         }
                     }
-                }
 
-                // Reset scrollback to current view
-                parser.set_scrollback(tab.scroll_offset);
+                    // Search for query in row text (case-insensitive)
+                    let row_text_lower = row_text.to_lowercase();
+                    let mut search_start = 0;
+                    while let Some(pos) = row_text_lower[search_start..].find(&query_lower) {
+                        let match_pos = search_start + pos;
+
+                        // Find which column this match starts at
+                        let mut match_col = 0;
+                        for (col_idx, &string_pos) in col_to_pos.iter().enumerate() {
+                            if string_pos == match_pos {
+                                match_col = col_idx;
+                                break;
+                            } else if string_pos > match_pos {
+                                break;
+                            } else {
+                                match_col = col_idx;
+                            }
+                        }
+
+                        // Convert to absolute row
+                        // At scrollback=S, row R has absolute position: R - S
+                        let abs_row = row as i64 - scrollback_pos as i64;
+                        matches.push((abs_row, match_col as u16, query_lower.chars().count()));
+
+                        search_start = match_pos + 1; // Allow overlapping matches
+                    }
+                }
             }
+
+            // Reset scrollback to current view
+            parser.set_scrollback(scroll_offset);
         }
 
-        // Matches are already in order from oldest to newest
-        // If we have matches, scroll to the first one
-        if !self.terminal_search_matches.is_empty() {
+        if let Some(search) = self.tabs.get_mut(selected_tab).map(|tab| &mut tab.terminal_search) {
+            search.matches = matches;
+            search.current = 0;
+        }
+
+        if self.tabs.get(selected_tab).map(|tab| !tab.terminal_search.matches.is_empty()).unwrap_or(false) {
             self.scroll_to_search_match();
         }
     }
 
     /// Scroll to the current search match
     fn scroll_to_search_match(&mut self) {
-        if self.terminal_search_matches.is_empty() || self.tabs.is_empty() || self.selected_tab >= self.tabs.len() {
+        if self.tabs.is_empty() || self.selected_tab >= self.tabs.len() {
             return;
         }
 
-        let (abs_row, _, _) = self.terminal_search_matches[self.terminal_search_current];
-        let tab = &mut self.tabs[self.selected_tab];
+        let selected_tab = self.selected_tab;
+        let (abs_row, parser_arc) = {
+            let tab = &self.tabs[selected_tab];
+            if tab.terminal_search.matches.is_empty() {
+                return;
+            }
+            let Some(session) = &tab.session else {
+                return;
+            };
+            (tab.terminal_search.matches[tab.terminal_search.current].0, session.parser.clone())
+        };
+
+        let tab = &mut self.tabs[selected_tab];
 
         // Calculate the screen row from absolute row
         // Relationship: abs_row = screen_row - scroll_offset
@@ -1197,27 +1232,25 @@ impl App {
         // We want to position the match at target_screen_row
         let tab_height = self.tab_content_area.height as i64;
 
-        if let Some(session) = &tab.session {
-            if let Ok(mut parser) = session.parser.lock() {
-                let max_scrollback = {
-                    parser.set_scrollback(usize::MAX);
-                    let max = parser.screen().scrollback();
-                    parser.set_scrollback(0);
-                    max
-                };
+        if let Ok(mut parser) = parser_arc.lock() {
+            let max_scrollback = {
+                parser.set_scrollback(usize::MAX);
+                let max = parser.screen().scrollback();
+                parser.set_scrollback(0);
+                max
+            };
 
-                // Target: put match at 1/3 from top of screen
-                let target_screen_row = tab_height / 3;
+            // Target: put match at 1/3 from top of screen
+            let target_screen_row = tab_height / 3;
 
-                // Calculate needed scroll: scroll_offset = target_screen_row - abs_row
-                let needed_scroll = target_screen_row - abs_row;
+            // Calculate needed scroll: scroll_offset = target_screen_row - abs_row
+            let needed_scroll = target_screen_row - abs_row;
 
-                if needed_scroll < 0 {
-                    // Match is in the "future" (beyond current live view), stay at live view
-                    tab.scroll_offset = 0;
-                } else {
-                    tab.scroll_offset = (needed_scroll as usize).min(max_scrollback);
-                }
+            if needed_scroll < 0 {
+                // Match is in the "future" (beyond current live view), stay at live view
+                tab.scroll_offset = 0;
+            } else {
+                tab.scroll_offset = (needed_scroll as usize).min(max_scrollback);
             }
         }
     }

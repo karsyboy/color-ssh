@@ -50,6 +50,18 @@ pub struct SshSession {
     clear_pending: Arc<Mutex<bool>>,
 }
 
+#[derive(Debug, Clone, Default)]
+pub struct TerminalSearchState {
+    /// Whether terminal search UI is active for this tab
+    active: bool,
+    /// Current terminal search query
+    query: String,
+    /// Match positions for terminal search (row, col, length)
+    matches: Vec<(i64, u16, usize)>,
+    /// Current match index in terminal search
+    current: usize,
+}
+
 /// Represents an open tab for a host
 pub struct HostTab {
     /// The SSH host this tab represents
@@ -60,6 +72,8 @@ pub struct HostTab {
     session: Option<SshSession>,
     /// Scrollback offset (0 = live view, >0 = scrolled up)
     scroll_offset: usize,
+    /// Per-tab terminal search state
+    terminal_search: TerminalSearchState,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -137,14 +151,6 @@ pub struct App {
     tab_scroll_offset: usize,
     /// History buffer size (scrollback lines for VT100 parser)
     history_buffer: usize,
-    /// Whether we're in terminal search mode (Ctrl+F)
-    terminal_search_mode: bool,
-    /// Terminal search query
-    terminal_search_query: String,
-    /// Match positions for terminal search (row, col, length)
-    terminal_search_matches: Vec<(i64, u16, usize)>,
-    /// Current match index in terminal search
-    terminal_search_current: usize,
     /// Whether the host panel is visible (can be toggled with Ctrl+B)
     host_panel_visible: bool,
 }
@@ -155,6 +161,14 @@ impl App {
             out.insert(child.id);
             Self::collect_descendant_folder_ids(child, out);
         }
+    }
+
+    fn current_tab_search(&self) -> Option<&TerminalSearchState> {
+        self.tabs.get(self.selected_tab).map(|tab| &tab.terminal_search)
+    }
+
+    fn current_tab_search_mut(&mut self) -> Option<&mut TerminalSearchState> {
+        self.tabs.get_mut(self.selected_tab).map(|tab| &mut tab.terminal_search)
     }
 
     /// Create a new App instance
@@ -229,10 +243,6 @@ impl App {
             exit_button_area: Rect::default(),
             tab_scroll_offset: 0,
             history_buffer,
-            terminal_search_mode: false,
-            terminal_search_query: String::new(),
-            terminal_search_matches: Vec::new(),
-            terminal_search_current: 0,
             host_panel_visible: true,
         };
 
