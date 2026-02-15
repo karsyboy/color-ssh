@@ -27,14 +27,14 @@ pub struct MainArgs {
 /// # Arguments Supported
 /// - `-d, --debug` - Enable debug mode with detailed logging
 /// - `-l, --log` - Enable SSH session logging
-/// - `-i, --interactive` - Launch interactive session manager TUI
 /// - `ssh_args` - All remaining arguments are passed to SSH
 ///
 /// # Examples
 /// ```text
+/// cossh                              # Launch interactive session manager (default when no args)
+/// cossh -d                           # Launch interactive session manager with debug enabled
 /// cossh -d user@example.com          # Debug mode enabled
 /// cossh -l user@example.com          # SSH logging enabled
-/// cossh -i                           # Launch interactive session manager
 /// cossh -d -l user@example.com -p 22 # Both modes with SSH args
 /// cossh -- -G user@example.com       # Non-interactive command (config dump).
 /// ```
@@ -42,11 +42,10 @@ pub struct MainArgs {
 /// # Returns
 /// A MainArgs struct containing all parsed arguments
 pub fn main_args() -> MainArgs {
-    let matches = Command::new("cossh")
+    let cmd = Command::new("cossh")
         .version("v0.6.0")
         .author("@karsyboy")
         .about("A Rust-based SSH client wrapper with syntax highlighting and logging capabilities")
-        .arg_required_else_help(true)
         .propagate_version(true)
         .arg(
             Arg::new("debug")
@@ -63,13 +62,6 @@ pub fn main_args() -> MainArgs {
                 .action(clap::ArgAction::SetTrue),
         )
         .arg(
-            Arg::new("interactive")
-                .short('i')
-                .long("interactive")
-                .help("Launch interactive session manager TUI")
-                .action(clap::ArgAction::SetTrue),
-        )
-        .arg(
             Arg::new("profile")
                 .short('P')
                 .long("profile")
@@ -77,36 +69,45 @@ pub fn main_args() -> MainArgs {
                 .num_args(1)
                 .required(false),
         )
-        .arg(
-            Arg::new("ssh_args")
-                .help("SSH arguments to forward to the SSH command")
-                .num_args(1..)
-                .required_unless_present("interactive"),
-        )
+        .arg(Arg::new("ssh_args").help("SSH arguments to forward to the SSH command").num_args(1..))
         .after_help(
             r#"
+cossh                                              # Launch interactive session manager
+cossh -d                                           # Launch interactive session manager with debug enabled
 cossh -d user@example.com                          # Debug mode enabled
 cossh -l user@example.com                          # SSH logging enabled
-cossh -i                                           # Launch interactive session manager
 cossh -l -P network user@firewall.example.com      # Use 'network' config profile
-cossh -l user@host -p 2222 -i ~/.ssh/custom_key    # Both modes with SSH args
+cossh -l user@host -p 2222                         # Both modes with SSH args
 cossh user@host -G                                 # Non-interactive command
 "#,
-        )
-        .get_matches();
+        );
+    let matches = cmd.clone().get_matches();
 
     // Retrieve SSH arguments to forward
     let ssh_args: Vec<String> = matches.get_many::<String>("ssh_args").map(|vals| vals.cloned().collect()).unwrap_or_default();
+    let debug = matches.get_flag("debug");
+    let ssh_logging = matches.get_flag("log");
+    let profile = matches.get_one::<String>("profile").cloned().filter(|s| !s.is_empty());
+    let no_user_args = std::env::args_os().len() <= 1;
+    let debug_only = debug && !ssh_logging && profile.is_none() && ssh_args.is_empty();
+    let interactive = no_user_args || debug_only;
+
+    if !interactive && ssh_args.is_empty() {
+        let mut help_cmd = cmd.clone();
+        let _ = help_cmd.print_long_help();
+        println!();
+        std::process::exit(2);
+    }
 
     // Detect non-interactive SSH commands that don't need highlighting
     // These commands typically output configuration or version info
     let is_non_interactive = ssh_args.iter().any(|arg| matches!(arg.as_str(), "-G" | "-V" | "-O" | "-Q" | "-T"));
 
     MainArgs {
-        debug: matches.get_flag("debug"),
-        ssh_logging: matches.get_flag("log"),
-        interactive: matches.get_flag("interactive"),
-        profile: matches.get_one::<String>("profile").cloned().filter(|s| !s.is_empty()),
+        debug,
+        ssh_logging,
+        interactive,
+        profile,
         ssh_args,
         is_non_interactive,
     }
