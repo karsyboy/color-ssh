@@ -337,10 +337,20 @@ impl App {
         if is_exited {
             right.push(Span::styled("Enter", Style::default().fg(Color::Green)));
             right.push(Span::styled(":reconnect | ", Style::default().fg(Color::DarkGray)));
+            right.push(Span::styled("S-Tab", Style::default().fg(Color::Cyan)));
+            right.push(Span::styled(":host | ", Style::default().fg(Color::DarkGray)));
+            right.push(Span::styled("A-←/→", Style::default().fg(Color::Cyan)));
+            right.push(Span::styled(":tab | ", Style::default().fg(Color::DarkGray)));
             right.push(Span::styled("^W", Style::default().fg(Color::Red)));
             right.push(Span::styled(":close | ", Style::default().fg(Color::DarkGray)));
-            right.push(Span::styled("S-Tab", Style::default().fg(Color::Cyan)));
-            right.push(Span::styled(":host", Style::default().fg(Color::DarkGray)));
+            right.push(Span::styled("^B", Style::default().fg(Color::Cyan)));
+            right.push(Span::styled(":panel | ", Style::default().fg(Color::DarkGray)));
+            right.push(Span::styled("^F", Style::default().fg(Color::Cyan)));
+            right.push(Span::styled(":find | ", Style::default().fg(Color::DarkGray)));
+            right.push(Span::styled("A-c", Style::default().fg(Color::Yellow)));
+            right.push(Span::styled(":copy | ", Style::default().fg(Color::DarkGray)));
+            right.push(Span::styled("S-PgUp/Dn", Style::default().fg(Color::Yellow)));
+            right.push(Span::styled(":scroll", Style::default().fg(Color::DarkGray)));
             return (left, right);
         }
 
