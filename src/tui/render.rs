@@ -486,9 +486,9 @@ impl App {
         let total_hosts = self.hosts.len();
         let matched_hosts = self.matched_host_count();
         let title = if self.search_query.is_empty() {
-            format!("Hosts {}", total_hosts)
+            format!("Hosts - {}", total_hosts)
         } else {
-            format!("Hosts {}/{}", matched_hosts, total_hosts)
+            format!("Hosts - {}/{}", matched_hosts, total_hosts)
         };
 
         let title_style = if self.focus_on_manager {
