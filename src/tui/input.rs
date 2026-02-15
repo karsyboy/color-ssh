@@ -155,7 +155,8 @@ impl App {
     }
 
     fn open_quick_connect_modal(&mut self) {
-        self.quick_connect = Some(QuickConnectState::new(self.quick_connect_default_ssh_logging));
+        let profiles = self.discover_quick_connect_profiles();
+        self.quick_connect = Some(QuickConnectState::new(self.quick_connect_default_ssh_logging, profiles));
     }
 
     fn handle_quick_connect_key(&mut self, key: KeyEvent) {
@@ -174,6 +175,10 @@ impl App {
                     form.selected = form.selected.prev();
                 }
                 KeyCode::Enter => match form.selected {
+                    QuickConnectField::Profile => {
+                        form.error = None;
+                        form.select_next_profile();
+                    }
                     QuickConnectField::Logging => {
                         form.ssh_logging = !form.ssh_logging;
                     }
@@ -189,6 +194,18 @@ impl App {
                         form.ssh_logging = !form.ssh_logging;
                     }
                 }
+                KeyCode::Left => {
+                    if form.selected == QuickConnectField::Profile {
+                        form.error = None;
+                        form.select_prev_profile();
+                    }
+                }
+                KeyCode::Right => {
+                    if form.selected == QuickConnectField::Profile {
+                        form.error = None;
+                        form.select_next_profile();
+                    }
+                }
                 KeyCode::Backspace => {
                     form.error = None;
                     match form.selected {
@@ -198,9 +215,6 @@ impl App {
                         QuickConnectField::Host => {
                             form.host.pop();
                         }
-                        QuickConnectField::Profile => {
-                            form.profile.pop();
-                        }
                         _ => {}
                     }
                 }
@@ -209,7 +223,6 @@ impl App {
                     match form.selected {
                         QuickConnectField::User => form.user.push(c),
                         QuickConnectField::Host => form.host.push(c),
-                        QuickConnectField::Profile => form.profile.push(c),
                         _ => {}
                     }
                 }
@@ -231,7 +244,7 @@ impl App {
 
         let user = form.user.trim().to_string();
         let host = form.host.trim().to_string();
-        let profile = form.profile.trim().to_string();
+        let profile = form.selected_profile_for_cli();
         let force_ssh_logging = form.ssh_logging;
 
         if host.is_empty() {
@@ -239,8 +252,6 @@ impl App {
             form.selected = QuickConnectField::Host;
             return;
         }
-
-        let profile = if profile.is_empty() { None } else { Some(profile) };
 
         self.open_quick_connect_host(user, host, profile, force_ssh_logging);
     }

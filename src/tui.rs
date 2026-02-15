@@ -27,7 +27,9 @@ use ratatui::{Terminal, backend::CrosstermBackend, layout::Rect, widgets::ListSt
 use std::io::Write;
 use std::sync::{Arc, Mutex};
 use std::{
+    cmp::Ordering,
     collections::{HashMap, HashSet},
+    fs,
     io::{self},
     process::Command,
     time::{Duration, Instant},
@@ -113,21 +115,59 @@ impl QuickConnectField {
 pub(crate) struct QuickConnectState {
     pub(crate) user: String,
     pub(crate) host: String,
-    pub(crate) profile: String,
+    pub(crate) profile_options: Vec<String>,
+    pub(crate) profile_index: usize,
     pub(crate) ssh_logging: bool,
     pub(crate) selected: QuickConnectField,
     pub(crate) error: Option<String>,
 }
 
 impl QuickConnectState {
-    fn new(default_ssh_logging: bool) -> Self {
+    fn new(default_ssh_logging: bool, mut profile_options: Vec<String>) -> Self {
+        if profile_options.is_empty() {
+            profile_options.push("default".to_string());
+        }
+        let profile_index = profile_options.iter().position(|profile| profile.eq_ignore_ascii_case("default")).unwrap_or(0);
+
         Self {
             user: String::new(),
             host: String::new(),
-            profile: String::new(),
+            profile_options,
+            profile_index,
             ssh_logging: default_ssh_logging,
             selected: QuickConnectField::User,
             error: None,
+        }
+    }
+
+    fn selected_profile_label(&self) -> &str {
+        self.profile_options.get(self.profile_index).map(String::as_str).unwrap_or("default")
+    }
+
+    fn selected_profile_for_cli(&self) -> Option<String> {
+        let profile = self.selected_profile_label();
+        if profile.eq_ignore_ascii_case("default") {
+            None
+        } else {
+            Some(profile.to_string())
+        }
+    }
+
+    fn select_next_profile(&mut self) {
+        if self.profile_options.is_empty() {
+            return;
+        }
+        self.profile_index = (self.profile_index + 1) % self.profile_options.len();
+    }
+
+    fn select_prev_profile(&mut self) {
+        if self.profile_options.is_empty() {
+            return;
+        }
+        if self.profile_index == 0 {
+            self.profile_index = self.profile_options.len() - 1;
+        } else {
+            self.profile_index -= 1;
         }
     }
 }
@@ -226,6 +266,48 @@ pub struct App {
 }
 
 impl App {
+    fn discover_quick_connect_profiles(&self) -> Vec<String> {
+        let mut profiles: HashSet<String> = HashSet::new();
+        profiles.insert("default".to_string());
+
+        let config_dir = config::SESSION_CONFIG
+            .get()
+            .and_then(|c| c.read().ok().map(|cfg| cfg.metadata.config_path.parent().map(|p| p.to_path_buf())))
+            .flatten();
+
+        if let Some(config_dir) = config_dir
+            && let Ok(entries) = fs::read_dir(config_dir)
+        {
+            for entry in entries.flatten() {
+                let filename = entry.file_name();
+                let Some(filename) = filename.to_str() else {
+                    continue;
+                };
+
+                if filename == ".cossh-config.yaml" {
+                    profiles.insert("default".to_string());
+                    continue;
+                }
+
+                if let Some(profile_name) = filename.strip_suffix(".cossh-config.yaml")
+                    && !profile_name.is_empty()
+                    && !profile_name.starts_with('.')
+                {
+                    profiles.insert(profile_name.to_string());
+                }
+            }
+        }
+
+        let mut profile_list: Vec<String> = profiles.into_iter().collect();
+        profile_list.sort_by(|a, b| match (a.eq_ignore_ascii_case("default"), b.eq_ignore_ascii_case("default")) {
+            (true, false) => Ordering::Less,
+            (false, true) => Ordering::Greater,
+            _ => a.to_lowercase().cmp(&b.to_lowercase()),
+        });
+
+        profile_list
+    }
+
     fn collect_descendant_folder_ids(folder: &TreeFolder, out: &mut HashSet<FolderId>) {
         for child in &folder.children {
             out.insert(child.id);

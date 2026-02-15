@@ -345,7 +345,7 @@ impl App {
         };
 
         let width = full_area.width.min(74).max(44);
-        let height = if form.error.is_some() { 11 } else { 10 };
+        let height = if form.error.is_some() { 12 } else { 11 };
         let area = Self::centered_rect(width, height, full_area);
 
         frame.render_widget(Clear, area);
@@ -378,11 +378,24 @@ impl App {
         } else {
             form.host.clone()
         };
+        let profile_text = form.selected_profile_label().to_string();
         let profile_text = if form.selected == super::QuickConnectField::Profile {
-            format!("{}_", form.profile)
+            format!("{}_", profile_text)
         } else {
-            form.profile.clone()
+            profile_text
         };
+        let mut profile_list_spans = vec![Span::styled("Profiles: ", Style::default().fg(Color::DarkGray))];
+        for (idx, profile_name) in form.profile_options.iter().enumerate() {
+            if idx > 0 {
+                profile_list_spans.push(Span::styled(" | ", Style::default().fg(Color::DarkGray)));
+            }
+            let style = if idx == form.profile_index {
+                Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD)
+            } else {
+                Style::default().fg(Color::Gray)
+            };
+            profile_list_spans.push(Span::styled(profile_name.clone(), style));
+        }
 
         let logging_mark = if form.ssh_logging { "[x]" } else { "[ ]" };
         let connect_style = if form.selected == super::QuickConnectField::Connect {
@@ -405,18 +418,19 @@ impl App {
             ]),
             Line::from(vec![
                 Span::styled("Profile: ", field_style(super::QuickConnectField::Profile, form.selected)),
-                Span::styled(
-                    if profile_text.is_empty() { "(optional)".to_string() } else { profile_text },
-                    value_style(super::QuickConnectField::Profile, form.selected),
-                ),
+                Span::styled(profile_text, value_style(super::QuickConnectField::Profile, form.selected)),
             ]),
+            Line::from(profile_list_spans),
             Line::from(vec![
                 Span::styled("SSH Logging: ", field_style(super::QuickConnectField::Logging, form.selected)),
                 Span::styled(format!("{} (-l)", logging_mark), value_style(super::QuickConnectField::Logging, form.selected)),
             ]),
             Line::from(""),
             Line::from(vec![Span::styled("[ Enter ] Connect", connect_style)]),
-            Line::from(vec![Span::styled("Esc: cancel | Tab/Shift+Tab: field", Style::default().fg(Color::DarkGray))]),
+            Line::from(vec![Span::styled(
+                "Esc: cancel | Tab/Shift+Tab: field | \u{2190}/\u{2192}: profile",
+                Style::default().fg(Color::DarkGray),
+            )]),
         ];
 
         if let Some(error) = &form.error {
