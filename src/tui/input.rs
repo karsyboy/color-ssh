@@ -114,6 +114,12 @@ impl App {
             return Ok(());
         }
 
+        // Global quit shortcut.
+        if key.code == KeyCode::Char('q') && key.modifiers.contains(KeyModifiers::CONTROL) {
+            self.should_exit = true;
+            return Ok(());
+        }
+
         if self.search_mode {
             return self.handle_search_key(key);
         }
@@ -311,8 +317,6 @@ impl App {
                     if !self.host_panel_visible {
                         self.host_panel_visible = true;
                     }
-                } else {
-                    self.should_exit = true;
                 }
             }
 

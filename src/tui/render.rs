@@ -291,7 +291,7 @@ impl App {
             right.push(Span::styled(":tabs | ", Style::default().fg(Color::DarkGray)));
         }
 
-        right.push(Span::styled("Esc", Style::default().fg(Color::Red)));
+        right.push(Span::styled("^Q", Style::default().fg(Color::Red)));
         right.push(Span::styled(":quit", Style::default().fg(Color::DarkGray)));
         (left, right)
     }
