@@ -646,6 +646,8 @@ impl App {
                     && mouse.row < area.y + area.height
                 {
                     self.focus_on_manager = false;
+                    // Clicking into terminal content should leave host search mode.
+                    self.search_mode = false;
                     let alt_held = mouse.modifiers.contains(KeyModifiers::ALT);
 
                     if self.is_pty_mouse_mode_active() && !alt_held {
