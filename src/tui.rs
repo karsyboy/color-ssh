@@ -208,7 +208,7 @@ impl App {
                     cfg.interactive_settings.as_ref().map(|interactive| {
                         (
                             interactive.history_buffer,
-                            interactive.host_tree_start_collapsed,
+                            interactive.host_tree_starts_collapsed(),
                             interactive.info_view,
                             interactive.host_view_size,
                             interactive.info_view_size,
@@ -216,7 +216,7 @@ impl App {
                     })
                 })
             })
-            .unwrap_or((1000, false, true, 25, 40));
+            .unwrap_or((1000, true, true, 25, 40));
 
         let (term_width, term_height) = crossterm::terminal::size().unwrap_or((100, 30));
         let host_panel_width = (((term_width as u32 * host_view_size_percent as u32) / 100) as u16).clamp(15, 80);

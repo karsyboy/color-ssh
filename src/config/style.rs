@@ -62,9 +62,14 @@ pub struct InteractiveSettings {
     /// History buffer size (scrollback lines for session manager tabs)
     #[serde(default = "default_history_buffer")]
     pub history_buffer: usize,
-    /// Whether host tree folders should start collapsed in session manager
-    #[serde(default = "default_host_tree_start_collapsed")]
-    pub host_tree_start_collapsed: bool,
+    /// Whether host tree folders should start uncollapsed in session manager.
+    /// `false` (default) means the tree starts collapsed.
+    #[serde(default = "default_host_tree_uncollapsed")]
+    pub host_tree_uncollapsed: bool,
+    /// Backward-compatibility key for older configs.
+    /// If present, this overrides `host_tree_uncollapsed`.
+    #[serde(default, rename = "host_tree_start_collapsed")]
+    legacy_host_tree_start_collapsed: Option<bool>,
     /// Whether the host info pane is shown by default
     #[serde(default = "default_info_view")]
     pub info_view: bool,
@@ -84,8 +89,15 @@ fn default_history_buffer() -> usize {
     1000
 }
 
-fn default_host_tree_start_collapsed() -> bool {
+fn default_host_tree_uncollapsed() -> bool {
     false
+}
+
+impl InteractiveSettings {
+    /// Resolve final startup behavior for host tree collapse state.
+    pub fn host_tree_starts_collapsed(&self) -> bool {
+        self.legacy_host_tree_start_collapsed.unwrap_or(!self.host_tree_uncollapsed)
+    }
 }
 
 fn default_info_view() -> bool {

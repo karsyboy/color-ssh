@@ -25,7 +25,7 @@ settings:
 # ============================================================================
 interactive_settings:
   history_buffer: 1000
-  host_tree_start_collapsed: false
+  host_tree_uncollapsed: false
   info_view: true
   host_view_size: 25
   info_view_size: 40
