@@ -32,6 +32,8 @@ pub struct SshHost {
     pub profile: Option<String>,
     /// Whether to use sshpass (from #_sshpass comment)
     pub use_sshpass: bool,
+    /// Whether to hide this host from the interactive host view (from #_hidden comment)
+    pub hidden: bool,
     /// Local forward settings
     pub local_forward: Vec<String>,
     /// Remote forward settings
@@ -53,6 +55,7 @@ impl SshHost {
             description: None,
             profile: None,
             use_sshpass: false,
+            hidden: false,
             local_forward: Vec::new(),
             remote_forward: Vec::new(),
             other_options: HashMap::new(),
@@ -264,6 +267,12 @@ fn parse_config_file(config_path: &Path) -> std::io::Result<ParsedConfigFile> {
                 let val = sshpass_val.trim().to_lowercase();
                 host.use_sshpass = val == "true" || val == "yes" || val == "1";
             }
+            if let Some(hidden_val) = trimmed.strip_prefix("#_hidden")
+                && let Some(ref mut host) = current_host
+            {
+                let val = hidden_val.trim().to_lowercase();
+                host.hidden = val == "true" || val == "yes" || val == "1";
+            }
             continue;
         }
 
@@ -282,6 +291,7 @@ fn parse_config_file(config_path: &Path) -> std::io::Result<ParsedConfigFile> {
                 if let Some(host) = current_host.take()
                     && !host.name.contains('*')
                     && !host.name.contains('?')
+                    && !host.hidden
                 {
                     parsed.hosts.push(host);
                 }
@@ -345,6 +355,7 @@ fn parse_config_file(config_path: &Path) -> std::io::Result<ParsedConfigFile> {
     if let Some(host) = current_host
         && !host.name.contains('*')
         && !host.name.contains('?')
+        && !host.hidden
     {
         parsed.hosts.push(host);
     }
