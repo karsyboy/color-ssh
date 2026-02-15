@@ -16,6 +16,9 @@ pub struct Config {
     /// Application-wide settings
     #[serde(default)]
     pub settings: Settings,
+    /// Interactive session-manager settings (optional block)
+    #[serde(default)]
+    pub setting_interactive: Option<InteractiveSettings>,
     /// Color palette mapping names to hex codes (converted to ANSI at runtime)
     pub palette: HashMap<String, String>,
     /// Syntax highlighting rules
@@ -40,12 +43,6 @@ pub struct Settings {
     /// Enable SSH session logging
     #[serde(default)]
     pub ssh_logging: bool,
-    /// History buffer size (scrollback lines for session manager tabs)
-    #[serde(default = "default_history_buffer")]
-    pub history_buffer: usize,
-    /// Whether host tree folders should start collapsed in session manager
-    #[serde(default = "default_host_tree_start_collapsed")]
-    pub host_tree_start_collapsed: bool,
 }
 
 impl Default for Settings {
@@ -55,10 +52,19 @@ impl Default for Settings {
             show_title: true,
             debug_mode: false,
             ssh_logging: false,
-            history_buffer: 1000,
-            host_tree_start_collapsed: false,
         }
     }
+}
+
+/// Interactive-only session manager settings.
+#[derive(Debug, Deserialize, Default)]
+pub struct InteractiveSettings {
+    /// History buffer size (scrollback lines for session manager tabs)
+    #[serde(default = "default_history_buffer")]
+    pub history_buffer: usize,
+    /// Whether host tree folders should start collapsed in session manager
+    #[serde(default = "default_host_tree_start_collapsed")]
+    pub host_tree_start_collapsed: bool,
 }
 
 fn default_show_title() -> bool {

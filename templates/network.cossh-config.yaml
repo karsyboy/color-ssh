@@ -19,8 +19,14 @@ settings:
   show_title: true
   debug_mode: false
   ssh_logging: true
+
+# ============================================================================
+# INTERACTIVE SETTINGS SECTION (Optional)
+# ============================================================================
+setting_interactive:
   history_buffer: 1000
-  
+  host_tree_start_collapsed: false
+
 # ============================================================================
 # COLOR PALETTE
 # ============================================================================

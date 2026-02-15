@@ -42,7 +42,7 @@ fn main() -> Result<ExitCode> {
     // If interactive mode is requested, launch the session manager
     if args.interactive {
         log_info!("Launching interactive session manager");
-        // Init config so session manager can read settings like history_buffer
+        // Init config so session manager can read interactive settings (if configured)
         let _ = config::init_session_config(args.profile.clone());
         if let Err(e) = tui::run_session_manager() {
             eprintln!("Session manager error: {}", e);

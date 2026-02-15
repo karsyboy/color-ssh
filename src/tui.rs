@@ -179,7 +179,13 @@ impl App {
         let host_tree_root = tree_model.root;
         let (history_buffer, host_tree_start_collapsed) = config::SESSION_CONFIG
             .get()
-            .and_then(|c| c.read().ok().map(|cfg| (cfg.settings.history_buffer, cfg.settings.host_tree_start_collapsed)))
+            .and_then(|c| {
+                c.read().ok().and_then(|cfg| {
+                    cfg.setting_interactive
+                        .as_ref()
+                        .map(|interactive| (interactive.history_buffer, interactive.host_tree_start_collapsed))
+                })
+            })
             .unwrap_or((1000, false));
         let mut collapsed_folders = HashSet::new();
         if host_tree_start_collapsed {
