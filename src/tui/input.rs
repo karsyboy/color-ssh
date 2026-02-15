@@ -135,6 +135,11 @@ impl App {
     /// Handle keys while in search mode
     fn handle_search_key(&mut self, key: KeyEvent) -> io::Result<()> {
         match key.code {
+            KeyCode::Char('c') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                self.search_mode = false;
+                self.search_query.clear();
+                self.update_filtered_hosts();
+            }
             KeyCode::Esc => {
                 self.search_mode = false;
                 self.search_query.clear();
@@ -376,6 +381,11 @@ impl App {
             // Host list navigation (when focused on manager)
             KeyCode::Char('f') if self.focus_on_manager && key.modifiers.contains(KeyModifiers::CONTROL) => {
                 self.search_mode = true;
+            }
+            KeyCode::Char('c') if self.focus_on_manager && key.modifiers.contains(KeyModifiers::CONTROL) && !self.search_query.is_empty() => {
+                self.search_mode = false;
+                self.search_query.clear();
+                self.update_filtered_hosts();
             }
             KeyCode::Left if self.focus_on_manager && self.host_panel_visible && key.modifiers.contains(KeyModifiers::CONTROL) => {
                 // Ctrl+Left: shrink host panel

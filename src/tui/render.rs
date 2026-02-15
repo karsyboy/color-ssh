@@ -275,6 +275,10 @@ impl App {
             left.push(Span::styled("filter:", Style::default().fg(Color::DarkGray)));
             left.push(Span::styled(" ", Style::default()));
             left.push(Span::styled(self.search_query.clone(), Style::default().fg(Color::Yellow)));
+            left.push(Span::styled(" ", Style::default()));
+            left.push(Span::styled("(", Style::default().fg(Color::DarkGray)));
+            left.push(Span::styled("^C", Style::default().fg(Color::Red)));
+            left.push(Span::styled(" clear)", Style::default().fg(Color::DarkGray)));
         }
 
         let mut right = vec![
@@ -392,6 +396,8 @@ impl App {
             Span::styled("Enter", Style::default().fg(Color::Green)),
             Span::styled(" | ", Style::default().fg(Color::DarkGray)),
             Span::styled("Esc", Style::default().fg(Color::Red)),
+            Span::styled("/", Style::default().fg(Color::DarkGray)),
+            Span::styled("^C", Style::default().fg(Color::Red)),
             Span::styled(":clear", Style::default().fg(Color::DarkGray)),
         ];
         (left, right)
