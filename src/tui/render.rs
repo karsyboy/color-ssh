@@ -394,7 +394,10 @@ impl App {
         let mut lines = vec![
             Line::from(vec![
                 Span::styled("User: ", field_style(super::QuickConnectField::User, form.selected)),
-                Span::styled(user_text, value_style(super::QuickConnectField::User, form.selected)),
+                Span::styled(
+                    if user_text.is_empty() { "(optional)".to_string() } else { user_text },
+                    value_style(super::QuickConnectField::User, form.selected),
+                ),
             ]),
             Line::from(vec![
                 Span::styled("Host: ", field_style(super::QuickConnectField::Host, form.selected)),

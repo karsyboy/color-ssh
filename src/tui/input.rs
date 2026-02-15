@@ -234,12 +234,6 @@ impl App {
         let profile = form.profile.trim().to_string();
         let force_ssh_logging = form.ssh_logging;
 
-        if user.is_empty() {
-            form.error = Some("User is required".to_string());
-            form.selected = QuickConnectField::User;
-            return;
-        }
-
         if host.is_empty() {
             form.error = Some("Host is required".to_string());
             form.selected = QuickConnectField::Host;

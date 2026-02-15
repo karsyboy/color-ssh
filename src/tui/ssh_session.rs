@@ -172,9 +172,14 @@ impl App {
 
     /// Open a quick-connect host in a new tab.
     pub(super) fn open_quick_connect_host(&mut self, user: String, hostname: String, profile: Option<String>, force_ssh_logging: bool) {
-        let target = format!("{}@{}", user, hostname);
+        let user = user.trim().to_string();
+        let target = if user.is_empty() {
+            hostname.clone()
+        } else {
+            format!("{}@{}", user, hostname)
+        };
         let mut host = SshHost::new(target);
-        host.user = Some(user);
+        host.user = if user.is_empty() { None } else { Some(user) };
         host.hostname = Some(hostname);
         host.profile = profile;
         self.open_host_tab(host, force_ssh_logging);
