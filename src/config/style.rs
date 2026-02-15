@@ -43,6 +43,9 @@ pub struct Settings {
     /// History buffer size (scrollback lines for session manager tabs)
     #[serde(default = "default_history_buffer")]
     pub history_buffer: usize,
+    /// Whether host tree folders should start collapsed in session manager
+    #[serde(default = "default_host_tree_start_collapsed")]
+    pub host_tree_start_collapsed: bool,
 }
 
 impl Default for Settings {
@@ -53,6 +56,7 @@ impl Default for Settings {
             debug_mode: false,
             ssh_logging: false,
             history_buffer: 1000,
+            host_tree_start_collapsed: false,
         }
     }
 }
@@ -63,6 +67,10 @@ fn default_show_title() -> bool {
 
 fn default_history_buffer() -> usize {
     1000
+}
+
+fn default_host_tree_start_collapsed() -> bool {
+    false
 }
 
 /// A single highlight rule mapping a regex pattern to a color

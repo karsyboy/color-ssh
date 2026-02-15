@@ -6,7 +6,7 @@
 use super::App;
 use crossterm::clipboard::CopyToClipboard;
 use crossterm::execute;
-use std::io::{stdout, Write};
+use std::io::{Write, stdout};
 
 /// Check if a cell at (row, col) is within the current text selection
 pub fn is_cell_in_selection(row: i64, col: u16, start: Option<(i64, u16)>, end: Option<(i64, u16)>) -> bool {

@@ -3,8 +3,8 @@ pub mod config;
 pub mod highlighter;
 pub mod log;
 pub mod process;
-pub mod tui;
 pub mod ssh_config;
+pub mod tui;
 
 use std::io;
 

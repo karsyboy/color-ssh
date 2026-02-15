@@ -61,11 +61,52 @@ impl App {
     fn rebuild_visible_host_rows(&mut self) {
         let mut rows = Vec::new();
         if self.search_query.is_empty() {
-            self.collect_visible_rows_normal(&self.host_tree_root, 0, &mut rows);
+            self.collect_root_visible_rows_normal(&mut rows);
         } else {
-            self.collect_visible_rows_search(&self.host_tree_root, 0, &mut rows);
+            self.collect_root_visible_rows_search(&mut rows);
         }
         self.visible_host_rows = rows;
+    }
+
+    /// Build visible rows in normal mode while keeping the synthetic root hidden.
+    fn collect_root_visible_rows_normal(&self, rows: &mut Vec<HostTreeRow>) {
+        for &host_idx in &self.host_tree_root.host_indices {
+            if let Some(host) = self.hosts.get(host_idx) {
+                rows.push(HostTreeRow {
+                    kind: HostTreeRowKind::Host(host_idx),
+                    depth: 0,
+                    display_name: host.name.clone(),
+                    expanded: false,
+                });
+            }
+        }
+
+        for child in &self.host_tree_root.children {
+            self.collect_visible_rows_normal(child, 0, rows);
+        }
+    }
+
+    /// Build visible rows in search mode while keeping the synthetic root hidden.
+    fn collect_root_visible_rows_search(&self, rows: &mut Vec<HostTreeRow>) {
+        for &host_idx in &self.host_tree_root.host_indices {
+            if self.host_match_scores.contains_key(&host_idx)
+                && let Some(host) = self.hosts.get(host_idx)
+            {
+                rows.push(HostTreeRow {
+                    kind: HostTreeRowKind::Host(host_idx),
+                    depth: 0,
+                    display_name: host.name.clone(),
+                    expanded: false,
+                });
+            }
+        }
+
+        for child in &self.host_tree_root.children {
+            let mut sub_rows = Vec::new();
+            if self.collect_visible_rows_search(child, 0, &mut sub_rows) {
+                rows.extend(sub_rows);
+            }
+        }
     }
 
     fn collect_visible_rows_normal(&self, folder: &TreeFolder, depth: usize, rows: &mut Vec<HostTreeRow>) {

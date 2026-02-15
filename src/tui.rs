@@ -150,6 +150,13 @@ pub struct App {
 }
 
 impl App {
+    fn collect_descendant_folder_ids(folder: &TreeFolder, out: &mut HashSet<FolderId>) {
+        for child in &folder.children {
+            out.insert(child.id);
+            Self::collect_descendant_folder_ids(child, out);
+        }
+    }
+
     /// Create a new App instance
     pub fn new() -> io::Result<Self> {
         log_debug!("Initializing session manager");
@@ -170,6 +177,14 @@ impl App {
         });
         let hosts = tree_model.hosts;
         let host_tree_root = tree_model.root;
+        let (history_buffer, host_tree_start_collapsed) = config::SESSION_CONFIG
+            .get()
+            .and_then(|c| c.read().ok().map(|cfg| (cfg.settings.history_buffer, cfg.settings.host_tree_start_collapsed)))
+            .unwrap_or((1000, false));
+        let mut collapsed_folders = HashSet::new();
+        if host_tree_start_collapsed {
+            Self::collect_descendant_folder_ids(&host_tree_root, &mut collapsed_folders);
+        }
 
         log_debug!("Loaded {} SSH hosts", hosts.len());
 
@@ -184,7 +199,7 @@ impl App {
             visible_host_rows: Vec::new(),
             selected_host_row: 0,
             host_match_scores: HashMap::new(),
-            collapsed_folders: HashSet::new(),
+            collapsed_folders,
             host_list_state,
             host_list_area: Rect::default(),
             host_scroll_offset: 0,
@@ -207,10 +222,7 @@ impl App {
             is_dragging_divider: false,
             exit_button_area: Rect::default(),
             tab_scroll_offset: 0,
-            history_buffer: config::SESSION_CONFIG
-                .get()
-                .and_then(|c| c.read().ok().map(|cfg| cfg.settings.history_buffer))
-                .unwrap_or(1000),
+            history_buffer,
             terminal_search_mode: false,
             terminal_search_query: String::new(),
             terminal_search_matches: Vec::new(),
