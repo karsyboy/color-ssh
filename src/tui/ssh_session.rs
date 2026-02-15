@@ -14,7 +14,7 @@ use vt100::Parser;
 /// - ESC[c (Primary Device Attributes - DA1)
 /// - ESC[>c (Secondary Device Attributes - DA2)  
 /// - ESC[6n (Cursor Position Report - CPR)
-/// 
+///
 /// Since we're running in a TUI that has taken over the terminal, we emulate a modern xterm
 /// terminal and respond directly. This prevents fish from timing out waiting for responses.
 fn respond_to_terminal_queries(data: &[u8], writer: &Arc<Mutex<Box<dyn Write + Send>>>) {
@@ -24,18 +24,18 @@ fn respond_to_terminal_queries(data: &[u8], writer: &Arc<Mutex<Box<dyn Write + S
             // Found CSI sequence start (ESC[)
             let mut j = i + 2;
             let param_start = j;
-            
+
             // Collect parameter bytes (0x30-0x3F: digits, semicolons, >, etc.)
             while j < data.len() && (0x30..=0x3F).contains(&data[j]) {
                 j += 1;
             }
-            
+
             let params = &data[param_start..j];
-            
+
             // Check for terminal query final bytes
             if j < data.len() {
                 let final_byte = data[j];
-                
+
                 // Generate appropriate response for terminal capability queries
                 let response = match final_byte {
                     // DA1 - Primary Device Attributes query: ESC[0c or ESC[c
@@ -67,18 +67,18 @@ fn respond_to_terminal_queries(data: &[u8], writer: &Arc<Mutex<Box<dyn Write + S
                         // optional features like truncating multiline autosuggestions.
                         Some(b"\x1b[1;1R".as_slice())
                     }
-                    _ => None
+                    _ => None,
                 };
-                
+
                 if let Some(response_bytes) = response {
-                    // Write response back to PTY so the application (fish) receives it  
+                    // Write response back to PTY so the application (fish) receives it
                     log_debug!("Detected terminal query, sending response: {:?}", response_bytes);
                     if let Ok(mut w) = writer.lock() {
                         let _ = w.write_all(response_bytes);
                         let _ = w.flush();
                     }
                 }
-                
+
                 i = j + 1;
             } else {
                 i = j;
@@ -163,11 +163,9 @@ fn find_osc_end(data: &[u8]) -> Option<usize> {
 impl App {
     /// Select a host to open in a new tab
     pub(super) fn select_host_to_connect(&mut self) {
-        if self.filtered_hosts.is_empty() {
+        let Some(host_idx) = self.selected_host_idx() else {
             return;
-        }
-
-        let host_idx = self.filtered_hosts[self.selected_host].0;
+        };
         let host = self.hosts[host_idx].clone();
 
         log_debug!("Opening tab for host: {}", host.name);
@@ -242,7 +240,13 @@ impl App {
 
         let sshpass_info = if host.use_sshpass { " (via sshpass)" } else { "" };
         let profile_info = host.profile.as_ref().map_or(String::new(), |p| format!(" [profile: {}]", p));
-        log_debug!("Spawning cossh command: cossh {}{}{} (session: {})", host.name, sshpass_info, profile_info, tab_title);
+        log_debug!(
+            "Spawning cossh command: cossh {}{}{} (session: {})",
+            host.name,
+            sshpass_info,
+            profile_info,
+            tab_title
+        );
 
         // Spawn the command in the PTY
         let child = pty_pair.slave.spawn_command(cmd).map_err(|e| io::Error::other(e.to_string()))?;
@@ -279,7 +283,7 @@ impl App {
                     Ok(n) => {
                         let data = &buf[..n];
 
-                        // Respond to terminal capability queries from PTY  
+                        // Respond to terminal capability queries from PTY
                         // (fixes fish shell DA query timeout warning)
                         respond_to_terminal_queries(data, &writer_clone);
 
@@ -358,11 +362,11 @@ impl App {
                     if *clear {
                         // Reset scroll offset to show the cleared screen
                         tab.scroll_offset = 0;
-                        
+
                         // Note: We DON'T recreate the parser because that would lose terminal state
                         // like mouse mode settings from TUI apps. The clear sequence is already
                         // processed by the parser, and scrollback will naturally age out.
-                        
+
                         *clear = false;
                     }
                 }

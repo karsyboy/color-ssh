@@ -15,7 +15,7 @@ mod search;
 mod selection;
 mod ssh_session;
 
-use crate::ssh_config::{SshHost, load_ssh_hosts};
+use crate::ssh_config::{FolderId, SshHost, TreeFolder, load_ssh_host_tree};
 use crate::{config, log_debug, log_error};
 use crossterm::{
     event::{self, DisableMouseCapture, EnableMouseCapture, Event},
@@ -27,6 +27,7 @@ use ratatui::{Terminal, backend::CrosstermBackend, layout::Rect, widgets::ListSt
 use std::io::Write;
 use std::sync::{Arc, Mutex};
 use std::{
+    collections::{HashMap, HashSet},
     io::{self},
     process::Command,
     time::{Duration, Instant},
@@ -61,14 +62,34 @@ pub struct HostTab {
     scroll_offset: usize,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum HostTreeRowKind {
+    Folder(FolderId),
+    Host(usize),
+}
+
+#[derive(Debug, Clone)]
+pub(crate) struct HostTreeRow {
+    pub(crate) kind: HostTreeRowKind,
+    pub(crate) depth: usize,
+    pub(crate) display_name: String,
+    pub(crate) expanded: bool,
+}
+
 /// Main application state
 pub struct App {
     /// List of all SSH hosts
     hosts: Vec<SshHost>,
-    /// Filtered hosts based on search (with scores for fuzzy matching)
-    filtered_hosts: Vec<(usize, i32)>,
-    /// Currently selected host index (in filtered list)
-    selected_host: usize,
+    /// Root of the include-derived host tree
+    host_tree_root: TreeFolder,
+    /// Flattened rows currently visible in the host panel tree
+    visible_host_rows: Vec<HostTreeRow>,
+    /// Currently selected row in the visible host tree
+    selected_host_row: usize,
+    /// Match scores by host index when host search is active
+    host_match_scores: HashMap<usize, i32>,
+    /// Collapsed folder IDs (expanded by default)
+    collapsed_folders: HashSet<FolderId>,
     /// List state for the host list
     host_list_state: ListState,
     /// Search query
@@ -133,24 +154,37 @@ impl App {
     pub fn new() -> io::Result<Self> {
         log_debug!("Initializing session manager");
 
-        let hosts = load_ssh_hosts().unwrap_or_else(|e| {
+        let tree_model = load_ssh_host_tree().unwrap_or_else(|e| {
             log_error!("Failed to load SSH hosts: {}", e);
-            Vec::new()
+            let fallback_root = TreeFolder {
+                id: 0,
+                name: "config".to_string(),
+                path: std::path::PathBuf::from("~/.ssh/config"),
+                children: Vec::new(),
+                host_indices: Vec::new(),
+            };
+            crate::ssh_config::SshHostTreeModel {
+                root: fallback_root,
+                hosts: Vec::new(),
+            }
         });
+        let hosts = tree_model.hosts;
+        let host_tree_root = tree_model.root;
 
         log_debug!("Loaded {} SSH hosts", hosts.len());
 
-        let filtered_hosts: Vec<(usize, i32)> = (0..hosts.len()).map(|i| (i, 0)).collect();
-
         let mut host_list_state = ListState::default();
-        if !filtered_hosts.is_empty() {
+        if !hosts.is_empty() {
             host_list_state.select(Some(0));
         }
 
-        Ok(Self {
+        let mut app = Self {
             hosts,
-            filtered_hosts,
-            selected_host: 0,
+            host_tree_root,
+            visible_host_rows: Vec::new(),
+            selected_host_row: 0,
+            host_match_scores: HashMap::new(),
+            collapsed_folders: HashSet::new(),
             host_list_state,
             host_list_area: Rect::default(),
             host_scroll_offset: 0,
@@ -182,7 +216,10 @@ impl App {
             terminal_search_matches: Vec::new(),
             terminal_search_current: 0,
             host_panel_visible: true,
-        })
+        };
+
+        app.update_filtered_hosts();
+        Ok(app)
     }
 }
 

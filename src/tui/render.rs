@@ -248,10 +248,13 @@ impl App {
 
     /// Get selected host name from the host list context.
     fn selected_host_name(&self) -> Option<String> {
-        self.filtered_hosts
-            .get(self.selected_host)
-            .and_then(|(idx, _)| self.hosts.get(*idx))
-            .map(|host| host.name.clone())
+        if let Some(host_idx) = self.selected_host_idx() {
+            return self.hosts.get(host_idx).map(|host| host.name.clone());
+        }
+        if let Some(folder_id) = self.selected_folder_id() {
+            return self.folder_by_id(folder_id).map(|folder| format!("Folder: {}", folder.name));
+        }
+        None
     }
 
     /// Status text for host/manager focus.
@@ -417,12 +420,12 @@ impl App {
         // Update scroll to keep selection visible
         self.update_host_scroll(viewport_height.max(1));
 
-        let total = self.filtered_hosts.len();
-        let showing = total.min(viewport_height);
-        let title = if self.host_scroll_offset > 0 || showing < total {
-            format!("Hosts {}/{}", showing, total)
+        let total_hosts = self.hosts.len();
+        let matched_hosts = self.matched_host_count();
+        let title = if self.search_query.is_empty() {
+            format!("Hosts {}", total_hosts)
         } else {
-            format!("Hosts {}", total)
+            format!("Hosts {}/{}", matched_hosts, total_hosts)
         };
 
         let title_style = if self.focus_on_manager {
@@ -436,29 +439,48 @@ impl App {
             return;
         }
 
-        // Create visible items with scrolling
+        // Create visible tree rows with scrolling.
         let visible_hosts: Vec<ListItem> = self
-            .filtered_hosts
+            .visible_host_rows
             .iter()
             .skip(self.host_scroll_offset)
             .take(viewport_height)
-            .map(|(idx, _score)| ListItem::new(self.hosts[*idx].name.clone()))
+            .map(|row| match row.kind {
+                super::HostTreeRowKind::Folder(_) => {
+                    let glyph = if row.expanded { "▾" } else { "▸" };
+                    let indent = "  ".repeat(row.depth);
+                    ListItem::new(Line::from(vec![
+                        Span::raw(indent),
+                        Span::styled(glyph, Style::default().fg(Color::Cyan)),
+                        Span::raw(" "),
+                        Span::styled(row.display_name.clone(), Style::default().fg(Color::LightCyan)),
+                    ]))
+                }
+                super::HostTreeRowKind::Host(_) => {
+                    let indent = "  ".repeat(row.depth);
+                    ListItem::new(Line::from(vec![
+                        Span::raw(indent),
+                        Span::styled(row.display_name.clone(), Style::default().fg(Color::White)),
+                    ]))
+                }
+            })
             .collect();
 
         let list = List::new(visible_hosts).highlight_style(Style::default().bg(Color::DarkGray).add_modifier(Modifier::BOLD));
 
         // Adjust list state for scrolling
-        let adjusted_selection = self.selected_host.saturating_sub(self.host_scroll_offset);
+        let adjusted_selection = self.selected_host_row.saturating_sub(self.host_scroll_offset);
         let mut adjusted_state = ListState::default();
         adjusted_state.select(Some(adjusted_selection));
         frame.render_stateful_widget(list, list_area, &mut adjusted_state);
 
         // Draw scrollbar if needed
-        if total > viewport_height && list_area.width > 0 {
+        let total_rows = self.visible_host_rows.len();
+        if total_rows > viewport_height && list_area.width > 0 {
             let scrollbar_height = list_area.height as usize;
             if scrollbar_height > 0 {
-                let thumb_size = (scrollbar_height * viewport_height / total).max(1);
-                let thumb_position = (scrollbar_height * self.host_scroll_offset / total).min(scrollbar_height.saturating_sub(thumb_size));
+                let thumb_size = (scrollbar_height * viewport_height / total_rows).max(1);
+                let thumb_position = (scrollbar_height * self.host_scroll_offset / total_rows).min(scrollbar_height.saturating_sub(thumb_size));
                 let scrollbar_x = list_area.x + list_area.width - 1;
 
                 for i in 0..scrollbar_height {
@@ -492,104 +514,138 @@ impl App {
             Style::default().fg(Color::DarkGray)
         };
 
-        if self.filtered_hosts.is_empty() {
+        if self.visible_host_rows.is_empty() {
             frame.render_widget(Paragraph::new(Line::from(Span::styled("Info", header_style))), header_area);
-            frame.render_widget(Paragraph::new("No host selected").style(Style::default().fg(Color::DarkGray)), body_area);
+            frame.render_widget(Paragraph::new("No selection").style(Style::default().fg(Color::DarkGray)), body_area);
             return;
         }
 
-        let host_idx = self.filtered_hosts[self.selected_host].0;
-        let host = &self.hosts[host_idx];
+        if let Some(host_idx) = self.selected_host_idx()
+            && let Some(host) = self.hosts.get(host_idx)
+        {
+            frame.render_widget(
+                Paragraph::new(Line::from(Span::styled(format!("Info {}", host.name), header_style))),
+                header_area,
+            );
 
-        frame.render_widget(
-            Paragraph::new(Line::from(Span::styled(format!("Info {}", host.name), header_style))),
-            header_area,
-        );
+            let mut lines = Vec::new();
 
-        let mut lines = Vec::new();
+            // Description
+            if let Some(desc) = &host.description {
+                lines.push(Line::from(vec![Span::styled(
+                    desc,
+                    Style::default().fg(Color::Cyan).add_modifier(Modifier::ITALIC),
+                )]));
+                lines.push(Line::from(""));
+            }
 
-        // Description
-        if let Some(desc) = &host.description {
-            lines.push(Line::from(vec![Span::styled(
-                desc,
-                Style::default().fg(Color::Cyan).add_modifier(Modifier::ITALIC),
-            )]));
-            lines.push(Line::from(""));
+            // Hostname
+            if let Some(hostname) = &host.hostname {
+                lines.push(Line::from(vec![
+                    Span::styled("Host: ", Style::default().fg(Color::DarkGray)),
+                    Span::styled(hostname, Style::default().fg(Color::White)),
+                ]));
+            }
+
+            // User
+            if let Some(user) = &host.user {
+                lines.push(Line::from(vec![
+                    Span::styled("User: ", Style::default().fg(Color::DarkGray)),
+                    Span::styled(user, Style::default().fg(Color::White)),
+                ]));
+            }
+
+            // Port
+            if let Some(port) = &host.port {
+                lines.push(Line::from(vec![
+                    Span::styled("Port: ", Style::default().fg(Color::DarkGray)),
+                    Span::styled(port.to_string(), Style::default().fg(Color::White)),
+                ]));
+            }
+
+            // Identity file (show just filename)
+            if let Some(identity) = &host.identity_file {
+                let display = identity.rsplit('/').next().unwrap_or(identity);
+                lines.push(Line::from(vec![
+                    Span::styled("Key:  ", Style::default().fg(Color::DarkGray)),
+                    Span::styled(display, Style::default().fg(Color::DarkGray)),
+                ]));
+            }
+
+            // ProxyJump
+            if let Some(proxy) = &host.proxy_jump {
+                lines.push(Line::from(vec![
+                    Span::styled("Jump: ", Style::default().fg(Color::DarkGray)),
+                    Span::styled(proxy, Style::default().fg(Color::White)),
+                ]));
+            }
+
+            // Forwards
+            for fwd in &host.local_forward {
+                lines.push(Line::from(vec![
+                    Span::styled("LFwd: ", Style::default().fg(Color::DarkGray)),
+                    Span::styled(fwd, Style::default().fg(Color::White)),
+                ]));
+            }
+            for fwd in &host.remote_forward {
+                lines.push(Line::from(vec![
+                    Span::styled("RFwd: ", Style::default().fg(Color::DarkGray)),
+                    Span::styled(fwd, Style::default().fg(Color::White)),
+                ]));
+            }
+
+            // Profile
+            if let Some(profile) = &host.profile {
+                lines.push(Line::from(vec![
+                    Span::styled("Prof: ", Style::default().fg(Color::DarkGray)),
+                    Span::styled(profile, Style::default().fg(Color::Magenta)),
+                ]));
+            }
+
+            // SSHPass
+            if host.use_sshpass {
+                lines.push(Line::from(vec![
+                    Span::styled("Pass: ", Style::default().fg(Color::DarkGray)),
+                    Span::styled("sshpass", Style::default().fg(Color::Yellow)),
+                ]));
+            }
+
+            let paragraph = Paragraph::new(lines).wrap(Wrap { trim: false });
+            frame.render_widget(paragraph, body_area);
+            return;
         }
 
-        // Hostname
-        if let Some(hostname) = &host.hostname {
-            lines.push(Line::from(vec![
-                Span::styled("Host: ", Style::default().fg(Color::DarkGray)),
-                Span::styled(hostname, Style::default().fg(Color::White)),
-            ]));
+        if let Some(folder_id) = self.selected_folder_id()
+            && let Some(folder) = self.folder_by_id(folder_id)
+        {
+            frame.render_widget(
+                Paragraph::new(Line::from(Span::styled(format!("Info {}", folder.name), header_style))),
+                header_area,
+            );
+            let total_hosts = self.folder_descendant_host_count(folder_id);
+            let lines = vec![
+                Line::from(vec![
+                    Span::styled("Path: ", Style::default().fg(Color::DarkGray)),
+                    Span::styled(folder.path.display().to_string(), Style::default().fg(Color::White)),
+                ]),
+                Line::from(vec![
+                    Span::styled("Folders: ", Style::default().fg(Color::DarkGray)),
+                    Span::styled(folder.children.len().to_string(), Style::default().fg(Color::White)),
+                ]),
+                Line::from(vec![
+                    Span::styled("Hosts: ", Style::default().fg(Color::DarkGray)),
+                    Span::styled(
+                        format!("{} direct / {} total", folder.host_indices.len(), total_hosts),
+                        Style::default().fg(Color::White),
+                    ),
+                ]),
+            ];
+            frame.render_widget(Paragraph::new(lines), body_area);
+            return;
         }
 
-        // User
-        if let Some(user) = &host.user {
-            lines.push(Line::from(vec![
-                Span::styled("User: ", Style::default().fg(Color::DarkGray)),
-                Span::styled(user, Style::default().fg(Color::White)),
-            ]));
-        }
-
-        // Port
-        if let Some(port) = &host.port {
-            lines.push(Line::from(vec![
-                Span::styled("Port: ", Style::default().fg(Color::DarkGray)),
-                Span::styled(port.to_string(), Style::default().fg(Color::White)),
-            ]));
-        }
-
-        // Identity file (show just filename)
-        if let Some(identity) = &host.identity_file {
-            let display = identity.rsplit('/').next().unwrap_or(identity);
-            lines.push(Line::from(vec![
-                Span::styled("Key:  ", Style::default().fg(Color::DarkGray)),
-                Span::styled(display, Style::default().fg(Color::DarkGray)),
-            ]));
-        }
-
-        // ProxyJump
-        if let Some(proxy) = &host.proxy_jump {
-            lines.push(Line::from(vec![
-                Span::styled("Jump: ", Style::default().fg(Color::DarkGray)),
-                Span::styled(proxy, Style::default().fg(Color::White)),
-            ]));
-        }
-
-        // Forwards
-        for fwd in &host.local_forward {
-            lines.push(Line::from(vec![
-                Span::styled("LFwd: ", Style::default().fg(Color::DarkGray)),
-                Span::styled(fwd, Style::default().fg(Color::White)),
-            ]));
-        }
-        for fwd in &host.remote_forward {
-            lines.push(Line::from(vec![
-                Span::styled("RFwd: ", Style::default().fg(Color::DarkGray)),
-                Span::styled(fwd, Style::default().fg(Color::White)),
-            ]));
-        }
-
-        // Profile
-        if let Some(profile) = &host.profile {
-            lines.push(Line::from(vec![
-                Span::styled("Prof: ", Style::default().fg(Color::DarkGray)),
-                Span::styled(profile, Style::default().fg(Color::Magenta)),
-            ]));
-        }
-
-        // SSHPass
-        if host.use_sshpass {
-            lines.push(Line::from(vec![
-                Span::styled("Pass: ", Style::default().fg(Color::DarkGray)),
-                Span::styled("sshpass", Style::default().fg(Color::Yellow)),
-            ]));
-        }
-
-        let paragraph = Paragraph::new(lines).wrap(Wrap { trim: false });
-        frame.render_widget(paragraph, body_area);
+        frame.render_widget(Paragraph::new(Line::from(Span::styled("Info", header_style))), header_area);
+        frame.render_widget(Paragraph::new("No selection").style(Style::default().fg(Color::DarkGray)), body_area);
     }
 
     /// Render the host details panel (shown when no tabs are open)
@@ -601,8 +657,7 @@ impl App {
         let header_area = Rect::new(area.x, area.y, area.width, 1);
         let body_area = Rect::new(area.x, area.y.saturating_add(1), area.width, area.height.saturating_sub(1));
 
-        let content = if !self.filtered_hosts.is_empty() {
-            let host_idx = self.filtered_hosts[self.selected_host].0;
+        let content = if let Some(host_idx) = self.selected_host_idx() {
             let host = &self.hosts[host_idx];
 
             let mut lines = vec![
@@ -650,8 +705,39 @@ impl App {
             }
 
             lines
+        } else if let Some(folder_id) = self.selected_folder_id() {
+            if let Some(folder) = self.folder_by_id(folder_id) {
+                vec![
+                    Line::from(""),
+                    Line::from(vec![
+                        Span::styled("Folder: ", Style::default().fg(Color::Gray)),
+                        Span::styled(&folder.name, Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)),
+                    ]),
+                    Line::from(""),
+                    Line::from(vec![
+                        Span::styled("  Path: ", Style::default().fg(Color::Gray)),
+                        Span::styled(folder.path.display().to_string(), Style::default().fg(Color::White)),
+                    ]),
+                    Line::from(vec![
+                        Span::styled("  Child Folders: ", Style::default().fg(Color::Gray)),
+                        Span::styled(folder.children.len().to_string(), Style::default().fg(Color::White)),
+                    ]),
+                    Line::from(vec![
+                        Span::styled("  Hosts: ", Style::default().fg(Color::Gray)),
+                        Span::styled(
+                            format!("{} direct / {} total", folder.host_indices.len(), self.folder_descendant_host_count(folder_id)),
+                            Style::default().fg(Color::White),
+                        ),
+                    ]),
+                ]
+            } else {
+                vec![
+                    Line::from(""),
+                    Line::from(Span::styled("No folder selected", Style::default().fg(Color::DarkGray))),
+                ]
+            }
         } else {
-            vec![Line::from(""), Line::from(Span::styled("No hosts found", Style::default().fg(Color::DarkGray)))]
+            vec![Line::from(""), Line::from(Span::styled("No selection", Style::default().fg(Color::DarkGray)))]
         };
 
         let header = Paragraph::new(Line::from(Span::styled(
@@ -714,10 +800,7 @@ impl App {
             let tab = &self.tabs[idx];
             let is_selected = idx == self.selected_tab && !self.focus_on_manager;
             let style = if is_selected {
-                Style::default()
-                    .fg(Color::Yellow)
-                    .bg(Color::Indexed(238))
-                    .add_modifier(Modifier::BOLD)
+                Style::default().fg(Color::Yellow).bg(Color::Indexed(238)).add_modifier(Modifier::BOLD)
             } else {
                 Style::default().fg(Color::Gray).bg(Color::Indexed(236))
             };

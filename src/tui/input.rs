@@ -372,46 +372,57 @@ impl App {
                 // Ctrl+Right: grow host panel
                 self.host_panel_width = (self.host_panel_width + 5).min(80);
             }
+            KeyCode::Left if self.focus_on_manager && key.modifiers.is_empty() => {
+                if let Some(folder_id) = self.selected_folder_id() {
+                    self.set_folder_expanded(folder_id, false);
+                }
+            }
+            KeyCode::Right if self.focus_on_manager && key.modifiers.is_empty() => {
+                if let Some(folder_id) = self.selected_folder_id() {
+                    self.set_folder_expanded(folder_id, true);
+                }
+            }
             KeyCode::Up if self.focus_on_manager => {
-                if !self.filtered_hosts.is_empty() && self.selected_host > 0 {
-                    self.selected_host -= 1;
-                    self.host_list_state.select(Some(self.selected_host));
+                if self.visible_host_row_count() > 0 && self.selected_host_row > 0 {
+                    self.set_selected_row(self.selected_host_row - 1);
                 }
             }
             KeyCode::Down if self.focus_on_manager => {
-                if !self.filtered_hosts.is_empty() && self.selected_host < self.filtered_hosts.len() - 1 {
-                    self.selected_host += 1;
-                    self.host_list_state.select(Some(self.selected_host));
+                let row_count = self.visible_host_row_count();
+                if row_count > 0 && self.selected_host_row < row_count - 1 {
+                    self.set_selected_row(self.selected_host_row + 1);
                 }
             }
             KeyCode::PageUp if self.focus_on_manager => {
-                if !self.filtered_hosts.is_empty() {
+                if self.visible_host_row_count() > 0 {
                     let page_size = 10.max(self.host_list_area.height as usize);
-                    self.selected_host = self.selected_host.saturating_sub(page_size);
-                    self.host_list_state.select(Some(self.selected_host));
+                    self.set_selected_row(self.selected_host_row.saturating_sub(page_size));
                 }
             }
             KeyCode::PageDown if self.focus_on_manager => {
-                if !self.filtered_hosts.is_empty() {
+                let row_count = self.visible_host_row_count();
+                if row_count > 0 {
                     let page_size = 10.max(self.host_list_area.height as usize);
-                    self.selected_host = (self.selected_host + page_size).min(self.filtered_hosts.len().saturating_sub(1));
-                    self.host_list_state.select(Some(self.selected_host));
+                    self.set_selected_row((self.selected_host_row + page_size).min(row_count.saturating_sub(1)));
                 }
             }
             KeyCode::Home if self.focus_on_manager => {
-                if !self.filtered_hosts.is_empty() {
-                    self.selected_host = 0;
-                    self.host_list_state.select(Some(0));
+                if self.visible_host_row_count() > 0 {
+                    self.set_selected_row(0);
                 }
             }
             KeyCode::End if self.focus_on_manager => {
-                if !self.filtered_hosts.is_empty() {
-                    self.selected_host = self.filtered_hosts.len().saturating_sub(1);
-                    self.host_list_state.select(Some(self.selected_host));
+                let row_count = self.visible_host_row_count();
+                if row_count > 0 {
+                    self.set_selected_row(row_count.saturating_sub(1));
                 }
             }
             KeyCode::Enter if self.focus_on_manager => {
-                self.select_host_to_connect();
+                if let Some(folder_id) = self.selected_folder_id() {
+                    self.toggle_folder(folder_id);
+                } else {
+                    self.select_host_to_connect();
+                }
             }
             _ => {}
         }
@@ -467,28 +478,39 @@ impl App {
                     // Calculate which host was clicked (accounting for scroll offset).
                     let clicked_row = (mouse.row - host_area.y) as usize;
                     let clicked_index = self.host_scroll_offset + clicked_row;
-                    if clicked_index < self.filtered_hosts.len() {
-                        // Check for double-click (same position within 400ms)
-                        let now = Instant::now();
-                        let is_double_click = if let Some((last_time, last_col, last_row)) = self.last_click {
-                            now.duration_since(last_time).as_millis() < 400 && last_col == mouse.column && last_row == mouse.row
-                        } else {
-                            false
-                        };
-
-                        self.selected_host = clicked_index;
-                        self.host_list_state.select(Some(self.selected_host));
+                    if clicked_index < self.visible_host_rows.len() {
+                        self.set_selected_row(clicked_index);
                         self.focus_on_manager = true;
 
-                        if is_double_click {
-                            // Double-click: open host in a new tab
+                        let row_kind = self.visible_host_rows[clicked_index].kind;
+
+                        if let super::HostTreeRowKind::Folder(folder_id) = row_kind {
+                            self.toggle_folder(folder_id);
                             self.last_click = None;
-                            self.select_host_to_connect();
                         } else {
-                            self.last_click = Some((now, mouse.column, mouse.row));
+                            // Check for double-click (same position within 400ms).
+                            let now = Instant::now();
+                            let is_double_click = if let Some((last_time, last_col, last_row)) = self.last_click {
+                                now.duration_since(last_time).as_millis() < 400 && last_col == mouse.column && last_row == mouse.row
+                            } else {
+                                false
+                            };
+
+                            if is_double_click {
+                                // Double-click host: open in a new tab.
+                                self.last_click = None;
+                                self.select_host_to_connect();
+                            } else {
+                                self.last_click = Some((now, mouse.column, mouse.row));
+                            }
                         }
+
+                        self.selection_start = None;
+                        self.selection_end = None;
+                        self.is_selecting = false;
+                        return Ok(());
                     } else {
-                        // Clicked in host list area but past the last host — just focus
+                        // Clicked in host list area but past the last row — just focus.
                         self.focus_on_manager = true;
                     }
                     self.selection_start = None;
@@ -563,9 +585,7 @@ impl App {
                     // Find first visible tab by current scroll offset.
                     let mut running_start = 0usize;
                     let mut first_visible_idx = 0usize;
-                    while first_visible_idx < self.tabs.len()
-                        && running_start + tab_widths[first_visible_idx] <= self.tab_scroll_offset
-                    {
+                    while first_visible_idx < self.tabs.len() && running_start + tab_widths[first_visible_idx] <= self.tab_scroll_offset {
                         running_start += tab_widths[first_visible_idx];
                         first_visible_idx += 1;
                     }
@@ -763,10 +783,9 @@ impl App {
                     && mouse.row >= host_area.y
                     && mouse.row < host_area.y + host_area.height
                 {
-                    // Scroll host list up
-                    if !self.filtered_hosts.is_empty() && self.selected_host > 0 {
-                        self.selected_host = self.selected_host.saturating_sub(3);
-                        self.host_list_state.select(Some(self.selected_host));
+                    // Scroll host tree up.
+                    if self.visible_host_row_count() > 0 && self.selected_host_row > 0 {
+                        self.set_selected_row(self.selected_host_row.saturating_sub(3));
                     }
                 } else if !self.tabs.is_empty() && self.selected_tab < self.tabs.len() {
                     // If PTY wants mouse events, forward scroll to PTY
@@ -807,10 +826,10 @@ impl App {
                     && mouse.row >= host_area.y
                     && mouse.row < host_area.y + host_area.height
                 {
-                    // Scroll host list down
-                    if !self.filtered_hosts.is_empty() && self.selected_host < self.filtered_hosts.len().saturating_sub(1) {
-                        self.selected_host = (self.selected_host + 3).min(self.filtered_hosts.len().saturating_sub(1));
-                        self.host_list_state.select(Some(self.selected_host));
+                    // Scroll host tree down.
+                    let row_count = self.visible_host_row_count();
+                    if row_count > 0 && self.selected_host_row < row_count.saturating_sub(1) {
+                        self.set_selected_row((self.selected_host_row + 3).min(row_count.saturating_sub(1)));
                     }
                 } else if !self.tabs.is_empty() && self.selected_tab < self.tabs.len() {
                     // If PTY wants mouse events, forward scroll to PTY
@@ -977,7 +996,6 @@ impl App {
         }
         Ok(())
     }
-
     /// Send keyboard input to the active PTY
     pub(super) fn send_key_to_pty(&mut self, key: KeyEvent) -> io::Result<()> {
         if self.selected_tab >= self.tabs.len() {
