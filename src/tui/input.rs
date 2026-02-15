@@ -258,7 +258,7 @@ impl App {
             }
 
             // Host list navigation (when focused on manager)
-            KeyCode::Char('/') if self.focus_on_manager => {
+            KeyCode::Char('f') if self.focus_on_manager && key.modifiers.contains(KeyModifiers::CONTROL) => {
                 self.search_mode = true;
             }
             KeyCode::Left if self.focus_on_manager && self.host_panel_visible && key.modifiers.contains(KeyModifiers::CONTROL) => {

@@ -37,6 +37,14 @@ fn vt100_to_ratatui_color(color: vt100::Color) -> Color {
     }
 }
 
+#[derive(Debug, Clone, Copy)]
+enum StatusContext {
+    HostSearch,
+    TerminalSearch,
+    Host,
+    Terminal,
+}
+
 impl App {
     /// Render the UI
     pub(super) fn draw(&mut self, frame: &mut Frame) {
@@ -110,27 +118,55 @@ impl App {
 
     /// Build status line content for the current app context.
     fn build_status_line_spans(&self) -> Vec<Span<'static>> {
+        match self.resolve_status_context() {
+            StatusContext::HostSearch => self.build_search_mode_status_spans(),
+            StatusContext::TerminalSearch => self.build_terminal_search_status_spans(),
+            StatusContext::Host => self.build_manager_status_spans(),
+            StatusContext::Terminal => self.build_terminal_status_spans(),
+        }
+    }
+
+    /// Determine the status bar context based on focus and search modes.
+    fn resolve_status_context(&self) -> StatusContext {
         if self.search_mode {
-            return self.build_search_mode_status_spans();
+            return StatusContext::HostSearch;
         }
-
-        if !self.focus_on_manager && !self.tabs.is_empty() && self.terminal_search_mode {
-            return self.build_terminal_search_status_spans();
+        if self.has_terminal_focus() && self.terminal_search_mode {
+            return StatusContext::TerminalSearch;
         }
-
-        if self.focus_on_manager {
-            return self.build_manager_status_spans();
+        if self.has_terminal_focus() {
+            return StatusContext::Terminal;
         }
+        StatusContext::Host
+    }
 
-        self.build_tab_status_spans()
+    /// True when the terminal/session pane is focused and a tab is active.
+    fn has_terminal_focus(&self) -> bool {
+        !self.focus_on_manager && !self.tabs.is_empty() && self.selected_tab < self.tabs.len()
+    }
+
+    /// Visual separator between context and status sections.
+    fn context_split_indicator(&self) -> Span<'static> {
+        Span::styled(" || ", Style::default().fg(Color::DarkGray))
+    }
+
+    /// Get selected host name from the host list context.
+    fn selected_host_name(&self) -> Option<String> {
+        self.filtered_hosts
+            .get(self.selected_host)
+            .and_then(|(idx, _)| self.hosts.get(*idx))
+            .map(|host| host.name.clone())
     }
 
     /// Status text for host/manager focus.
     fn build_manager_status_spans(&self) -> Vec<Span<'static>> {
+        let host_name = self.selected_host_name().unwrap_or_else(|| "none".to_string());
         let mut spans = vec![
             Span::styled("Host", Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD)),
+            self.context_split_indicator(),
+            Span::styled(host_name, Style::default().fg(Color::White)),
             Span::styled(" | ", Style::default().fg(Color::DarkGray)),
-            Span::styled("/", Style::default().fg(Color::Yellow)),
+            Span::styled("^F", Style::default().fg(Color::Yellow)),
             Span::styled(":find | ", Style::default().fg(Color::DarkGray)),
             Span::styled("↑/↓", Style::default().fg(Color::Cyan)),
             Span::styled(":move | ", Style::default().fg(Color::DarkGray)),
@@ -154,13 +190,13 @@ impl App {
         spans
     }
 
-    /// Status text for tab focus.
-    fn build_tab_status_spans(&self) -> Vec<Span<'static>> {
+    /// Status text for terminal/session focus.
+    fn build_terminal_status_spans(&self) -> Vec<Span<'static>> {
         if self.tabs.is_empty() || self.selected_tab >= self.tabs.len() {
             return vec![
-                Span::styled("Tab", Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)),
+                Span::styled("Terminal", Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)),
                 Span::styled(" | ", Style::default().fg(Color::DarkGray)),
-                Span::styled("No active tab", Style::default().fg(Color::DarkGray)),
+                Span::styled("No active terminal", Style::default().fg(Color::DarkGray)),
             ];
         }
 
@@ -180,8 +216,8 @@ impl App {
         };
 
         let mut spans = vec![
-            Span::styled("Tab", Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)),
-            Span::styled(" ", Style::default()),
+            Span::styled("Terminal", Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)),
+            self.context_split_indicator(),
             Span::styled("●", Style::default().fg(status_icon_color).add_modifier(Modifier::BOLD)),
             Span::styled(" ", Style::default()),
             Span::styled(status_text, Style::default().fg(Color::White)),
@@ -230,18 +266,14 @@ impl App {
     fn build_search_mode_status_spans(&self) -> Vec<Span<'static>> {
         vec![
             Span::styled("Host Search", Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD)),
-            Span::styled(" ", Style::default()),
+            self.context_split_indicator(),
             Span::styled(self.search_query.clone(), Style::default().fg(Color::White)),
             Span::styled("_", Style::default().fg(Color::White)),
-            Span::styled(" | ", Style::default().fg(Color::DarkGray)),
-            Span::styled("type", Style::default().fg(Color::White)),
-            Span::styled(" | ", Style::default().fg(Color::DarkGray)),
-            Span::styled("Backspace", Style::default().fg(Color::Cyan)),
-            Span::styled(" | ", Style::default().fg(Color::DarkGray)),
+            self.context_split_indicator(),
             Span::styled("Enter", Style::default().fg(Color::Green)),
-            Span::styled(":done | ", Style::default().fg(Color::DarkGray)),
+            Span::styled(" | ", Style::default().fg(Color::DarkGray)),
             Span::styled("Esc", Style::default().fg(Color::Red)),
-            Span::styled(":cancel", Style::default().fg(Color::DarkGray)),
+            Span::styled(":clear", Style::default().fg(Color::DarkGray)),
         ]
     }
 
@@ -254,21 +286,19 @@ impl App {
         };
 
         vec![
-            Span::styled("Tab Search", Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD)),
-            Span::styled(" ", Style::default()),
+            Span::styled("Terminal Search", Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD)),
+            self.context_split_indicator(),
             Span::styled(self.terminal_search_query.clone(), Style::default().fg(Color::White)),
             Span::styled("_", Style::default().fg(Color::White)),
             Span::styled(" ", Style::default()),
             Span::styled(format!("({})", match_info), Style::default().fg(Color::Yellow)),
+            self.context_split_indicator(),
+            Span::styled("Enter", Style::default().fg(Color::Green)),
             Span::styled(" | ", Style::default().fg(Color::DarkGray)),
-            Span::styled("type", Style::default().fg(Color::White)),
-            Span::styled(" | ", Style::default().fg(Color::DarkGray)),
-            Span::styled("Backspace", Style::default().fg(Color::Cyan)),
-            Span::styled(" | ", Style::default().fg(Color::DarkGray)),
-            Span::styled("↑/↓ Enter", Style::default().fg(Color::Cyan)),
-            Span::styled(":next/prev | ", Style::default().fg(Color::DarkGray)),
             Span::styled("Esc", Style::default().fg(Color::Red)),
-            Span::styled(":close", Style::default().fg(Color::DarkGray)),
+            Span::styled(":clear | ", Style::default().fg(Color::DarkGray)),
+            Span::styled("↑/↓", Style::default().fg(Color::Cyan)),
+            Span::styled(":next/prev", Style::default().fg(Color::DarkGray)),
         ]
     }
 
@@ -294,17 +324,12 @@ impl App {
             })
             .collect();
 
-        let title = if self.search_mode {
-            format!(" SSH Hosts (Search: {}_) ", self.search_query)
+        let total = self.filtered_hosts.len();
+        let showing = visible_hosts.len();
+        let title = if self.host_scroll_offset > 0 || showing < total {
+            format!(" Hosts ({}/{}) ", showing, total)
         } else {
-            let total = self.filtered_hosts.len();
-            let showing = visible_hosts.len();
-
-            if self.host_scroll_offset > 0 || showing < total {
-                format!(" Hosts ({}/{}) ", showing, total)
-            } else {
-                format!(" Hosts ({}) ", total)
-            }
+            format!(" Hosts ({}) ", total)
         };
 
         let border_style = if self.focus_on_manager {
