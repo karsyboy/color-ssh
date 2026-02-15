@@ -573,17 +573,14 @@ impl App {
                     // Hit-test only tabs actually rendered in the current viewport.
                     let mut used = 0usize;
                     let mut idx = first_visible_idx;
-                    while idx < self.tabs.len() {
+                    while idx < self.tabs.len() && used < visible_tab_width {
                         let tab_width = tab_widths[idx];
-                        if used + tab_width > visible_tab_width {
-                            break;
-                        }
-                        if local_col < used + tab_width {
-                            let tab = &self.tabs[idx];
+                        let visible_end = (used + tab_width).min(visible_tab_width);
+                        if local_col < visible_end {
                             // Check if click is on the × close button.
                             // Format is "title × " so × is at title.len() + 1.
-                            let close_pos = used + tab.title.len() + 1;
-                            if local_col == close_pos {
+                            let close_pos = used + self.tabs[idx].title.len() + 1;
+                            if close_pos < visible_end && local_col == close_pos {
                                 // Close this tab
                                 self.tabs.remove(idx);
                                 if self.tabs.is_empty() {

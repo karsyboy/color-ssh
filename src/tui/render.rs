@@ -710,12 +710,7 @@ impl App {
 
         let mut used = 0usize;
         let mut idx = first_visible_idx;
-        while idx < self.tabs.len() {
-            let w = tab_widths[idx];
-            if used + w > visible_tab_width {
-                break;
-            }
-
+        while idx < self.tabs.len() && used < visible_tab_width {
             let tab = &self.tabs[idx];
             let is_selected = idx == self.selected_tab && !self.focus_on_manager;
             let style = if is_selected {
@@ -732,15 +727,27 @@ impl App {
                 Style::default().fg(Color::Red).bg(Color::Indexed(236)).add_modifier(Modifier::BOLD)
             };
 
-            spans.push(Span::styled(format!("{} ", tab.title), style));
-            spans.push(Span::styled("×", close_style));
-            spans.push(Span::styled(" ", Style::default().fg(Color::DarkGray)));
-            used += w;
+            let mut push_clipped = |text: &str, text_style: Style| {
+                if used >= visible_tab_width {
+                    return;
+                }
+                let remaining = visible_tab_width - used;
+                let chunk: String = text.chars().take(remaining).collect();
+                if !chunk.is_empty() {
+                    let width = chunk.chars().count();
+                    spans.push(Span::styled(chunk, text_style));
+                    used += width;
+                }
+            };
+
+            push_clipped(&format!("{} ", tab.title), style);
+            push_clipped("×", close_style);
+            push_clipped(" ", Style::default().fg(Color::DarkGray));
             idx += 1;
         }
 
-        // Keep overflow indicator hitbox and glyph aligned by right-aligning ▶ to the
-        // final tab-bar column (the click logic expects last-column placement).
+        // Keep overflow indicator hitbox and glyph aligned by placing ▶ in the final
+        // tab-bar column (the click logic expects last-column placement).
         let remaining = visible_tab_width.saturating_sub(used);
         if remaining > 0 {
             spans.push(Span::raw(" ".repeat(remaining)));
