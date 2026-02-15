@@ -722,7 +722,7 @@ impl App {
                 Style::default()
                     .fg(Color::Yellow)
                     .bg(Color::Indexed(238))
-                    .add_modifier(Modifier::BOLD | Modifier::UNDERLINED)
+                    .add_modifier(Modifier::BOLD)
             } else {
                 Style::default().fg(Color::Gray).bg(Color::Indexed(236))
             };
