@@ -265,11 +265,17 @@ impl App {
     /// Status text for host/manager focus.
     fn build_manager_status_spans(&self) -> (Vec<Span<'static>>, Vec<Span<'static>>) {
         let host_name = self.selected_host_name().unwrap_or_else(|| "none".to_string());
-        let left = vec![
+        let mut left = vec![
             Span::styled("Host", Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD)),
             self.context_split_indicator(),
             Span::styled(host_name, Style::default().fg(Color::White)),
         ];
+        if !self.search_query.is_empty() {
+            left.push(self.context_split_indicator());
+            left.push(Span::styled("filter:", Style::default().fg(Color::DarkGray)));
+            left.push(Span::styled(" ", Style::default()));
+            left.push(Span::styled(self.search_query.clone(), Style::default().fg(Color::Yellow)));
+        }
 
         let mut right = vec![
             Span::styled("^F", Style::default().fg(Color::Yellow)),
