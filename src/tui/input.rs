@@ -676,8 +676,29 @@ impl App {
                     // Cossh text selection drag (only when no TUI app has mouse mode)
                     self.selection_dragged = true;
                     let area = self.tab_content_area;
+                    if area.width == 0 || area.height == 0 {
+                        return Ok(());
+                    }
+
+                    // Auto-scroll while selecting at the top/bottom edge to allow
+                    // selecting text beyond the visible viewport.
+                    let top_row = area.y;
+                    let bottom_row = area.y + area.height.saturating_sub(1);
+                    if mouse.row <= top_row {
+                        let edge_distance = top_row.saturating_sub(mouse.row).saturating_add(1) as usize;
+                        let step = edge_distance.min(10);
+                        let max_scrollback = self.max_scrollback_for_tab(self.selected_tab);
+                        let tab = &mut self.tabs[self.selected_tab];
+                        tab.scroll_offset = tab.scroll_offset.saturating_add(step).min(max_scrollback);
+                    } else if mouse.row >= bottom_row {
+                        let edge_distance = mouse.row.saturating_sub(bottom_row).saturating_add(1) as usize;
+                        let step = edge_distance.min(10);
+                        let tab = &mut self.tabs[self.selected_tab];
+                        tab.scroll_offset = tab.scroll_offset.saturating_sub(step);
+                    }
+
                     let clamped_col = mouse.column.max(area.x).min(area.x + area.width.saturating_sub(1));
-                    let clamped_row = mouse.row.max(area.y).min(area.y + area.height.saturating_sub(1));
+                    let clamped_row = mouse.row.max(top_row).min(bottom_row);
                     let vt_row = clamped_row.saturating_sub(area.y);
                     let vt_col = clamped_col.saturating_sub(area.x);
                     let scroll_offset = self.tabs[self.selected_tab].scroll_offset;
