@@ -117,35 +117,61 @@ impl App {
                 host_panel_area.height,
             );
 
-            // Split the left panel: host list on top, host info on bottom
-            let left_chunks = Layout::default()
-                .direction(Direction::Vertical)
-                .constraints([Constraint::Percentage(60), Constraint::Percentage(40)])
-                .split(host_content_area);
-
             // Cache the full host panel area for click-to-focus
             self.host_panel_area = host_panel_area;
+            self.host_info_area = Rect::default();
 
             if host_content_area.width > 0 {
-                // Render host list
-                self.render_host_list(frame, left_chunks[0]);
+                const MIN_HOST_LIST_HEIGHT: u16 = 4;
+                const MIN_HOST_INFO_HEIGHT: u16 = 3;
 
-                if left_chunks[1].height > 0 {
-                    draw_horizontal_rule(
-                        frame,
-                        left_chunks[1].y,
-                        left_chunks[1].x,
-                        left_chunks[1].width,
-                        Style::default().fg(Color::DarkGray),
+                let mut host_list_area = host_content_area;
+
+                if self.host_info_visible && host_content_area.height > MIN_HOST_LIST_HEIGHT {
+                    let max_info_height = host_content_area.height.saturating_sub(MIN_HOST_LIST_HEIGHT);
+                    let min_info_height = MIN_HOST_INFO_HEIGHT.min(max_info_height);
+
+                    if self.host_info_height < min_info_height {
+                        self.host_info_height = min_info_height;
+                    } else if self.host_info_height > max_info_height {
+                        self.host_info_height = max_info_height;
+                    }
+
+                    let info_height = self.host_info_height.clamp(min_info_height, max_info_height);
+                    let list_height = host_content_area.height.saturating_sub(info_height);
+                    host_list_area = Rect::new(host_content_area.x, host_content_area.y, host_content_area.width, list_height);
+                    self.host_info_area = Rect::new(
+                        host_content_area.x,
+                        host_content_area.y.saturating_add(list_height),
+                        host_content_area.width,
+                        info_height,
                     );
                 }
 
-                // Render host info panel below the list
-                self.render_host_info(frame, left_chunks[1]);
+                // Render host list
+                self.render_host_list(frame, host_list_area);
+
+                if self.host_info_visible && self.host_info_area.height > 0 {
+                    draw_horizontal_rule(
+                        frame,
+                        self.host_info_area.y,
+                        self.host_info_area.x,
+                        self.host_info_area.width,
+                        if self.is_dragging_host_info_divider {
+                            Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD)
+                        } else {
+                            Style::default().fg(Color::DarkGray)
+                        },
+                    );
+                    self.render_host_info(frame, self.host_info_area);
+                } else {
+                    self.host_info_area = Rect::default();
+                }
             }
         } else {
             // Clear the cached area when hidden
             self.host_panel_area = Rect::default();
+            self.host_info_area = Rect::default();
         }
 
         // If there are tabs, render tabs; otherwise render help panel
@@ -294,6 +320,8 @@ impl App {
             Span::styled(":open | ", Style::default().fg(Color::DarkGray)),
             Span::styled("^←/^→", Style::default().fg(Color::Cyan)),
             Span::styled(":resize | ", Style::default().fg(Color::DarkGray)),
+            Span::styled("i", Style::default().fg(Color::Cyan)),
+            Span::styled(":info | ", Style::default().fg(Color::DarkGray)),
         ];
 
         if !self.tabs.is_empty() {

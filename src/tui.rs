@@ -116,10 +116,14 @@ pub struct App {
     selected_host_to_connect: Option<SshHost>,
     /// Cached area for the host list
     host_list_area: Rect,
+    /// Cached area for the host info pane
+    host_info_area: Rect,
     /// Host list scroll offset
     host_scroll_offset: usize,
     /// Width of the host panel in columns (adjustable with Ctrl+Left/Right)
     host_panel_width: u16,
+    /// Height of the host info pane in rows when visible
+    host_info_height: u16,
     /// Open tabs for hosts
     tabs: Vec<HostTab>,
     /// Currently selected tab index
@@ -147,6 +151,8 @@ pub struct App {
     is_dragging_divider: bool,
     /// Whether we're dragging the host list scrollbar thumb/track
     is_dragging_host_scrollbar: bool,
+    /// Whether we're dragging the divider between host list and host info panes
+    is_dragging_host_info_divider: bool,
     /// Cached area for the exit button (top-right corner)
     exit_button_area: Rect,
     /// Horizontal scroll offset for the tab bar (in chars)
@@ -155,6 +161,8 @@ pub struct App {
     history_buffer: usize,
     /// Whether the host panel is visible (can be toggled with Ctrl+B)
     host_panel_visible: bool,
+    /// Whether the host info pane is visible
+    host_info_visible: bool,
 }
 
 impl App {
@@ -224,8 +232,10 @@ impl App {
             collapsed_folders,
             host_list_state,
             host_list_area: Rect::default(),
+            host_info_area: Rect::default(),
             host_scroll_offset: 0,
             host_panel_width: 25,
+            host_info_height: 8,
             search_query: String::new(),
             search_mode: false,
             should_exit: false,
@@ -243,10 +253,12 @@ impl App {
             last_click: None,
             is_dragging_divider: false,
             is_dragging_host_scrollbar: false,
+            is_dragging_host_info_divider: false,
             exit_button_area: Rect::default(),
             tab_scroll_offset: 0,
             history_buffer,
             host_panel_visible: true,
+            host_info_visible: true,
         };
 
         app.update_filtered_hosts();

@@ -429,6 +429,10 @@ impl App {
             KeyCode::Char('f') if self.focus_on_manager && key.modifiers.contains(KeyModifiers::CONTROL) => {
                 self.search_mode = true;
             }
+            KeyCode::Char('i') if self.focus_on_manager && key.modifiers.is_empty() => {
+                self.host_info_visible = !self.host_info_visible;
+                self.is_dragging_host_info_divider = false;
+            }
             KeyCode::Char('c') if self.focus_on_manager && key.modifiers.contains(KeyModifiers::CONTROL) && !self.search_query.is_empty() => {
                 self.search_mode = false;
                 self.search_query.clear();
@@ -517,6 +521,7 @@ impl App {
             MouseEventKind::Down(MouseButton::Left) => {
                 // Reset drag latches for a new left-click gesture.
                 self.is_dragging_host_scrollbar = false;
+                self.is_dragging_host_info_divider = false;
 
                 // Check if click is on the exit button
                 let exit_area = self.exit_button_area;
@@ -538,6 +543,20 @@ impl App {
                     self.selection_end = None;
                     self.is_selecting = false;
                     return Ok(());
+                }
+
+                // Check if click is on the divider between host list and host info panes.
+                if self.host_panel_visible && self.host_info_visible && self.host_info_area.height > 0 {
+                    let divider_row = self.host_info_area.y;
+                    let host_content_right = self.host_panel_area.x + self.host_panel_area.width.saturating_sub(1);
+                    if mouse.row == divider_row && mouse.column >= self.host_panel_area.x && mouse.column < host_content_right {
+                        self.focus_on_manager = true;
+                        self.is_dragging_host_info_divider = true;
+                        self.selection_start = None;
+                        self.selection_end = None;
+                        self.is_selecting = false;
+                        return Ok(());
+                    }
                 }
 
                 // Check if click is in the host list area (select specific host)
@@ -773,6 +792,20 @@ impl App {
                     // Resize host panel by dragging the divider
                     let new_width = mouse.column.saturating_sub(self.host_panel_area.x).saturating_add(1);
                     self.host_panel_width = new_width.clamp(15, 80);
+                } else if self.is_dragging_host_info_divider && self.host_panel_visible && self.host_info_visible {
+                    // Resize host info pane by dragging the horizontal splitter.
+                    const MIN_HOST_LIST_HEIGHT: u16 = 4;
+                    const MIN_HOST_INFO_HEIGHT: u16 = 3;
+
+                    let content_top = self.host_panel_area.y;
+                    let content_height = self.host_panel_area.height;
+                    if content_height > MIN_HOST_LIST_HEIGHT {
+                        let min_split = content_top.saturating_add(MIN_HOST_LIST_HEIGHT);
+                        let max_split = content_top + content_height.saturating_sub(MIN_HOST_INFO_HEIGHT);
+                        let split_row = mouse.row.clamp(min_split, max_split);
+                        let list_height = split_row.saturating_sub(content_top);
+                        self.host_info_height = content_height.saturating_sub(list_height);
+                    }
                 } else if self.is_dragging_host_scrollbar {
                     // Drag host list scrollbar track/thumb.
                     self.set_host_scroll_from_scrollbar_row(mouse.row);
@@ -830,6 +863,8 @@ impl App {
             MouseEventKind::Up(MouseButton::Left) => {
                 if self.is_dragging_divider {
                     self.is_dragging_divider = false;
+                } else if self.is_dragging_host_info_divider {
+                    self.is_dragging_host_info_divider = false;
                 } else if self.is_dragging_host_scrollbar {
                     self.is_dragging_host_scrollbar = false;
                 } else if self.is_selecting {
