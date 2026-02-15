@@ -198,6 +198,8 @@ impl App {
         self.tabs.push(tab);
         self.selected_tab = self.tabs.len() - 1;
         self.focus_on_manager = false;
+        // Opening a host into a terminal should leave host search-edit mode.
+        self.search_mode = false;
 
         log_debug!("Created new tab at index {}", self.selected_tab);
     }
