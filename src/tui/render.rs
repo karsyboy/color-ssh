@@ -41,20 +41,26 @@ impl App {
     /// Render the UI
     pub(super) fn draw(&mut self, frame: &mut Frame) {
         let size = frame.area();
+        let root_chunks = Layout::default()
+            .direction(Direction::Vertical)
+            .constraints([Constraint::Min(0), Constraint::Length(1)])
+            .split(size);
+        let content_area = root_chunks[0];
+        let status_area = root_chunks[1];
 
         // Create main layout: adjustable left panel and expanding right panel (or full width if hidden)
         let (main_chunks, show_host_panel) = if self.host_panel_visible {
             let chunks = Layout::default()
                 .direction(Direction::Horizontal)
                 .constraints([Constraint::Length(self.host_panel_width), Constraint::Min(0)])
-                .split(size);
+                .split(content_area);
             (chunks, true)
         } else {
             // Host panel hidden, use full width for content
             let chunks = Layout::default()
                 .direction(Direction::Horizontal)
                 .constraints([Constraint::Length(0), Constraint::Min(0)])
-                .split(size);
+                .split(content_area);
             (chunks, false)
         };
 
@@ -92,6 +98,178 @@ impl App {
         } else {
             self.render_host_details(frame, main_chunks[1]);
         }
+
+        self.render_global_status_bar(frame, status_area);
+    }
+
+    /// Render the global one-line status bar at the bottom.
+    fn render_global_status_bar(&self, frame: &mut Frame, area: Rect) {
+        let status = Paragraph::new(Line::from(self.build_status_line_spans())).block(Block::default());
+        frame.render_widget(status, area);
+    }
+
+    /// Build status line content for the current app context.
+    fn build_status_line_spans(&self) -> Vec<Span<'static>> {
+        if self.search_mode {
+            return self.build_search_mode_status_spans();
+        }
+
+        if !self.focus_on_manager && !self.tabs.is_empty() && self.terminal_search_mode {
+            return self.build_terminal_search_status_spans();
+        }
+
+        if self.focus_on_manager {
+            return self.build_manager_status_spans();
+        }
+
+        self.build_tab_status_spans()
+    }
+
+    /// Status text for host/manager focus.
+    fn build_manager_status_spans(&self) -> Vec<Span<'static>> {
+        let mut spans = vec![
+            Span::styled("Host", Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD)),
+            Span::styled(" | ", Style::default().fg(Color::DarkGray)),
+            Span::styled("/", Style::default().fg(Color::Yellow)),
+            Span::styled(":find | ", Style::default().fg(Color::DarkGray)),
+            Span::styled("↑/↓", Style::default().fg(Color::Cyan)),
+            Span::styled(":move | ", Style::default().fg(Color::DarkGray)),
+            Span::styled("PgUp/Dn", Style::default().fg(Color::Cyan)),
+            Span::styled(":page | ", Style::default().fg(Color::DarkGray)),
+            Span::styled("Home/End", Style::default().fg(Color::Cyan)),
+            Span::styled(":edge | ", Style::default().fg(Color::DarkGray)),
+            Span::styled("Enter", Style::default().fg(Color::Green)),
+            Span::styled(":open | ", Style::default().fg(Color::DarkGray)),
+            Span::styled("^←/^→", Style::default().fg(Color::Cyan)),
+            Span::styled(":resize | ", Style::default().fg(Color::DarkGray)),
+        ];
+
+        if !self.tabs.is_empty() {
+            spans.push(Span::styled("S-Tab", Style::default().fg(Color::Cyan)));
+            spans.push(Span::styled(":tabs | ", Style::default().fg(Color::DarkGray)));
+        }
+
+        spans.push(Span::styled("Esc", Style::default().fg(Color::Red)));
+        spans.push(Span::styled(":quit", Style::default().fg(Color::DarkGray)));
+        spans
+    }
+
+    /// Status text for tab focus.
+    fn build_tab_status_spans(&self) -> Vec<Span<'static>> {
+        if self.tabs.is_empty() || self.selected_tab >= self.tabs.len() {
+            return vec![
+                Span::styled("Tab", Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)),
+                Span::styled(" | ", Style::default().fg(Color::DarkGray)),
+                Span::styled("No active tab", Style::default().fg(Color::DarkGray)),
+            ];
+        }
+
+        let tab = &self.tabs[self.selected_tab];
+        let is_exited = tab
+            .session
+            .as_ref()
+            .and_then(|s| s.exited.lock().ok().map(|e| *e))
+            .unwrap_or(true);
+
+        let status_icon_color = if is_exited { Color::Red } else { Color::Green };
+        let status_text = if is_exited { "Down" } else { "Live" };
+        let scroll_info = if tab.scroll_offset > 0 {
+            format!(" +{}", tab.scroll_offset)
+        } else {
+            String::new()
+        };
+
+        let mut spans = vec![
+            Span::styled("Tab", Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)),
+            Span::styled(" ", Style::default()),
+            Span::styled("●", Style::default().fg(status_icon_color).add_modifier(Modifier::BOLD)),
+            Span::styled(" ", Style::default()),
+            Span::styled(status_text, Style::default().fg(Color::White)),
+            Span::styled(" ", Style::default()),
+            Span::styled(tab.host.name.clone(), Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD)),
+        ];
+
+        if !scroll_info.is_empty() {
+            spans.push(Span::styled(" sb:", Style::default().fg(Color::DarkGray)));
+            spans.push(Span::styled(scroll_info, Style::default().fg(Color::Yellow)));
+        }
+
+        spans.push(Span::styled(" | ", Style::default().fg(Color::DarkGray)));
+
+        if is_exited {
+            spans.push(Span::styled("Enter", Style::default().fg(Color::Green)));
+            spans.push(Span::styled(":reconnect | ", Style::default().fg(Color::DarkGray)));
+            spans.push(Span::styled("^W", Style::default().fg(Color::Red)));
+            spans.push(Span::styled(":close | ", Style::default().fg(Color::DarkGray)));
+            spans.push(Span::styled("S-Tab", Style::default().fg(Color::Cyan)));
+            spans.push(Span::styled(":host", Style::default().fg(Color::DarkGray)));
+            return spans;
+        }
+
+        spans.extend([
+            Span::styled("S-Tab", Style::default().fg(Color::Cyan)),
+            Span::styled(":host | ", Style::default().fg(Color::DarkGray)),
+            Span::styled("A-←/→", Style::default().fg(Color::Cyan)),
+            Span::styled(":tab | ", Style::default().fg(Color::DarkGray)),
+            Span::styled("^W", Style::default().fg(Color::Red)),
+            Span::styled(":close | ", Style::default().fg(Color::DarkGray)),
+            Span::styled("^B", Style::default().fg(Color::Cyan)),
+            Span::styled(":panel | ", Style::default().fg(Color::DarkGray)),
+            Span::styled("^F", Style::default().fg(Color::Cyan)),
+            Span::styled(":find | ", Style::default().fg(Color::DarkGray)),
+            Span::styled("A-c", Style::default().fg(Color::Yellow)),
+            Span::styled(":copy | ", Style::default().fg(Color::DarkGray)),
+            Span::styled("S-PgUp/Dn", Style::default().fg(Color::Yellow)),
+            Span::styled(":scroll", Style::default().fg(Color::DarkGray)),
+        ]);
+
+        spans
+    }
+
+    /// Status text while host search is active.
+    fn build_search_mode_status_spans(&self) -> Vec<Span<'static>> {
+        vec![
+            Span::styled("Host Search", Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD)),
+            Span::styled(" ", Style::default()),
+            Span::styled(self.search_query.clone(), Style::default().fg(Color::White)),
+            Span::styled("_", Style::default().fg(Color::White)),
+            Span::styled(" | ", Style::default().fg(Color::DarkGray)),
+            Span::styled("type", Style::default().fg(Color::White)),
+            Span::styled(" | ", Style::default().fg(Color::DarkGray)),
+            Span::styled("Backspace", Style::default().fg(Color::Cyan)),
+            Span::styled(" | ", Style::default().fg(Color::DarkGray)),
+            Span::styled("Enter", Style::default().fg(Color::Green)),
+            Span::styled(":done | ", Style::default().fg(Color::DarkGray)),
+            Span::styled("Esc", Style::default().fg(Color::Red)),
+            Span::styled(":cancel", Style::default().fg(Color::DarkGray)),
+        ]
+    }
+
+    /// Status text while terminal search is active in a tab.
+    fn build_terminal_search_status_spans(&self) -> Vec<Span<'static>> {
+        let match_info = if !self.terminal_search_matches.is_empty() {
+            format!("{}/{}", self.terminal_search_current + 1, self.terminal_search_matches.len())
+        } else {
+            "0/0".to_string()
+        };
+
+        vec![
+            Span::styled("Tab Search", Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD)),
+            Span::styled(" ", Style::default()),
+            Span::styled(self.terminal_search_query.clone(), Style::default().fg(Color::White)),
+            Span::styled("_", Style::default().fg(Color::White)),
+            Span::styled(" ", Style::default()),
+            Span::styled(format!("({})", match_info), Style::default().fg(Color::Yellow)),
+            Span::styled(" | ", Style::default().fg(Color::DarkGray)),
+            Span::styled("type", Style::default().fg(Color::White)),
+            Span::styled(" | ", Style::default().fg(Color::DarkGray)),
+            Span::styled("Backspace", Style::default().fg(Color::Cyan)),
+            Span::styled(" | ", Style::default().fg(Color::DarkGray)),
+            Span::styled("↑/↓ Enter", Style::default().fg(Color::Cyan)),
+            Span::styled(":next/prev | ", Style::default().fg(Color::DarkGray)),
+            Span::styled("Esc", Style::default().fg(Color::Red)),
+            Span::styled(":close", Style::default().fg(Color::DarkGray)),
+        ]
     }
 
     /// Render the host list
@@ -339,35 +517,11 @@ impl App {
                 ]));
             }
 
-            lines.push(Line::from(""));
-            lines.push(Line::from(""));
-            lines.push(Line::from(vec![
-                Span::styled("Press ", Style::default().fg(Color::Gray)),
-                Span::styled("Enter", Style::default().fg(Color::Green).add_modifier(Modifier::BOLD)),
-                Span::styled(" to open in new tab", Style::default().fg(Color::Gray)),
-            ]));
-            lines.push(Line::from(vec![
-                Span::styled("Press ", Style::default().fg(Color::Gray)),
-                Span::styled("Shift+Tab", Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)),
-                Span::styled(" to switch focus to tabs", Style::default().fg(Color::Gray)),
-            ]));
-            lines.push(Line::from(vec![
-                Span::styled("Press ", Style::default().fg(Color::Gray)),
-                Span::styled("Esc", Style::default().fg(Color::Red).add_modifier(Modifier::BOLD)),
-                Span::styled(" to quit", Style::default().fg(Color::Gray)),
-            ]));
-
             lines
         } else {
             vec![
                 Line::from(""),
                 Line::from(Span::styled("No hosts found", Style::default().fg(Color::DarkGray))),
-                Line::from(""),
-                Line::from(vec![
-                    Span::styled("Press ", Style::default().fg(Color::Gray)),
-                    Span::styled("/", Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)),
-                    Span::styled(" to search", Style::default().fg(Color::Gray)),
-                ]),
             ]
         };
 
@@ -488,11 +642,11 @@ impl App {
 
         let exit_title = Line::from(vec![Span::styled(" X ", Style::default().fg(Color::Red).add_modifier(Modifier::BOLD))]);
 
-        let scroll_hint = if self.tabs.len() > 1 { ", Scroll: switch" } else { "" };
+        let title = format!(" Tabs ({}) ", self.tabs.len());
         let tabs_line = Line::from(visible_spans);
         let paragraph = Paragraph::new(tabs_line).block(
             Block::default()
-                .title(format!(" Tabs [Shift+Tab: switch focus, Alt+←/→: navigate, Ctrl+W: close{}] ", scroll_hint))
+                .title(title)
                 .title_top(exit_title.alignment(Alignment::Right))
                 .borders(Borders::ALL)
                 .border_style(border_style),
@@ -507,14 +661,8 @@ impl App {
             return;
         }
 
-        // Resize PTY to match display area - status bar at bottom now
-        let chunks = Layout::default()
-            .direction(Direction::Vertical)
-            .constraints([Constraint::Min(0), Constraint::Length(1)])
-            .split(area);
-
-        self.resize_current_pty(chunks[0]);
-        self.tab_content_area = chunks[0];
+        self.resize_current_pty(area);
+        self.tab_content_area = area;
 
         let tab = &self.tabs[tab_idx];
         let host = &tab.host;
@@ -524,18 +672,13 @@ impl App {
         let tab_title = tab.title.clone();
 
         // Check if session exists
-        let (session_active, is_exited) = if let Some(session) = &tab.session {
-            let exited = *session.exited.lock().unwrap();
-            (true, exited)
-        } else {
-            (false, false)
-        };
+        let session_active = tab.session.is_some();
 
         if session_active {
             // Render the border/block first
             let block = Block::default().borders(Borders::ALL).title(format!(" {} ", &tab_title));
-            let inner_area = block.inner(chunks[0]);
-            frame.render_widget(block, chunks[0]);
+            let inner_area = block.inner(area);
+            frame.render_widget(block, area);
 
             // Now render VT100 screen directly into the buffer cell-by-cell
             let tab = &self.tabs[tab_idx];
@@ -653,80 +796,6 @@ impl App {
                     }
                 }
             }
-            
-            // Compact status bar at the bottom
-            let scroll_info = if scroll_offset > 0 {
-                format!(" [Scrollback: +{}]", scroll_offset)
-            } else {
-                String::new()
-            };
-            
-            let status_line = if self.terminal_search_mode {
-                // Show search box
-                let match_info = if !self.terminal_search_matches.is_empty() {
-                    format!("({}/{}) ", self.terminal_search_current + 1, self.terminal_search_matches.len())
-                } else {
-                    "(0) ".to_string()
-                };
-                vec![
-                    Span::styled(" Search: ", Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD)),
-                    Span::styled(self.terminal_search_query.clone(), Style::default().fg(Color::White)),
-                    Span::styled("_", Style::default().fg(Color::White)),
-                    Span::styled(" ", Style::default()),
-                    Span::styled(match_info, Style::default().fg(Color::Yellow)),
-                    Span::styled("[", Style::default().fg(Color::DarkGray)),
-                    Span::styled("↑/↓", Style::default().fg(Color::Cyan)),
-                    Span::styled(": navigate | ", Style::default().fg(Color::DarkGray)),
-                    Span::styled("Esc", Style::default().fg(Color::Cyan)),
-                    Span::styled(": close]", Style::default().fg(Color::DarkGray)),
-                ]
-            } else {
-                let (status_icon_color, status_text) = if is_exited {
-                    (Color::Red, "Disconnected")
-                } else {
-                    (Color::Green, "Connected")
-                };
-                
-                let mut spans = vec![
-                    Span::styled(" ● ", Style::default().fg(status_icon_color).add_modifier(Modifier::BOLD)),
-                    Span::styled(status_text, Style::default().fg(Color::White)),
-                    Span::styled(": ", Style::default().fg(Color::DarkGray)),
-                    Span::styled(host.name.clone(), Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD)),
-                ];
-                
-                if !scroll_info.is_empty() {
-                    spans.push(Span::styled(scroll_info, Style::default().fg(Color::Yellow)));
-                }
-                
-                spans.push(Span::styled(" | ", Style::default().fg(Color::DarkGray)));
-                
-                if is_exited {
-                    spans.push(Span::styled("[", Style::default().fg(Color::DarkGray)));
-                    spans.push(Span::styled("Enter", Style::default().fg(Color::Green)));
-                    spans.push(Span::styled(": reconnect | ", Style::default().fg(Color::DarkGray)));
-                    spans.push(Span::styled("Ctrl+W", Style::default().fg(Color::Red)));
-                    spans.push(Span::styled(": close]", Style::default().fg(Color::DarkGray)));
-                } else {
-                    spans.push(Span::styled("[", Style::default().fg(Color::DarkGray)));
-                    spans.push(Span::styled("Shift+Tab", Style::default().fg(Color::Cyan)));
-                    spans.push(Span::styled(": focus | ", Style::default().fg(Color::DarkGray)));
-                    spans.push(Span::styled("Ctrl+B", Style::default().fg(Color::Cyan)));
-                    spans.push(Span::styled(": toggle panel | ", Style::default().fg(Color::DarkGray)));
-                    spans.push(Span::styled("Ctrl+F", Style::default().fg(Color::Cyan)));
-                    spans.push(Span::styled(": search", Style::default().fg(Color::DarkGray)));
-                    if scroll_offset > 0 {
-                        spans.push(Span::styled(" | ", Style::default().fg(Color::DarkGray)));
-                        spans.push(Span::styled("Shift+PgUp/PgDn", Style::default().fg(Color::Yellow)));
-                        spans.push(Span::styled(": scroll", Style::default().fg(Color::DarkGray)));
-                    }
-                    spans.push(Span::styled("]", Style::default().fg(Color::DarkGray)));
-                }
-                
-                spans
-            };
-
-            let status = Paragraph::new(Line::from(status_line)).block(Block::default());
-            frame.render_widget(status, chunks[1]);
         } else {
             // Session failed to start
             let error_lines = vec![
