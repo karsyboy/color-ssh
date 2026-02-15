@@ -46,6 +46,20 @@ pub fn fuzzy_match(text: &str, pattern: &str) -> Option<i32> {
     Some(score)
 }
 
+/// Strict contiguous match scoring.
+///
+/// Higher score for prefix matches, then earlier substring positions.
+fn strict_match_score(text: &str, pattern: &str) -> Option<i32> {
+    let text = text.to_lowercase();
+    let pos = text.find(pattern)?;
+
+    if pos == 0 {
+        Some(300 + pattern.len() as i32)
+    } else {
+        Some((200 - pos as i32).max(1))
+    }
+}
+
 impl App {
     fn row_key_from_kind(kind: HostTreeRowKind) -> HostRowKey {
         match kind {
@@ -219,31 +233,61 @@ impl App {
 
         self.host_match_scores.clear();
         if !self.search_query.is_empty() {
-            let query = &self.search_query;
+            let query = self.search_query.to_lowercase();
+
+            // Pass 1: strict contiguous matching.
+            // If we have strict hits, only show those for more predictable filtering.
             for (idx, host) in self.hosts.iter().enumerate() {
                 let mut best_score = None;
 
-                // Try matching against name
-                if let Some(score) = fuzzy_match(&host.name, query) {
-                    best_score = Some(score + 100); // Boost name matches
+                if let Some(score) = strict_match_score(&host.name, &query) {
+                    best_score = Some(score + 1000); // Strong name preference
                 }
 
-                // Try matching against hostname
                 if let Some(hostname) = &host.hostname
-                    && let Some(score) = fuzzy_match(hostname, query)
+                    && let Some(score) = strict_match_score(hostname, &query)
                 {
-                    best_score = Some(best_score.unwrap_or(0).max(score + 50));
+                    best_score = Some(best_score.unwrap_or(0).max(score + 500));
                 }
 
-                // Try matching against user
                 if let Some(user) = &host.user
-                    && let Some(score) = fuzzy_match(user, query)
+                    && let Some(score) = strict_match_score(user, &query)
                 {
-                    best_score = Some(best_score.unwrap_or(0).max(score + 30));
+                    best_score = Some(best_score.unwrap_or(0).max(score + 300));
                 }
 
                 if let Some(score) = best_score {
                     self.host_match_scores.insert(idx, score);
+                }
+            }
+
+            if self.host_match_scores.is_empty() {
+                // Pass 2: fallback to fuzzy matching only when strict matching found nothing.
+                for (idx, host) in self.hosts.iter().enumerate() {
+                    let mut best_score = None;
+
+                    // Try matching against name
+                    if let Some(score) = fuzzy_match(&host.name, &query) {
+                        best_score = Some(score + 100); // Boost name matches
+                    }
+
+                    // Try matching against hostname
+                    if let Some(hostname) = &host.hostname
+                        && let Some(score) = fuzzy_match(hostname, &query)
+                    {
+                        best_score = Some(best_score.unwrap_or(0).max(score + 50));
+                    }
+
+                    // Try matching against user
+                    if let Some(user) = &host.user
+                        && let Some(score) = fuzzy_match(user, &query)
+                    {
+                        best_score = Some(best_score.unwrap_or(0).max(score + 30));
+                    }
+
+                    if let Some(score) = best_score {
+                        self.host_match_scores.insert(idx, score);
+                    }
                 }
             }
         }
