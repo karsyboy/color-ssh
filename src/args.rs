@@ -43,7 +43,7 @@ pub struct MainArgs {
 /// A MainArgs struct containing all parsed arguments
 pub fn main_args() -> MainArgs {
     let matches = Command::new("cossh")
-        .version("v0.5.9")
+        .version("v0.6.0")
         .author("@karsyboy")
         .about("A Rust-based SSH client wrapper with syntax highlighting and logging capabilities")
         .arg_required_else_help(true)

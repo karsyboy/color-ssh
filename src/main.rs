@@ -37,7 +37,7 @@ fn main() -> Result<ExitCode> {
 
     // Enable debug logging initially to capture config load
     logger.enable_debug();
-    log_info!("color-ssh v0.5.9 starting");
+    log_info!("color-ssh v0.6.0 starting");
 
     // If interactive mode is requested, launch the session manager
     if args.interactive {
@@ -103,7 +103,7 @@ fn main() -> Result<ExitCode> {
             "\x1b[36m██║     ██║   ██║██║     ██║   ██║██╔══██╗╚════╝╚════██║╚════██║██╔══██║",
             "\x1b[34m╚██████╗╚██████╔╝███████╗╚██████╔╝██║  ██║      ███████║███████║██║  ██║",
             "\x1b[35m ╚═════╝ ╚═════╝ ╚══════╝ ╚═════╝ ╚═╝  ╚═╝      ╚══════╝╚══════╝╚═╝  ╚═╝",
-            "\x1b[31mVersion: \x1b[33m0.5.9\x1b[0m    \x1b[31mBy: \x1b[32m@Karsyboy\x1b[0m    \x1b[31mGithub: \x1b[34mhttps://github.com/karsyboy/color-ssh\x1b[0m",
+            "\x1b[31mVersion: \x1b[33m0.6.0\x1b[0m    \x1b[31mBy: \x1b[32m@Karsyboy\x1b[0m    \x1b[31mGithub: \x1b[34mhttps://github.com/karsyboy/color-ssh\x1b[0m",
             " ",
         ];
 
