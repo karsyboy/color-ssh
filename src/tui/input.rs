@@ -6,6 +6,107 @@ use std::io::{self, Write};
 use std::time::Instant;
 
 impl App {
+    fn final_right_tab_scroll_offset(&self, available_width: usize) -> usize {
+        if self.tabs.is_empty() || available_width == 0 {
+            return 0;
+        }
+        let total_width = self.total_tab_width();
+        if total_width <= available_width {
+            return 0;
+        }
+
+        // Reserve one column for the left overflow marker once we've scrolled right.
+        let visible_with_left_marker = available_width.saturating_sub(1);
+        let threshold = total_width.saturating_sub(visible_with_left_marker);
+
+        let mut start = 0usize;
+        let mut last_start = 0usize;
+        for idx in 0..self.tabs.len() {
+            if start >= threshold {
+                return start;
+            }
+            last_start = start;
+            start += self.tab_display_width(idx);
+        }
+
+        last_start
+    }
+
+    pub(super) fn normalize_tab_scroll_offset(&self, raw_offset: usize, available_width: usize) -> usize {
+        if self.tabs.is_empty() || available_width == 0 {
+            return 0;
+        }
+        let final_offset = self.final_right_tab_scroll_offset(available_width);
+        let clamped = raw_offset.min(final_offset);
+
+        let mut snapped = 0usize;
+        let mut start = 0usize;
+        for idx in 0..self.tabs.len() {
+            if start > clamped {
+                break;
+            }
+            snapped = start;
+            start += self.tab_display_width(idx);
+        }
+        snapped
+    }
+
+    fn total_tab_width(&self) -> usize {
+        (0..self.tabs.len()).map(|idx| self.tab_display_width(idx)).sum()
+    }
+
+    /// Return the previous valid tab-boundary scroll offset, if one exists.
+    pub(super) fn prev_tab_scroll_offset(&self, raw_offset: usize, available_width: usize) -> Option<usize> {
+        if self.tabs.is_empty() || available_width == 0 {
+            return None;
+        }
+
+        let current = self.normalize_tab_scroll_offset(raw_offset, available_width);
+        if current == 0 {
+            return None;
+        }
+
+        let mut previous = 0usize;
+        let mut start = 0usize;
+        for idx in 0..self.tabs.len() {
+            if start >= current {
+                break;
+            }
+            previous = start;
+            start += self.tab_display_width(idx);
+        }
+
+        Some(previous)
+    }
+
+    /// Return the next valid tab-boundary scroll offset, if one exists.
+    pub(super) fn next_tab_scroll_offset(&self, raw_offset: usize, available_width: usize) -> Option<usize> {
+        if self.tabs.is_empty() || available_width == 0 {
+            return None;
+        }
+
+        let total_width = self.total_tab_width();
+        if total_width <= available_width {
+            return None;
+        }
+
+        let current = self.normalize_tab_scroll_offset(raw_offset, available_width);
+        let final_offset = self.final_right_tab_scroll_offset(available_width);
+        if current >= final_offset {
+            return None;
+        }
+
+        let mut start = 0usize;
+        for idx in 0..self.tabs.len() {
+            if start > current {
+                return Some(start.min(final_offset));
+            }
+            start += self.tab_display_width(idx);
+        }
+
+        Some(final_offset)
+    }
+
     /// Handle keyboard input
     pub(super) fn handle_key(&mut self, key: KeyEvent) -> io::Result<()> {
         // Only process key press events, not release
@@ -422,29 +523,72 @@ impl App {
                     && mouse.row < tab_area.y + tab_area.height
                 {
                     // Calculate which tab was clicked based on tab title widths
-                    // Flat tab format: "title ×  ".
+                    // Flat tab format: "title × ".
                     let visual_col = (mouse.column - tab_area.x) as usize;
-                    // When scrolled, the ◀ indicator takes 1 column at the start
-                    let indicator_offset: usize = if self.tab_scroll_offset > 0 { 1 } else { 0 };
-                    let click_col = if visual_col < indicator_offset {
-                        // Clicked on the ◀ indicator itself — don't match any tab
-                        usize::MAX
-                    } else {
-                        visual_col - indicator_offset + self.tab_scroll_offset
-                    };
-                    let mut cumulative_width: usize = 0;
-                    for (idx, tab) in self.tabs.iter().enumerate() {
-                        let tab_width = self.tab_display_width(idx);
-                        if click_col < cumulative_width + tab_width {
+                    let tab_widths: Vec<usize> = self.tabs.iter().enumerate().map(|(idx, _)| self.tab_display_width(idx)).collect();
+                    let available_width = tab_area.width as usize;
+                    self.tab_scroll_offset = self.normalize_tab_scroll_offset(self.tab_scroll_offset, available_width);
+                    let has_left_overflow = self.prev_tab_scroll_offset(self.tab_scroll_offset, available_width).is_some();
+                    let left_slot = if has_left_overflow { 1 } else { 0 };
+                    let has_right_overflow = self.next_tab_scroll_offset(self.tab_scroll_offset, available_width).is_some();
+                    let right_slot = if has_right_overflow { 1 } else { 0 };
+                    let visible_tab_width = available_width.saturating_sub(left_slot + right_slot);
+
+                    // Clickable overflow indicators.
+                    if has_left_overflow && visual_col == 0 {
+                        if let Some(prev_offset) = self.prev_tab_scroll_offset(self.tab_scroll_offset, available_width) {
+                            self.tab_scroll_offset = prev_offset;
+                        }
+                        return Ok(());
+                    }
+                    if has_right_overflow && visual_col == available_width.saturating_sub(1) {
+                        if let Some(next_offset) = self.next_tab_scroll_offset(self.tab_scroll_offset, available_width) {
+                            self.tab_scroll_offset = next_offset;
+                        }
+                        return Ok(());
+                    }
+
+                    // Ignore clicks outside the visible tab chip band.
+                    if visual_col < left_slot || visual_col >= left_slot + visible_tab_width {
+                        self.focus_on_manager = false;
+                        self.selection_start = None;
+                        self.selection_end = None;
+                        self.is_selecting = false;
+                        return Ok(());
+                    }
+                    let local_col = visual_col - left_slot;
+
+                    // Find first visible tab by current scroll offset.
+                    let mut running_start = 0usize;
+                    let mut first_visible_idx = 0usize;
+                    while first_visible_idx < self.tabs.len()
+                        && running_start + tab_widths[first_visible_idx] <= self.tab_scroll_offset
+                    {
+                        running_start += tab_widths[first_visible_idx];
+                        first_visible_idx += 1;
+                    }
+
+                    // Hit-test only tabs actually rendered in the current viewport.
+                    let mut used = 0usize;
+                    let mut idx = first_visible_idx;
+                    while idx < self.tabs.len() {
+                        let tab_width = tab_widths[idx];
+                        if used + tab_width > visible_tab_width {
+                            break;
+                        }
+                        if local_col < used + tab_width {
+                            let tab = &self.tabs[idx];
                             // Check if click is on the × close button.
-                            // Format is "title ×  " so × is at title.len() + 1.
-                            let close_pos = cumulative_width + tab.title.len() + 1;
-                            if click_col == close_pos {
+                            // Format is "title × " so × is at title.len() + 1.
+                            let close_pos = used + tab.title.len() + 1;
+                            if local_col == close_pos {
                                 // Close this tab
                                 self.tabs.remove(idx);
                                 if self.tabs.is_empty() {
                                     self.selected_tab = 0;
                                     self.focus_on_manager = true;
+                                } else if idx < self.selected_tab {
+                                    self.selected_tab -= 1;
                                 } else if self.selected_tab >= self.tabs.len() {
                                     self.selected_tab = self.tabs.len() - 1;
                                 }
@@ -459,7 +603,8 @@ impl App {
                             self.is_selecting = false;
                             return Ok(());
                         }
-                        cumulative_width += tab_width;
+                        used += tab_width;
+                        idx += 1;
                     }
                     // Clicked in tab bar but past all tab labels — still focus on tabs
                     self.focus_on_manager = false;
@@ -583,8 +728,8 @@ impl App {
                     && mouse.row >= tab_area.y
                     && mouse.row < tab_area.y + tab_area.height
                 {
-                    // Scroll up on tab bar = previous tab
-                    if self.selected_tab > 0 {
+                    // Scroll up on tab bar = previous tab (stop at first)
+                    if !self.tabs.is_empty() && self.selected_tab > 0 {
                         self.selected_tab -= 1;
                         self.focus_on_manager = false;
                         self.selection_start = None;
@@ -627,8 +772,8 @@ impl App {
                     && mouse.row >= tab_area.y
                     && mouse.row < tab_area.y + tab_area.height
                 {
-                    // Scroll down on tab bar = next tab
-                    if self.selected_tab < self.tabs.len() - 1 {
+                    // Scroll down on tab bar = next tab (stop at last)
+                    if !self.tabs.is_empty() && self.selected_tab < self.tabs.len() - 1 {
                         self.selected_tab += 1;
                         self.focus_on_manager = false;
                         self.selection_start = None;
@@ -864,8 +1009,8 @@ impl App {
         if idx >= self.tabs.len() {
             return 0;
         }
-        // Flat format: "title ×  " = title.len() + 4
-        self.tabs[idx].title.len() + 4
+        // Flat format: "title × " = title.len() + 3
+        self.tabs[idx].title.len() + 3
     }
 
     /// Ensure the selected tab is visible within the tab bar by adjusting tab_scroll_offset
@@ -891,7 +1036,8 @@ impl App {
         if start_pos < self.tab_scroll_offset {
             self.tab_scroll_offset = start_pos;
         } else if end_pos > self.tab_scroll_offset + tab_bar_width {
-            self.tab_scroll_offset = end_pos.saturating_sub(tab_bar_width);
+            // Tab bar scroll operates on tab boundaries, so jump to the selected tab's start.
+            self.tab_scroll_offset = start_pos;
         }
     }
 

@@ -71,23 +71,6 @@ fn draw_horizontal_rule(frame: &mut Frame, y: u16, x: u16, width: u16, style: St
     }
 }
 
-fn fill_row_bg(frame: &mut Frame, area: Rect, bg: Color) {
-    if area.width == 0 || area.height == 0 {
-        return;
-    }
-    let frame_area = frame.area();
-    let y = area.y.min(frame_area.y + frame_area.height.saturating_sub(1));
-    let end_x = area.x.saturating_add(area.width).min(frame_area.x + frame_area.width);
-    let buf = frame.buffer_mut();
-    for x in area.x..end_x {
-        let cell = &mut buf[(x, y)];
-        cell.set_style(Style::default().bg(bg));
-        if cell.symbol().is_empty() {
-            cell.set_symbol(" ");
-        }
-    }
-}
-
 #[derive(Debug, Clone, Copy)]
 enum StatusContext {
     HostSearch,
@@ -290,7 +273,6 @@ impl App {
         let is_exited = tab.session.as_ref().and_then(|s| s.exited.lock().ok().map(|e| *e)).unwrap_or(true);
 
         let status_icon_color = if is_exited { Color::Red } else { Color::Green };
-        let status_text = if is_exited { "Down" } else { "Live" };
         let scroll_info = if tab.scroll_offset > 0 {
             format!(" +{}", tab.scroll_offset)
         } else {
@@ -301,8 +283,6 @@ impl App {
             Span::styled("Terminal", Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)),
             self.context_split_indicator(),
             Span::styled("●", Style::default().fg(status_icon_color).add_modifier(Modifier::BOLD)),
-            Span::styled(" ", Style::default()),
-            Span::styled(status_text, Style::default().fg(Color::White)),
             Span::styled(" ", Style::default()),
             Span::styled(tab.host.name.clone(), Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD)),
         ];
@@ -669,16 +649,39 @@ impl App {
         if area.width == 0 || area.height == 0 {
             return;
         }
+        let tab_widths: Vec<usize> = self.tabs.iter().map(|tab| tab.title.len() + 3).collect();
+        let available_width = area.width as usize;
+        self.tab_scroll_offset = self.normalize_tab_scroll_offset(self.tab_scroll_offset, available_width);
 
-        let bar_bg = Color::Indexed(235);
-        fill_row_bg(frame, area, bar_bg);
+        let has_left_overflow = self.prev_tab_scroll_offset(self.tab_scroll_offset, available_width).is_some();
+        let left_slot = if has_left_overflow { 1 } else { 0 };
+        let has_right_overflow = self.next_tab_scroll_offset(self.tab_scroll_offset, available_width).is_some();
+        let right_slot = if has_right_overflow { 1 } else { 0 };
+        let visible_tab_width = available_width.saturating_sub(left_slot + right_slot);
 
-        // Build full tab title spans first, then apply horizontal scroll offset
-        let mut all_spans: Vec<Span> = Vec::new();
+        let mut spans: Vec<Span> = Vec::new();
+        if has_left_overflow {
+            spans.push(Span::styled("◀", Style::default().fg(Color::Cyan)));
+        }
 
-        for (idx, tab) in self.tabs.iter().enumerate() {
+        // Skip tabs scrolled out on the left.
+        let mut running_start = 0usize;
+        let mut first_visible_idx = 0usize;
+        while first_visible_idx < self.tabs.len() && running_start + tab_widths[first_visible_idx] <= self.tab_scroll_offset {
+            running_start += tab_widths[first_visible_idx];
+            first_visible_idx += 1;
+        }
+
+        let mut used = 0usize;
+        let mut idx = first_visible_idx;
+        while idx < self.tabs.len() {
+            let w = tab_widths[idx];
+            if used + w > visible_tab_width {
+                break;
+            }
+
+            let tab = &self.tabs[idx];
             let is_selected = idx == self.selected_tab && !self.focus_on_manager;
-
             let style = if is_selected {
                 Style::default()
                     .fg(Color::Yellow)
@@ -687,66 +690,31 @@ impl App {
             } else {
                 Style::default().fg(Color::Gray).bg(Color::Indexed(236))
             };
-
             let close_style = if is_selected {
                 Style::default().fg(Color::LightRed).bg(Color::Indexed(238)).add_modifier(Modifier::BOLD)
             } else {
-                Style::default().fg(Color::Red).bg(Color::Indexed(236))
+                Style::default().fg(Color::Red).bg(Color::Indexed(236)).add_modifier(Modifier::BOLD)
             };
 
-            all_spans.push(Span::styled(format!("{} ", &tab.title), style));
-            all_spans.push(Span::styled("×", close_style));
-            all_spans.push(Span::styled("  ", Style::default().fg(Color::DarkGray)));
+            spans.push(Span::styled(format!("{} ", tab.title), style));
+            spans.push(Span::styled("×", close_style));
+            spans.push(Span::styled(" ", Style::default().fg(Color::DarkGray)));
+            used += w;
+            idx += 1;
         }
 
-        // Calculate total display width of all tab titles (use char count, not byte length,
-        // because × and │ are multi-byte but single-column characters)
-        let total_width: usize = all_spans.iter().map(|s| s.content.chars().count()).sum();
-        let available_width = area.width as usize;
-
-        // Clamp tab_scroll_offset
-        if total_width <= available_width {
-            self.tab_scroll_offset = 0;
-        } else if self.tab_scroll_offset > total_width.saturating_sub(available_width) {
-            self.tab_scroll_offset = total_width.saturating_sub(available_width);
+        // Keep overflow indicator hitbox and glyph aligned by right-aligning ▶ to the
+        // final tab-bar column (the click logic expects last-column placement).
+        let remaining = visible_tab_width.saturating_sub(used);
+        if remaining > 0 {
+            spans.push(Span::raw(" ".repeat(remaining)));
         }
 
-        // Apply horizontal scroll: skip characters from the start
-        let mut visible_spans: Vec<Span> = Vec::new();
-        let mut skipped = 0usize;
-        let scroll_offset = self.tab_scroll_offset;
-
-        // Add scroll indicator if scrolled
-        let has_left_overflow = scroll_offset > 0;
-        let has_right_overflow = total_width > scroll_offset + available_width;
-
-        for span in &all_spans {
-            let span_len = span.content.chars().count();
-            if skipped + span_len <= scroll_offset {
-                skipped += span_len;
-                continue;
-            }
-            if skipped < scroll_offset {
-                // Partial span: skip some leading chars
-                let skip_chars = scroll_offset - skipped;
-                let trimmed: String = span.content.chars().skip(skip_chars).collect();
-                visible_spans.push(Span::styled(trimmed, span.style));
-                skipped = scroll_offset;
-            } else {
-                visible_spans.push(span.clone());
-            }
-        }
-
-        // Add scroll indicators
-        if has_left_overflow {
-            visible_spans.insert(0, Span::styled("◀", Style::default().fg(Color::Cyan).bg(bar_bg)));
-        }
         if has_right_overflow {
-            visible_spans.push(Span::styled("▶", Style::default().fg(Color::Cyan).bg(bar_bg)));
+            spans.push(Span::styled("▶", Style::default().fg(Color::Cyan)));
         }
 
-        let tabs_line = Line::from(visible_spans);
-        frame.render_widget(Paragraph::new(tabs_line), area);
+        frame.render_widget(Paragraph::new(Line::from(spans)), area);
     }
 
     /// Render the content of a specific tab
