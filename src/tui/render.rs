@@ -308,20 +308,20 @@ impl App {
         }
 
         let mut right = vec![
-            Span::styled("^F", Style::default().fg(Color::Yellow)),
-            Span::styled(":find | ", Style::default().fg(Color::DarkGray)),
             Span::styled("↑/↓", Style::default().fg(Color::Cyan)),
             Span::styled(":move | ", Style::default().fg(Color::DarkGray)),
             Span::styled("PgUp/Dn", Style::default().fg(Color::Cyan)),
             Span::styled(":page | ", Style::default().fg(Color::DarkGray)),
             Span::styled("Home/End", Style::default().fg(Color::Cyan)),
             Span::styled(":edge | ", Style::default().fg(Color::DarkGray)),
+            Span::styled("^F", Style::default().fg(Color::Yellow)),
+            Span::styled(":find | ", Style::default().fg(Color::DarkGray)),
             Span::styled("Enter", Style::default().fg(Color::Green)),
             Span::styled(":open | ", Style::default().fg(Color::DarkGray)),
-            Span::styled("^←/^→", Style::default().fg(Color::Cyan)),
-            Span::styled(":resize | ", Style::default().fg(Color::DarkGray)),
             Span::styled("i", Style::default().fg(Color::Cyan)),
             Span::styled(":info | ", Style::default().fg(Color::DarkGray)),
+            Span::styled("^←/^→", Style::default().fg(Color::Cyan)),
+            Span::styled(":resize | ", Style::default().fg(Color::DarkGray)),
         ];
 
         if !self.tabs.is_empty() {
@@ -379,8 +379,6 @@ impl App {
             right.push(Span::styled(":host | ", Style::default().fg(Color::DarkGray)));
             right.push(Span::styled("A-←/→", Style::default().fg(Color::Cyan)));
             right.push(Span::styled(":tab | ", Style::default().fg(Color::DarkGray)));
-            right.push(Span::styled("^W", Style::default().fg(Color::Red)));
-            right.push(Span::styled(":close | ", Style::default().fg(Color::DarkGray)));
             right.push(Span::styled("^B", Style::default().fg(Color::Cyan)));
             right.push(Span::styled(":panel | ", Style::default().fg(Color::DarkGray)));
             right.push(Span::styled("^F", Style::default().fg(Color::Cyan)));
@@ -388,7 +386,9 @@ impl App {
             right.push(Span::styled("A-c", Style::default().fg(Color::Yellow)));
             right.push(Span::styled(":copy | ", Style::default().fg(Color::DarkGray)));
             right.push(Span::styled("S-PgUp/Dn", Style::default().fg(Color::Yellow)));
-            right.push(Span::styled(":scroll", Style::default().fg(Color::DarkGray)));
+            right.push(Span::styled(":scroll | ", Style::default().fg(Color::DarkGray)));
+            right.push(Span::styled("^W", Style::default().fg(Color::Red)));
+            right.push(Span::styled(":close", Style::default().fg(Color::DarkGray)));
             return (left, right);
         }
 
@@ -397,8 +397,6 @@ impl App {
             Span::styled(":host | ", Style::default().fg(Color::DarkGray)),
             Span::styled("A-←/→", Style::default().fg(Color::Cyan)),
             Span::styled(":tab | ", Style::default().fg(Color::DarkGray)),
-            Span::styled("^W", Style::default().fg(Color::Red)),
-            Span::styled(":close | ", Style::default().fg(Color::DarkGray)),
             Span::styled("^B", Style::default().fg(Color::Cyan)),
             Span::styled(":panel | ", Style::default().fg(Color::DarkGray)),
             Span::styled("^F", Style::default().fg(Color::Cyan)),
@@ -406,7 +404,9 @@ impl App {
             Span::styled("A-c", Style::default().fg(Color::Yellow)),
             Span::styled(":copy | ", Style::default().fg(Color::DarkGray)),
             Span::styled("S-PgUp/Dn", Style::default().fg(Color::Yellow)),
-            Span::styled(":scroll", Style::default().fg(Color::DarkGray)),
+            Span::styled(":scroll | ", Style::default().fg(Color::DarkGray)),
+            Span::styled("^W", Style::default().fg(Color::Red)),
+            Span::styled(":close", Style::default().fg(Color::DarkGray)),
         ]);
 
         (left, right)
