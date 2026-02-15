@@ -299,16 +299,11 @@ impl App {
         } else {
             let total = self.filtered_hosts.len();
             let showing = visible_hosts.len();
-            let tabs_info = if !self.tabs.is_empty() {
-                format!(" | {} tabs", self.tabs.len())
-            } else {
-                String::new()
-            };
 
             if self.host_scroll_offset > 0 || showing < total {
-                format!(" Hosts ({}/{}){}  [Ctrl+←/→: resize] ", showing, total, tabs_info)
+                format!(" Hosts ({}/{}) ", showing, total)
             } else {
-                format!(" Hosts ({}){}  [Ctrl+←/→: resize] ", total, tabs_info)
+                format!(" Hosts ({}) ", total)
             }
         };
 
