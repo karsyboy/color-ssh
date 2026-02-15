@@ -4,7 +4,7 @@ use super::App;
 use super::selection::is_cell_in_selection;
 use ratatui::{
     Frame,
-    layout::{Constraint, Direction, Layout, Rect},
+    layout::{Alignment, Constraint, Direction, Layout, Rect},
     style::{Color, Modifier, Style},
     text::{Line, Span},
     widgets::{List, ListItem, ListState, Paragraph, Wrap},
@@ -180,19 +180,46 @@ impl App {
 
     /// Render the global one-line status bar at the bottom.
     fn render_global_status_bar(&mut self, frame: &mut Frame, area: Rect) {
-        let status = Paragraph::new(Line::from(self.build_status_line_spans())).style(Style::default().fg(Color::Gray));
-        frame.render_widget(status, area);
+        if area.width == 0 || area.height == 0 {
+            self.exit_button_area = Rect::default();
+            return;
+        }
+
+        let (left_spans, right_spans) = self.build_status_line_sections();
+        let base_style = Style::default().fg(Color::Gray);
+
+        if right_spans.is_empty() {
+            let status = Paragraph::new(Line::from(left_spans)).style(base_style);
+            frame.render_widget(status, area);
+            self.exit_button_area = Rect::default();
+            return;
+        }
+
+        let right_width = self.spans_display_width(&right_spans).min(area.width as usize) as u16;
+        let chunks = Layout::default()
+            .direction(Direction::Horizontal)
+            .constraints([Constraint::Min(0), Constraint::Length(right_width)])
+            .split(area);
+
+        let left = Paragraph::new(Line::from(left_spans)).style(base_style);
+        let right = Paragraph::new(Line::from(right_spans)).style(base_style).alignment(Alignment::Right);
+        frame.render_widget(left, chunks[0]);
+        frame.render_widget(right, chunks[1]);
         self.exit_button_area = Rect::default();
     }
 
-    /// Build status line content for the current app context.
-    fn build_status_line_spans(&self) -> Vec<Span<'static>> {
+    /// Build status line sections for the current app context.
+    fn build_status_line_sections(&self) -> (Vec<Span<'static>>, Vec<Span<'static>>) {
         match self.resolve_status_context() {
             StatusContext::HostSearch => self.build_search_mode_status_spans(),
             StatusContext::TerminalSearch => self.build_terminal_search_status_spans(),
             StatusContext::Host => self.build_manager_status_spans(),
             StatusContext::Terminal => self.build_terminal_status_spans(),
         }
+    }
+
+    fn spans_display_width(&self, spans: &[Span<'static>]) -> usize {
+        spans.iter().map(|span| span.content.chars().count()).sum()
     }
 
     /// Determine the status bar context based on focus and search modes.
@@ -228,13 +255,15 @@ impl App {
     }
 
     /// Status text for host/manager focus.
-    fn build_manager_status_spans(&self) -> Vec<Span<'static>> {
+    fn build_manager_status_spans(&self) -> (Vec<Span<'static>>, Vec<Span<'static>>) {
         let host_name = self.selected_host_name().unwrap_or_else(|| "none".to_string());
-        let mut spans = vec![
+        let left = vec![
             Span::styled("Host", Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD)),
             self.context_split_indicator(),
             Span::styled(host_name, Style::default().fg(Color::White)),
-            Span::styled(" | ", Style::default().fg(Color::DarkGray)),
+        ];
+
+        let mut right = vec![
             Span::styled("^F", Style::default().fg(Color::Yellow)),
             Span::styled(":find | ", Style::default().fg(Color::DarkGray)),
             Span::styled("↑/↓", Style::default().fg(Color::Cyan)),
@@ -250,23 +279,26 @@ impl App {
         ];
 
         if !self.tabs.is_empty() {
-            spans.push(Span::styled("S-Tab", Style::default().fg(Color::Cyan)));
-            spans.push(Span::styled(":tabs | ", Style::default().fg(Color::DarkGray)));
+            right.push(Span::styled("S-Tab", Style::default().fg(Color::Cyan)));
+            right.push(Span::styled(":tabs | ", Style::default().fg(Color::DarkGray)));
         }
 
-        spans.push(Span::styled("Esc", Style::default().fg(Color::Red)));
-        spans.push(Span::styled(":quit", Style::default().fg(Color::DarkGray)));
-        spans
+        right.push(Span::styled("Esc", Style::default().fg(Color::Red)));
+        right.push(Span::styled(":quit", Style::default().fg(Color::DarkGray)));
+        (left, right)
     }
 
     /// Status text for terminal/session focus.
-    fn build_terminal_status_spans(&self) -> Vec<Span<'static>> {
+    fn build_terminal_status_spans(&self) -> (Vec<Span<'static>>, Vec<Span<'static>>) {
         if self.tabs.is_empty() || self.selected_tab >= self.tabs.len() {
-            return vec![
-                Span::styled("Terminal", Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)),
-                Span::styled(" | ", Style::default().fg(Color::DarkGray)),
-                Span::styled("No active terminal", Style::default().fg(Color::DarkGray)),
-            ];
+            return (
+                vec![
+                    Span::styled("Terminal", Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)),
+                    Span::styled(" | ", Style::default().fg(Color::DarkGray)),
+                    Span::styled("No active terminal", Style::default().fg(Color::DarkGray)),
+                ],
+                Vec::new(),
+            );
         }
 
         let tab = &self.tabs[self.selected_tab];
@@ -279,7 +311,7 @@ impl App {
             String::new()
         };
 
-        let mut spans = vec![
+        let mut left = vec![
             Span::styled("Terminal", Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)),
             self.context_split_indicator(),
             Span::styled("●", Style::default().fg(status_icon_color).add_modifier(Modifier::BOLD)),
@@ -288,23 +320,23 @@ impl App {
         ];
 
         if !scroll_info.is_empty() {
-            spans.push(Span::styled(" sb:", Style::default().fg(Color::DarkGray)));
-            spans.push(Span::styled(scroll_info, Style::default().fg(Color::Yellow)));
+            left.push(Span::styled(" sb:", Style::default().fg(Color::DarkGray)));
+            left.push(Span::styled(scroll_info, Style::default().fg(Color::Yellow)));
         }
 
-        spans.push(Span::styled(" | ", Style::default().fg(Color::DarkGray)));
+        let mut right = Vec::new();
 
         if is_exited {
-            spans.push(Span::styled("Enter", Style::default().fg(Color::Green)));
-            spans.push(Span::styled(":reconnect | ", Style::default().fg(Color::DarkGray)));
-            spans.push(Span::styled("^W", Style::default().fg(Color::Red)));
-            spans.push(Span::styled(":close | ", Style::default().fg(Color::DarkGray)));
-            spans.push(Span::styled("S-Tab", Style::default().fg(Color::Cyan)));
-            spans.push(Span::styled(":host", Style::default().fg(Color::DarkGray)));
-            return spans;
+            right.push(Span::styled("Enter", Style::default().fg(Color::Green)));
+            right.push(Span::styled(":reconnect | ", Style::default().fg(Color::DarkGray)));
+            right.push(Span::styled("^W", Style::default().fg(Color::Red)));
+            right.push(Span::styled(":close | ", Style::default().fg(Color::DarkGray)));
+            right.push(Span::styled("S-Tab", Style::default().fg(Color::Cyan)));
+            right.push(Span::styled(":host", Style::default().fg(Color::DarkGray)));
+            return (left, right);
         }
 
-        spans.extend([
+        right.extend([
             Span::styled("S-Tab", Style::default().fg(Color::Cyan)),
             Span::styled(":host | ", Style::default().fg(Color::DarkGray)),
             Span::styled("A-←/→", Style::default().fg(Color::Cyan)),
@@ -321,47 +353,51 @@ impl App {
             Span::styled(":scroll", Style::default().fg(Color::DarkGray)),
         ]);
 
-        spans
+        (left, right)
     }
 
     /// Status text while host search is active.
-    fn build_search_mode_status_spans(&self) -> Vec<Span<'static>> {
-        vec![
+    fn build_search_mode_status_spans(&self) -> (Vec<Span<'static>>, Vec<Span<'static>>) {
+        let left = vec![
             Span::styled("Host Search", Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD)),
             self.context_split_indicator(),
             Span::styled(self.search_query.clone(), Style::default().fg(Color::White)),
             Span::styled("_", Style::default().fg(Color::White)),
-            self.context_split_indicator(),
+        ];
+        let right = vec![
             Span::styled("Enter", Style::default().fg(Color::Green)),
             Span::styled(" | ", Style::default().fg(Color::DarkGray)),
             Span::styled("Esc", Style::default().fg(Color::Red)),
             Span::styled(":clear", Style::default().fg(Color::DarkGray)),
-        ]
+        ];
+        (left, right)
     }
 
     /// Status text while terminal search is active in a tab.
-    fn build_terminal_search_status_spans(&self) -> Vec<Span<'static>> {
+    fn build_terminal_search_status_spans(&self) -> (Vec<Span<'static>>, Vec<Span<'static>>) {
         let match_info = if !self.terminal_search_matches.is_empty() {
             format!("{}/{}", self.terminal_search_current + 1, self.terminal_search_matches.len())
         } else {
             "0/0".to_string()
         };
 
-        vec![
+        let left = vec![
             Span::styled("Terminal Search", Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD)),
             self.context_split_indicator(),
             Span::styled(self.terminal_search_query.clone(), Style::default().fg(Color::White)),
             Span::styled("_", Style::default().fg(Color::White)),
             Span::styled(" ", Style::default()),
             Span::styled(format!("({})", match_info), Style::default().fg(Color::Yellow)),
-            self.context_split_indicator(),
+        ];
+        let right = vec![
             Span::styled("Enter", Style::default().fg(Color::Green)),
             Span::styled(" | ", Style::default().fg(Color::DarkGray)),
             Span::styled("Esc", Style::default().fg(Color::Red)),
             Span::styled(":clear | ", Style::default().fg(Color::DarkGray)),
             Span::styled("↑/↓", Style::default().fg(Color::Cyan)),
             Span::styled(":next/prev", Style::default().fg(Color::DarkGray)),
-        ]
+        ];
+        (left, right)
     }
 
     /// Render the host list
