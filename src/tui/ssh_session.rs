@@ -167,7 +167,20 @@ impl App {
             return;
         };
         let host = self.hosts[host_idx].clone();
+        self.open_host_tab(host, false);
+    }
 
+    /// Open a quick-connect host in a new tab.
+    pub(super) fn open_quick_connect_host(&mut self, user: String, hostname: String, profile: Option<String>, force_ssh_logging: bool) {
+        let target = format!("{}@{}", user, hostname);
+        let mut host = SshHost::new(target);
+        host.user = Some(user);
+        host.hostname = Some(hostname);
+        host.profile = profile;
+        self.open_host_tab(host, force_ssh_logging);
+    }
+
+    fn open_host_tab(&mut self, host: SshHost, force_ssh_logging: bool) {
         log_debug!("Opening tab for host: {}", host.name);
 
         // Generate unique tab title with suffix for duplicate hosts
@@ -179,7 +192,7 @@ impl App {
         };
 
         // Spawn SSH session
-        let session = match Self::spawn_ssh_session(&host, &tab_title, self.history_buffer) {
+        let session = match Self::spawn_ssh_session(&host, &tab_title, self.history_buffer, force_ssh_logging) {
             Ok(session) => Some(session),
             Err(e) => {
                 log_error!("Failed to spawn SSH session: {}", e);
@@ -194,6 +207,7 @@ impl App {
             session,
             scroll_offset: 0,
             terminal_search: TerminalSearchState::default(),
+            force_ssh_logging,
         };
 
         self.tabs.push(tab);
@@ -201,12 +215,14 @@ impl App {
         self.focus_on_manager = false;
         // Opening a host into a terminal should leave host search-edit mode.
         self.search_mode = false;
+        // Close quick-connect modal if it was open.
+        self.quick_connect = None;
 
         log_debug!("Created new tab at index {}", self.selected_tab);
     }
 
     /// Spawn an SSH session in a PTY
-    fn spawn_ssh_session(host: &SshHost, tab_title: &str, history_buffer: usize) -> io::Result<SshSession> {
+    fn spawn_ssh_session(host: &SshHost, tab_title: &str, history_buffer: usize, force_ssh_logging: bool) -> io::Result<SshSession> {
         let pty_system = native_pty_system();
 
         // Create a new PTY with initial size (will be resized later)
@@ -232,6 +248,10 @@ impl App {
             CommandBuilder::new(&cossh_path)
         };
 
+        if force_ssh_logging {
+            cmd.arg("-l");
+        }
+
         cmd.arg(&host.name);
         cmd.env("COSSH_SESSION_NAME", tab_title);
 
@@ -243,11 +263,13 @@ impl App {
 
         let sshpass_info = if host.use_sshpass { " (via sshpass)" } else { "" };
         let profile_info = host.profile.as_ref().map_or(String::new(), |p| format!(" [profile: {}]", p));
+        let logging_info = if force_ssh_logging { " [ssh-logging]" } else { "" };
         log_debug!(
-            "Spawning cossh command: cossh {}{}{} (session: {})",
+            "Spawning cossh command: cossh {}{}{}{} (session: {})",
             host.name,
             sshpass_info,
             profile_info,
+            logging_info,
             tab_title
         );
 
@@ -390,7 +412,8 @@ impl App {
 
         // Spawn a new SSH session
         let tab_title = tab.title.clone();
-        match Self::spawn_ssh_session(&host, &tab_title, self.history_buffer) {
+        let force_ssh_logging = self.tabs[self.selected_tab].force_ssh_logging;
+        match Self::spawn_ssh_session(&host, &tab_title, self.history_buffer, force_ssh_logging) {
             Ok(session) => {
                 let tab = &mut self.tabs[self.selected_tab];
                 tab.session = Some(session);

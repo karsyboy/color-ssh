@@ -74,6 +74,62 @@ pub struct HostTab {
     scroll_offset: usize,
     /// Per-tab terminal search state
     terminal_search: TerminalSearchState,
+    /// Force `-l` for this tab's nested cossh session
+    force_ssh_logging: bool,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum QuickConnectField {
+    User,
+    Host,
+    Profile,
+    Logging,
+    Connect,
+}
+
+impl QuickConnectField {
+    fn next(self) -> Self {
+        match self {
+            Self::User => Self::Host,
+            Self::Host => Self::Profile,
+            Self::Profile => Self::Logging,
+            Self::Logging => Self::Connect,
+            Self::Connect => Self::User,
+        }
+    }
+
+    fn prev(self) -> Self {
+        match self {
+            Self::User => Self::Connect,
+            Self::Host => Self::User,
+            Self::Profile => Self::Host,
+            Self::Logging => Self::Profile,
+            Self::Connect => Self::Logging,
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+pub(crate) struct QuickConnectState {
+    pub(crate) user: String,
+    pub(crate) host: String,
+    pub(crate) profile: String,
+    pub(crate) ssh_logging: bool,
+    pub(crate) selected: QuickConnectField,
+    pub(crate) error: Option<String>,
+}
+
+impl QuickConnectState {
+    fn new(default_ssh_logging: bool) -> Self {
+        Self {
+            user: String::new(),
+            host: String::new(),
+            profile: String::new(),
+            ssh_logging: default_ssh_logging,
+            selected: QuickConnectField::User,
+            error: None,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -163,6 +219,10 @@ pub struct App {
     host_panel_visible: bool,
     /// Whether the host info pane is visible
     host_info_visible: bool,
+    /// Optional quick-connect form state (shown as modal when present)
+    quick_connect: Option<QuickConnectState>,
+    /// Default logging checkbox state for quick-connect forms
+    quick_connect_default_ssh_logging: bool,
 }
 
 impl App {
@@ -217,6 +277,11 @@ impl App {
                 })
             })
             .unwrap_or((1000, true, true, 25, 40));
+
+        let quick_connect_default_ssh_logging = config::SESSION_CONFIG
+            .get()
+            .and_then(|c| c.read().ok().map(|cfg| cfg.settings.ssh_logging))
+            .unwrap_or(false);
 
         let (term_width, term_height) = crossterm::terminal::size().unwrap_or((100, 30));
         let host_panel_width = (((term_width as u32 * host_view_size_percent as u32) / 100) as u16).clamp(15, 80);
@@ -274,6 +339,8 @@ impl App {
             history_buffer,
             host_panel_visible: true,
             host_info_visible,
+            quick_connect: None,
+            quick_connect_default_ssh_logging,
         };
 
         app.update_filtered_hosts();

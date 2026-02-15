@@ -1,6 +1,6 @@
 //! Keyboard and mouse input handling
 
-use super::App;
+use super::{App, QuickConnectField, QuickConnectState};
 use crossterm::event::{self, KeyCode, KeyEvent, KeyEventKind, KeyModifiers, MouseButton, MouseEventKind};
 use std::io::{self, Write};
 use std::time::Instant;
@@ -154,6 +154,103 @@ impl App {
         self.set_selected_row(new_selected);
     }
 
+    fn open_quick_connect_modal(&mut self) {
+        self.quick_connect = Some(QuickConnectState::new(self.quick_connect_default_ssh_logging));
+    }
+
+    fn handle_quick_connect_key(&mut self, key: KeyEvent) {
+        let mut should_submit = false;
+        let mut should_close = false;
+
+        if let Some(form) = self.quick_connect.as_mut() {
+            match key.code {
+                KeyCode::Esc => {
+                    should_close = true;
+                }
+                KeyCode::Tab | KeyCode::Down => {
+                    form.selected = form.selected.next();
+                }
+                KeyCode::BackTab | KeyCode::Up => {
+                    form.selected = form.selected.prev();
+                }
+                KeyCode::Enter => match form.selected {
+                    QuickConnectField::Logging => {
+                        form.ssh_logging = !form.ssh_logging;
+                    }
+                    QuickConnectField::Connect => {
+                        should_submit = true;
+                    }
+                    _ => {
+                        form.selected = form.selected.next();
+                    }
+                },
+                KeyCode::Char(' ') => {
+                    if form.selected == QuickConnectField::Logging {
+                        form.ssh_logging = !form.ssh_logging;
+                    }
+                }
+                KeyCode::Backspace => {
+                    form.error = None;
+                    match form.selected {
+                        QuickConnectField::User => {
+                            form.user.pop();
+                        }
+                        QuickConnectField::Host => {
+                            form.host.pop();
+                        }
+                        QuickConnectField::Profile => {
+                            form.profile.pop();
+                        }
+                        _ => {}
+                    }
+                }
+                KeyCode::Char(c) if !key.modifiers.contains(KeyModifiers::CONTROL) && !key.modifiers.contains(KeyModifiers::ALT) => {
+                    form.error = None;
+                    match form.selected {
+                        QuickConnectField::User => form.user.push(c),
+                        QuickConnectField::Host => form.host.push(c),
+                        QuickConnectField::Profile => form.profile.push(c),
+                        _ => {}
+                    }
+                }
+                _ => {}
+            }
+        }
+
+        if should_submit {
+            self.submit_quick_connect_modal();
+        } else if should_close {
+            self.quick_connect = None;
+        }
+    }
+
+    fn submit_quick_connect_modal(&mut self) {
+        let Some(form) = self.quick_connect.as_mut() else {
+            return;
+        };
+
+        let user = form.user.trim().to_string();
+        let host = form.host.trim().to_string();
+        let profile = form.profile.trim().to_string();
+        let force_ssh_logging = form.ssh_logging;
+
+        if user.is_empty() {
+            form.error = Some("User is required".to_string());
+            form.selected = QuickConnectField::User;
+            return;
+        }
+
+        if host.is_empty() {
+            form.error = Some("Host is required".to_string());
+            form.selected = QuickConnectField::Host;
+            return;
+        }
+
+        let profile = if profile.is_empty() { None } else { Some(profile) };
+
+        self.open_quick_connect_host(user, host, profile, force_ssh_logging);
+    }
+
     /// Handle keyboard input
     pub(super) fn handle_key(&mut self, key: KeyEvent) -> io::Result<()> {
         // Only process key press events, not release
@@ -164,6 +261,11 @@ impl App {
         // Global quit shortcut.
         if key.code == KeyCode::Char('q') && key.modifiers.contains(KeyModifiers::CONTROL) {
             self.should_exit = true;
+            return Ok(());
+        }
+
+        if self.quick_connect.is_some() {
+            self.handle_quick_connect_key(key);
             return Ok(());
         }
 
@@ -429,6 +531,9 @@ impl App {
             KeyCode::Char('f') if self.focus_on_manager && key.modifiers.contains(KeyModifiers::CONTROL) => {
                 self.search_mode = true;
             }
+            KeyCode::Char('q') if self.focus_on_manager && key.modifiers.is_empty() => {
+                self.open_quick_connect_modal();
+            }
             KeyCode::Char('i') if self.focus_on_manager && key.modifiers.is_empty() => {
                 self.host_info_visible = !self.host_info_visible;
                 self.is_dragging_host_info_divider = false;
@@ -520,6 +625,10 @@ impl App {
 
     /// Handle mouse events
     pub(super) fn handle_mouse(&mut self, mouse: event::MouseEvent) -> io::Result<()> {
+        if self.quick_connect.is_some() {
+            return Ok(());
+        }
+
         // If terminal search mode is active but PTY wants mouse events (TUI app running),
         // exit search mode and forward mouse to PTY
         if self.current_tab_search().map(|s| s.active).unwrap_or(false) && self.is_pty_mouse_mode_active() {

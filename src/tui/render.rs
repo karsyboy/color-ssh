@@ -7,7 +7,7 @@ use ratatui::{
     layout::{Alignment, Constraint, Direction, Layout, Rect},
     style::{Color, Modifier, Style},
     text::{Line, Span},
-    widgets::{List, ListItem, ListState, Paragraph, Wrap},
+    widgets::{Block, Borders, Clear, List, ListItem, ListState, Paragraph, Wrap},
 };
 
 /// Convert VT100 color to Ratatui color
@@ -207,6 +207,7 @@ impl App {
         );
 
         self.render_global_status_bar(frame, status_area);
+        self.render_quick_connect_modal(frame, size);
     }
 
     /// Render the global one-line status bar at the bottom.
@@ -324,6 +325,8 @@ impl App {
             Span::styled(":info | ", Style::default().fg(Color::DarkGray)),
             Span::styled("^←/^→", Style::default().fg(Color::Cyan)),
             Span::styled(":resize | ", Style::default().fg(Color::DarkGray)),
+            Span::styled("q", Style::default().fg(Color::Yellow)),
+            Span::styled(":quick | ", Style::default().fg(Color::DarkGray)),
         ];
 
         if !self.tabs.is_empty() {
@@ -334,6 +337,98 @@ impl App {
         right.push(Span::styled("^Q", Style::default().fg(Color::Red)));
         right.push(Span::styled(":quit", Style::default().fg(Color::DarkGray)));
         (left, right)
+    }
+
+    fn render_quick_connect_modal(&self, frame: &mut Frame, full_area: Rect) {
+        let Some(form) = &self.quick_connect else {
+            return;
+        };
+
+        let width = full_area.width.min(74).max(44);
+        let height = if form.error.is_some() { 11 } else { 10 };
+        let area = Self::centered_rect(width, height, full_area);
+
+        frame.render_widget(Clear, area);
+        let block = Block::default()
+            .borders(Borders::ALL)
+            .border_style(Style::default().fg(Color::Cyan))
+            .title(" Quick Connect ");
+        let inner = block.inner(area);
+        frame.render_widget(block, area);
+
+        let selected_label = Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD);
+        let normal_label = Style::default().fg(Color::DarkGray);
+        let selected_value = Style::default().fg(Color::White).add_modifier(Modifier::BOLD);
+        let normal_value = Style::default().fg(Color::White);
+
+        let field_style = |field, selected: super::QuickConnectField| {
+            if field == selected { selected_label } else { normal_label }
+        };
+        let value_style = |field, selected: super::QuickConnectField| {
+            if field == selected { selected_value } else { normal_value }
+        };
+
+        let user_text = if form.selected == super::QuickConnectField::User {
+            format!("{}_", form.user)
+        } else {
+            form.user.clone()
+        };
+        let host_text = if form.selected == super::QuickConnectField::Host {
+            format!("{}_", form.host)
+        } else {
+            form.host.clone()
+        };
+        let profile_text = if form.selected == super::QuickConnectField::Profile {
+            format!("{}_", form.profile)
+        } else {
+            form.profile.clone()
+        };
+
+        let logging_mark = if form.ssh_logging { "[x]" } else { "[ ]" };
+        let connect_style = if form.selected == super::QuickConnectField::Connect {
+            Style::default().fg(Color::Green).add_modifier(Modifier::BOLD)
+        } else {
+            Style::default().fg(Color::DarkGray)
+        };
+
+        let mut lines = vec![
+            Line::from(vec![
+                Span::styled("User: ", field_style(super::QuickConnectField::User, form.selected)),
+                Span::styled(user_text, value_style(super::QuickConnectField::User, form.selected)),
+            ]),
+            Line::from(vec![
+                Span::styled("Host: ", field_style(super::QuickConnectField::Host, form.selected)),
+                Span::styled(host_text, value_style(super::QuickConnectField::Host, form.selected)),
+            ]),
+            Line::from(vec![
+                Span::styled("Profile: ", field_style(super::QuickConnectField::Profile, form.selected)),
+                Span::styled(
+                    if profile_text.is_empty() { "(optional)".to_string() } else { profile_text },
+                    value_style(super::QuickConnectField::Profile, form.selected),
+                ),
+            ]),
+            Line::from(vec![
+                Span::styled("SSH Logging: ", field_style(super::QuickConnectField::Logging, form.selected)),
+                Span::styled(format!("{} (-l)", logging_mark), value_style(super::QuickConnectField::Logging, form.selected)),
+            ]),
+            Line::from(""),
+            Line::from(vec![Span::styled("[ Enter ] Connect", connect_style)]),
+            Line::from(vec![Span::styled("Esc: cancel | Tab/Shift+Tab: field", Style::default().fg(Color::DarkGray))]),
+        ];
+
+        if let Some(error) = &form.error {
+            lines.push(Line::from(vec![Span::styled(error.clone(), Style::default().fg(Color::Red))]));
+        }
+
+        frame.render_widget(Paragraph::new(lines), inner);
+    }
+
+    fn centered_rect(width: u16, height: u16, area: Rect) -> Rect {
+        let popup_width = width.min(area.width);
+        let popup_height = height.min(area.height);
+        let x = area.x + area.width.saturating_sub(popup_width) / 2;
+        let y = area.y + area.height.saturating_sub(popup_height) / 2;
+        Rect::new(x, y, popup_width, popup_height)
     }
 
     /// Status text for terminal/session focus.
