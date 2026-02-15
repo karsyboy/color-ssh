@@ -157,12 +157,17 @@ impl App {
 
         if show_host_panel && main_chunks[1].width > 0 {
             // Draw a subtle vertical divider between host and terminal panes.
+            let divider_style = if self.is_dragging_divider {
+                Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD)
+            } else {
+                Style::default().fg(Color::DarkGray)
+            };
             draw_vertical_rule(
                 frame,
                 self.host_panel_area.x + self.host_panel_area.width.saturating_sub(1),
                 content_area.y,
                 content_area.height,
-                Style::default().fg(Color::DarkGray),
+                divider_style,
             );
         }
 
