@@ -7,7 +7,7 @@
 //! - Runtime metadata
 
 use regex::Regex;
-use serde::Deserialize;
+use serde::{Deserialize, Deserializer};
 use std::{collections::HashMap, path::PathBuf};
 
 /// Main configuration structure loaded from YAML
@@ -17,8 +17,8 @@ pub struct Config {
     #[serde(default)]
     pub settings: Settings,
     /// Interactive session-manager settings (optional block)
-    #[serde(default)]
-    pub setting_interactive: Option<InteractiveSettings>,
+    #[serde(default, alias = "setting_interactive")]
+    pub interactive_settings: Option<InteractiveSettings>,
     /// Color palette mapping names to hex codes (converted to ANSI at runtime)
     pub palette: HashMap<String, String>,
     /// Syntax highlighting rules
@@ -65,6 +65,15 @@ pub struct InteractiveSettings {
     /// Whether host tree folders should start collapsed in session manager
     #[serde(default = "default_host_tree_start_collapsed")]
     pub host_tree_start_collapsed: bool,
+    /// Whether the host info pane is shown by default
+    #[serde(default = "default_info_view")]
+    pub info_view: bool,
+    /// Host panel width as a percentage of terminal width
+    #[serde(default = "default_host_view_size", deserialize_with = "deserialize_host_view_size")]
+    pub host_view_size: u16,
+    /// Host info pane height as a percentage of host panel height
+    #[serde(default = "default_info_view_size", deserialize_with = "deserialize_info_view_size")]
+    pub info_view_size: u16,
 }
 
 fn default_show_title() -> bool {
@@ -77,6 +86,34 @@ fn default_history_buffer() -> usize {
 
 fn default_host_tree_start_collapsed() -> bool {
     false
+}
+
+fn default_info_view() -> bool {
+    true
+}
+
+fn default_host_view_size() -> u16 {
+    25
+}
+
+fn default_info_view_size() -> u16 {
+    40
+}
+
+fn deserialize_host_view_size<'de, D>(deserializer: D) -> Result<u16, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    let value = u16::deserialize(deserializer)?;
+    Ok(value.clamp(10, 70))
+}
+
+fn deserialize_info_view_size<'de, D>(deserializer: D) -> Result<u16, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    let value = u16::deserialize(deserializer)?;
+    Ok(value.clamp(10, 80))
 }
 
 /// A single highlight rule mapping a regex pattern to a color

@@ -201,16 +201,31 @@ impl App {
         });
         let hosts = tree_model.hosts;
         let host_tree_root = tree_model.root;
-        let (history_buffer, host_tree_start_collapsed) = config::SESSION_CONFIG
+        let (history_buffer, host_tree_start_collapsed, host_info_visible, host_view_size_percent, info_view_size_percent) = config::SESSION_CONFIG
             .get()
             .and_then(|c| {
                 c.read().ok().and_then(|cfg| {
-                    cfg.setting_interactive
-                        .as_ref()
-                        .map(|interactive| (interactive.history_buffer, interactive.host_tree_start_collapsed))
+                    cfg.interactive_settings.as_ref().map(|interactive| {
+                        (
+                            interactive.history_buffer,
+                            interactive.host_tree_start_collapsed,
+                            interactive.info_view,
+                            interactive.host_view_size,
+                            interactive.info_view_size,
+                        )
+                    })
                 })
             })
-            .unwrap_or((1000, false));
+            .unwrap_or((1000, false, true, 25, 40));
+
+        let (term_width, term_height) = crossterm::terminal::size().unwrap_or((100, 30));
+        let host_panel_width = (((term_width as u32 * host_view_size_percent as u32) / 100) as u16).clamp(15, 80);
+        let content_height = term_height.saturating_sub(2);
+        let mut host_info_height = ((content_height as u32 * info_view_size_percent as u32) / 100) as u16;
+        host_info_height = host_info_height.max(3);
+        if content_height > 4 {
+            host_info_height = host_info_height.min(content_height.saturating_sub(4));
+        }
         let mut collapsed_folders = HashSet::new();
         if host_tree_start_collapsed {
             Self::collect_descendant_folder_ids(&host_tree_root, &mut collapsed_folders);
@@ -234,8 +249,8 @@ impl App {
             host_list_area: Rect::default(),
             host_info_area: Rect::default(),
             host_scroll_offset: 0,
-            host_panel_width: 25,
-            host_info_height: 8,
+            host_panel_width,
+            host_info_height,
             search_query: String::new(),
             search_mode: false,
             should_exit: false,
@@ -258,7 +273,7 @@ impl App {
             tab_scroll_offset: 0,
             history_buffer,
             host_panel_visible: true,
-            host_info_visible: true,
+            host_info_visible,
         };
 
         app.update_filtered_hosts();
