@@ -283,14 +283,14 @@ impl App {
             }
             KeyCode::PageUp if self.focus_on_manager => {
                 if !self.filtered_hosts.is_empty() {
-                    let page_size = 10.max(self.host_list_area.height.saturating_sub(3) as usize);
+                    let page_size = 10.max(self.host_list_area.height as usize);
                     self.selected_host = self.selected_host.saturating_sub(page_size);
                     self.host_list_state.select(Some(self.selected_host));
                 }
             }
             KeyCode::PageDown if self.focus_on_manager => {
                 if !self.filtered_hosts.is_empty() {
-                    let page_size = 10.max(self.host_list_area.height.saturating_sub(3) as usize);
+                    let page_size = 10.max(self.host_list_area.height as usize);
                     self.selected_host = (self.selected_host + page_size).min(self.filtered_hosts.len().saturating_sub(1));
                     self.host_list_state.select(Some(self.selected_host));
                 }
@@ -326,7 +326,7 @@ impl App {
             self.terminal_search_matches.clear();
             self.terminal_search_current = 0;
         }
-        
+
         match mouse.kind {
             MouseEventKind::Down(MouseButton::Left) => {
                 // Check if click is on the exit button
@@ -342,7 +342,7 @@ impl App {
                 }
 
                 // Check if click is on the divider between host panel and terminal panel
-                let divider_col = self.host_panel_area.x + self.host_panel_area.width;
+                let divider_col = self.host_panel_area.x + self.host_panel_area.width.saturating_sub(1);
                 if self.host_panel_visible && self.host_panel_area.width > 0 && mouse.column == divider_col {
                     self.is_dragging_divider = true;
                     self.selection_start = None;
@@ -355,14 +355,14 @@ impl App {
                 let host_area = self.host_list_area;
                 if self.host_panel_visible
                     && host_area.width > 0
-                    && host_area.height > 2
+                    && host_area.height > 0
                     && mouse.column >= host_area.x
                     && mouse.column < host_area.x + host_area.width
-                    && mouse.row > host_area.y
-                    && mouse.row < host_area.y + host_area.height.saturating_sub(1)
+                    && mouse.row >= host_area.y
+                    && mouse.row < host_area.y + host_area.height
                 {
-                    // Calculate which host was clicked (accounting for border and scroll)
-                    let clicked_row = (mouse.row - host_area.y - 1) as usize;
+                    // Calculate which host was clicked (accounting for scroll offset).
+                    let clicked_row = (mouse.row - host_area.y) as usize;
                     let clicked_index = self.host_scroll_offset + clicked_row;
                     if clicked_index < self.filtered_hosts.len() {
                         // Check for double-click (same position within 400ms)
@@ -422,9 +422,8 @@ impl App {
                     && mouse.row < tab_area.y + tab_area.height
                 {
                     // Calculate which tab was clicked based on tab title widths
-                    // Tab format: " [title ×] " (selected) or " title × " (unselected)
-                    // Widths: prefix(1-2) + title + space(1) + ×(1) + suffix(1-2) = title.len() + 5
-                    let visual_col = (mouse.column - tab_area.x).saturating_sub(1) as usize; // subtract left border
+                    // Flat tab format: "title ×  ".
+                    let visual_col = (mouse.column - tab_area.x) as usize;
                     // When scrolled, the ◀ indicator takes 1 column at the start
                     let indicator_offset: usize = if self.tab_scroll_offset > 0 { 1 } else { 0 };
                     let click_col = if visual_col < indicator_offset {
@@ -435,16 +434,11 @@ impl App {
                     };
                     let mut cumulative_width: usize = 0;
                     for (idx, tab) in self.tabs.iter().enumerate() {
-                        let is_selected = idx == self.selected_tab && !self.focus_on_manager;
-                        // Selected: " [title ×] " = 2 + title + 1 + 1 + 2 = title.len() + 6
-                        // Unselected: " title × " = 1 + title + 1 + 1 + 1 = title.len() + 4
-                        let tab_width = if is_selected { tab.title.len() + 6 } else { tab.title.len() + 4 };
-                        let prefix_len: usize = if is_selected { 2 } else { 1 };
-                        let separator_width = if idx < self.tabs.len() - 1 { 1 } else { 0 }; // "│"
+                        let tab_width = self.tab_display_width(idx);
                         if click_col < cumulative_width + tab_width {
-                            // Check if click is on the × close button
-                            // × is at position: cumulative_width + prefix_len + title.len() + 1 (the space)
-                            let close_pos = cumulative_width + prefix_len + tab.title.len() + 1;
+                            // Check if click is on the × close button.
+                            // Format is "title ×  " so × is at title.len() + 1.
+                            let close_pos = cumulative_width + tab.title.len() + 1;
                             if click_col == close_pos {
                                 // Close this tab
                                 self.tabs.remove(idx);
@@ -465,7 +459,7 @@ impl App {
                             self.is_selecting = false;
                             return Ok(());
                         }
-                        cumulative_width += tab_width + separator_width;
+                        cumulative_width += tab_width;
                     }
                     // Clicked in tab bar but past all tab labels — still focus on tabs
                     self.focus_on_manager = false;
@@ -479,12 +473,12 @@ impl App {
                 let area = self.tab_content_area;
                 if !self.tabs.is_empty()
                     && self.selected_tab < self.tabs.len()
-                    && area.width > 2
-                    && area.height > 2
-                    && mouse.column > area.x
-                    && mouse.column < area.x + area.width - 1
-                    && mouse.row > area.y
-                    && mouse.row < area.y + area.height - 1
+                    && area.width > 0
+                    && area.height > 0
+                    && mouse.column >= area.x
+                    && mouse.column < area.x + area.width
+                    && mouse.row >= area.y
+                    && mouse.row < area.y + area.height
                 {
                     self.focus_on_manager = false;
                     let alt_held = mouse.modifiers.contains(KeyModifiers::ALT);
@@ -504,8 +498,8 @@ impl App {
                         }
                     } else if !self.is_pty_mouse_mode_active() || alt_held {
                         // Only start text selection if PTY doesn't want mouse events (or Alt is held to force selection)
-                        let vt_row = mouse.row.saturating_sub(area.y + 1);
-                        let vt_col = mouse.column.saturating_sub(area.x + 1);
+                        let vt_row = mouse.row.saturating_sub(area.y);
+                        let vt_col = mouse.column.saturating_sub(area.x);
                         let scroll_offset = self.tabs[self.selected_tab].scroll_offset;
                         let abs_row = vt_row as i64 - scroll_offset as i64;
                         self.selection_start = Some((abs_row, vt_col));
@@ -513,20 +507,6 @@ impl App {
                         self.is_selecting = true;
                         self.selection_dragged = false;
                     }
-                } else if !self.tabs.is_empty()
-                    && self.selected_tab < self.tabs.len()
-                    && area.width > 0
-                    && area.height > 0
-                    && mouse.column >= area.x
-                    && mouse.column < area.x + area.width
-                    && mouse.row >= area.y
-                    && mouse.row < area.y + area.height
-                {
-                    // Clicked on border of tab content — just focus tabs
-                    self.focus_on_manager = false;
-                    self.selection_start = None;
-                    self.selection_end = None;
-                    self.is_selecting = false;
                 } else {
                     self.selection_start = None;
                     self.selection_end = None;
@@ -536,7 +516,7 @@ impl App {
             MouseEventKind::Drag(MouseButton::Left) => {
                 if self.is_dragging_divider && self.host_panel_visible {
                     // Resize host panel by dragging the divider
-                    let new_width = mouse.column.saturating_sub(self.host_panel_area.x);
+                    let new_width = mouse.column.saturating_sub(self.host_panel_area.x).saturating_add(1);
                     self.host_panel_width = new_width.clamp(15, 80);
                 } else if self.is_pty_mouse_mode_active() {
                     // Forward drag to PTY for TUI app (button 32 = motion with left button)
@@ -551,10 +531,10 @@ impl App {
                     // Cossh text selection drag (only when no TUI app has mouse mode)
                     self.selection_dragged = true;
                     let area = self.tab_content_area;
-                    let clamped_col = mouse.column.max(area.x + 1).min(area.x + area.width.saturating_sub(2));
-                    let clamped_row = mouse.row.max(area.y + 1).min(area.y + area.height.saturating_sub(2));
-                    let vt_row = clamped_row.saturating_sub(area.y + 1);
-                    let vt_col = clamped_col.saturating_sub(area.x + 1);
+                    let clamped_col = mouse.column.max(area.x).min(area.x + area.width.saturating_sub(1));
+                    let clamped_row = mouse.row.max(area.y).min(area.y + area.height.saturating_sub(1));
+                    let vt_row = clamped_row.saturating_sub(area.y);
+                    let vt_col = clamped_col.saturating_sub(area.x);
                     let scroll_offset = self.tabs[self.selected_tab].scroll_offset;
                     let abs_row = vt_row as i64 - scroll_offset as i64;
                     self.selection_end = Some((abs_row, vt_col));
@@ -749,8 +729,7 @@ impl App {
         }
         if let Some(session) = &self.tabs[self.selected_tab].session {
             if let Ok(parser) = session.parser.lock() {
-                return parser.screen().mouse_protocol_mode()
-                    != vt100::MouseProtocolMode::None;
+                return parser.screen().mouse_protocol_mode() != vt100::MouseProtocolMode::None;
             }
         }
         false
@@ -785,16 +764,10 @@ impl App {
     /// Check if a mouse event is inside the tab content area and return VT100 coords (1-based)
     fn mouse_to_vt_coords(&self, column: u16, row: u16) -> Option<(u16, u16)> {
         let area = self.tab_content_area;
-        if area.width > 2
-            && area.height > 2
-            && column > area.x
-            && column < area.x + area.width - 1
-            && row > area.y
-            && row < area.y + area.height - 1
-        {
+        if area.width > 0 && area.height > 0 && column >= area.x && column < area.x + area.width && row >= area.y && row < area.y + area.height {
             // VT100 mouse coords are 1-based
-            let vt_col = column - area.x; // 1-based (border is at area.x)
-            let vt_row = row - area.y; // 1-based (border is at area.y)
+            let vt_col = (column - area.x) + 1;
+            let vt_row = (row - area.y) + 1;
             Some((vt_col, vt_row))
         } else {
             None
@@ -891,10 +864,8 @@ impl App {
         if idx >= self.tabs.len() {
             return 0;
         }
-        let is_selected = idx == self.selected_tab && !self.focus_on_manager;
-        // Selected: " [title ×] " = title.len() + 6
-        // Unselected: " title × " = title.len() + 4
-        if is_selected { self.tabs[idx].title.len() + 6 } else { self.tabs[idx].title.len() + 4 }
+        // Flat format: "title ×  " = title.len() + 4
+        self.tabs[idx].title.len() + 4
     }
 
     /// Ensure the selected tab is visible within the tab bar by adjusting tab_scroll_offset
@@ -904,7 +875,7 @@ impl App {
             return;
         }
 
-        let tab_bar_width = self.tab_bar_area.width.saturating_sub(2) as usize; // subtract borders
+        let tab_bar_width = self.tab_bar_area.width as usize;
         if tab_bar_width == 0 {
             return;
         }
@@ -913,9 +884,6 @@ impl App {
         let mut start_pos: usize = 0;
         for i in 0..self.selected_tab {
             start_pos += self.tab_display_width(i);
-            if i < self.tabs.len() - 1 {
-                start_pos += 1; // separator "│"
-            }
         }
         let end_pos = start_pos + self.tab_display_width(self.selected_tab);
 
@@ -942,9 +910,9 @@ impl App {
                 // Get max scrollback to know how much history exists
                 parser.set_scrollback(usize::MAX);
                 let max_scrollback = parser.screen().scrollback();
-                
+
                 let query_lower = self.terminal_search_query.to_lowercase();
-                
+
                 // Search through entire history
                 // Strategy: iterate through each scrollback position from max to 0
                 // At scrollback > 0, search only row 0 (the top line that changes with each scroll)
@@ -953,7 +921,7 @@ impl App {
                     parser.set_scrollback(scrollback_pos);
                     let screen = parser.screen();
                     let (rows, cols) = screen.size();
-                    
+
                     // Determine which rows to search at this scrollback position
                     let search_rows: Vec<u16> = if scrollback_pos == 0 {
                         // At live view, search all rows to get the remaining lines
@@ -962,12 +930,12 @@ impl App {
                         // At scrollback > 0, search only row 0 to avoid duplicates
                         vec![0]
                     };
-                    
+
                     for &row in &search_rows {
                         // Extract text from this row, tracking column positions
                         let mut row_text = String::new();
                         let mut col_to_pos = Vec::new(); // Maps column to string position
-                        
+
                         for col in 0..cols {
                             col_to_pos.push(row_text.len());
                             if let Some(cell) = screen.cell(row, col) {
@@ -986,7 +954,7 @@ impl App {
                         let mut search_start = 0;
                         while let Some(pos) = row_text_lower[search_start..].find(&query_lower) {
                             let match_pos = search_start + pos;
-                            
+
                             // Find which column this match starts at
                             let mut match_col = 0;
                             for (col_idx, &string_pos) in col_to_pos.iter().enumerate() {
@@ -999,12 +967,12 @@ impl App {
                                     match_col = col_idx;
                                 }
                             }
-                            
+
                             // Convert to absolute row
                             // At scrollback=S, row R has absolute position: R - S
                             let abs_row = row as i64 - scrollback_pos as i64;
                             self.terminal_search_matches.push((abs_row, match_col as u16, query_lower.chars().count()));
-                            
+
                             search_start = match_pos + 1; // Allow overlapping matches
                         }
                     }
@@ -1014,7 +982,7 @@ impl App {
                 parser.set_scrollback(tab.scroll_offset);
             }
         }
-        
+
         // Matches are already in order from oldest to newest
         // If we have matches, scroll to the first one
         if !self.terminal_search_matches.is_empty() {
@@ -1034,10 +1002,10 @@ impl App {
         // Calculate the screen row from absolute row
         // Relationship: abs_row = screen_row - scroll_offset
         // Therefore: scroll_offset = screen_row - abs_row
-        
+
         // We want to position the match at target_screen_row
-        let tab_height = self.tab_content_area.height.saturating_sub(2) as i64;
-        
+        let tab_height = self.tab_content_area.height as i64;
+
         if let Some(session) = &tab.session {
             if let Ok(mut parser) = session.parser.lock() {
                 let max_scrollback = {
@@ -1049,7 +1017,7 @@ impl App {
 
                 // Target: put match at 1/3 from top of screen
                 let target_screen_row = tab_height / 3;
-                
+
                 // Calculate needed scroll: scroll_offset = target_screen_row - abs_row
                 let needed_scroll = target_screen_row - abs_row;
 

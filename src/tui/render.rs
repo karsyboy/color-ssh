@@ -4,10 +4,10 @@ use super::App;
 use super::selection::is_cell_in_selection;
 use ratatui::{
     Frame,
-    layout::{Alignment, Constraint, Direction, Layout, Rect},
+    layout::{Constraint, Direction, Layout, Rect},
     style::{Color, Modifier, Style},
     text::{Line, Span},
-    widgets::{Block, Borders, List, ListItem, ListState, Paragraph, Wrap},
+    widgets::{List, ListItem, ListState, Paragraph, Wrap},
 };
 
 /// Convert VT100 color to Ratatui color
@@ -37,6 +37,57 @@ fn vt100_to_ratatui_color(color: vt100::Color) -> Color {
     }
 }
 
+fn draw_vertical_rule(frame: &mut Frame, x: u16, y: u16, height: u16, style: Style) {
+    if height == 0 {
+        return;
+    }
+    let frame_area = frame.area();
+    if x < frame_area.x || x >= frame_area.x + frame_area.width {
+        return;
+    }
+    let buf = frame.buffer_mut();
+    let end_y = y.saturating_add(height).min(frame_area.y + frame_area.height);
+    for row in y..end_y {
+        let cell = &mut buf[(x, row)];
+        cell.set_symbol("│");
+        cell.set_style(style);
+    }
+}
+
+fn draw_horizontal_rule(frame: &mut Frame, y: u16, x: u16, width: u16, style: Style) {
+    if width == 0 {
+        return;
+    }
+    let frame_area = frame.area();
+    if y < frame_area.y || y >= frame_area.y + frame_area.height {
+        return;
+    }
+    let buf = frame.buffer_mut();
+    let end_x = x.saturating_add(width).min(frame_area.x + frame_area.width);
+    for col in x..end_x {
+        let cell = &mut buf[(col, y)];
+        cell.set_symbol("─");
+        cell.set_style(style);
+    }
+}
+
+fn fill_row_bg(frame: &mut Frame, area: Rect, bg: Color) {
+    if area.width == 0 || area.height == 0 {
+        return;
+    }
+    let frame_area = frame.area();
+    let y = area.y.min(frame_area.y + frame_area.height.saturating_sub(1));
+    let end_x = area.x.saturating_add(area.width).min(frame_area.x + frame_area.width);
+    let buf = frame.buffer_mut();
+    for x in area.x..end_x {
+        let cell = &mut buf[(x, y)];
+        cell.set_style(Style::default().bg(bg));
+        if cell.symbol().is_empty() {
+            cell.set_symbol(" ");
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy)]
 enum StatusContext {
     HostSearch,
@@ -51,10 +102,11 @@ impl App {
         let size = frame.area();
         let root_chunks = Layout::default()
             .direction(Direction::Vertical)
-            .constraints([Constraint::Min(0), Constraint::Length(1)])
+            .constraints([Constraint::Min(0), Constraint::Length(1), Constraint::Length(1)])
             .split(size);
         let content_area = root_chunks[0];
-        let status_area = root_chunks[1];
+        let separator_area = root_chunks[1];
+        let status_area = root_chunks[2];
 
         // Create main layout: adjustable left panel and expanding right panel (or full width if hidden)
         let (main_chunks, show_host_panel) = if self.host_panel_visible {
@@ -73,31 +125,44 @@ impl App {
         };
 
         if show_host_panel {
+            let host_panel_area = main_chunks[0];
+            // Reserve one column for the visual divider so terminal text is never overdrawn.
+            let host_content_area = Rect::new(
+                host_panel_area.x,
+                host_panel_area.y,
+                host_panel_area.width.saturating_sub(1),
+                host_panel_area.height,
+            );
+
             // Split the left panel: host list on top, host info on bottom
             let left_chunks = Layout::default()
                 .direction(Direction::Vertical)
                 .constraints([Constraint::Percentage(60), Constraint::Percentage(40)])
-                .split(main_chunks[0]);
+                .split(host_content_area);
 
             // Cache the full host panel area for click-to-focus
-            self.host_panel_area = main_chunks[0];
+            self.host_panel_area = host_panel_area;
 
-            // Render host list
-            self.render_host_list(frame, left_chunks[0]);
+            if host_content_area.width > 0 {
+                // Render host list
+                self.render_host_list(frame, left_chunks[0]);
 
-            // Render host info panel below the list
-            self.render_host_info(frame, left_chunks[1]);
+                if left_chunks[1].height > 0 {
+                    draw_horizontal_rule(
+                        frame,
+                        left_chunks[1].y,
+                        left_chunks[1].x,
+                        left_chunks[1].width,
+                        Style::default().fg(Color::DarkGray),
+                    );
+                }
+
+                // Render host info panel below the list
+                self.render_host_info(frame, left_chunks[1]);
+            }
         } else {
             // Clear the cached area when hidden
             self.host_panel_area = Rect::default();
-        }
-
-        // Cache exit button area: the X sits in the top-right border of the right panel
-        // " X " is 3 chars, positioned inside the top border of main_chunks[1]
-        let right_area = main_chunks[1];
-        if right_area.width > 4 {
-            // The X character is at: right_area.x + right_area.width - 3 (accounting for border + " X ")
-            self.exit_button_area = Rect::new(right_area.x + right_area.width - 4, right_area.y, 3, 1);
         }
 
         // If there are tabs, render tabs; otherwise render help panel
@@ -107,13 +172,34 @@ impl App {
             self.render_host_details(frame, main_chunks[1]);
         }
 
+        if show_host_panel && main_chunks[1].width > 0 {
+            // Draw a subtle vertical divider between host and terminal panes.
+            draw_vertical_rule(
+                frame,
+                self.host_panel_area.x + self.host_panel_area.width.saturating_sub(1),
+                content_area.y,
+                content_area.height,
+                Style::default().fg(Color::DarkGray),
+            );
+        }
+
+        // Draw a subtle divider above the status bar.
+        draw_horizontal_rule(
+            frame,
+            separator_area.y,
+            separator_area.x,
+            separator_area.width,
+            Style::default().fg(Color::DarkGray),
+        );
+
         self.render_global_status_bar(frame, status_area);
     }
 
     /// Render the global one-line status bar at the bottom.
-    fn render_global_status_bar(&self, frame: &mut Frame, area: Rect) {
-        let status = Paragraph::new(Line::from(self.build_status_line_spans())).block(Block::default());
+    fn render_global_status_bar(&mut self, frame: &mut Frame, area: Rect) {
+        let status = Paragraph::new(Line::from(self.build_status_line_spans())).style(Style::default().fg(Color::Gray));
         frame.render_widget(status, area);
+        self.exit_button_area = Rect::default();
     }
 
     /// Build status line content for the current app context.
@@ -201,11 +287,7 @@ impl App {
         }
 
         let tab = &self.tabs[self.selected_tab];
-        let is_exited = tab
-            .session
-            .as_ref()
-            .and_then(|s| s.exited.lock().ok().map(|e| *e))
-            .unwrap_or(true);
+        let is_exited = tab.session.as_ref().and_then(|s| s.exited.lock().ok().map(|e| *e)).unwrap_or(true);
 
         let status_icon_color = if is_exited { Color::Red } else { Color::Green };
         let status_text = if is_exited { "Down" } else { "Live" };
@@ -304,12 +386,39 @@ impl App {
 
     /// Render the host list
     fn render_host_list(&mut self, frame: &mut Frame, area: Rect) {
-        // Cache area and calculate viewport
-        self.host_list_area = area;
-        let viewport_height = area.height.saturating_sub(3) as usize; // minus borders and title
+        if area.height == 0 {
+            self.host_list_area = Rect::default();
+            return;
+        }
+
+        let header_area = Rect::new(area.x, area.y, area.width, 1);
+        let list_area = Rect::new(area.x, area.y.saturating_add(1), area.width, area.height.saturating_sub(1));
+
+        // Cache only the selectable list rows (no decorative header).
+        self.host_list_area = list_area;
+        let viewport_height = list_area.height as usize;
 
         // Update scroll to keep selection visible
-        self.update_host_scroll(viewport_height);
+        self.update_host_scroll(viewport_height.max(1));
+
+        let total = self.filtered_hosts.len();
+        let showing = total.min(viewport_height);
+        let title = if self.host_scroll_offset > 0 || showing < total {
+            format!("Hosts {}/{}", showing, total)
+        } else {
+            format!("Hosts {}", total)
+        };
+
+        let title_style = if self.focus_on_manager {
+            Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD)
+        } else {
+            Style::default().fg(Color::DarkGray)
+        };
+        frame.render_widget(Paragraph::new(Line::from(Span::styled(title, title_style))), header_area);
+
+        if list_area.height == 0 {
+            return;
+        }
 
         // Create visible items with scrolling
         let visible_hosts: Vec<ListItem> = self
@@ -317,58 +426,32 @@ impl App {
             .iter()
             .skip(self.host_scroll_offset)
             .take(viewport_height)
-            .map(|(idx, _score)| {
-                let host = &self.hosts[*idx];
-
-                ListItem::new(host.name.clone())
-            })
+            .map(|(idx, _score)| ListItem::new(self.hosts[*idx].name.clone()))
             .collect();
 
-        let total = self.filtered_hosts.len();
-        let showing = visible_hosts.len();
-        let title = if self.host_scroll_offset > 0 || showing < total {
-            format!(" Hosts ({}/{}) ", showing, total)
-        } else {
-            format!(" Hosts ({}) ", total)
-        };
-
-        let border_style = if self.focus_on_manager {
-            Style::default().fg(Color::Cyan)
-        } else {
-            Style::default().fg(Color::DarkGray)
-        };
-
-        let list = List::new(visible_hosts)
-            .block(Block::default().title(title).borders(Borders::ALL).border_style(border_style))
-            .highlight_style(Style::default().bg(Color::DarkGray).add_modifier(Modifier::BOLD));
+        let list = List::new(visible_hosts).highlight_style(Style::default().bg(Color::DarkGray).add_modifier(Modifier::BOLD));
 
         // Adjust list state for scrolling
         let adjusted_selection = self.selected_host.saturating_sub(self.host_scroll_offset);
         let mut adjusted_state = ListState::default();
         adjusted_state.select(Some(adjusted_selection));
+        frame.render_stateful_widget(list, list_area, &mut adjusted_state);
 
-        frame.render_stateful_widget(list, area, &mut adjusted_state);
-        
         // Draw scrollbar if needed
-        if self.filtered_hosts.len() > viewport_height {
-            let scrollbar_height = area.height.saturating_sub(2) as usize; // minus borders
+        if total > viewport_height && list_area.width > 0 {
+            let scrollbar_height = list_area.height as usize;
             if scrollbar_height > 0 {
-                let total_items = self.filtered_hosts.len();
-                let thumb_size = (scrollbar_height * viewport_height / total_items).max(1);
-                let thumb_position = (scrollbar_height * self.host_scroll_offset / total_items).min(scrollbar_height.saturating_sub(thumb_size));
-                
-                let scrollbar_x = area.x + area.width - 1; // Right border position
-                
-                // Draw the scrollbar
+                let thumb_size = (scrollbar_height * viewport_height / total).max(1);
+                let thumb_position = (scrollbar_height * self.host_scroll_offset / total).min(scrollbar_height.saturating_sub(thumb_size));
+                let scrollbar_x = list_area.x + list_area.width - 1;
+
                 for i in 0..scrollbar_height {
-                    let y = area.y + 1 + i as u16; // +1 for top border
+                    let y = list_area.y + i as u16;
                     if i >= thumb_position && i < thumb_position + thumb_size {
-                        // Scrollbar thumb
                         let cell = &mut frame.buffer_mut()[(scrollbar_x, y)];
                         cell.set_symbol("█");
                         cell.set_style(Style::default().fg(Color::Cyan));
                     } else {
-                        // Scrollbar track
                         let cell = &mut frame.buffer_mut()[(scrollbar_x, y)];
                         cell.set_symbol("│");
                         cell.set_style(Style::default().fg(Color::DarkGray));
@@ -380,22 +463,32 @@ impl App {
 
     /// Render the host info panel below the host list on the left side
     fn render_host_info(&self, frame: &mut Frame, area: Rect) {
-        let border_style = if self.focus_on_manager {
-            Style::default().fg(Color::Cyan)
+        if area.height == 0 {
+            return;
+        }
+
+        let header_area = Rect::new(area.x, area.y, area.width, 1);
+        let body_area = Rect::new(area.x, area.y.saturating_add(1), area.width, area.height.saturating_sub(1));
+
+        let header_style = if self.focus_on_manager {
+            Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD)
         } else {
             Style::default().fg(Color::DarkGray)
         };
 
         if self.filtered_hosts.is_empty() {
-            let paragraph = Paragraph::new("No host selected")
-                .block(Block::default().title(" Info ").borders(Borders::ALL).border_style(border_style))
-                .style(Style::default().fg(Color::DarkGray));
-            frame.render_widget(paragraph, area);
+            frame.render_widget(Paragraph::new(Line::from(Span::styled("Info", header_style))), header_area);
+            frame.render_widget(Paragraph::new("No host selected").style(Style::default().fg(Color::DarkGray)), body_area);
             return;
         }
 
         let host_idx = self.filtered_hosts[self.selected_host].0;
         let host = &self.hosts[host_idx];
+
+        frame.render_widget(
+            Paragraph::new(Line::from(Span::styled(format!("Info {}", host.name), header_style))),
+            header_area,
+        );
 
         let mut lines = Vec::new();
 
@@ -479,16 +572,19 @@ impl App {
             ]));
         }
 
-        let title = format!(" {} ", host.name);
-        let paragraph = Paragraph::new(lines)
-            .block(Block::default().title(title).borders(Borders::ALL).border_style(border_style))
-            .wrap(Wrap { trim: false });
-
-        frame.render_widget(paragraph, area);
+        let paragraph = Paragraph::new(lines).wrap(Wrap { trim: false });
+        frame.render_widget(paragraph, body_area);
     }
 
     /// Render the host details panel (shown when no tabs are open)
     fn render_host_details(&self, frame: &mut Frame, area: Rect) {
+        if area.height == 0 {
+            return;
+        }
+
+        let header_area = Rect::new(area.x, area.y, area.width, 1);
+        let body_area = Rect::new(area.x, area.y.saturating_add(1), area.width, area.height.saturating_sub(1));
+
         let content = if !self.filtered_hosts.is_empty() {
             let host_idx = self.filtered_hosts[self.selected_host].0;
             let host = &self.hosts[host_idx];
@@ -539,22 +635,15 @@ impl App {
 
             lines
         } else {
-            vec![
-                Line::from(""),
-                Line::from(Span::styled("No hosts found", Style::default().fg(Color::DarkGray))),
-            ]
+            vec![Line::from(""), Line::from(Span::styled("No hosts found", Style::default().fg(Color::DarkGray)))]
         };
 
-        let exit_title = Line::from(vec![Span::styled(" X ", Style::default().fg(Color::Red).add_modifier(Modifier::BOLD))]);
-
-        let paragraph = Paragraph::new(content).block(
-            Block::default()
-                .title(" Host Details ")
-                .title_top(exit_title.alignment(Alignment::Right))
-                .borders(Borders::ALL),
-        );
-
-        frame.render_widget(paragraph, area);
+        let header = Paragraph::new(Line::from(Span::styled(
+            "Host Details",
+            Style::default().fg(Color::DarkGray).add_modifier(Modifier::BOLD),
+        )));
+        frame.render_widget(header, header_area);
+        frame.render_widget(Paragraph::new(content), body_area);
     }
 
     /// Render the tabs panel (tab bar + active tab content)
@@ -562,7 +651,7 @@ impl App {
         // Split the area vertically: tab bar at top, content below
         let chunks = Layout::default()
             .direction(Direction::Vertical)
-            .constraints([Constraint::Length(3), Constraint::Min(0)])
+            .constraints([Constraint::Length(1), Constraint::Min(0)])
             .split(area);
 
         // Cache tab bar area and render
@@ -577,6 +666,13 @@ impl App {
 
     /// Render the tab bar showing all open tabs
     fn render_tab_bar(&mut self, frame: &mut Frame, area: Rect) {
+        if area.width == 0 || area.height == 0 {
+            return;
+        }
+
+        let bar_bg = Color::Indexed(235);
+        fill_row_bg(frame, area, bar_bg);
+
         // Build full tab title spans first, then apply horizontal scroll offset
         let mut all_spans: Vec<Span> = Vec::new();
 
@@ -584,34 +680,29 @@ impl App {
             let is_selected = idx == self.selected_tab && !self.focus_on_manager;
 
             let style = if is_selected {
-                Style::default().fg(Color::Yellow).bg(Color::DarkGray).add_modifier(Modifier::BOLD)
+                Style::default()
+                    .fg(Color::Yellow)
+                    .bg(Color::Indexed(238))
+                    .add_modifier(Modifier::BOLD | Modifier::UNDERLINED)
             } else {
-                Style::default().fg(Color::White)
+                Style::default().fg(Color::Gray).bg(Color::Indexed(236))
             };
 
             let close_style = if is_selected {
-                Style::default().fg(Color::Red).bg(Color::DarkGray).add_modifier(Modifier::BOLD)
+                Style::default().fg(Color::LightRed).bg(Color::Indexed(238)).add_modifier(Modifier::BOLD)
             } else {
-                Style::default().fg(Color::Red)
+                Style::default().fg(Color::Red).bg(Color::Indexed(236))
             };
 
-            let prefix = if is_selected { " [" } else { " " };
-            let suffix = if is_selected { "] " } else { " " };
-
-            all_spans.push(Span::styled(format!("{}{} ", prefix, &tab.title), style));
+            all_spans.push(Span::styled(format!("{} ", &tab.title), style));
             all_spans.push(Span::styled("×", close_style));
-            all_spans.push(Span::styled(suffix.to_string(), style));
-
-            // Add separator between tabs
-            if idx < self.tabs.len() - 1 {
-                all_spans.push(Span::styled("│", Style::default().fg(Color::DarkGray)));
-            }
+            all_spans.push(Span::styled("  ", Style::default().fg(Color::DarkGray)));
         }
 
         // Calculate total display width of all tab titles (use char count, not byte length,
         // because × and │ are multi-byte but single-column characters)
         let total_width: usize = all_spans.iter().map(|s| s.content.chars().count()).sum();
-        let available_width = area.width.saturating_sub(2) as usize; // subtract borders
+        let available_width = area.width as usize;
 
         // Clamp tab_scroll_offset
         if total_width <= available_width {
@@ -648,31 +739,14 @@ impl App {
 
         // Add scroll indicators
         if has_left_overflow {
-            visible_spans.insert(0, Span::styled("◀", Style::default().fg(Color::Cyan)));
+            visible_spans.insert(0, Span::styled("◀", Style::default().fg(Color::Cyan).bg(bar_bg)));
         }
         if has_right_overflow {
-            visible_spans.push(Span::styled("▶", Style::default().fg(Color::Cyan)));
+            visible_spans.push(Span::styled("▶", Style::default().fg(Color::Cyan).bg(bar_bg)));
         }
 
-        let border_style = if self.focus_on_manager {
-            Style::default().fg(Color::DarkGray)
-        } else {
-            Style::default().fg(Color::Cyan)
-        };
-
-        let exit_title = Line::from(vec![Span::styled(" X ", Style::default().fg(Color::Red).add_modifier(Modifier::BOLD))]);
-
-        let title = format!(" Tabs ({}) ", self.tabs.len());
         let tabs_line = Line::from(visible_spans);
-        let paragraph = Paragraph::new(tabs_line).block(
-            Block::default()
-                .title(title)
-                .title_top(exit_title.alignment(Alignment::Right))
-                .borders(Borders::ALL)
-                .border_style(border_style),
-        );
-
-        frame.render_widget(paragraph, area);
+        frame.render_widget(Paragraph::new(tabs_line), area);
     }
 
     /// Render the content of a specific tab
@@ -689,17 +763,11 @@ impl App {
         let scroll_offset = tab.scroll_offset;
         let sel_start = self.selection_start;
         let sel_end = self.selection_end;
-        let tab_title = tab.title.clone();
 
         // Check if session exists
         let session_active = tab.session.is_some();
 
         if session_active {
-            // Render the border/block first
-            let block = Block::default().borders(Borders::ALL).title(format!(" {} ", &tab_title));
-            let inner_area = block.inner(area);
-            frame.render_widget(block, area);
-
             // Now render VT100 screen directly into the buffer cell-by-cell
             let tab = &self.tabs[tab_idx];
             if let Some(session) = &tab.session {
@@ -712,8 +780,8 @@ impl App {
 
                     let buf = frame.buffer_mut();
 
-                    let render_rows = (inner_area.height as u16).min(vt_rows);
-                    let render_cols = (inner_area.width as u16).min(vt_cols);
+                    let render_rows = area.height.min(vt_rows);
+                    let render_cols = area.width.min(vt_cols);
 
                     for row in 0..render_rows {
                         for col in 0..render_cols {
@@ -722,19 +790,12 @@ impl App {
                                 None => continue,
                             };
 
-                            let ch = if cell.has_contents() {
-                                cell.contents()
-                            } else {
-                                " ".to_string()
-                            };
+                            let ch = if cell.has_contents() { cell.contents() } else { " ".to_string() };
 
-                            let is_cursor = !hide_cursor
-                                && scroll_offset == 0
-                                && row == cursor_position.0
-                                && col == cursor_position.1;
+                            let is_cursor = !hide_cursor && scroll_offset == 0 && row == cursor_position.0 && col == cursor_position.1;
                             let abs_row = row as i64 - scroll_offset as i64;
                             let is_selected = is_cell_in_selection(abs_row, col, sel_start, sel_end);
-                            
+
                             // Check if this cell is part of a search match
                             let is_search_match = self.is_cell_in_search_match(abs_row, col);
                             let is_current_search_match = self.is_cell_in_current_search_match(abs_row, col);
@@ -802,12 +863,10 @@ impl App {
                                 s
                             };
 
-                            let buf_x = inner_area.x + col;
-                            let buf_y = inner_area.y + row;
+                            let buf_x = area.x + col;
+                            let buf_y = area.y + row;
 
-                            if buf_x < inner_area.x + inner_area.width
-                                && buf_y < inner_area.y + inner_area.height
-                            {
+                            if buf_x < area.x + area.width && buf_y < area.y + area.height {
                                 let buf_cell = &mut buf[(buf_x, buf_y)];
                                 buf_cell.set_symbol(&ch);
                                 buf_cell.set_style(style);
@@ -832,12 +891,7 @@ impl App {
                 ]),
             ];
 
-            let paragraph = Paragraph::new(error_lines).block(
-                Block::default()
-                    .title(format!(" {} ", &tab_title))
-                    .borders(Borders::ALL)
-                    .border_style(Style::default().fg(Color::Red)),
-            );
+            let paragraph = Paragraph::new(error_lines).style(Style::default().fg(Color::Red));
 
             frame.render_widget(paragraph, area);
         }
@@ -848,7 +902,7 @@ impl App {
         if !self.terminal_search_mode || self.terminal_search_matches.is_empty() {
             return false;
         }
-        
+
         for (match_row, match_col, match_len) in &self.terminal_search_matches {
             if *match_row == abs_row && col >= *match_col && (col as usize) < (*match_col as usize + *match_len) {
                 return true;
@@ -862,7 +916,7 @@ impl App {
         if !self.terminal_search_mode || self.terminal_search_matches.is_empty() {
             return false;
         }
-        
+
         let (match_row, match_col, match_len) = self.terminal_search_matches[self.terminal_search_current];
         match_row == abs_row && col >= match_col && (col as usize) < (match_col as usize + match_len)
     }

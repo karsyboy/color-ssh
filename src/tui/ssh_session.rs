@@ -402,9 +402,10 @@ impl App {
             && self.selected_tab < self.tabs.len()
             && let Some(session) = &mut self.tabs[self.selected_tab].session
         {
-            // Calculate rows and cols from area (accounting for borders and status line)
-            let rows = area.height.saturating_sub(3); // Subtract borders
-            let cols = area.width.saturating_sub(2); // Subtract borders
+            // Area is already the raw terminal content region for this tab.
+            // Keep PTY size aligned 1:1 with the rendered content area.
+            let rows = area.height.max(1);
+            let cols = area.width.max(1);
 
             if let Ok(pty_master) = session.pty_master.lock() {
                 let _ = pty_master.resize(PtySize {
