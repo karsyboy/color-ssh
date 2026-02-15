@@ -318,6 +318,8 @@ impl App {
             Span::styled(":find | ", Style::default().fg(Color::DarkGray)),
             Span::styled("Enter", Style::default().fg(Color::Green)),
             Span::styled(":open | ", Style::default().fg(Color::DarkGray)),
+            Span::styled("c", Style::default().fg(Color::Cyan)),
+            Span::styled(":collapse | ", Style::default().fg(Color::DarkGray)),
             Span::styled("i", Style::default().fg(Color::Cyan)),
             Span::styled(":info | ", Style::default().fg(Color::DarkGray)),
             Span::styled("^←/^→", Style::default().fg(Color::Cyan)),

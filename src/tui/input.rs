@@ -433,6 +433,20 @@ impl App {
                 self.host_info_visible = !self.host_info_visible;
                 self.is_dragging_host_info_divider = false;
             }
+            KeyCode::Char('c') if self.focus_on_manager && key.modifiers.is_empty() && self.search_query.is_empty() => {
+                // Toggle all folders: collapse all if any folder is expanded, otherwise expand all.
+                let any_expanded_folder = self
+                    .visible_host_rows
+                    .iter()
+                    .any(|row| matches!(row.kind, super::HostTreeRowKind::Folder(_)) && row.expanded);
+
+                self.collapsed_folders.clear();
+                if any_expanded_folder {
+                    Self::collect_descendant_folder_ids(&self.host_tree_root, &mut self.collapsed_folders);
+                }
+
+                self.update_filtered_hosts();
+            }
             KeyCode::Char('c') if self.focus_on_manager && key.modifiers.contains(KeyModifiers::CONTROL) && !self.search_query.is_empty() => {
                 self.search_mode = false;
                 self.search_query.clear();
