@@ -42,20 +42,41 @@ impl App {
     pub(super) fn draw(&mut self, frame: &mut Frame) {
         let size = frame.area();
 
-        // Create main layout: adjustable left panel and expanding right panel
-        let main_chunks = Layout::default()
-            .direction(Direction::Horizontal)
-            .constraints([Constraint::Length(self.host_panel_width), Constraint::Min(0)])
-            .split(size);
+        // Create main layout: adjustable left panel and expanding right panel (or full width if hidden)
+        let (main_chunks, show_host_panel) = if self.host_panel_visible {
+            let chunks = Layout::default()
+                .direction(Direction::Horizontal)
+                .constraints([Constraint::Length(self.host_panel_width), Constraint::Min(0)])
+                .split(size);
+            (chunks, true)
+        } else {
+            // Host panel hidden, use full width for content
+            let chunks = Layout::default()
+                .direction(Direction::Horizontal)
+                .constraints([Constraint::Length(0), Constraint::Min(0)])
+                .split(size);
+            (chunks, false)
+        };
 
-        // Split the left panel: host list on top, host info on bottom
-        let left_chunks = Layout::default()
-            .direction(Direction::Vertical)
-            .constraints([Constraint::Percentage(60), Constraint::Percentage(40)])
-            .split(main_chunks[0]);
+        if show_host_panel {
+            // Split the left panel: host list on top, host info on bottom
+            let left_chunks = Layout::default()
+                .direction(Direction::Vertical)
+                .constraints([Constraint::Percentage(60), Constraint::Percentage(40)])
+                .split(main_chunks[0]);
 
-        // Cache the full host panel area for click-to-focus
-        self.host_panel_area = main_chunks[0];
+            // Cache the full host panel area for click-to-focus
+            self.host_panel_area = main_chunks[0];
+
+            // Render host list
+            self.render_host_list(frame, left_chunks[0]);
+
+            // Render host info panel below the list
+            self.render_host_info(frame, left_chunks[1]);
+        } else {
+            // Clear the cached area when hidden
+            self.host_panel_area = Rect::default();
+        }
 
         // Cache exit button area: the X sits in the top-right border of the right panel
         // " X " is 3 chars, positioned inside the top border of main_chunks[1]
@@ -64,12 +85,6 @@ impl App {
             // The X character is at: right_area.x + right_area.width - 3 (accounting for border + " X ")
             self.exit_button_area = Rect::new(right_area.x + right_area.width - 4, right_area.y, 3, 1);
         }
-
-        // Render host list
-        self.render_host_list(frame, left_chunks[0]);
-
-        // Render host info panel below the list
-        self.render_host_info(frame, left_chunks[1]);
 
         // If there are tabs, render tabs; otherwise render help panel
         if !self.tabs.is_empty() {
@@ -492,14 +507,14 @@ impl App {
             return;
         }
 
-        // Resize PTY to match display area
+        // Resize PTY to match display area - status bar at bottom now
         let chunks = Layout::default()
             .direction(Direction::Vertical)
-            .constraints([Constraint::Length(1), Constraint::Min(0)])
+            .constraints([Constraint::Min(0), Constraint::Length(1)])
             .split(area);
 
-        self.resize_current_pty(chunks[1]);
-        self.tab_content_area = chunks[1];
+        self.resize_current_pty(chunks[0]);
+        self.tab_content_area = chunks[0];
 
         let tab = &self.tabs[tab_idx];
         let host = &tab.host;
@@ -517,44 +532,10 @@ impl App {
         };
 
         if session_active {
-            // Status line
-            let scroll_info = if scroll_offset > 0 {
-                format!(" | [SCROLLBACK +{}] Shift+PgUp/PgDn", scroll_offset)
-            } else {
-                String::new()
-            };
-            
-            let status_text = if self.terminal_search_mode {
-                // Show search box
-                let match_info = if !self.terminal_search_matches.is_empty() {
-                    format!(" ({}/{}) ", self.terminal_search_current + 1, self.terminal_search_matches.len())
-                } else {
-                    " (0) ".to_string()
-                };
-                format!("Search: {}_{}[↑/↓: navigate | Esc: close]", self.terminal_search_query, match_info)
-            } else if is_exited {
-                format!("Status: Disconnected [Enter: reconnect | Ctrl+W: close] | Host: {}{}", host.name, scroll_info)
-            } else {
-                format!("Status: Connected to {} | Shift+Tab to switch | Ctrl+F: search{}", host.name, scroll_info)
-            };
-
-            let status_style = if self.terminal_search_mode {
-                Style::default().fg(Color::Cyan)
-            } else if is_exited {
-                Style::default().fg(Color::Red)
-            } else if scroll_offset > 0 {
-                Style::default().fg(Color::Yellow)
-            } else {
-                Style::default().fg(Color::Green)
-            };
-
-            let status = Paragraph::new(status_text).style(status_style).block(Block::default());
-            frame.render_widget(status, chunks[0]);
-
             // Render the border/block first
             let block = Block::default().borders(Borders::ALL).title(format!(" {} ", &tab_title));
-            let inner_area = block.inner(chunks[1]);
-            frame.render_widget(block, chunks[1]);
+            let inner_area = block.inner(chunks[0]);
+            frame.render_widget(block, chunks[0]);
 
             // Now render VT100 screen directly into the buffer cell-by-cell
             let tab = &self.tabs[tab_idx];
@@ -672,6 +653,80 @@ impl App {
                     }
                 }
             }
+            
+            // Compact status bar at the bottom
+            let scroll_info = if scroll_offset > 0 {
+                format!(" [Scrollback: +{}]", scroll_offset)
+            } else {
+                String::new()
+            };
+            
+            let status_line = if self.terminal_search_mode {
+                // Show search box
+                let match_info = if !self.terminal_search_matches.is_empty() {
+                    format!("({}/{}) ", self.terminal_search_current + 1, self.terminal_search_matches.len())
+                } else {
+                    "(0) ".to_string()
+                };
+                vec![
+                    Span::styled(" Search: ", Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD)),
+                    Span::styled(self.terminal_search_query.clone(), Style::default().fg(Color::White)),
+                    Span::styled("_", Style::default().fg(Color::White)),
+                    Span::styled(" ", Style::default()),
+                    Span::styled(match_info, Style::default().fg(Color::Yellow)),
+                    Span::styled("[", Style::default().fg(Color::DarkGray)),
+                    Span::styled("↑/↓", Style::default().fg(Color::Cyan)),
+                    Span::styled(": navigate | ", Style::default().fg(Color::DarkGray)),
+                    Span::styled("Esc", Style::default().fg(Color::Cyan)),
+                    Span::styled(": close]", Style::default().fg(Color::DarkGray)),
+                ]
+            } else {
+                let (status_icon_color, status_text) = if is_exited {
+                    (Color::Red, "Disconnected")
+                } else {
+                    (Color::Green, "Connected")
+                };
+                
+                let mut spans = vec![
+                    Span::styled(" ● ", Style::default().fg(status_icon_color).add_modifier(Modifier::BOLD)),
+                    Span::styled(status_text, Style::default().fg(Color::White)),
+                    Span::styled(": ", Style::default().fg(Color::DarkGray)),
+                    Span::styled(host.name.clone(), Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD)),
+                ];
+                
+                if !scroll_info.is_empty() {
+                    spans.push(Span::styled(scroll_info, Style::default().fg(Color::Yellow)));
+                }
+                
+                spans.push(Span::styled(" | ", Style::default().fg(Color::DarkGray)));
+                
+                if is_exited {
+                    spans.push(Span::styled("[", Style::default().fg(Color::DarkGray)));
+                    spans.push(Span::styled("Enter", Style::default().fg(Color::Green)));
+                    spans.push(Span::styled(": reconnect | ", Style::default().fg(Color::DarkGray)));
+                    spans.push(Span::styled("Ctrl+W", Style::default().fg(Color::Red)));
+                    spans.push(Span::styled(": close]", Style::default().fg(Color::DarkGray)));
+                } else {
+                    spans.push(Span::styled("[", Style::default().fg(Color::DarkGray)));
+                    spans.push(Span::styled("Shift+Tab", Style::default().fg(Color::Cyan)));
+                    spans.push(Span::styled(": focus | ", Style::default().fg(Color::DarkGray)));
+                    spans.push(Span::styled("Ctrl+B", Style::default().fg(Color::Cyan)));
+                    spans.push(Span::styled(": toggle panel | ", Style::default().fg(Color::DarkGray)));
+                    spans.push(Span::styled("Ctrl+F", Style::default().fg(Color::Cyan)));
+                    spans.push(Span::styled(": search", Style::default().fg(Color::DarkGray)));
+                    if scroll_offset > 0 {
+                        spans.push(Span::styled(" | ", Style::default().fg(Color::DarkGray)));
+                        spans.push(Span::styled("Shift+PgUp/PgDn", Style::default().fg(Color::Yellow)));
+                        spans.push(Span::styled(": scroll", Style::default().fg(Color::DarkGray)));
+                    }
+                    spans.push(Span::styled("]", Style::default().fg(Color::DarkGray)));
+                }
+                
+                spans
+            };
+
+            let status = Paragraph::new(Line::from(status_line)).block(Block::default());
+            frame.render_widget(status, chunks[1]);
         } else {
             // Session failed to start
             let error_lines = vec![

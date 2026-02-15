@@ -124,6 +124,8 @@ pub struct App {
     terminal_search_matches: Vec<(i64, u16, usize)>,
     /// Current match index in terminal search
     terminal_search_current: usize,
+    /// Whether the host panel is visible (can be toggled with Ctrl+B)
+    host_panel_visible: bool,
 }
 
 impl App {
@@ -179,6 +181,7 @@ impl App {
             terminal_search_query: String::new(),
             terminal_search_matches: Vec::new(),
             terminal_search_current: 0,
+            host_panel_visible: true,
         })
     }
 }

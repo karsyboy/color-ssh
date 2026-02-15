@@ -8,6 +8,87 @@ use std::io::{self, Read, Write};
 use std::sync::{Arc, Mutex};
 use vt100::Parser;
 
+/// Respond to terminal query sequences from programs running in the PTY.
+///
+/// Fish shell and other programs query terminal capabilities via escape sequences like:
+/// - ESC[c (Primary Device Attributes - DA1)
+/// - ESC[>c (Secondary Device Attributes - DA2)  
+/// - ESC[6n (Cursor Position Report - CPR)
+/// 
+/// Since we're running in a TUI that has taken over the terminal, we emulate a modern xterm
+/// terminal and respond directly. This prevents fish from timing out waiting for responses.
+fn respond_to_terminal_queries(data: &[u8], writer: &Arc<Mutex<Box<dyn Write + Send>>>) {
+    let mut i = 0;
+    while i < data.len() {
+        if data[i] == 0x1b && i + 1 < data.len() && data[i + 1] == b'[' {
+            // Found CSI sequence start (ESC[)
+            let mut j = i + 2;
+            let param_start = j;
+            
+            // Collect parameter bytes (0x30-0x3F: digits, semicolons, >, etc.)
+            while j < data.len() && (0x30..=0x3F).contains(&data[j]) {
+                j += 1;
+            }
+            
+            let params = &data[param_start..j];
+            
+            // Check for terminal query final bytes
+            if j < data.len() {
+                let final_byte = data[j];
+                
+                // Generate appropriate response for terminal capability queries
+                let response = match final_byte {
+                    // DA1 - Primary Device Attributes query: ESC[0c or ESC[c
+                    b'c' if params.is_empty() || params == b"0" => {
+                        // Respond as VT220 with various capabilities
+                        // CSI ? 62 ; 1 ; 2 ; 6 ; 9 ; 15 ; 22 c
+                        // (VT220, 132-columns, ANSI color, National Replacement Character sets...)
+                        // The vt100 parser handles most of these features already
+                        Some(b"\x1b[?62;1;2;6;9;15;22c".as_slice())
+                    }
+                    // DA2 - Secondary Device Attributes query: ESC[>c or ESC[>0c
+                    b'c' if params.starts_with(b">") => {
+                        // Respond as xterm version 279 (common modern xterm)
+                        // CSI > 41 ; 279 ; 0 c
+                        Some(b"\x1b[>41;279;0c".as_slice())
+                    }
+                    // DSR - Device Status Report query: ESC[5n
+                    b'n' if params == b"5" => {
+                        // Respond: terminal is ready/OK
+                        // CSI 0 n
+                        Some(b"\x1b[0n".as_slice())
+                    }
+                    // CPR - Cursor Position Report query: ESC[6n
+                    b'n' if params == b"6" => {
+                        // Respond with a static cursor position
+                        // CSI 1 ; 1 R
+                        // NOTE: This is not the real cursor position, but fish mainly needs
+                        // *a* response to avoid timeouts. The actual position is used for
+                        // optional features like truncating multiline autosuggestions.
+                        Some(b"\x1b[1;1R".as_slice())
+                    }
+                    _ => None
+                };
+                
+                if let Some(response_bytes) = response {
+                    // Write response back to PTY so the application (fish) receives it  
+                    log_debug!("Detected terminal query, sending response: {:?}", response_bytes);
+                    if let Ok(mut w) = writer.lock() {
+                        let _ = w.write_all(response_bytes);
+                        let _ = w.flush();
+                    }
+                }
+                
+                i = j + 1;
+            } else {
+                i = j;
+            }
+        } else {
+            i += 1;
+        }
+    }
+}
+
 /// Scan PTY output for OSC 52 clipboard sequences and forward them to stdout.
 ///
 /// OSC 52 format: `ESC ] 52 ; <selection> ; <base64-data> BEL` or `ESC ] 52 ; <selection> ; <base64-data> ESC \`
@@ -177,6 +258,7 @@ impl App {
         let exited_clone = exited.clone();
         let pty_master = Arc::new(Mutex::new(pty_pair.master));
         let writer = Arc::new(Mutex::new(writer));
+        let writer_clone = writer.clone();
         let clear_pending = Arc::new(Mutex::new(false));
         let clear_pending_clone = clear_pending.clone();
 
@@ -196,6 +278,10 @@ impl App {
                     }
                     Ok(n) => {
                         let data = &buf[..n];
+
+                        // Respond to terminal capability queries from PTY  
+                        // (fixes fish shell DA query timeout warning)
+                        respond_to_terminal_queries(data, &writer_clone);
 
                         // Forward any OSC 52 clipboard sequences to the real terminal
                         // so the inner TUI app's copy reaches the system clipboard.

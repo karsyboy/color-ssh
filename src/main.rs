@@ -1,4 +1,4 @@
-use cossh::{Result, args, config, log, log_debug, log_error, log_info, process, session_manager};
+use cossh::{Result, args, config, log, log_debug, log_error, log_info, process, tui};
 use std::process::ExitCode;
 
 /// Extracts the SSH destination hostname from the provided SSH arguments returns hostname or none
@@ -44,7 +44,7 @@ fn main() -> Result<ExitCode> {
         log_info!("Launching interactive session manager");
         // Init config so session manager can read settings like history_buffer
         let _ = config::init_session_config(args.profile.clone());
-        if let Err(e) = session_manager::run_session_manager() {
+        if let Err(e) = tui::run_session_manager() {
             eprintln!("Session manager error: {}", e);
             std::process::exit(1);
         }

@@ -97,6 +97,10 @@ impl App {
         }
 
         match key.code {
+            KeyCode::Char('b') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                // Ctrl+B: Toggle host panel visibility
+                self.host_panel_visible = !self.host_panel_visible;
+            }
             KeyCode::Char('c') if key.modifiers == KeyModifiers::ALT => {
                 // Alt+c: copy selection to clipboard
                 if self.selection_start.is_some() && self.selection_end.is_some() {
@@ -118,8 +122,11 @@ impl App {
                 self.send_key_to_pty(key)?;
             }
             KeyCode::BackTab => {
-                // Shift+Tab: Switch focus back to manager
+                // Shift+Tab: Switch focus back to manager (show panel if hidden)
                 self.focus_on_manager = true;
+                if !self.host_panel_visible {
+                    self.host_panel_visible = true;
+                }
             }
             KeyCode::Left if key.modifiers.contains(KeyModifiers::ALT) => {
                 // Alt+Left: previous tab
@@ -196,9 +203,12 @@ impl App {
         match key.code {
             // Global commands
             KeyCode::Esc => {
-                // If on tabs, go back to manager
+                // If on tabs, go back to manager (show panel if hidden)
                 if !self.focus_on_manager {
                     self.focus_on_manager = true;
+                    if !self.host_panel_visible {
+                        self.host_panel_visible = true;
+                    }
                 } else {
                     self.should_exit = true;
                 }
@@ -206,9 +216,12 @@ impl App {
 
             // Tab management
             KeyCode::BackTab => {
-                // Shift+Tab: Switch focus between manager and tabs
+                // Shift+Tab: Switch focus between manager and tabs (show panel if switching to manager)
                 if !self.tabs.is_empty() {
                     self.focus_on_manager = !self.focus_on_manager;
+                    if self.focus_on_manager && !self.host_panel_visible {
+                        self.host_panel_visible = true;
+                    }
                 }
             }
             KeyCode::Char('w') if key.modifiers.contains(KeyModifiers::CONTROL) => {
@@ -248,11 +261,11 @@ impl App {
             KeyCode::Char('/') if self.focus_on_manager => {
                 self.search_mode = true;
             }
-            KeyCode::Left if self.focus_on_manager && key.modifiers.contains(KeyModifiers::CONTROL) => {
+            KeyCode::Left if self.focus_on_manager && self.host_panel_visible && key.modifiers.contains(KeyModifiers::CONTROL) => {
                 // Ctrl+Left: shrink host panel
                 self.host_panel_width = self.host_panel_width.saturating_sub(5).max(15);
             }
-            KeyCode::Right if self.focus_on_manager && key.modifiers.contains(KeyModifiers::CONTROL) => {
+            KeyCode::Right if self.focus_on_manager && self.host_panel_visible && key.modifiers.contains(KeyModifiers::CONTROL) => {
                 // Ctrl+Right: grow host panel
                 self.host_panel_width = (self.host_panel_width + 5).min(80);
             }
@@ -330,7 +343,7 @@ impl App {
 
                 // Check if click is on the divider between host panel and terminal panel
                 let divider_col = self.host_panel_area.x + self.host_panel_area.width;
-                if self.host_panel_area.width > 0 && mouse.column == divider_col {
+                if self.host_panel_visible && self.host_panel_area.width > 0 && mouse.column == divider_col {
                     self.is_dragging_divider = true;
                     self.selection_start = None;
                     self.selection_end = None;
@@ -340,7 +353,8 @@ impl App {
 
                 // Check if click is in the host list area (select specific host)
                 let host_area = self.host_list_area;
-                if host_area.width > 0
+                if self.host_panel_visible
+                    && host_area.width > 0
                     && host_area.height > 2
                     && mouse.column >= host_area.x
                     && mouse.column < host_area.x + host_area.width
@@ -382,7 +396,8 @@ impl App {
 
                 // Check if click is anywhere in the host panel (list + info) to focus it
                 let panel_area = self.host_panel_area;
-                if panel_area.width > 0
+                if self.host_panel_visible
+                    && panel_area.width > 0
                     && panel_area.height > 0
                     && mouse.column >= panel_area.x
                     && mouse.column < panel_area.x + panel_area.width
@@ -519,7 +534,7 @@ impl App {
                 }
             }
             MouseEventKind::Drag(MouseButton::Left) => {
-                if self.is_dragging_divider {
+                if self.is_dragging_divider && self.host_panel_visible {
                     // Resize host panel by dragging the divider
                     let new_width = mouse.column.saturating_sub(self.host_panel_area.x);
                     self.host_panel_width = new_width.clamp(15, 80);
