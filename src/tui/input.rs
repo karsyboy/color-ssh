@@ -216,6 +216,7 @@ impl App {
                 }
                 if self.tabs.is_empty() {
                     self.focus_on_manager = true;
+                    self.host_panel_visible = true;
                 }
             }
             KeyCode::Tab if key.modifiers.is_empty() => {
@@ -334,6 +335,7 @@ impl App {
                     }
                     if self.tabs.is_empty() {
                         self.focus_on_manager = true;
+                        self.host_panel_visible = true;
                     }
                 }
             }
@@ -587,6 +589,7 @@ impl App {
                                 if self.tabs.is_empty() {
                                     self.selected_tab = 0;
                                     self.focus_on_manager = true;
+                                    self.host_panel_visible = true;
                                 } else if idx < self.selected_tab {
                                     self.selected_tab -= 1;
                                 } else if self.selected_tab >= self.tabs.len() {
