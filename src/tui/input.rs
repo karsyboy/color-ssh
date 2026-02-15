@@ -783,9 +783,9 @@ impl App {
                     && mouse.row >= host_area.y
                     && mouse.row < host_area.y + host_area.height
                 {
-                    // Scroll host tree up.
+                    // Scroll host tree up one row per wheel event for predictable movement.
                     if self.visible_host_row_count() > 0 && self.selected_host_row > 0 {
-                        self.set_selected_row(self.selected_host_row.saturating_sub(3));
+                        self.set_selected_row(self.selected_host_row.saturating_sub(1));
                     }
                 } else if !self.tabs.is_empty() && self.selected_tab < self.tabs.len() {
                     // If PTY wants mouse events, forward scroll to PTY
@@ -826,10 +826,10 @@ impl App {
                     && mouse.row >= host_area.y
                     && mouse.row < host_area.y + host_area.height
                 {
-                    // Scroll host tree down.
+                    // Scroll host tree down one row per wheel event for predictable movement.
                     let row_count = self.visible_host_row_count();
                     if row_count > 0 && self.selected_host_row < row_count.saturating_sub(1) {
-                        self.set_selected_row((self.selected_host_row + 3).min(row_count.saturating_sub(1)));
+                        self.set_selected_row((self.selected_host_row + 1).min(row_count.saturating_sub(1)));
                     }
                 } else if !self.tabs.is_empty() && self.selected_tab < self.tabs.len() {
                     // If PTY wants mouse events, forward scroll to PTY
