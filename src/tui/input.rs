@@ -107,6 +107,53 @@ impl App {
         Some(final_offset)
     }
 
+    /// Return the host list scrollbar column if a scrollbar is currently visible.
+    fn host_scrollbar_x(&self) -> Option<u16> {
+        let area = self.host_list_area;
+        if !self.host_panel_visible || area.width == 0 || area.height == 0 {
+            return None;
+        }
+
+        let total_rows = self.visible_host_row_count();
+        let viewport_height = area.height as usize;
+        if total_rows <= viewport_height {
+            return None;
+        }
+
+        Some(area.x + area.width.saturating_sub(1))
+    }
+
+    /// Map a mouse row on the host scrollbar track to a host list scroll offset.
+    fn set_host_scroll_from_scrollbar_row(&mut self, mouse_row: u16) {
+        let area = self.host_list_area;
+        let total_rows = self.visible_host_row_count();
+        let viewport_height = area.height as usize;
+
+        if area.height == 0 || total_rows <= viewport_height {
+            return;
+        }
+
+        let max_offset = total_rows.saturating_sub(viewport_height);
+        let track_len = viewport_height.saturating_sub(1);
+        let local_row = mouse_row.saturating_sub(area.y).min(area.height.saturating_sub(1)) as usize;
+
+        let new_offset = if track_len == 0 {
+            0
+        } else {
+            (local_row.saturating_mul(max_offset) + (track_len / 2)) / track_len
+        }
+        .min(max_offset);
+
+        // Keep selected row in a similar relative viewport position while scrolling by track.
+        let relative_row = self
+            .selected_host_row
+            .saturating_sub(self.host_scroll_offset)
+            .min(viewport_height.saturating_sub(1));
+        self.host_scroll_offset = new_offset;
+        let new_selected = (self.host_scroll_offset + relative_row).min(total_rows.saturating_sub(1));
+        self.set_selected_row(new_selected);
+    }
+
     /// Handle keyboard input
     pub(super) fn handle_key(&mut self, key: KeyEvent) -> io::Result<()> {
         // Only process key press events, not release
@@ -468,6 +515,9 @@ impl App {
 
         match mouse.kind {
             MouseEventKind::Down(MouseButton::Left) => {
+                // Reset drag latches for a new left-click gesture.
+                self.is_dragging_host_scrollbar = false;
+
                 // Check if click is on the exit button
                 let exit_area = self.exit_button_area;
                 if exit_area.width > 0
@@ -500,6 +550,19 @@ impl App {
                     && mouse.row >= host_area.y
                     && mouse.row < host_area.y + host_area.height
                 {
+                    // Click on host scrollbar track/thumb: jump scroll and allow drag.
+                    if let Some(scrollbar_x) = self.host_scrollbar_x()
+                        && mouse.column == scrollbar_x
+                    {
+                        self.focus_on_manager = true;
+                        self.is_dragging_host_scrollbar = true;
+                        self.set_host_scroll_from_scrollbar_row(mouse.row);
+                        self.selection_start = None;
+                        self.selection_end = None;
+                        self.is_selecting = false;
+                        return Ok(());
+                    }
+
                     // Calculate which host was clicked (accounting for scroll offset).
                     let clicked_row = (mouse.row - host_area.y) as usize;
                     let clicked_index = self.host_scroll_offset + clicked_row;
@@ -710,6 +773,9 @@ impl App {
                     // Resize host panel by dragging the divider
                     let new_width = mouse.column.saturating_sub(self.host_panel_area.x).saturating_add(1);
                     self.host_panel_width = new_width.clamp(15, 80);
+                } else if self.is_dragging_host_scrollbar {
+                    // Drag host list scrollbar track/thumb.
+                    self.set_host_scroll_from_scrollbar_row(mouse.row);
                 } else if self.is_pty_mouse_mode_active() {
                     // Forward drag to PTY for TUI app (button 32 = motion with left button)
                     // PTY mouse mode takes priority over selection
@@ -764,6 +830,8 @@ impl App {
             MouseEventKind::Up(MouseButton::Left) => {
                 if self.is_dragging_divider {
                     self.is_dragging_divider = false;
+                } else if self.is_dragging_host_scrollbar {
+                    self.is_dragging_host_scrollbar = false;
                 } else if self.is_selecting {
                     // Cossh text selection release
                     self.is_selecting = false;

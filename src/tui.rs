@@ -145,6 +145,8 @@ pub struct App {
     last_click: Option<(Instant, u16, u16)>,
     /// Whether we're currently dragging the panel divider to resize
     is_dragging_divider: bool,
+    /// Whether we're dragging the host list scrollbar thumb/track
+    is_dragging_host_scrollbar: bool,
     /// Cached area for the exit button (top-right corner)
     exit_button_area: Rect,
     /// Horizontal scroll offset for the tab bar (in chars)
@@ -240,6 +242,7 @@ impl App {
             host_panel_area: Rect::default(),
             last_click: None,
             is_dragging_divider: false,
+            is_dragging_host_scrollbar: false,
             exit_button_area: Rect::default(),
             tab_scroll_offset: 0,
             history_buffer,
