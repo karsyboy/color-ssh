@@ -89,7 +89,7 @@ fn parse_config_file(config_path: &Path) -> io::Result<ParsedConfigFile> {
     let reader = BufReader::new(file);
 
     let mut parsed = ParsedConfigFile::default();
-    let mut current_host: Option<SshHost> = None;
+    let mut current_hosts: Vec<SshHost> = Vec::new();
 
     for line in reader.lines() {
         let line = line?;
@@ -100,27 +100,31 @@ fn parse_config_file(config_path: &Path) -> io::Result<ParsedConfigFile> {
         }
 
         if trimmed.starts_with('#') {
-            if let Some(desc) = trimmed.strip_prefix("#_Desc")
-                && let Some(ref mut host) = current_host
-            {
-                host.description = Some(desc.trim().to_string());
+            if let Some(desc) = trimmed.strip_prefix("#_Desc") {
+                let desc = desc.trim().to_string();
+                for host in &mut current_hosts {
+                    host.description = Some(desc.clone());
+                }
             }
-            if let Some(profile) = trimmed.strip_prefix("#_Profile")
-                && let Some(ref mut host) = current_host
-            {
-                host.profile = Some(profile.trim().to_string());
+            if let Some(profile) = trimmed.strip_prefix("#_Profile") {
+                let profile = profile.trim().to_string();
+                for host in &mut current_hosts {
+                    host.profile = Some(profile.clone());
+                }
             }
-            if let Some(sshpass_val) = trimmed.strip_prefix("#_sshpass")
-                && let Some(ref mut host) = current_host
-            {
+            if let Some(sshpass_val) = trimmed.strip_prefix("#_sshpass") {
                 let val = sshpass_val.trim().to_lowercase();
-                host.use_sshpass = val == "true" || val == "yes" || val == "1";
+                let use_sshpass = val == "true" || val == "yes" || val == "1";
+                for host in &mut current_hosts {
+                    host.use_sshpass = use_sshpass;
+                }
             }
-            if let Some(hidden_val) = trimmed.strip_prefix("#_hidden")
-                && let Some(ref mut host) = current_host
-            {
+            if let Some(hidden_val) = trimmed.strip_prefix("#_hidden") {
                 let val = hidden_val.trim().to_lowercase();
-                host.hidden = val == "true" || val == "yes" || val == "1";
+                let hidden = val == "true" || val == "yes" || val == "1";
+                for host in &mut current_hosts {
+                    host.hidden = hidden;
+                }
             }
             continue;
         }
@@ -135,51 +139,52 @@ fn parse_config_file(config_path: &Path) -> io::Result<ParsedConfigFile> {
 
         match keyword.as_str() {
             "host" => {
-                if let Some(host) = current_host.take()
-                    && !host.name.contains('*')
-                    && !host.name.contains('?')
-                    && !host.hidden
-                {
-                    parsed.hosts.push(host);
+                for host in current_hosts.drain(..) {
+                    if !host.name.contains('*') && !host.name.contains('?') && !host.hidden {
+                        parsed.hosts.push(host);
+                    }
                 }
 
-                let host_pattern = value.split_whitespace().next().unwrap_or(value);
-                current_host = Some(SshHost::new(host_pattern.to_string()));
+                current_hosts = value.split_whitespace().map(|alias| SshHost::new(alias.to_string())).collect();
+                if current_hosts.is_empty() {
+                    current_hosts.push(SshHost::new(value.to_string()));
+                }
             }
             "hostname" => {
-                if let Some(ref mut host) = current_host {
+                for host in &mut current_hosts {
                     host.hostname = Some(value.to_string());
                 }
             }
             "user" => {
-                if let Some(ref mut host) = current_host {
+                for host in &mut current_hosts {
                     host.user = Some(value.to_string());
                 }
             }
             "port" => {
-                if let Some(ref mut host) = current_host
-                    && let Ok(port) = value.parse::<u16>()
-                {
-                    host.port = Some(port);
+                if let Ok(port) = value.parse::<u16>() {
+                    for host in &mut current_hosts {
+                        host.port = Some(port);
+                    }
                 }
             }
             "identityfile" => {
-                if let Some(ref mut host) = current_host {
-                    host.identity_file = Some(expand_tilde(value));
+                let identity = expand_tilde(value);
+                for host in &mut current_hosts {
+                    host.identity_file = Some(identity.clone());
                 }
             }
             "proxyjump" => {
-                if let Some(ref mut host) = current_host {
+                for host in &mut current_hosts {
                     host.proxy_jump = Some(value.to_string());
                 }
             }
             "localforward" => {
-                if let Some(ref mut host) = current_host {
+                for host in &mut current_hosts {
                     host.local_forward.push(value.to_string());
                 }
             }
             "remoteforward" => {
-                if let Some(ref mut host) = current_host {
+                for host in &mut current_hosts {
                     host.remote_forward.push(value.to_string());
                 }
             }
@@ -189,19 +194,17 @@ fn parse_config_file(config_path: &Path) -> io::Result<ParsedConfigFile> {
                 }
             }
             _ => {
-                if let Some(ref mut host) = current_host {
+                for host in &mut current_hosts {
                     host.other_options.insert(keyword.clone(), value.to_string());
                 }
             }
         }
     }
 
-    if let Some(host) = current_host
-        && !host.name.contains('*')
-        && !host.name.contains('?')
-        && !host.hidden
-    {
-        parsed.hosts.push(host);
+    for host in current_hosts {
+        if !host.name.contains('*') && !host.name.contains('?') && !host.hidden {
+            parsed.hosts.push(host);
+        }
     }
 
     Ok(parsed)

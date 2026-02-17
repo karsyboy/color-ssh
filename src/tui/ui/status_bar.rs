@@ -1,6 +1,7 @@
 //! Global status bar rendering.
 
 use crate::tui::SessionManager;
+use crate::tui::ui::theme::display_width;
 use ratatui::{
     Frame,
     layout::{Alignment, Constraint, Direction, Layout, Rect},
@@ -54,7 +55,7 @@ impl SessionManager {
     }
 
     fn spans_display_width(&self, spans: &[Span<'static>]) -> usize {
-        spans.iter().map(|span| span.content.chars().count()).sum()
+        spans.iter().map(|span| display_width(span.content.as_ref())).sum()
     }
 
     fn resolve_status_context(&self) -> StatusContext {

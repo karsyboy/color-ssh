@@ -135,12 +135,8 @@ pub fn process_handler(process_args: Vec<String>, is_non_interactive: bool) -> R
 pub fn spawn_ssh(args: &[String]) -> std::io::Result<std::process::Child> {
     log_debug!("Spawning SSH with args: {:?}", args);
 
-    // Force PTY allocation to ensure proper interactive behavior and prevent buffering issues
-    let mut ssh_args = vec!["-t".to_string()];
-    ssh_args.extend_from_slice(args);
-
     let child = Command::new("ssh")
-        .args(&ssh_args)
+        .args(args)
         .stdin(Stdio::inherit())
         .stdout(Stdio::piped())
         .stderr(Stdio::inherit())

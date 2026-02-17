@@ -1,10 +1,64 @@
 //! Terminal-search indexing and viewport sync.
 
-use crate::tui::SessionManager;
+use crate::tui::{SessionManager, TerminalSearchRowSnapshot};
 use crate::{debug_enabled, log_debug};
+use std::sync::atomic::Ordering as AtomicOrdering;
 use std::time::Instant;
 
 impl SessionManager {
+    fn build_terminal_search_cache_rows(parser: &mut vt100::Parser, restore_scrollback: usize) -> Vec<TerminalSearchRowSnapshot> {
+        parser.set_scrollback(usize::MAX);
+        let max_scrollback = parser.screen().scrollback();
+        let mut rows_out = Vec::new();
+
+        for scrollback_pos in (0..=max_scrollback).rev() {
+            parser.set_scrollback(scrollback_pos);
+            let screen = parser.screen();
+            let (rows, cols) = screen.size();
+
+            let mut collect_row = |row: u16| {
+                let mut row_text_lower = String::new();
+                let mut col_start_byte_offsets = Vec::with_capacity(cols as usize);
+                for col in 0..cols {
+                    col_start_byte_offsets.push(row_text_lower.len());
+                    if let Some(cell) = screen.cell(row, col) {
+                        if cell.has_contents() {
+                            row_text_lower.push_str(&cell.contents().to_lowercase());
+                        } else {
+                            row_text_lower.push(' ');
+                        }
+                    } else {
+                        row_text_lower.push(' ');
+                    }
+                }
+                rows_out.push(TerminalSearchRowSnapshot {
+                    abs_row: row as i64 - scrollback_pos as i64,
+                    row_text_lower,
+                    col_start_byte_offsets,
+                });
+            };
+
+            if scrollback_pos == 0 {
+                for row in 0..rows {
+                    collect_row(row);
+                }
+            } else {
+                collect_row(0);
+            }
+        }
+
+        parser.set_scrollback(restore_scrollback);
+        rows_out
+    }
+
+    fn match_col_for_start(col_start_byte_offsets: &[usize], start_pos: usize) -> usize {
+        match col_start_byte_offsets.binary_search(&start_pos) {
+            Ok(col) => col,
+            Err(0) => 0,
+            Err(insert) => insert.saturating_sub(1),
+        }
+    }
+
     pub(crate) fn update_terminal_search(&mut self) {
         if self.tabs.is_empty() || self.selected_tab >= self.tabs.len() {
             return;
@@ -24,73 +78,40 @@ impl SessionManager {
             (query_lower, query_char_count)
         };
 
-        let scroll_offset = self.tabs[selected_tab].scroll_offset;
-        let parser_arc = match self.tabs[selected_tab].session.as_ref() {
-            Some(session) => session.parser.clone(),
+        let (scroll_offset, parser_arc, render_epoch) = match self.tabs[selected_tab].session.as_ref() {
+            Some(session) => (
+                self.tabs[selected_tab].scroll_offset,
+                session.parser.clone(),
+                session.render_epoch.load(AtomicOrdering::Relaxed),
+            ),
             None => return,
         };
 
-        let mut matches = Vec::new();
-        if let Ok(mut parser) = parser_arc.lock() {
-            parser.set_scrollback(usize::MAX);
-            let max_scrollback = parser.screen().scrollback();
-            let mut row_text = String::new();
-            let mut col_to_pos = Vec::new();
+        let cache_stale =
+            self.tabs[selected_tab].terminal_search_cache.rows.is_empty() || self.tabs[selected_tab].terminal_search_cache.render_epoch != render_epoch;
 
-            for scrollback_pos in (0..=max_scrollback).rev() {
-                parser.set_scrollback(scrollback_pos);
-                let screen = parser.screen();
-                let (rows, cols) = screen.size();
-
-                let mut scan_row = |row: u16, collected: &mut Vec<(i64, u16, usize)>| {
-                    row_text.clear();
-                    col_to_pos.clear();
-
-                    for col in 0..cols {
-                        col_to_pos.push(row_text.len());
-                        if let Some(cell) = screen.cell(row, col) {
-                            if cell.has_contents() {
-                                row_text.push_str(&cell.contents());
-                            } else {
-                                row_text.push(' ');
-                            }
-                        } else {
-                            row_text.push(' ');
-                        }
-                    }
-
-                    let row_text_lower = row_text.to_lowercase();
-                    let mut search_start = 0;
-                    while let Some(pos) = row_text_lower[search_start..].find(&query_lower) {
-                        let match_pos = search_start + pos;
-
-                        let mut match_col = 0usize;
-                        for (col_idx, &string_pos) in col_to_pos.iter().enumerate() {
-                            if string_pos == match_pos {
-                                match_col = col_idx;
-                                break;
-                            }
-                            if string_pos > match_pos {
-                                break;
-                            }
-                            match_col = col_idx;
-                        }
-
-                        let abs_row = row as i64 - scrollback_pos as i64;
-                        collected.push((abs_row, match_col as u16, query_char_count));
-                        search_start = match_pos + 1;
-                    }
-                };
-
-                if scrollback_pos == 0 {
-                    for row in 0..rows {
-                        scan_row(row, &mut matches);
-                    }
-                } else {
-                    scan_row(0, &mut matches);
+        if cache_stale {
+            if let Ok(mut parser) = parser_arc.lock() {
+                let rows = Self::build_terminal_search_cache_rows(&mut parser, scroll_offset);
+                if let Some(tab) = self.tabs.get_mut(selected_tab) {
+                    tab.terminal_search_cache.rows = rows;
+                    tab.terminal_search_cache.render_epoch = render_epoch;
                 }
+            } else if let Some(tab) = self.tabs.get_mut(selected_tab) {
+                tab.terminal_search_cache.rows.clear();
+                tab.terminal_search_cache.render_epoch = render_epoch;
             }
-            parser.set_scrollback(scroll_offset);
+        }
+
+        let mut matches = Vec::new();
+        for row in &self.tabs[selected_tab].terminal_search_cache.rows {
+            let mut search_start = 0;
+            while let Some(pos) = row.row_text_lower[search_start..].find(&query_lower) {
+                let match_pos = search_start + pos;
+                let match_col = Self::match_col_for_start(&row.col_start_byte_offsets, match_pos);
+                matches.push((row.abs_row, match_col as u16, query_char_count));
+                search_start = match_pos.saturating_add(1);
+            }
         }
 
         if let Some(search) = self.tabs.get_mut(selected_tab).map(|tab| &mut tab.terminal_search) {

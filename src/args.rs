@@ -99,9 +99,8 @@ cossh user@host -G                                 # Non-interactive command
         std::process::exit(2);
     }
 
-    // Detect non-interactive SSH commands that don't need highlighting
-    // These commands typically output configuration or version info
-    let is_non_interactive = ssh_args.iter().any(|arg| matches!(arg.as_str(), "-G" | "-V" | "-O" | "-Q" | "-T"));
+    // Detect SSH command modes that should bypass highlighting/output processing.
+    let is_non_interactive = ssh_args.iter().any(|arg| matches!(arg.as_str(), "-G" | "-V" | "-O" | "-Q"));
 
     MainArgs {
         debug,

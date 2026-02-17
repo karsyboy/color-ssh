@@ -3,7 +3,7 @@
 use super::osc52::forward_osc52;
 use super::terminal_queries::respond_to_terminal_queries;
 use crate::ssh_config::SshHost;
-use crate::tui::{HostTab, SessionManager, SshSession, TerminalSearchState};
+use crate::tui::{HostTab, SessionManager, SshSession, TerminalSearchCache, TerminalSearchState};
 use crate::{debug_enabled, log_debug, log_error};
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use portable_pty::{CommandBuilder, PtySize, native_pty_system};
@@ -145,6 +145,7 @@ impl SessionManager {
             session,
             scroll_offset: 0,
             terminal_search: TerminalSearchState::default(),
+            terminal_search_cache: TerminalSearchCache::default(),
             force_ssh_logging,
             last_pty_size: None,
         };
@@ -366,6 +367,9 @@ impl SessionManager {
                 let tab = &mut self.tabs[self.selected_tab];
                 tab.session = Some(session);
                 tab.scroll_offset = 0;
+                tab.terminal_search.matches.clear();
+                tab.terminal_search.current = 0;
+                tab.terminal_search_cache = TerminalSearchCache::default();
                 log_debug!("Successfully reconnected to {}", host.name);
             }
             Err(err) => {
@@ -401,6 +405,7 @@ impl SessionManager {
 
             // Rebuild parser from replay log to preserve text when width changes.
             rebuild_parser_from_replay(session, rows, cols, self.history_buffer);
+            session.render_epoch.fetch_add(1, Ordering::Relaxed);
 
             tab.last_pty_size = Some((rows, cols));
             if debug_enabled!() {

@@ -3,6 +3,7 @@
 use crate::tui::SessionManager;
 use crate::tui::features::selection::extract::is_cell_in_selection;
 use crate::tui::features::terminal_search::render_highlight::build_search_row_ranges;
+use crate::tui::ui::theme::{display_width, truncate_to_display_width};
 use ratatui::{
     Frame,
     layout::{Constraint, Direction, Layout, Rect},
@@ -258,9 +259,9 @@ impl SessionManager {
                     return;
                 }
                 let remaining = visible_tab_width - used;
-                let chunk: String = text.chars().take(remaining).collect();
+                let chunk = truncate_to_display_width(text, remaining);
                 if !chunk.is_empty() {
-                    let width = chunk.chars().count();
+                    let width = display_width(&chunk);
                     spans.push(Span::styled(chunk, text_style));
                     used += width;
                 }
