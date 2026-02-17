@@ -24,3 +24,21 @@ pub(crate) fn truncate_to_display_width(text: &str, max_width: usize) -> String 
 
     output
 }
+
+#[cfg(test)]
+mod tests {
+    use super::{display_width, truncate_to_display_width};
+
+    #[test]
+    fn calculates_display_width_for_wide_glyphs() {
+        assert_eq!(display_width("abc"), 3);
+        assert_eq!(display_width("a界b"), 4);
+    }
+
+    #[test]
+    fn truncates_by_display_width_instead_of_char_count() {
+        assert_eq!(truncate_to_display_width("a界b", 1), "a");
+        assert_eq!(truncate_to_display_width("a界b", 3), "a界");
+        assert_eq!(truncate_to_display_width("a界b", 4), "a界b");
+    }
+}

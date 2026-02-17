@@ -269,3 +269,16 @@ impl SessionManager {
         (left, right)
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::SessionManager;
+    use ratatui::text::Span;
+
+    #[test]
+    fn calculates_span_width_using_unicode_display_width() {
+        let app = SessionManager::new_for_tests();
+        let spans = vec![Span::raw("a界"), Span::raw("x")];
+        assert_eq!(app.spans_display_width(&spans), 4);
+    }
+}

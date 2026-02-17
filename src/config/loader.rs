@@ -344,3 +344,80 @@ fn compile_secret_patterns(config: &Config) -> Vec<Regex> {
 
     patterns
 }
+
+#[cfg(test)]
+mod tests {
+    use super::{ColorType, compile_rules, compile_secret_patterns, hex_to_ansi, is_valid_hex_color};
+    use crate::config::style::{Config, HighlightRule, Metadata, Settings};
+    use std::collections::HashMap;
+
+    fn base_config() -> Config {
+        Config {
+            settings: Settings::default(),
+            interactive_settings: None,
+            palette: HashMap::new(),
+            rules: Vec::new(),
+            metadata: Metadata::default(),
+        }
+    }
+
+    #[test]
+    fn validates_hex_color_format() {
+        assert!(is_valid_hex_color("#00ffAA"));
+        assert!(!is_valid_hex_color("00ffAA"));
+        assert!(!is_valid_hex_color("#00ffA"));
+        assert!(!is_valid_hex_color("#00ffZZ"));
+    }
+
+    #[test]
+    fn converts_hex_to_ansi_for_fg_and_bg() {
+        assert_eq!(hex_to_ansi("#112233", ColorType::Foreground), "\x1b[38;2;17;34;51m");
+        assert_eq!(hex_to_ansi("#112233", ColorType::Background), "\x1b[48;2;17;34;51m");
+        assert_eq!(hex_to_ansi("oops", ColorType::Foreground), "");
+    }
+
+    #[test]
+    fn compiles_rules_and_handles_missing_colors_and_invalid_regex() {
+        let mut config = base_config();
+        config.palette.insert("ok_fg".to_string(), "#00ff00".to_string());
+        config.palette.insert("ok_bg".to_string(), "#0000ff".to_string());
+        config.rules = vec![
+            HighlightRule {
+                regex: "success".to_string(),
+                color: "ok_fg".to_string(),
+                bg_color: None,
+            },
+            HighlightRule {
+                regex: "combo".to_string(),
+                color: "ok_fg".to_string(),
+                bg_color: Some("ok_bg".to_string()),
+            },
+            HighlightRule {
+                regex: "fallback".to_string(),
+                color: "missing".to_string(),
+                bg_color: None,
+            },
+            HighlightRule {
+                regex: "[unclosed".to_string(),
+                color: "ok_fg".to_string(),
+                bg_color: None,
+            },
+        ];
+
+        let compiled = compile_rules(&config);
+        assert_eq!(compiled.len(), 3, "invalid regex should be dropped");
+        assert_eq!(compiled[0].1, "\x1b[38;2;0;255;0m");
+        assert_eq!(compiled[1].1, "\x1b[38;2;0;255;0;48;2;0;0;255m");
+        assert_eq!(compiled[2].1, "\x1b[0m", "missing palette entry should fall back to reset");
+    }
+
+    #[test]
+    fn compiles_only_valid_secret_patterns() {
+        let mut config = base_config();
+        config.settings.remove_secrets = Some(vec!["token=\\w+".to_string(), "[".to_string()]);
+
+        let patterns = compile_secret_patterns(&config);
+        assert_eq!(patterns.len(), 1);
+        assert!(patterns[0].is_match("token=abc123"));
+    }
+}

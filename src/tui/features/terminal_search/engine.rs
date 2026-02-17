@@ -5,6 +5,20 @@ use crate::{debug_enabled, log_debug};
 use std::sync::atomic::Ordering as AtomicOrdering;
 use std::time::Instant;
 
+fn find_matches_in_cached_rows(rows: &[TerminalSearchRowSnapshot], query_lower: &str, query_char_count: usize) -> Vec<(i64, u16, usize)> {
+    let mut matches = Vec::new();
+    for row in rows {
+        let mut search_start = 0;
+        while let Some(pos) = row.row_text_lower[search_start..].find(query_lower) {
+            let match_pos = search_start + pos;
+            let match_col = SessionManager::match_col_for_start(&row.col_start_byte_offsets, match_pos);
+            matches.push((row.abs_row, match_col as u16, query_char_count));
+            search_start = match_pos.saturating_add(1);
+        }
+    }
+    matches
+}
+
 impl SessionManager {
     fn build_terminal_search_cache_rows(parser: &mut vt100::Parser, restore_scrollback: usize) -> Vec<TerminalSearchRowSnapshot> {
         parser.set_scrollback(usize::MAX);
@@ -103,16 +117,7 @@ impl SessionManager {
             }
         }
 
-        let mut matches = Vec::new();
-        for row in &self.tabs[selected_tab].terminal_search_cache.rows {
-            let mut search_start = 0;
-            while let Some(pos) = row.row_text_lower[search_start..].find(&query_lower) {
-                let match_pos = search_start + pos;
-                let match_col = Self::match_col_for_start(&row.col_start_byte_offsets, match_pos);
-                matches.push((row.abs_row, match_col as u16, query_char_count));
-                search_start = match_pos.saturating_add(1);
-            }
-        }
+        let matches = find_matches_in_cached_rows(&self.tabs[selected_tab].terminal_search_cache.rows, &query_lower, query_char_count);
 
         if let Some(search) = self.tabs.get_mut(selected_tab).map(|tab| &mut tab.terminal_search) {
             search.matches = matches;
@@ -167,5 +172,46 @@ impl SessionManager {
                 tab.scroll_offset = (needed_scroll as usize).min(max_scrollback);
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{SessionManager, find_matches_in_cached_rows};
+    use crate::tui::TerminalSearchRowSnapshot;
+    use vt100::Parser;
+
+    #[test]
+    fn restores_scrollback_after_building_search_cache_rows() {
+        let mut parser = Parser::new(2, 5, 50);
+        parser.process(b"11111\r\n22222\r\n33333\r\n");
+        parser.set_scrollback(1);
+        let before = parser.screen().cell(0, 0).map(|cell| cell.contents()).unwrap_or_default();
+
+        let rows = SessionManager::build_terminal_search_cache_rows(&mut parser, 1);
+        let after = parser.screen().cell(0, 0).map(|cell| cell.contents()).unwrap_or_default();
+
+        assert!(!rows.is_empty());
+        assert_eq!(before, after);
+    }
+
+    #[test]
+    fn maps_start_byte_offset_to_column_with_binary_search() {
+        let offsets = vec![0, 1, 2, 3, 4];
+        assert_eq!(SessionManager::match_col_for_start(&offsets, 0), 0);
+        assert_eq!(SessionManager::match_col_for_start(&offsets, 3), 3);
+        assert_eq!(SessionManager::match_col_for_start(&offsets, 10), 4);
+    }
+
+    #[test]
+    fn finds_multiple_matches_per_row_from_cached_snapshots() {
+        let rows = vec![TerminalSearchRowSnapshot {
+            abs_row: 3,
+            row_text_lower: "alpha alpha".to_string(),
+            col_start_byte_offsets: (0..11).collect(),
+        }];
+
+        let matches = find_matches_in_cached_rows(&rows, "alpha", 5);
+        assert_eq!(matches, vec![(3, 0, 5), (3, 6, 5)]);
     }
 }

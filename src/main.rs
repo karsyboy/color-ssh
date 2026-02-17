@@ -137,3 +137,38 @@ fn main() -> Result<ExitCode> {
     log_info!("color-ssh exiting with code: {:?}", exit_code);
     Ok(exit_code)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::extract_ssh_destination;
+
+    #[test]
+    fn extracts_plain_destination_host() {
+        let args = vec!["example.com".to_string()];
+        assert_eq!(extract_ssh_destination(&args).as_deref(), Some("example.com"));
+    }
+
+    #[test]
+    fn extracts_host_from_user_at_host_syntax() {
+        let args = vec!["alice@example.com".to_string()];
+        assert_eq!(extract_ssh_destination(&args).as_deref(), Some("example.com"));
+    }
+
+    #[test]
+    fn skips_flags_that_consume_values_before_destination() {
+        let args = vec![
+            "-p".to_string(),
+            "2222".to_string(),
+            "-J".to_string(),
+            "jump.example.com".to_string(),
+            "target.example.com".to_string(),
+        ];
+        assert_eq!(extract_ssh_destination(&args).as_deref(), Some("target.example.com"));
+    }
+
+    #[test]
+    fn returns_none_when_only_value_consuming_flags_are_present() {
+        let args = vec!["-W".to_string(), "localhost:22".to_string()];
+        assert_eq!(extract_ssh_destination(&args), None);
+    }
+}

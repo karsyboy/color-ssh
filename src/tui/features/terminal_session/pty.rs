@@ -466,13 +466,26 @@ impl SessionManager {
 
 #[cfg(test)]
 mod tests {
-    use super::encode_key_event_bytes;
+    use super::{SessionManager, encode_key_event_bytes};
     use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
     #[test]
     fn encode_key_event_bytes_ctrl_char() {
         let key = KeyEvent::new(KeyCode::Char('C'), KeyModifiers::CONTROL);
         assert_eq!(encode_key_event_bytes(key), Some(vec![3]));
+    }
+
+    #[test]
+    fn encode_key_event_bytes_ctrl_bracket_variants() {
+        let open = KeyEvent::new(KeyCode::Char('['), KeyModifiers::CONTROL);
+        let backslash = KeyEvent::new(KeyCode::Char('\\'), KeyModifiers::CONTROL);
+        let close = KeyEvent::new(KeyCode::Char(']'), KeyModifiers::CONTROL);
+        let at = KeyEvent::new(KeyCode::Char('@'), KeyModifiers::CONTROL);
+
+        assert_eq!(encode_key_event_bytes(open), Some(vec![27]));
+        assert_eq!(encode_key_event_bytes(backslash), Some(vec![28]));
+        assert_eq!(encode_key_event_bytes(close), Some(vec![29]));
+        assert_eq!(encode_key_event_bytes(at), Some(vec![0]));
     }
 
     #[test]
@@ -485,5 +498,34 @@ mod tests {
     fn encode_key_event_bytes_arrow() {
         let key = KeyEvent::new(KeyCode::Up, KeyModifiers::NONE);
         assert_eq!(encode_key_event_bytes(key), Some(b"\x1b[A".to_vec()));
+    }
+
+    #[test]
+    fn encode_key_event_bytes_alt_arrow_prefixes_escape() {
+        let key = KeyEvent::new(KeyCode::Up, KeyModifiers::ALT);
+        assert_eq!(encode_key_event_bytes(key), Some(b"\x1b\x1b[A".to_vec()));
+    }
+
+    #[test]
+    fn detects_clear_sequence_start_for_esc_2j_and_esc_3j() {
+        assert_eq!(SessionManager::clear_replay_slice_start(b"hello\x1b[2J"), Some(5));
+        assert_eq!(SessionManager::clear_replay_slice_start(b"hello\x1b[3J"), Some(5));
+    }
+
+    #[test]
+    fn keeps_contiguous_home_and_clear_chain_when_detecting_start() {
+        let data = b"abc\x1b[H\x1b[2J\x1b[3J";
+        assert_eq!(SessionManager::clear_replay_slice_start(data), Some(3));
+    }
+
+    #[test]
+    fn prefers_latest_clear_chain_start_when_multiple_clears_exist() {
+        let data = b"abc\x1b[2Jjunk\x1b[H\x1b[3J";
+        assert_eq!(SessionManager::clear_replay_slice_start(data), Some(11));
+    }
+
+    #[test]
+    fn returns_none_when_no_clear_sequence_is_present() {
+        assert_eq!(SessionManager::clear_replay_slice_start(b"normal output only"), None);
     }
 }

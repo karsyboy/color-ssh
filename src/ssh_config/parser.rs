@@ -301,4 +301,51 @@ mod tests {
 
         let _ = fs::remove_dir_all(dir);
     }
+
+    #[test]
+    fn expands_multi_alias_host_stanzas_and_applies_metadata_to_all_aliases() {
+        let dir = test_dir("multi_alias").expect("temp dir");
+        let config_path = dir.join("config");
+
+        write_file(
+            &config_path,
+            "Host app-a app-b app-c\n#_Desc Shared app hosts\n#_Profile prod\nHostName app.internal\nUser deploy\nPort 2222\nIdentityFile ~/.ssh/id_app\nProxyJump bastion\n",
+        )
+        .expect("write config");
+
+        let hosts = parse_ssh_config(&config_path).expect("parse config");
+        let names: Vec<&str> = hosts.iter().map(|host| host.name.as_str()).collect();
+        assert_eq!(names, vec!["app-a", "app-b", "app-c"]);
+
+        for host in hosts {
+            assert_eq!(host.hostname.as_deref(), Some("app.internal"));
+            assert_eq!(host.user.as_deref(), Some("deploy"));
+            assert_eq!(host.port, Some(2222));
+            assert_eq!(host.description.as_deref(), Some("Shared app hosts"));
+            assert_eq!(host.profile.as_deref(), Some("prod"));
+            assert_eq!(host.proxy_jump.as_deref(), Some("bastion"));
+            let identity = host.identity_file.as_deref().unwrap_or_default();
+            assert!(identity.ends_with(".ssh/id_app"));
+        }
+
+        let _ = fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn filters_hidden_and_wildcard_aliases_within_multi_alias_stanza() {
+        let dir = test_dir("alias_filtering").expect("temp dir");
+        let config_path = dir.join("config");
+
+        write_file(
+            &config_path,
+            "Host db-* db-primary db-standby\nHostName db.internal\n\nHost hidden-a hidden-b\n#_hidden true\nHostName hidden.internal\n",
+        )
+        .expect("write config");
+
+        let hosts = parse_ssh_config(&config_path).expect("parse config");
+        let names: Vec<&str> = hosts.iter().map(|host| host.name.as_str()).collect();
+        assert_eq!(names, vec!["db-primary", "db-standby"]);
+
+        let _ = fs::remove_dir_all(dir);
+    }
 }

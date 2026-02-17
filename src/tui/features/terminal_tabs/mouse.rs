@@ -527,6 +527,31 @@ impl SessionManager {
 #[cfg(test)]
 mod tests {
     use super::SessionManager;
+    use crate::ssh_config::SshHost;
+    use crate::tui::{HostTab, TerminalSearchCache, TerminalSearchState};
+    use crossterm::event::{KeyModifiers, MouseButton, MouseEvent, MouseEventKind};
+    use ratatui::layout::Rect;
+
+    fn app_with_tabs(titles: &[&str]) -> SessionManager {
+        let mut app = SessionManager::new_for_tests();
+        app.host_panel_visible = false;
+        app.host_panel_area = Rect::default();
+        app.host_list_area = Rect::default();
+        app.tab_bar_area = Rect::new(0, 0, 40, 1);
+        for title in titles {
+            app.tabs.push(HostTab {
+                host: SshHost::new((*title).to_string()),
+                title: (*title).to_string(),
+                session: None,
+                scroll_offset: 0,
+                terminal_search: TerminalSearchState::default(),
+                terminal_search_cache: TerminalSearchCache::default(),
+                force_ssh_logging: false,
+                last_pty_size: None,
+            });
+        }
+        app
+    }
 
     #[test]
     fn encode_mouse_event_bytes_sgr_press_and_release() {
@@ -541,5 +566,60 @@ mod tests {
     fn encode_mouse_event_bytes_default_clamps_large_coords() {
         let bytes = SessionManager::encode_mouse_event_bytes(vt100::MouseProtocolEncoding::Default, 0, 500, 900, false);
         assert_eq!(bytes, vec![0x1b, b'[', b'M', 32, 255, 255]);
+    }
+
+    #[test]
+    fn closes_wide_title_tab_when_clicking_close_glyph() {
+        let mut app = app_with_tabs(&["a界", "next"]);
+        let close_click = MouseEvent {
+            kind: MouseEventKind::Down(MouseButton::Left),
+            column: 4,
+            row: 0,
+            modifiers: KeyModifiers::NONE,
+        };
+
+        app.handle_mouse(close_click).expect("mouse handling");
+        assert_eq!(app.tabs.len(), 1);
+        assert_eq!(app.tabs[0].title, "next");
+    }
+
+    #[test]
+    fn selects_tab_when_clicking_title_region_not_close_glyph() {
+        let mut app = app_with_tabs(&["one", "a界"]);
+        let select_second_tab = MouseEvent {
+            kind: MouseEventKind::Down(MouseButton::Left),
+            column: 7,
+            row: 0,
+            modifiers: KeyModifiers::NONE,
+        };
+
+        app.handle_mouse(select_second_tab).expect("mouse handling");
+        assert_eq!(app.selected_tab, 1);
+        assert_eq!(app.tabs.len(), 2);
+    }
+
+    #[test]
+    fn scroll_markers_move_tab_strip_left_and_right() {
+        let mut app = app_with_tabs(&["one", "two", "three", "four"]);
+        app.tab_bar_area = Rect::new(0, 0, 10, 1);
+        app.tab_scroll_offset = 0;
+
+        let right_marker_click = MouseEvent {
+            kind: MouseEventKind::Down(MouseButton::Left),
+            column: 9,
+            row: 0,
+            modifiers: KeyModifiers::NONE,
+        };
+        app.handle_mouse(right_marker_click).expect("right marker click");
+        assert!(app.tab_scroll_offset > 0);
+
+        let left_marker_click = MouseEvent {
+            kind: MouseEventKind::Down(MouseButton::Left),
+            column: 0,
+            row: 0,
+            modifiers: KeyModifiers::NONE,
+        };
+        app.handle_mouse(left_marker_click).expect("left marker click");
+        assert_eq!(app.tab_scroll_offset, 0);
     }
 }

@@ -47,11 +47,9 @@ impl SessionManager {
         }
 
         let terminal_view_active = !self.focus_on_manager && !self.tabs.is_empty() && self.selected_tab < self.tabs.len();
-        if key.code == KeyCode::Char('q') && key.modifiers.contains(KeyModifiers::CONTROL) {
-            if !terminal_view_active {
-                self.should_exit = true;
-                return Ok(());
-            }
+        if key.code == KeyCode::Char('q') && key.modifiers.contains(KeyModifiers::CONTROL) && !terminal_view_active {
+            self.should_exit = true;
+            return Ok(());
         }
 
         if self.quick_connect.is_some() {
@@ -230,50 +228,8 @@ mod tests {
     use super::*;
 
     #[test]
-    fn encode_key_event_ctrl_char() {
-        let key = KeyEvent::new(KeyCode::Char('C'), KeyModifiers::CONTROL);
-        assert_eq!(encode_key_event_bytes(key), Some(vec![3]));
-    }
-
-    #[test]
-    fn encode_key_event_ctrl_bracket_variants() {
-        let open = KeyEvent::new(KeyCode::Char('['), KeyModifiers::CONTROL);
-        let backslash = KeyEvent::new(KeyCode::Char('\\'), KeyModifiers::CONTROL);
-        let close = KeyEvent::new(KeyCode::Char(']'), KeyModifiers::CONTROL);
-        let at = KeyEvent::new(KeyCode::Char('@'), KeyModifiers::CONTROL);
-
-        assert_eq!(encode_key_event_bytes(open), Some(vec![27]));
-        assert_eq!(encode_key_event_bytes(backslash), Some(vec![28]));
-        assert_eq!(encode_key_event_bytes(close), Some(vec![29]));
-        assert_eq!(encode_key_event_bytes(at), Some(vec![0]));
-    }
-
-    #[test]
-    fn encode_key_event_arrow() {
-        let key = KeyEvent::new(KeyCode::Up, KeyModifiers::NONE);
-        assert_eq!(encode_key_event_bytes(key), Some(b"\x1b[A".to_vec()));
-    }
-
-    #[test]
-    fn encode_key_event_alt_char_prefixes_escape() {
-        let key = KeyEvent::new(KeyCode::Char('f'), KeyModifiers::ALT);
-        assert_eq!(encode_key_event_bytes(key), Some(vec![0x1b, b'f']));
-    }
-
-    #[test]
-    fn encode_key_event_alt_arrow_prefixes_escape() {
-        let key = KeyEvent::new(KeyCode::Up, KeyModifiers::ALT);
-        assert_eq!(encode_key_event_bytes(key), Some(b"\x1b\x1b[A".to_vec()));
-    }
-
-    #[test]
-    fn tab_title_display_width_uses_unicode_display_width() {
-        assert_eq!(tab_title_display_width("a界"), 3);
-    }
-
-    #[test]
     fn handle_key_ctrl_q_sets_should_exit() {
-        let mut app = SessionManager::new().expect("app should initialize");
+        let mut app = SessionManager::new_for_tests();
         let key = KeyEvent::new(KeyCode::Char('q'), KeyModifiers::CONTROL);
         app.handle_key(key).expect("handle_key should succeed");
         assert!(app.should_exit);
@@ -281,7 +237,7 @@ mod tests {
 
     #[test]
     fn handle_key_ctrl_q_does_not_exit_in_terminal_view() {
-        let mut app = SessionManager::new().expect("app should initialize");
+        let mut app = SessionManager::new_for_tests();
         app.tabs.push(crate::tui::HostTab {
             host: crate::ssh_config::SshHost::new("test-host".to_string()),
             title: "test-host".to_string(),

@@ -255,6 +255,63 @@ impl AppState {
         app.update_filtered_hosts();
         Ok(app)
     }
+
+    #[cfg(test)]
+    pub(crate) fn new_for_tests() -> Self {
+        let host_tree_root = TreeFolder {
+            id: 0,
+            name: "config".to_string(),
+            path: std::path::PathBuf::from("~/.ssh/config"),
+            children: Vec::new(),
+            host_indices: Vec::new(),
+        };
+
+        let mut app = Self {
+            hosts: Vec::new(),
+            host_search_index: Vec::new(),
+            host_tree_root,
+            visible_host_rows: Vec::new(),
+            selected_host_row: 0,
+            host_match_scores: HashMap::new(),
+            collapsed_folders: HashSet::new(),
+            search_query: String::new(),
+            search_mode: false,
+            should_exit: false,
+            selected_host_to_connect: None,
+            host_list_area: Rect::default(),
+            host_info_area: Rect::default(),
+            host_scroll_offset: 0,
+            host_panel_width: 25,
+            host_panel_default_percent: 25,
+            host_info_height: 10,
+            tabs: Vec::new(),
+            selected_tab: 0,
+            focus_on_manager: true,
+            selection_start: None,
+            selection_end: None,
+            is_selecting: false,
+            selection_dragged: false,
+            tab_content_area: Rect::default(),
+            tab_bar_area: Rect::default(),
+            host_panel_area: Rect::default(),
+            last_click: None,
+            is_dragging_divider: false,
+            is_dragging_host_scrollbar: false,
+            is_dragging_host_info_divider: false,
+            tab_scroll_offset: 0,
+            history_buffer: 1000,
+            host_panel_visible: true,
+            host_info_visible: true,
+            quick_connect: None,
+            quick_connect_default_ssh_logging: false,
+            last_terminal_size: (100, 30),
+            ui_dirty: true,
+            last_draw_at: Instant::now(),
+            last_seen_render_epoch: 0,
+        };
+        app.update_filtered_hosts();
+        app
+    }
 }
 
 pub(crate) type SessionManager = AppState;
@@ -265,7 +322,7 @@ mod tests {
 
     #[test]
     fn terminal_resize_scales_host_panel_width_proportionally() {
-        let mut app = AppState::new().expect("app should initialize");
+        let mut app = AppState::new_for_tests();
         app.last_terminal_size = (100, 30);
         app.host_panel_width = 25;
 
@@ -278,7 +335,7 @@ mod tests {
 
     #[test]
     fn terminal_resize_clamps_host_panel_width_for_small_windows() {
-        let mut app = AppState::new().expect("app should initialize");
+        let mut app = AppState::new_for_tests();
         app.last_terminal_size = (120, 30);
         app.host_panel_width = 30;
 
@@ -288,7 +345,7 @@ mod tests {
 
     #[test]
     fn terminal_resize_growth_caps_host_panel_width_at_default() {
-        let mut app = AppState::new().expect("app should initialize");
+        let mut app = AppState::new_for_tests();
         app.last_terminal_size = (100, 30);
         app.host_panel_default_percent = 25;
         app.host_panel_width = 60;

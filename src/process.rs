@@ -6,6 +6,16 @@ use std::{
     thread,
 };
 
+fn map_exit_code(success: bool, code: Option<i32>) -> ExitCode {
+    if success {
+        ExitCode::SUCCESS
+    } else {
+        // Clamp exit code to valid u8 range (0-255)
+        let clamped_code = code.map_or(1, |status_code| u8::try_from(status_code).unwrap_or(255));
+        ExitCode::from(clamped_code)
+    }
+}
+
 /// Main process handler for SSH subprocess returns an exit code based on the SSH process status
 pub fn process_handler(process_args: Vec<String>, is_non_interactive: bool) -> Result<ExitCode> {
     log_info!("Starting SSH process with args: {:?}", process_args);
@@ -122,13 +132,7 @@ pub fn process_handler(process_args: Vec<String>, is_non_interactive: bool) -> R
     let exit_code = status.code().unwrap_or(1);
     log_info!("SSH process exited with code: {}", exit_code);
 
-    if status.success() {
-        Ok(ExitCode::SUCCESS)
-    } else {
-        // Clamp exit code to valid u8 range (0-255)
-        let clamped_code = u8::try_from(exit_code).unwrap_or(255);
-        Ok(ExitCode::from(clamped_code))
-    }
+    Ok(map_exit_code(status.success(), status.code()))
 }
 
 /// Spawns an SSH process with the provided arguments and returns the child process
@@ -168,11 +172,28 @@ fn spawn_ssh_passthrough(args: &[String]) -> Result<ExitCode> {
     let exit_code = status.code().unwrap_or(1);
     log_info!("SSH passthrough process exited with code: {}", exit_code);
 
-    if status.success() {
-        Ok(ExitCode::SUCCESS)
-    } else {
-        // Clamp exit code to valid u8 range (0-255)
-        let clamped_code = u8::try_from(exit_code).unwrap_or(255);
-        Ok(ExitCode::from(clamped_code))
+    Ok(map_exit_code(status.success(), status.code()))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::map_exit_code;
+    use std::process::ExitCode;
+
+    #[test]
+    fn returns_success_exit_code_for_success_status() {
+        assert_eq!(map_exit_code(true, Some(0)), ExitCode::SUCCESS);
+    }
+
+    #[test]
+    fn preserves_non_zero_exit_status_in_u8_range() {
+        assert_eq!(map_exit_code(false, Some(23)), ExitCode::from(23));
+    }
+
+    #[test]
+    fn clamps_out_of_range_status_and_defaults_missing_to_one() {
+        assert_eq!(map_exit_code(false, Some(300)), ExitCode::from(255));
+        assert_eq!(map_exit_code(false, Some(-1)), ExitCode::from(255));
+        assert_eq!(map_exit_code(false, None), ExitCode::from(1));
     }
 }

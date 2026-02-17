@@ -157,3 +157,38 @@ fn build_index_mapping(raw: &str) -> (String, Vec<usize>) {
     mapping.push(raw_idx);
     (clean_chunk, mapping)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::process_chunk;
+    use regex::Regex;
+
+    #[test]
+    fn highlights_text_when_match_exists_inside_ansi_sequences() {
+        let rules = vec![(Regex::new("error").expect("regex"), "<red>".to_string())];
+        let chunk = "\x1b[31merror\x1b[0m".to_string();
+
+        let output = process_chunk(chunk, 0, &rules, "</red>");
+        assert!(output.contains("<red>error"));
+        assert!(output.ends_with("</red>"));
+    }
+
+    #[test]
+    fn keeps_first_match_when_ranges_overlap() {
+        let rules = vec![
+            (Regex::new("ab").expect("regex"), "<a>".to_string()),
+            (Regex::new("abc").expect("regex"), "<b>".to_string()),
+        ];
+
+        let output = process_chunk("abc".to_string(), 1, &rules, "</>");
+        assert_eq!(output, "<a>ab</>c");
+    }
+
+    #[test]
+    fn maps_newlines_as_spaces_for_matching_but_preserves_raw_text() {
+        let rules = vec![(Regex::new("a b").expect("regex"), "<x>".to_string())];
+
+        let output = process_chunk("a\nb".to_string(), 2, &rules, "</x>");
+        assert_eq!(output, "<x>a\nb</x>");
+    }
+}
