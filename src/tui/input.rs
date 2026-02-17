@@ -1,18 +1,28 @@
 //! Keyboard input and terminal-search handling.
 
 use super::{ConnectRequest, QuickConnectField, QuickConnectState, SessionManager};
+use crate::{debug_enabled, log_debug, log_error};
 use crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
 use std::io::{self, Write};
+use std::time::Instant;
 
 fn encode_key_event(key: KeyEvent) -> Option<Vec<u8>> {
     let bytes = match key.code {
         KeyCode::Char(ch) => {
             if key.modifiers.contains(KeyModifiers::CONTROL) {
-                if ch.is_ascii_alphabetic() {
-                    vec![(ch.to_ascii_lowercase() as u8) - b'a' + 1]
-                } else {
-                    vec![ch as u8]
-                }
+                let control_byte = match ch {
+                    '@' | ' ' => 0,
+                    'a'..='z' => (ch as u8) - b'a' + 1,
+                    'A'..='Z' => (ch as u8) - b'A' + 1,
+                    '[' => 27,
+                    '\\' => 28,
+                    ']' => 29,
+                    '^' => 30,
+                    '_' => 31,
+                    '?' => 127,
+                    _ => ch as u8,
+                };
+                vec![control_byte]
             } else {
                 ch.to_string().into_bytes()
             }
@@ -38,20 +48,20 @@ fn encode_key_event(key: KeyEvent) -> Option<Vec<u8>> {
 }
 
 impl SessionManager {
-    fn clear_selection_state(&mut self) {
+    pub(super) fn clear_selection_state(&mut self) {
         self.selection_start = None;
         self.selection_end = None;
         self.is_selecting = false;
     }
 
-    fn focus_manager_panel(&mut self) {
+    pub(super) fn focus_manager_panel(&mut self) {
         self.focus_on_manager = true;
         if !self.host_panel_visible {
             self.host_panel_visible = true;
         }
     }
 
-    fn close_current_tab(&mut self) {
+    pub(super) fn close_current_tab(&mut self) {
         if self.tabs.is_empty() || self.selected_tab >= self.tabs.len() {
             return;
         }
@@ -66,7 +76,7 @@ impl SessionManager {
         }
     }
 
-    fn clear_terminal_search(&mut self) {
+    pub(super) fn clear_terminal_search(&mut self) {
         if let Some(search) = self.current_tab_search_mut() {
             search.active = false;
             search.query.clear();
@@ -586,23 +596,41 @@ impl SessionManager {
         Ok(())
     }
 
-    pub(super) fn send_key_to_pty(&mut self, key: KeyEvent) -> io::Result<()> {
+    pub(super) fn write_bytes_to_active_pty(&mut self, bytes: &[u8]) -> io::Result<()> {
         if self.selected_tab >= self.tabs.len() {
             return Ok(());
         }
 
+        let tab = &mut self.tabs[self.selected_tab];
+        let Some(session) = &mut tab.session else {
+            return Ok(());
+        };
+
+        let mut writer = match session.writer.lock() {
+            Ok(writer) => writer,
+            Err(lock_err) => {
+                log_error!("Failed to lock PTY writer: {}", lock_err);
+                return Ok(());
+            }
+        };
+
+        if let Err(err) = writer.write_all(bytes) {
+            log_error!("Failed to write to PTY: {}", err);
+            if let Ok(mut exited) = session.exited.lock() {
+                *exited = true;
+            }
+            return Ok(());
+        }
+
+        Ok(())
+    }
+
+    pub(super) fn send_key_to_pty(&mut self, key: KeyEvent) -> io::Result<()> {
         let Some(bytes) = encode_key_event(key) else {
             return Ok(());
         };
 
-        let tab = &mut self.tabs[self.selected_tab];
-        if let Some(session) = &mut tab.session
-            && let Ok(mut writer) = session.writer.lock()
-        {
-            let _ = writer.write_all(&bytes);
-        }
-
-        Ok(())
+        self.write_bytes_to_active_pty(&bytes)
     }
 
     pub(super) fn tab_display_width(&self, idx: usize) -> usize {
@@ -638,16 +666,19 @@ impl SessionManager {
         if self.tabs.is_empty() || self.selected_tab >= self.tabs.len() {
             return;
         }
+        let search_started_at = Instant::now();
 
         let selected_tab = self.selected_tab;
-        let query_lower = {
+        let (query_lower, query_char_count) = {
             let search = &mut self.tabs[selected_tab].terminal_search;
             search.matches.clear();
             search.current = 0;
             if search.query.is_empty() {
                 return;
             }
-            search.query.to_lowercase()
+            let query_lower = search.query.to_lowercase();
+            let query_char_count = query_lower.chars().count();
+            (query_lower, query_char_count)
         };
 
         let scroll_offset = self.tabs[selected_tab].scroll_offset;
@@ -660,17 +691,17 @@ impl SessionManager {
         if let Ok(mut parser) = parser_arc.lock() {
             parser.set_scrollback(usize::MAX);
             let max_scrollback = parser.screen().scrollback();
+            let mut row_text = String::new();
+            let mut col_to_pos = Vec::new();
 
             for scrollback_pos in (0..=max_scrollback).rev() {
                 parser.set_scrollback(scrollback_pos);
                 let screen = parser.screen();
                 let (rows, cols) = screen.size();
 
-                let search_rows: Vec<u16> = if scrollback_pos == 0 { (0..rows).collect() } else { vec![0] };
-
-                for &row in &search_rows {
-                    let mut row_text = String::new();
-                    let mut col_to_pos = Vec::new();
+                let mut scan_row = |row: u16, collected: &mut Vec<(i64, u16, usize)>| {
+                    row_text.clear();
+                    col_to_pos.clear();
 
                     for col in 0..cols {
                         col_to_pos.push(row_text.len());
@@ -695,21 +726,27 @@ impl SessionManager {
                             if string_pos == match_pos {
                                 match_col = col_idx;
                                 break;
-                            } else if string_pos > match_pos {
-                                break;
-                            } else {
-                                match_col = col_idx;
                             }
+                            if string_pos > match_pos {
+                                break;
+                            }
+                            match_col = col_idx;
                         }
 
                         let abs_row = row as i64 - scrollback_pos as i64;
-                        matches.push((abs_row, match_col as u16, query_lower.chars().count()));
-
+                        collected.push((abs_row, match_col as u16, query_char_count));
                         search_start = match_pos + 1;
                     }
+                };
+
+                if scrollback_pos == 0 {
+                    for row in 0..rows {
+                        scan_row(row, &mut matches);
+                    }
+                } else {
+                    scan_row(0, &mut matches);
                 }
             }
-
             parser.set_scrollback(scroll_offset);
         }
 
@@ -720,6 +757,12 @@ impl SessionManager {
 
         if self.tabs.get(selected_tab).map(|tab| !tab.terminal_search.matches.is_empty()).unwrap_or(false) {
             self.scroll_to_search_match();
+        }
+
+        if debug_enabled!() {
+            let elapsed = search_started_at.elapsed();
+            let match_count = self.tabs.get(selected_tab).map(|tab| tab.terminal_search.matches.len()).unwrap_or(0);
+            log_debug!("Terminal search updated in {:?} (matches: {})", elapsed, match_count);
         }
     }
 
@@ -771,6 +814,19 @@ mod tests {
     fn encode_key_event_ctrl_char() {
         let key = KeyEvent::new(KeyCode::Char('C'), KeyModifiers::CONTROL);
         assert_eq!(encode_key_event(key), Some(vec![3]));
+    }
+
+    #[test]
+    fn encode_key_event_ctrl_bracket_variants() {
+        let open = KeyEvent::new(KeyCode::Char('['), KeyModifiers::CONTROL);
+        let backslash = KeyEvent::new(KeyCode::Char('\\'), KeyModifiers::CONTROL);
+        let close = KeyEvent::new(KeyCode::Char(']'), KeyModifiers::CONTROL);
+        let at = KeyEvent::new(KeyCode::Char('@'), KeyModifiers::CONTROL);
+
+        assert_eq!(encode_key_event(open), Some(vec![27]));
+        assert_eq!(encode_key_event(backslash), Some(vec![28]));
+        assert_eq!(encode_key_event(close), Some(vec![29]));
+        assert_eq!(encode_key_event(at), Some(vec![0]));
     }
 
     #[test]

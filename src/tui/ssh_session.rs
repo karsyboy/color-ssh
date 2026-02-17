@@ -2,10 +2,14 @@
 
 use super::{HostTab, SessionManager, SshSession, TerminalSearchState};
 use crate::ssh_config::SshHost;
-use crate::{log_debug, log_error};
+use crate::{debug_enabled, log_debug, log_error};
 use portable_pty::{CommandBuilder, PtySize, native_pty_system};
 use std::io::{self, Read, Write};
-use std::sync::{Arc, Mutex};
+use std::sync::{
+    Arc, Mutex,
+    atomic::{AtomicU64, Ordering},
+};
+use std::time::Instant;
 use vt100::Parser;
 
 /// Respond to terminal query sequences from programs running in the PTY.
@@ -94,54 +98,63 @@ fn respond_to_terminal_queries(data: &[u8], writer: &Arc<Mutex<Box<dyn Write + S
 /// OSC 52 format: `ESC ] 52 ; <selection> ; <base64-data> BEL` or `ESC ] 52 ; <selection> ; <base64-data> ESC \`
 /// `osc_buf` accumulates partial sequences across read boundaries.
 fn forward_osc52(data: &[u8], osc_buf: &mut Vec<u8>) {
-    // If we're accumulating an OSC sequence, append new data
-    if !osc_buf.is_empty() {
-        osc_buf.extend_from_slice(data);
-        // Check for terminator: BEL (0x07) or ST (ESC \)
-        if let Some(end) = find_osc_end(osc_buf) {
-            let seq = &osc_buf[..end];
-            let mut stdout = io::stdout();
-            let _ = stdout.write_all(seq);
-            let _ = stdout.flush();
-            // There might be more data after the sequence; scan remainder
-            let rest = osc_buf[end..].to_vec();
-            osc_buf.clear();
-            if !rest.is_empty() {
-                forward_osc52(&rest, osc_buf);
-            }
-        } else if osc_buf.len() > 100_000 {
-            // Safety: don't accumulate forever if no terminator found
-            osc_buf.clear();
-        }
+    let forwarded_sequences = collect_osc52_sequences(data, osc_buf);
+    if forwarded_sequences.is_empty() {
         return;
     }
 
-    // Scan for OSC 52 start: ESC ] 52 ;
-    let mut scan_idx = 0;
-    while scan_idx < data.len() {
-        // Look for ESC (0x1b)
-        if data[scan_idx] == 0x1b && scan_idx + 1 < data.len() && data[scan_idx + 1] == b']' {
-            // Check if this is OSC 52
-            let rest = &data[scan_idx + 2..];
-            if rest.starts_with(b"52;") {
-                // Found OSC 52 start — look for terminator in remaining data
-                let seq_start = scan_idx;
-                if let Some(end_offset) = find_osc_end(&data[seq_start..]) {
-                    // Complete sequence — forward it
-                    let seq = &data[seq_start..seq_start + end_offset];
-                    let mut stdout = io::stdout();
-                    let _ = stdout.write_all(seq);
-                    let _ = stdout.flush();
-                    scan_idx = seq_start + end_offset;
-                    continue;
-                } else {
-                    // Partial sequence — buffer it for next read
-                    osc_buf.extend_from_slice(&data[seq_start..]);
-                    return;
+    let mut stdout = io::stdout();
+    for sequence in forwarded_sequences {
+        let _ = stdout.write_all(&sequence);
+    }
+    let _ = stdout.flush();
+}
+
+fn collect_osc52_sequences(data: &[u8], osc_buf: &mut Vec<u8>) -> Vec<Vec<u8>> {
+    let mut forwarded = Vec::new();
+    let mut owned_input: Option<Vec<u8>> = None;
+    let mut input = owned_input.as_deref().unwrap_or(data);
+
+    loop {
+        if !osc_buf.is_empty() {
+            osc_buf.extend_from_slice(input);
+            if let Some(end) = find_osc_end(osc_buf) {
+                forwarded.push(osc_buf[..end].to_vec());
+                owned_input = Some(osc_buf[end..].to_vec());
+                osc_buf.clear();
+                if owned_input.as_ref().is_some_and(Vec::is_empty) {
+                    return forwarded;
+                }
+                input = owned_input.as_deref().unwrap_or(&[]);
+                continue;
+            }
+
+            if osc_buf.len() > 100_000 {
+                osc_buf.clear();
+            }
+            return forwarded;
+        }
+
+        let mut scan_idx = 0;
+        while scan_idx < input.len() {
+            if input[scan_idx] == 0x1b && scan_idx + 1 < input.len() && input[scan_idx + 1] == b']' {
+                let rest = &input[scan_idx + 2..];
+                if rest.starts_with(b"52;") {
+                    let seq_start = scan_idx;
+                    if let Some(end_offset) = find_osc_end(&input[seq_start..]) {
+                        forwarded.push(input[seq_start..seq_start + end_offset].to_vec());
+                        scan_idx = seq_start + end_offset;
+                        continue;
+                    }
+
+                    osc_buf.extend_from_slice(&input[seq_start..]);
+                    return forwarded;
                 }
             }
+            scan_idx += 1;
         }
-        scan_idx += 1;
+
+        return forwarded;
     }
 }
 
@@ -213,6 +226,7 @@ impl SessionManager {
             scroll_offset: 0,
             terminal_search: TerminalSearchState::default(),
             force_ssh_logging,
+            last_pty_size: None,
         };
 
         self.tabs.push(tab);
@@ -295,6 +309,8 @@ impl SessionManager {
         let writer_clone = writer.clone();
         let clear_pending = Arc::new(Mutex::new(false));
         let clear_pending_clone = clear_pending.clone();
+        let render_epoch = Arc::new(AtomicU64::new(0));
+        let render_epoch_clone = render_epoch.clone();
 
         // Spawn a thread to read from PTY
         std::thread::spawn(move || {
@@ -331,6 +347,7 @@ impl SessionManager {
                         if let Ok(mut parser) = parser_clone.lock() {
                             // Process the data through VT100 parser
                             parser.process(data);
+                            render_epoch_clone.fetch_add(1, Ordering::Relaxed);
                         }
                     }
                     Err(err) => {
@@ -352,6 +369,7 @@ impl SessionManager {
             parser,
             exited,
             clear_pending,
+            render_epoch,
         })
     }
 
@@ -434,12 +452,17 @@ impl SessionManager {
     pub(super) fn resize_current_pty(&mut self, area: ratatui::layout::Rect) {
         if !self.tabs.is_empty()
             && self.selected_tab < self.tabs.len()
-            && let Some(session) = &mut self.tabs[self.selected_tab].session
+            && let Some(tab) = self.tabs.get_mut(self.selected_tab)
+            && let Some(session) = &mut tab.session
         {
             // Area is already the raw terminal content region for this tab.
             // Keep PTY size aligned 1:1 with the rendered content area.
             let rows = area.height.max(1);
             let cols = area.width.max(1);
+            if tab.last_pty_size == Some((rows, cols)) {
+                return;
+            }
+            let resize_started_at = Instant::now();
 
             if let Ok(pty_master) = session.pty_master.lock() {
                 let _ = pty_master.resize(PtySize {
@@ -454,6 +477,35 @@ impl SessionManager {
             if let Ok(mut parser) = session.parser.lock() {
                 parser.set_size(rows, cols);
             }
+
+            tab.last_pty_size = Some((rows, cols));
+            if debug_enabled!() {
+                log_debug!("Resized PTY/parser to {}x{} in {:?}", cols, rows, resize_started_at.elapsed());
+            }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{collect_osc52_sequences, find_osc_end};
+
+    #[test]
+    fn find_osc_end_supports_bel_and_st() {
+        assert_eq!(find_osc_end(b"\x1b]52;c;abc\x07"), Some(11));
+        assert_eq!(find_osc_end(b"\x1b]52;c;abc\x1b\\"), Some(12));
+    }
+
+    #[test]
+    fn collect_osc52_sequences_handles_chunked_input_iteratively() {
+        let mut osc_buf = Vec::new();
+        let first = collect_osc52_sequences(b"\x1b]52;c;Zm9v", &mut osc_buf);
+        assert!(first.is_empty());
+        assert!(!osc_buf.is_empty());
+
+        let second = collect_osc52_sequences(b"YmFy\x07after", &mut osc_buf);
+        assert_eq!(second.len(), 1);
+        assert_eq!(second[0], b"\x1b]52;c;Zm9vYmFy\x07".to_vec());
+        assert!(osc_buf.is_empty());
     }
 }

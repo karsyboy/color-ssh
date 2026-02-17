@@ -2,6 +2,7 @@
 
 use super::{HostTreeRow, HostTreeRowKind, SessionManager};
 use crate::ssh_config::{FolderId, TreeFolder};
+use std::collections::HashMap;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum HostRowKey {
@@ -11,11 +12,11 @@ enum HostRowKey {
 
 /// Fuzzy match scoring for host search.
 ///
-/// Returns a score if `pattern` fuzzy-matches against `text`, or `None` if
-/// there is no match. Consecutive character matches score higher.
-pub fn fuzzy_match(text: &str, pattern: &str) -> Option<i32> {
-    let text = text.to_lowercase();
-    let pattern = pattern.to_lowercase();
+/// Returns a score if `pattern_lower` fuzzy-matches against `text_lower`, or
+/// `None` if there is no match. Consecutive character matches score higher.
+fn fuzzy_match(text_lower: &str, pattern_lower: &str) -> Option<i32> {
+    let text = text_lower;
+    let pattern = pattern_lower;
 
     let mut text_chars = text.chars().peekable();
     let mut pattern_chars = pattern.chars().peekable();
@@ -49,15 +50,74 @@ pub fn fuzzy_match(text: &str, pattern: &str) -> Option<i32> {
 /// Strict contiguous match scoring.
 ///
 /// Higher score for prefix matches, then earlier substring positions.
-fn strict_match_score(text: &str, pattern: &str) -> Option<i32> {
-    let text = text.to_lowercase();
-    let pos = text.find(pattern)?;
+fn strict_match_score(text_lower: &str, pattern_lower: &str) -> Option<i32> {
+    let pos = text_lower.find(pattern_lower)?;
 
     if pos == 0 {
-        Some(300 + pattern.len() as i32)
+        Some(300 + pattern_lower.len() as i32)
     } else {
         Some((200 - pos as i32).max(1))
     }
+}
+
+fn compute_match_scores(search_entries: &[super::state::HostSearchEntry], query_lower: &str) -> HashMap<usize, i32> {
+    let mut match_scores = HashMap::new();
+
+    // Pass 1: strict contiguous matching.
+    for (idx, search_entry) in search_entries.iter().enumerate() {
+        let mut best_score = None;
+
+        if let Some(score) = strict_match_score(&search_entry.name_lower, query_lower) {
+            best_score = Some(score + 1000);
+        }
+
+        if let Some(hostname) = &search_entry.hostname_lower
+            && let Some(score) = strict_match_score(hostname, query_lower)
+        {
+            best_score = Some(best_score.unwrap_or(0).max(score + 500));
+        }
+
+        if let Some(user) = &search_entry.user_lower
+            && let Some(score) = strict_match_score(user, query_lower)
+        {
+            best_score = Some(best_score.unwrap_or(0).max(score + 300));
+        }
+
+        if let Some(score) = best_score {
+            match_scores.insert(idx, score);
+        }
+    }
+
+    if !match_scores.is_empty() {
+        return match_scores;
+    }
+
+    // Pass 2: fuzzy fallback when strict matching found nothing.
+    for (idx, search_entry) in search_entries.iter().enumerate() {
+        let mut best_score = None;
+
+        if let Some(score) = fuzzy_match(&search_entry.name_lower, query_lower) {
+            best_score = Some(score + 100);
+        }
+
+        if let Some(hostname) = &search_entry.hostname_lower
+            && let Some(score) = fuzzy_match(hostname, query_lower)
+        {
+            best_score = Some(best_score.unwrap_or(0).max(score + 50));
+        }
+
+        if let Some(user) = &search_entry.user_lower
+            && let Some(score) = fuzzy_match(user, query_lower)
+        {
+            best_score = Some(best_score.unwrap_or(0).max(score + 30));
+        }
+
+        if let Some(score) = best_score {
+            match_scores.insert(idx, score);
+        }
+    }
+
+    match_scores
 }
 
 impl SessionManager {
@@ -197,20 +257,17 @@ impl SessionManager {
     fn sync_host_row_selection_state(&mut self) {
         if self.visible_host_rows.is_empty() {
             self.selected_host_row = 0;
-            self.host_list_state.select(None);
             return;
         }
 
         if self.selected_host_row >= self.visible_host_rows.len() {
             self.selected_host_row = self.visible_host_rows.len().saturating_sub(1);
         }
-        self.host_list_state.select(Some(self.selected_host_row));
     }
 
     fn repair_selection_after_rebuild(&mut self, preferred: Option<HostRowKey>) {
         if self.visible_host_rows.is_empty() {
             self.selected_host_row = 0;
-            self.host_list_state.select(None);
             self.host_scroll_offset = 0;
             return;
         }
@@ -233,63 +290,8 @@ impl SessionManager {
 
         self.host_match_scores.clear();
         if !self.search_query.is_empty() {
-            let query = self.search_query.to_lowercase();
-
-            // Pass 1: strict contiguous matching.
-            // If we have strict hits, only show those for more predictable filtering.
-            for (idx, host) in self.hosts.iter().enumerate() {
-                let mut best_score = None;
-
-                if let Some(score) = strict_match_score(&host.name, &query) {
-                    best_score = Some(score + 1000); // Strong name preference
-                }
-
-                if let Some(hostname) = &host.hostname
-                    && let Some(score) = strict_match_score(hostname, &query)
-                {
-                    best_score = Some(best_score.unwrap_or(0).max(score + 500));
-                }
-
-                if let Some(user) = &host.user
-                    && let Some(score) = strict_match_score(user, &query)
-                {
-                    best_score = Some(best_score.unwrap_or(0).max(score + 300));
-                }
-
-                if let Some(score) = best_score {
-                    self.host_match_scores.insert(idx, score);
-                }
-            }
-
-            if self.host_match_scores.is_empty() {
-                // Pass 2: fallback to fuzzy matching only when strict matching found nothing.
-                for (idx, host) in self.hosts.iter().enumerate() {
-                    let mut best_score = None;
-
-                    // Try matching against name
-                    if let Some(score) = fuzzy_match(&host.name, &query) {
-                        best_score = Some(score + 100); // Boost name matches
-                    }
-
-                    // Try matching against hostname
-                    if let Some(hostname) = &host.hostname
-                        && let Some(score) = fuzzy_match(hostname, &query)
-                    {
-                        best_score = Some(best_score.unwrap_or(0).max(score + 50));
-                    }
-
-                    // Try matching against user
-                    if let Some(user) = &host.user
-                        && let Some(score) = fuzzy_match(user, &query)
-                    {
-                        best_score = Some(best_score.unwrap_or(0).max(score + 30));
-                    }
-
-                    if let Some(score) = best_score {
-                        self.host_match_scores.insert(idx, score);
-                    }
-                }
-            }
+            let query_lower = self.search_query.to_lowercase();
+            self.host_match_scores = compute_match_scores(&self.host_search_index, &query_lower);
         }
 
         self.rebuild_visible_host_rows();
@@ -397,5 +399,48 @@ impl SessionManager {
         } else if self.selected_host_row >= self.host_scroll_offset + viewport_height {
             self.host_scroll_offset = self.selected_host_row.saturating_sub(viewport_height - 1);
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn search_entry(name: &str, hostname: Option<&str>, user: Option<&str>) -> super::super::state::HostSearchEntry {
+        super::super::state::HostSearchEntry {
+            name_lower: name.to_string(),
+            hostname_lower: hostname.map(str::to_string),
+            user_lower: user.map(str::to_string),
+        }
+    }
+
+    #[test]
+    fn strict_matching_is_preferred_over_fuzzy_fallback() {
+        let entries = vec![
+            search_entry("database", Some("db.internal"), Some("deploy")),
+            search_entry("dba-stage", Some("stage.internal"), Some("ops")),
+        ];
+
+        let strict_scores = compute_match_scores(&entries, "data");
+        assert_eq!(strict_scores.len(), 1);
+        assert!(strict_scores.contains_key(&0));
+
+        let fuzzy_scores = compute_match_scores(&entries, "dsg");
+        assert_eq!(fuzzy_scores.len(), 1);
+        assert!(fuzzy_scores.contains_key(&1));
+    }
+
+    #[test]
+    fn strict_score_orders_prefix_before_later_matches() {
+        let prefix_score = strict_match_score("server-app", "server").unwrap_or_default();
+        let later_score = strict_match_score("prod-server", "server").unwrap_or_default();
+        assert!(prefix_score > later_score);
+    }
+
+    #[test]
+    fn no_match_returns_empty_score_map() {
+        let entries = vec![search_entry("alpha", Some("alpha.internal"), Some("dev"))];
+        let scores = compute_match_scores(&entries, "zzz");
+        assert!(scores.is_empty());
     }
 }

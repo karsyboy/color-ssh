@@ -20,7 +20,6 @@ enum StatusContext {
 impl SessionManager {
     pub(super) fn render_global_status_bar(&mut self, frame: &mut Frame, area: Rect) {
         if area.width == 0 || area.height == 0 {
-            self.exit_button_area = Rect::default();
             return;
         }
 
@@ -30,7 +29,6 @@ impl SessionManager {
         if right_spans.is_empty() {
             let status = Paragraph::new(Line::from(left_spans)).style(base_style);
             frame.render_widget(status, area);
-            self.exit_button_area = Rect::default();
             return;
         }
 
@@ -44,7 +42,6 @@ impl SessionManager {
         let right = Paragraph::new(Line::from(right_spans)).style(base_style).alignment(Alignment::Right);
         frame.render_widget(left, chunks[0]);
         frame.render_widget(right, chunks[1]);
-        self.exit_button_area = Rect::default();
     }
 
     fn build_status_line_sections(&self) -> (Vec<Span<'static>>, Vec<Span<'static>>) {

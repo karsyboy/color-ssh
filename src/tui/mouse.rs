@@ -2,23 +2,10 @@
 
 use super::SessionManager;
 use crossterm::event::{self, KeyModifiers, MouseButton, MouseEventKind};
-use std::io::{self, Write};
+use std::io;
 use std::time::Instant;
 
 impl SessionManager {
-    fn clear_selection_state_mouse(&mut self) {
-        self.selection_start = None;
-        self.selection_end = None;
-        self.is_selecting = false;
-    }
-
-    fn focus_manager_panel_mouse(&mut self) {
-        self.focus_on_manager = true;
-        if !self.host_panel_visible {
-            self.host_panel_visible = true;
-        }
-    }
-
     fn host_scrollbar_x(&self) -> Option<u16> {
         let area = self.host_list_area;
         if !self.host_panel_visible || area.width == 0 || area.height == 0 {
@@ -84,21 +71,10 @@ impl SessionManager {
                 self.is_dragging_host_scrollbar = false;
                 self.is_dragging_host_info_divider = false;
 
-                let exit_area = self.exit_button_area;
-                if exit_area.width > 0
-                    && mouse.column >= exit_area.x
-                    && mouse.column < exit_area.x + exit_area.width
-                    && mouse.row >= exit_area.y
-                    && mouse.row < exit_area.y + exit_area.height
-                {
-                    self.should_exit = true;
-                    return Ok(());
-                }
-
                 let divider_col = self.host_panel_area.x + self.host_panel_area.width.saturating_sub(1);
                 if self.host_panel_visible && self.host_panel_area.width > 0 && mouse.column == divider_col {
                     self.is_dragging_divider = true;
-                    self.clear_selection_state_mouse();
+                    self.clear_selection_state();
                     return Ok(());
                 }
 
@@ -106,9 +82,9 @@ impl SessionManager {
                     let divider_row = self.host_info_area.y;
                     let host_content_right = self.host_panel_area.x + self.host_panel_area.width.saturating_sub(1);
                     if mouse.row == divider_row && mouse.column >= self.host_panel_area.x && mouse.column < host_content_right {
-                        self.focus_manager_panel_mouse();
+                        self.focus_manager_panel();
                         self.is_dragging_host_info_divider = true;
-                        self.clear_selection_state_mouse();
+                        self.clear_selection_state();
                         return Ok(());
                     }
                 }
@@ -125,10 +101,10 @@ impl SessionManager {
                     if let Some(scrollbar_x) = self.host_scrollbar_x()
                         && mouse.column == scrollbar_x
                     {
-                        self.focus_manager_panel_mouse();
+                        self.focus_manager_panel();
                         self.is_dragging_host_scrollbar = true;
                         self.set_host_scroll_from_scrollbar_row(mouse.row);
-                        self.clear_selection_state_mouse();
+                        self.clear_selection_state();
                         return Ok(());
                     }
 
@@ -136,7 +112,7 @@ impl SessionManager {
                     let clicked_index = self.host_scroll_offset + clicked_row;
                     if clicked_index < self.visible_host_rows.len() {
                         self.set_selected_row(clicked_index);
-                        self.focus_manager_panel_mouse();
+                        self.focus_manager_panel();
 
                         let row_kind = self.visible_host_rows[clicked_index].kind;
                         if let super::HostTreeRowKind::Folder(folder_id) = row_kind {
@@ -158,12 +134,12 @@ impl SessionManager {
                             }
                         }
 
-                        self.clear_selection_state_mouse();
+                        self.clear_selection_state();
                         return Ok(());
                     }
 
-                    self.focus_manager_panel_mouse();
-                    self.clear_selection_state_mouse();
+                    self.focus_manager_panel();
+                    self.clear_selection_state();
                     return Ok(());
                 }
 
@@ -176,8 +152,8 @@ impl SessionManager {
                     && mouse.row >= panel_area.y
                     && mouse.row < panel_area.y + panel_area.height
                 {
-                    self.focus_manager_panel_mouse();
-                    self.clear_selection_state_mouse();
+                    self.focus_manager_panel();
+                    self.clear_selection_state();
                     return Ok(());
                 }
 
@@ -215,7 +191,7 @@ impl SessionManager {
 
                     if visual_col < left_slot || visual_col >= left_slot + visible_tab_width {
                         self.focus_on_manager = false;
-                        self.clear_selection_state_mouse();
+                        self.clear_selection_state();
                         return Ok(());
                     }
                     let local_col = visual_col - left_slot;
@@ -235,21 +211,17 @@ impl SessionManager {
                         if local_col < visible_end {
                             let close_pos = used + self.tabs[idx].title.len() + 1;
                             if close_pos < visible_end && local_col == close_pos {
-                                self.tabs.remove(idx);
+                                self.selected_tab = idx;
+                                self.close_current_tab();
                                 if self.tabs.is_empty() {
                                     self.selected_tab = 0;
-                                    self.focus_manager_panel_mouse();
-                                } else if idx < self.selected_tab {
-                                    self.selected_tab -= 1;
-                                } else if self.selected_tab >= self.tabs.len() {
-                                    self.selected_tab = self.tabs.len() - 1;
                                 }
                             } else {
                                 self.selected_tab = idx;
                                 self.focus_on_manager = false;
                             }
                             self.ensure_tab_visible();
-                            self.clear_selection_state_mouse();
+                            self.clear_selection_state();
                             return Ok(());
                         }
                         used += tab_width;
@@ -257,7 +229,7 @@ impl SessionManager {
                     }
 
                     self.focus_on_manager = false;
-                    self.clear_selection_state_mouse();
+                    self.clear_selection_state();
                     return Ok(());
                 }
 
@@ -279,7 +251,7 @@ impl SessionManager {
                         if self.tabs[self.selected_tab].scroll_offset > 0 {
                             self.tabs[self.selected_tab].scroll_offset = 0;
                         }
-                        self.clear_selection_state_mouse();
+                        self.clear_selection_state();
                         self.selection_dragged = false;
                         if let Some((col, row)) = self.mouse_to_vt_coords(mouse.column, mouse.row) {
                             self.send_mouse_to_pty(0, col, row, false)?;
@@ -295,7 +267,7 @@ impl SessionManager {
                         self.selection_dragged = false;
                     }
                 } else {
-                    self.clear_selection_state_mouse();
+                    self.clear_selection_state();
                 }
             }
             MouseEventKind::Drag(MouseButton::Left) => {
@@ -374,7 +346,7 @@ impl SessionManager {
                     if self.selection_dragged {
                         self.copy_selection_to_clipboard();
                     } else {
-                        self.clear_selection_state_mouse();
+                        self.clear_selection_state();
                     }
                 } else if self.is_pty_mouse_mode_active() {
                     let mode = self.pty_mouse_mode();
@@ -398,7 +370,7 @@ impl SessionManager {
                     if self.selected_tab > 0 {
                         self.selected_tab -= 1;
                         self.focus_on_manager = false;
-                        self.clear_selection_state_mouse();
+                        self.clear_selection_state();
                         self.ensure_tab_visible();
                     }
                 } else if host_area.width > 0
@@ -435,7 +407,7 @@ impl SessionManager {
                     if self.selected_tab < self.tabs.len() - 1 {
                         self.selected_tab += 1;
                         self.focus_on_manager = false;
-                        self.clear_selection_state_mouse();
+                        self.clear_selection_state();
                         self.ensure_tab_visible();
                     }
                 } else if host_area.width > 0
@@ -566,37 +538,50 @@ impl SessionManager {
         }
     }
 
-    fn send_mouse_to_pty(&mut self, button: u8, col: u16, row: u16, is_release: bool) -> io::Result<()> {
-        if self.selected_tab >= self.tabs.len() {
-            return Ok(());
-        }
-        let encoding = self.pty_mouse_encoding();
-        let bytes = match encoding {
+    fn encode_mouse_event_bytes(encoding: vt100::MouseProtocolEncoding, button: u8, col: u16, row: u16, is_release: bool) -> Vec<u8> {
+        match encoding {
             vt100::MouseProtocolEncoding::Sgr => {
                 let suffix = if is_release { 'm' } else { 'M' };
                 format!("\x1b[<{};{};{}{}", button, col, row, suffix).into_bytes()
             }
             _ => {
-                if is_release {
-                    let cb = (3u8 + 32) as char;
-                    let cx = ((col as u8).saturating_add(32)) as char;
-                    let cy = ((row as u8).saturating_add(32)) as char;
-                    format!("\x1b[M{}{}{}", cb, cx, cy).into_bytes()
-                } else {
-                    let cb = (button.saturating_add(32)) as char;
-                    let cx = ((col as u8).saturating_add(32)) as char;
-                    let cy = ((row as u8).saturating_add(32)) as char;
-                    format!("\x1b[M{}{}{}", cb, cx, cy).into_bytes()
-                }
+                // Legacy X10 encoding only supports 8-bit coordinates. Clamp to avoid wraparound.
+                let clamped_col = col.clamp(1, 223) as u8;
+                let clamped_row = row.clamp(1, 223) as u8;
+                let cb = if is_release { 3u8 + 32 } else { button.saturating_add(32) };
+                let cx = clamped_col.saturating_add(32);
+                let cy = clamped_row.saturating_add(32);
+                vec![0x1b, b'[', b'M', cb, cx, cy]
             }
-        };
-
-        let tab = &mut self.tabs[self.selected_tab];
-        if let Some(session) = &mut tab.session
-            && let Ok(mut writer) = session.writer.lock()
-        {
-            let _ = writer.write_all(&bytes);
         }
-        Ok(())
+    }
+
+    fn send_mouse_to_pty(&mut self, button: u8, col: u16, row: u16, is_release: bool) -> io::Result<()> {
+        if self.selected_tab >= self.tabs.len() {
+            return Ok(());
+        }
+        let encoding = self.pty_mouse_encoding();
+        let bytes = Self::encode_mouse_event_bytes(encoding, button, col, row, is_release);
+        self.write_bytes_to_active_pty(&bytes)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::SessionManager;
+
+    #[test]
+    fn encode_mouse_event_bytes_sgr_press_and_release() {
+        let press = SessionManager::encode_mouse_event_bytes(vt100::MouseProtocolEncoding::Sgr, 0, 10, 5, false);
+        let release = SessionManager::encode_mouse_event_bytes(vt100::MouseProtocolEncoding::Sgr, 0, 10, 5, true);
+
+        assert_eq!(press, b"\x1b[<0;10;5M".to_vec());
+        assert_eq!(release, b"\x1b[<0;10;5m".to_vec());
+    }
+
+    #[test]
+    fn encode_mouse_event_bytes_default_clamps_large_coords() {
+        let bytes = SessionManager::encode_mouse_event_bytes(vt100::MouseProtocolEncoding::Default, 0, 500, 900, false);
+        assert_eq!(bytes, vec![0x1b, b'[', b'M', 32, 255, 255]);
     }
 }

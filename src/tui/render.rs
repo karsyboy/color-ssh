@@ -9,6 +9,10 @@ use ratatui::{
     text::{Line, Span},
     widgets::{Block, Borders, Clear, List, ListItem, ListState, Paragraph, Wrap},
 };
+use std::collections::HashMap;
+
+type SearchRowRanges = HashMap<i64, Vec<(u16, u16)>>;
+type CurrentSearchRange = Option<(i64, u16, u16)>;
 
 /// Convert VT100 color to Ratatui color
 fn vt100_to_ratatui_color(color: vt100::Color) -> Color {
@@ -69,6 +73,28 @@ fn draw_horizontal_rule(frame: &mut Frame, y: u16, x: u16, width: u16, style: St
         cell.set_symbol("─");
         cell.set_style(style);
     }
+}
+
+fn build_search_row_ranges(search: Option<&super::TerminalSearchState>) -> (SearchRowRanges, CurrentSearchRange) {
+    let Some(search_state) = search else {
+        return (HashMap::new(), None);
+    };
+    if !search_state.active || search_state.matches.is_empty() {
+        return (HashMap::new(), None);
+    }
+
+    let current_match = search_state.matches.get(search_state.current).map(|(row, col, len)| {
+        let end_col = col.saturating_add(*len as u16);
+        (*row, *col, end_col)
+    });
+
+    let mut row_ranges: HashMap<i64, Vec<(u16, u16)>> = HashMap::new();
+    for (row, col, len) in &search_state.matches {
+        let end_col = col.saturating_add(*len as u16);
+        row_ranges.entry(*row).or_default().push((*col, end_col));
+    }
+
+    (row_ranges, current_match)
 }
 
 impl SessionManager {
@@ -765,6 +791,7 @@ impl SessionManager {
         let scroll_offset = tab.scroll_offset;
         let sel_start = self.selection_start;
         let sel_end = self.selection_end;
+        let (search_row_ranges, current_search_range) = build_search_row_ranges(self.current_tab_search());
 
         // Check if session exists
         let session_active = tab.session.is_some();
@@ -799,9 +826,12 @@ impl SessionManager {
                         let abs_row = row as i64 - scroll_offset as i64;
                         let is_selected = is_cell_in_selection(abs_row, col, sel_start, sel_end);
 
-                        // Check if this cell is part of a search match
-                        let is_search_match = self.is_cell_in_search_match(abs_row, col);
-                        let is_current_search_match = self.is_cell_in_current_search_match(abs_row, col);
+                        let is_search_match = search_row_ranges
+                            .get(&abs_row)
+                            .is_some_and(|ranges| ranges.iter().any(|(start_col, end_col)| col >= *start_col && col < *end_col));
+                        let is_current_search_match = current_search_range
+                            .as_ref()
+                            .is_some_and(|(match_row, start_col, end_col)| abs_row == *match_row && col >= *start_col && col < *end_col);
 
                         // Build the style from VT100 cell attributes
                         let style = if is_current_search_match {
@@ -898,34 +928,25 @@ impl SessionManager {
             frame.render_widget(paragraph, area);
         }
     }
+}
 
-    /// Check if a cell is part of any search match
-    fn is_cell_in_search_match(&self, abs_row: i64, col: u16) -> bool {
-        let Some(search) = self.current_tab_search() else {
-            return false;
+#[cfg(test)]
+mod tests {
+    use super::build_search_row_ranges;
+    use crate::tui::TerminalSearchState;
+
+    #[test]
+    fn build_search_row_ranges_groups_matches_by_row() {
+        let search = TerminalSearchState {
+            active: true,
+            query: "abc".to_string(),
+            matches: vec![(2, 4, 3), (2, 10, 2), (3, 1, 1)],
+            current: 1,
         };
-        if !search.active || search.matches.is_empty() {
-            return false;
-        }
 
-        for (match_row, match_col, match_len) in &search.matches {
-            if *match_row == abs_row && col >= *match_col && (col as usize) < (*match_col as usize + *match_len) {
-                return true;
-            }
-        }
-        false
-    }
-
-    /// Check if a cell is part of the current search match
-    fn is_cell_in_current_search_match(&self, abs_row: i64, col: u16) -> bool {
-        let Some(search) = self.current_tab_search() else {
-            return false;
-        };
-        if !search.active || search.matches.is_empty() {
-            return false;
-        }
-
-        let (match_row, match_col, match_len) = search.matches[search.current];
-        match_row == abs_row && col >= match_col && (col as usize) < (match_col as usize + match_len)
+        let (ranges, current) = build_search_row_ranges(Some(&search));
+        assert_eq!(ranges.get(&2).map(Vec::len), Some(2));
+        assert_eq!(ranges.get(&3).map(Vec::len), Some(1));
+        assert_eq!(current, Some((2, 10, 12)));
     }
 }

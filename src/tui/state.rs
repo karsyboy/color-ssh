@@ -3,14 +3,17 @@
 use crate::ssh_config::{FolderId, SshHost, TreeFolder, load_ssh_host_tree};
 use crate::{config, log_debug, log_error};
 use portable_pty::{Child, MasterPty};
-use ratatui::{layout::Rect, widgets::ListState};
+use ratatui::layout::Rect;
 use std::io::Write;
-use std::sync::{Arc, Mutex};
+use std::sync::{
+    Arc, Mutex,
+    atomic::{AtomicU64, Ordering as AtomicOrdering},
+};
 use std::{
     cmp::Ordering,
     collections::{HashMap, HashSet},
     fs, io,
-    time::Instant,
+    time::{Duration, Instant},
 };
 use vt100::Parser;
 
@@ -30,6 +33,7 @@ pub struct SshSession {
     pub(super) parser: Arc<Mutex<Parser>>,
     pub(super) exited: Arc<Mutex<bool>>,
     pub(super) clear_pending: Arc<Mutex<bool>>,
+    pub(super) render_epoch: Arc<AtomicU64>,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -48,6 +52,14 @@ pub struct HostTab {
     pub(super) scroll_offset: usize,
     pub(super) terminal_search: TerminalSearchState,
     pub(super) force_ssh_logging: bool,
+    pub(super) last_pty_size: Option<(u16, u16)>,
+}
+
+#[derive(Debug, Clone, Default)]
+pub(super) struct HostSearchEntry {
+    pub(super) name_lower: String,
+    pub(super) hostname_lower: Option<String>,
+    pub(super) user_lower: Option<String>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -159,12 +171,12 @@ pub(crate) struct HostTreeRow {
 /// Main application state.
 pub struct SessionManager {
     pub(super) hosts: Vec<SshHost>,
+    pub(super) host_search_index: Vec<HostSearchEntry>,
     pub(super) host_tree_root: TreeFolder,
     pub(super) visible_host_rows: Vec<HostTreeRow>,
     pub(super) selected_host_row: usize,
     pub(super) host_match_scores: HashMap<usize, i32>,
     pub(super) collapsed_folders: HashSet<FolderId>,
-    pub(super) host_list_state: ListState,
     pub(super) search_query: String,
     pub(super) search_mode: bool,
     pub(super) should_exit: bool,
@@ -188,16 +200,50 @@ pub struct SessionManager {
     pub(super) is_dragging_divider: bool,
     pub(super) is_dragging_host_scrollbar: bool,
     pub(super) is_dragging_host_info_divider: bool,
-    pub(super) exit_button_area: Rect,
     pub(super) tab_scroll_offset: usize,
     pub(super) history_buffer: usize,
     pub(super) host_panel_visible: bool,
     pub(super) host_info_visible: bool,
     pub(super) quick_connect: Option<QuickConnectState>,
     pub(super) quick_connect_default_ssh_logging: bool,
+    pub(super) ui_dirty: bool,
+    pub(super) last_draw_at: Instant,
+    pub(super) last_seen_render_epoch: u64,
 }
 
 impl SessionManager {
+    fn build_host_search_index(hosts: &[SshHost]) -> Vec<HostSearchEntry> {
+        hosts
+            .iter()
+            .map(|host| HostSearchEntry {
+                name_lower: host.name.to_lowercase(),
+                hostname_lower: host.hostname.as_ref().map(|hostname| hostname.to_lowercase()),
+                user_lower: host.user.as_ref().map(|user| user.to_lowercase()),
+            })
+            .collect()
+    }
+
+    fn current_render_epoch(&self) -> u64 {
+        self.tabs
+            .iter()
+            .filter_map(|tab| tab.session.as_ref())
+            .fold(0u64, |acc, session| acc.wrapping_add(session.render_epoch.load(AtomicOrdering::Relaxed)))
+    }
+
+    pub(super) fn should_draw(&self, heartbeat: Duration) -> bool {
+        self.ui_dirty || self.current_render_epoch() != self.last_seen_render_epoch || self.last_draw_at.elapsed() >= heartbeat
+    }
+
+    pub(super) fn mark_ui_dirty(&mut self) {
+        self.ui_dirty = true;
+    }
+
+    pub(super) fn mark_drawn(&mut self) {
+        self.last_draw_at = Instant::now();
+        self.last_seen_render_epoch = self.current_render_epoch();
+        self.ui_dirty = false;
+    }
+
     pub(super) fn discover_quick_connect_profiles(&self) -> Vec<String> {
         let mut profiles: HashSet<String> = HashSet::new();
         profiles.insert("default".to_string());
@@ -281,6 +327,7 @@ impl SessionManager {
             }
         });
         let hosts = tree_model.hosts;
+        let host_search_index = Self::build_host_search_index(&hosts);
         let host_tree_root = tree_model.root;
         let (history_buffer, host_tree_start_collapsed, host_info_visible, host_view_size_percent, info_view_size_percent) = config::SESSION_CONFIG
             .get()
@@ -320,19 +367,14 @@ impl SessionManager {
 
         log_debug!("Loaded {} SSH hosts", hosts.len());
 
-        let mut host_list_state = ListState::default();
-        if !hosts.is_empty() {
-            host_list_state.select(Some(0));
-        }
-
         let mut app = Self {
             hosts,
+            host_search_index,
             host_tree_root,
             visible_host_rows: Vec::new(),
             selected_host_row: 0,
             host_match_scores: HashMap::new(),
             collapsed_folders,
-            host_list_state,
             host_list_area: Rect::default(),
             host_info_area: Rect::default(),
             host_scroll_offset: 0,
@@ -356,13 +398,15 @@ impl SessionManager {
             is_dragging_divider: false,
             is_dragging_host_scrollbar: false,
             is_dragging_host_info_divider: false,
-            exit_button_area: Rect::default(),
             tab_scroll_offset: 0,
             history_buffer,
             host_panel_visible: true,
             host_info_visible,
             quick_connect: None,
             quick_connect_default_ssh_logging,
+            ui_dirty: true,
+            last_draw_at: Instant::now(),
+            last_seen_render_epoch: 0,
         };
 
         app.update_filtered_hosts();
