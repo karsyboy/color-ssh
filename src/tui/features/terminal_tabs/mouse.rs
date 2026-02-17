@@ -10,6 +10,7 @@ impl SessionManager {
     /// Handle mouse events.
     pub(crate) fn handle_mouse(&mut self, mouse: event::MouseEvent) -> io::Result<()> {
         if self.quick_connect.is_some() {
+            self.handle_quick_connect_mouse(mouse);
             return Ok(());
         }
 

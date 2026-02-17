@@ -41,6 +41,7 @@ pub struct AppState {
     pub(crate) host_info_area: Rect,
     pub(crate) host_scroll_offset: usize,
     pub(crate) host_panel_width: u16,
+    pub(crate) host_panel_default_percent: u16,
     pub(crate) host_info_height: u16,
     pub(crate) tabs: Vec<HostTab>,
     pub(crate) selected_tab: usize,
@@ -121,6 +122,11 @@ impl AppState {
         if prev_width > 0 && term_width != prev_width {
             let scaled = ((self.host_panel_width as u32 * term_width as u32) + (prev_width as u32 / 2)) / prev_width as u32;
             self.host_panel_width = Self::clamp_host_panel_width_for_terminal(scaled as u16, term_width);
+            if term_width > prev_width {
+                let default_width =
+                    Self::clamp_host_panel_width_for_terminal(((term_width as u32 * self.host_panel_default_percent as u32) / 100) as u16, term_width);
+                self.host_panel_width = self.host_panel_width.min(default_width);
+            }
         } else {
             self.host_panel_width = Self::clamp_host_panel_width_for_terminal(self.host_panel_width, term_width);
         }
@@ -214,6 +220,7 @@ impl AppState {
             host_info_area: Rect::default(),
             host_scroll_offset: 0,
             host_panel_width,
+            host_panel_default_percent: host_view_size_percent,
             host_info_height,
             search_query: String::new(),
             search_mode: false,
@@ -277,5 +284,16 @@ mod tests {
 
         app.handle_terminal_resize(10, 30);
         assert_eq!(app.host_panel_width, 9);
+    }
+
+    #[test]
+    fn terminal_resize_growth_caps_host_panel_width_at_default() {
+        let mut app = AppState::new().expect("app should initialize");
+        app.last_terminal_size = (100, 30);
+        app.host_panel_default_percent = 25;
+        app.host_panel_width = 60;
+
+        app.handle_terminal_resize(200, 30);
+        assert_eq!(app.host_panel_width, 50);
     }
 }
