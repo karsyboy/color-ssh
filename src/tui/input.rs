@@ -6,15 +6,15 @@ use std::io::{self, Write};
 
 fn encode_key_event(key: KeyEvent) -> Option<Vec<u8>> {
     let bytes = match key.code {
-        KeyCode::Char(c) => {
+        KeyCode::Char(ch) => {
             if key.modifiers.contains(KeyModifiers::CONTROL) {
-                if c.is_ascii_alphabetic() {
-                    vec![(c.to_ascii_lowercase() as u8) - b'a' + 1]
+                if ch.is_ascii_alphabetic() {
+                    vec![(ch.to_ascii_lowercase() as u8) - b'a' + 1]
                 } else {
-                    vec![c as u8]
+                    vec![ch as u8]
                 }
             } else {
-                c.to_string().into_bytes()
+                ch.to_string().into_bytes()
             }
         }
         KeyCode::Enter => vec![b'\r'],
@@ -237,11 +237,11 @@ impl SessionManager {
                         _ => {}
                     }
                 }
-                KeyCode::Char(c) if !key.modifiers.contains(KeyModifiers::CONTROL) && !key.modifiers.contains(KeyModifiers::ALT) => {
+                KeyCode::Char(ch) if !key.modifiers.contains(KeyModifiers::CONTROL) && !key.modifiers.contains(KeyModifiers::ALT) => {
                     form.error = None;
                     match form.selected {
-                        QuickConnectField::User => form.user.push(c),
-                        QuickConnectField::Host => form.host.push(c),
+                        QuickConnectField::User => form.user.push(ch),
+                        QuickConnectField::Host => form.host.push(ch),
                         _ => {}
                     }
                 }
@@ -321,8 +321,8 @@ impl SessionManager {
                 self.search_query.pop();
                 self.update_filtered_hosts();
             }
-            KeyCode::Char(c) => {
-                self.search_query.push(c);
+            KeyCode::Char(ch) => {
+                self.search_query.push(ch);
                 self.update_filtered_hosts();
             }
             _ => {}
@@ -361,9 +361,9 @@ impl SessionManager {
                     self.update_terminal_search();
                 }
             }
-            KeyCode::Char(c) => {
+            KeyCode::Char(ch) => {
                 if let Some(search) = self.current_tab_search_mut() {
-                    search.query.push(c);
+                    search.query.push(ch);
                     self.update_terminal_search();
                 }
             }
@@ -373,7 +373,7 @@ impl SessionManager {
     }
 
     fn handle_tab_key(&mut self, key: KeyEvent) -> io::Result<()> {
-        if self.current_tab_search().map(|s| s.active).unwrap_or(false) {
+        if self.current_tab_search().map(|search_state| search_state.active).unwrap_or(false) {
             return self.handle_terminal_search_key(key);
         }
 
@@ -429,7 +429,11 @@ impl SessionManager {
             }
             KeyCode::Enter => {
                 let tab = &self.tabs[self.selected_tab];
-                let is_exited = tab.session.as_ref().and_then(|session| session.exited.lock().ok().map(|v| *v)).unwrap_or(true);
+                let is_exited = tab
+                    .session
+                    .as_ref()
+                    .and_then(|session| session.exited.lock().ok().map(|exited| *exited))
+                    .unwrap_or(true);
 
                 if is_exited {
                     self.reconnect_session();
@@ -620,8 +624,8 @@ impl SessionManager {
         }
 
         let mut start_pos: usize = 0;
-        for i in 0..self.selected_tab {
-            start_pos += self.tab_display_width(i);
+        for tab_index in 0..self.selected_tab {
+            start_pos += self.tab_display_width(tab_index);
         }
         let end_pos = start_pos + self.tab_display_width(self.selected_tab);
 

@@ -107,7 +107,10 @@ pub fn process_chunk(chunk: String, chunk_id: i32, rules: &[(Regex, String)], re
 /// Build a mapping of the original string to a cleaned version with ANSI sequences and newlines removed and return both the clean string and mapping.
 fn build_index_mapping(raw: &str) -> (String, Vec<usize>) {
     // First, identify all ANSI escape sequence positions in the raw string
-    let ansi_ranges: Vec<(usize, usize)> = ANSI_ESCAPE_REGEX.find_iter(raw).map(|m| (m.start(), m.end())).collect();
+    let ansi_ranges: Vec<(usize, usize)> = ANSI_ESCAPE_REGEX
+        .find_iter(raw)
+        .map(|escape_match| (escape_match.start(), escape_match.end()))
+        .collect();
 
     let mut clean_chunk = String::with_capacity(raw.len());
     let mut mapping = Vec::with_capacity(raw.len());

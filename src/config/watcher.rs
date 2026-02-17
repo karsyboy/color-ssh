@@ -15,7 +15,7 @@ pub fn config_watcher(profile: Option<String>) -> RecommendedWatcher {
     log_debug!("Initializing configuration file watcher");
 
     let config_path = super::get_config().read().unwrap().metadata.config_path.clone();
-    let config_file_name = config_path.file_name().and_then(|n| n.to_str()).unwrap_or("").to_string();
+    let config_file_name = config_path.file_name().and_then(|segment| segment.to_str()).unwrap_or("").to_string();
 
     // Clone for use in the closure
     let config_file_name_clone = config_file_name.clone();
@@ -28,7 +28,7 @@ pub fn config_watcher(profile: Option<String>) -> RecommendedWatcher {
                 // Filter events to only process changes to our config file
                 let is_our_file = event.paths.iter().any(|path| {
                     path.file_name()
-                        .and_then(|n| n.to_str())
+                        .and_then(|segment| segment.to_str())
                         .map(|name| name == config_file_name_clone)
                         .unwrap_or(false)
                 });

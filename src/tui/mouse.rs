@@ -69,7 +69,7 @@ impl SessionManager {
             return Ok(());
         }
 
-        if self.current_tab_search().map(|s| s.active).unwrap_or(false)
+        if self.current_tab_search().map(|search_state| search_state.active).unwrap_or(false)
             && self.is_pty_mouse_mode_active()
             && let Some(search) = self.current_tab_search_mut()
         {

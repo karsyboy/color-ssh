@@ -87,7 +87,7 @@ cossh user@host -G                                 # Non-interactive command
     let ssh_args: Vec<String> = matches.get_many::<String>("ssh_args").map(|vals| vals.cloned().collect()).unwrap_or_default();
     let debug = matches.get_flag("debug");
     let ssh_logging = matches.get_flag("log");
-    let profile = matches.get_one::<String>("profile").cloned().filter(|s| !s.is_empty());
+    let profile = matches.get_one::<String>("profile").cloned().filter(|profile_name| !profile_name.is_empty());
     let no_user_args = std::env::args_os().len() <= 1;
     let debug_only = debug && !ssh_logging && profile.is_none() && ssh_args.is_empty();
     let interactive = no_user_args || debug_only;

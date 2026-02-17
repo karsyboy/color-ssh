@@ -44,8 +44,8 @@ fn main() -> Result<ExitCode> {
         log_info!("Launching interactive session manager");
         // Init config so session manager can read interactive settings (if configured)
         let _ = config::init_session_config(args.profile.clone());
-        if let Err(e) = tui::run_session_manager() {
-            eprintln!("Session manager error: {}", e);
+        if let Err(err) = tui::run_session_manager() {
+            eprintln!("Session manager error: {}", err);
             std::process::exit(1);
         }
         return Ok(ExitCode::SUCCESS);

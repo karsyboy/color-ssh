@@ -83,7 +83,7 @@ impl SshLogger {
             let cleaned_message = ANSI_ESCAPE_REGEX.replace_all(&message, "").to_string();
             let message: String = cleaned_message
                 .chars()
-                .filter(|c| (c.is_alphanumeric() || c.is_ascii_punctuation() || c.is_whitespace()) && *c != '\n' && *c != '\r')
+                .filter(|ch| (ch.is_alphanumeric() || ch.is_ascii_punctuation() || ch.is_whitespace()) && *ch != '\n' && *ch != '\r')
                 .collect();
 
             let message = if !crate::config::get_config().read().unwrap().metadata.compiled_secret_patterns.is_empty() {

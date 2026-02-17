@@ -306,9 +306,9 @@ impl SessionManager {
     fn centered_rect(width: u16, height: u16, area: Rect) -> Rect {
         let popup_width = width.min(area.width);
         let popup_height = height.min(area.height);
-        let x = area.x + area.width.saturating_sub(popup_width) / 2;
-        let y = area.y + area.height.saturating_sub(popup_height) / 2;
-        Rect::new(x, y, popup_width, popup_height)
+        let popup_x = area.x + area.width.saturating_sub(popup_width) / 2;
+        let popup_y = area.y + area.height.saturating_sub(popup_height) / 2;
+        Rect::new(popup_x, popup_y, popup_width, popup_height)
     }
 
     /// Render the host list
@@ -391,14 +391,14 @@ impl SessionManager {
                 let thumb_position = (scrollbar_height * self.host_scroll_offset / total_rows).min(scrollbar_height.saturating_sub(thumb_size));
                 let scrollbar_x = list_area.x + list_area.width - 1;
 
-                for i in 0..scrollbar_height {
-                    let y = list_area.y + i as u16;
-                    if i >= thumb_position && i < thumb_position + thumb_size {
-                        let cell = &mut frame.buffer_mut()[(scrollbar_x, y)];
+                for scrollbar_row_idx in 0..scrollbar_height {
+                    let row_y = list_area.y + scrollbar_row_idx as u16;
+                    if scrollbar_row_idx >= thumb_position && scrollbar_row_idx < thumb_position + thumb_size {
+                        let cell = &mut frame.buffer_mut()[(scrollbar_x, row_y)];
                         cell.set_symbol("█");
                         cell.set_style(Style::default().fg(Color::Cyan));
                     } else {
-                        let cell = &mut frame.buffer_mut()[(scrollbar_x, y)];
+                        let cell = &mut frame.buffer_mut()[(scrollbar_x, row_y)];
                         cell.set_symbol("│");
                         cell.set_style(Style::default().fg(Color::DarkGray));
                     }
@@ -789,7 +789,7 @@ impl SessionManager {
                 for row in 0..render_rows {
                     for col in 0..render_cols {
                         let cell = match screen.cell(row, col) {
-                            Some(c) => c,
+                            Some(cell) => cell,
                             None => continue,
                         };
 

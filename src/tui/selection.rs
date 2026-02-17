@@ -11,9 +11,13 @@ use std::io::{Write, stdout};
 /// Check if a cell at (row, col) is within the current text selection
 pub fn is_cell_in_selection(row: i64, col: u16, start: Option<(i64, u16)>, end: Option<(i64, u16)>) -> bool {
     let (start, end) = match (start, end) {
-        (Some(s), Some(e)) => {
+        (Some(selection_start), Some(selection_end)) => {
             // Normalize so start <= end in reading order
-            if s.0 < e.0 || (s.0 == e.0 && s.1 <= e.1) { (s, e) } else { (e, s) }
+            if selection_start.0 < selection_end.0 || (selection_start.0 == selection_end.0 && selection_start.1 <= selection_end.1) {
+                (selection_start, selection_end)
+            } else {
+                (selection_end, selection_start)
+            }
         }
         _ => return false,
     };
@@ -46,9 +50,13 @@ impl SessionManager {
     /// Copy the current text selection to clipboard
     pub(super) fn copy_selection_to_clipboard(&self) {
         let (start, end) = match (self.selection_start, self.selection_end) {
-            (Some(s), Some(e)) => {
+            (Some(selection_start), Some(selection_end)) => {
                 // Normalize so start <= end in reading order
-                if s.0 < e.0 || (s.0 == e.0 && s.1 <= e.1) { (s, e) } else { (e, s) }
+                if selection_start.0 < selection_end.0 || (selection_start.0 == selection_end.0 && selection_start.1 <= selection_end.1) {
+                    (selection_start, selection_end)
+                } else {
+                    (selection_end, selection_start)
+                }
             }
             _ => return,
         };
@@ -59,7 +67,7 @@ impl SessionManager {
 
         let tab = &self.tabs[self.selected_tab];
         let session = match &tab.session {
-            Some(s) => s,
+            Some(session) => session,
             None => return,
         };
 

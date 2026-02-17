@@ -24,7 +24,7 @@ pub(super) fn build_ssh_host_tree(config_path: &Path) -> io::Result<SshHostTreeM
     let mut hosts = Vec::new();
     let mut visited = HashSet::new();
     let mut next_id: FolderId = 0;
-    let root_name = config_path.file_name().and_then(|s| s.to_str()).unwrap_or("config").to_string();
+    let root_name = config_path.file_name().and_then(|segment| segment.to_str()).unwrap_or("config").to_string();
 
     let root = parse_tree_folder(config_path, &root_name, &mut hosts, &mut visited, &mut next_id)?.unwrap_or_else(|| TreeFolder {
         id: 0,
@@ -67,7 +67,7 @@ fn parse_tree_folder(
     for include_pattern in parsed.include_patterns {
         let resolved_pattern = resolve_include_pattern(&include_pattern, parent_dir);
         for include_path in expand_include_pattern(&resolved_pattern) {
-            let child_name = include_path.file_name().and_then(|s| s.to_str()).unwrap_or("include").to_string();
+            let child_name = include_path.file_name().and_then(|segment| segment.to_str()).unwrap_or("include").to_string();
 
             if let Some(child) = parse_tree_folder(&include_path, &child_name, hosts, visited, next_id)? {
                 children.push(child);

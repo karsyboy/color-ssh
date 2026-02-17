@@ -204,7 +204,12 @@ impl SessionManager {
 
         let config_dir = config::SESSION_CONFIG
             .get()
-            .and_then(|c| c.read().ok().map(|cfg| cfg.metadata.config_path.parent().map(|p| p.to_path_buf())))
+            .and_then(|config_lock| {
+                config_lock
+                    .read()
+                    .ok()
+                    .map(|cfg| cfg.metadata.config_path.parent().map(|config_path| config_path.to_path_buf()))
+            })
             .flatten();
 
         if let Some(config_dir) = config_dir
@@ -231,11 +236,13 @@ impl SessionManager {
         }
 
         let mut profile_list: Vec<String> = profiles.into_iter().collect();
-        profile_list.sort_by(|a, b| match (a.eq_ignore_ascii_case("default"), b.eq_ignore_ascii_case("default")) {
-            (true, false) => Ordering::Less,
-            (false, true) => Ordering::Greater,
-            _ => a.to_lowercase().cmp(&b.to_lowercase()),
-        });
+        profile_list.sort_by(
+            |left, right| match (left.eq_ignore_ascii_case("default"), right.eq_ignore_ascii_case("default")) {
+                (true, false) => Ordering::Less,
+                (false, true) => Ordering::Greater,
+                _ => left.to_lowercase().cmp(&right.to_lowercase()),
+            },
+        );
 
         profile_list
     }
@@ -277,8 +284,8 @@ impl SessionManager {
         let host_tree_root = tree_model.root;
         let (history_buffer, host_tree_start_collapsed, host_info_visible, host_view_size_percent, info_view_size_percent) = config::SESSION_CONFIG
             .get()
-            .and_then(|c| {
-                c.read().ok().and_then(|cfg| {
+            .and_then(|config_lock| {
+                config_lock.read().ok().and_then(|cfg| {
                     cfg.interactive_settings.as_ref().map(|interactive| {
                         (
                             interactive.history_buffer,
@@ -294,7 +301,7 @@ impl SessionManager {
 
         let quick_connect_default_ssh_logging = config::SESSION_CONFIG
             .get()
-            .and_then(|c| c.read().ok().map(|cfg| cfg.settings.ssh_logging))
+            .and_then(|config_lock| config_lock.read().ok().map(|cfg| cfg.settings.ssh_logging))
             .unwrap_or(false);
 
         let (term_width, term_height) = crossterm::terminal::size().unwrap_or((100, 30));

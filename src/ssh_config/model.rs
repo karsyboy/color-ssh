@@ -130,7 +130,7 @@ pub struct SshHostTreeModel {
 
 impl SshHostTreeModel {
     pub(super) fn empty(root_path: PathBuf) -> Self {
-        let root_name = root_path.file_name().and_then(|s| s.to_str()).unwrap_or("config").to_string();
+        let root_name = root_path.file_name().and_then(|segment| segment.to_str()).unwrap_or("config").to_string();
         Self {
             root: TreeFolder {
                 id: 0,

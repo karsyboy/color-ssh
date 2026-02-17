@@ -64,7 +64,7 @@ impl SessionManager {
         if self.search_mode {
             return StatusContext::HostSearch;
         }
-        if self.has_terminal_focus() && self.current_tab_search().map(|s| s.active).unwrap_or(false) {
+        if self.has_terminal_focus() && self.current_tab_search().map(|search_state| search_state.active).unwrap_or(false) {
             return StatusContext::TerminalSearch;
         }
         if self.has_terminal_focus() {
@@ -153,7 +153,11 @@ impl SessionManager {
         }
 
         let tab = &self.tabs[self.selected_tab];
-        let is_exited = tab.session.as_ref().and_then(|s| s.exited.lock().ok().map(|e| *e)).unwrap_or(true);
+        let is_exited = tab
+            .session
+            .as_ref()
+            .and_then(|session| session.exited.lock().ok().map(|exited| *exited))
+            .unwrap_or(true);
 
         let status_icon_color = if is_exited { Color::Red } else { Color::Green };
         let scroll_info = if tab.scroll_offset > 0 {

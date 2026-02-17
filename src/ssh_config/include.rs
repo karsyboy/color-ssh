@@ -24,7 +24,7 @@ pub(super) fn expand_include_pattern(pattern: &str) -> Vec<PathBuf> {
     }
 
     let parent = path.parent().unwrap_or(Path::new("."));
-    let filename_pattern = path.file_name().and_then(|s| s.to_str()).unwrap_or("*");
+    let filename_pattern = path.file_name().and_then(|segment| segment.to_str()).unwrap_or("*");
 
     let mut matched_paths = Vec::new();
     if let Ok(entries) = std::fs::read_dir(parent) {
@@ -44,7 +44,7 @@ pub(super) fn expand_include_pattern(pattern: &str) -> Vec<PathBuf> {
         }
     }
 
-    matched_paths.sort_by(|a, b| a.file_name().cmp(&b.file_name()));
+    matched_paths.sort_by(|left_path, right_path| left_path.file_name().cmp(&right_path.file_name()));
     matched_paths
 }
 
@@ -78,8 +78,8 @@ fn matches_pattern(text: &str, pattern: &str) -> bool {
                 text_idx += 1;
                 pattern_idx += 1;
             }
-            c => {
-                if text_chars[text_idx] != c {
+            pattern_char => {
+                if text_chars[text_idx] != pattern_char {
                     return false;
                 }
                 text_idx += 1;

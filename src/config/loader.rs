@@ -29,7 +29,7 @@ impl ConfigLoader {
     fn find_config_path(profile: &Option<String>) -> Result<PathBuf, io::Error> {
         log_debug!("Searching for configuration file...");
         let config_filename = match profile {
-            Some(p) if !p.is_empty() => format!("{}.cossh-config.yaml", p),
+            Some(profile_name) if !profile_name.is_empty() => format!("{}.cossh-config.yaml", profile_name),
             _ => ".cossh-config.yaml".to_string(),
         };
 
@@ -206,7 +206,7 @@ fn is_valid_hex_color(color: &str) -> bool {
     if color.len() != 7 || !color.starts_with('#') {
         return false;
     }
-    color[1..].chars().all(|c| c.is_ascii_hexdigit())
+    color[1..].chars().all(|hex_char| hex_char.is_ascii_hexdigit())
 }
 
 /// Compiles the highlighting rules from the configuration into a vector of regex patterns and their corresponding colors
@@ -304,7 +304,7 @@ fn hex_to_ansi(hex: &str, color_type: ColorType) -> String {
     // Check if the hex code is valid (starts with '#' and has 7 characters)
     if hex.len() == 7 && hex.starts_with('#') {
         // Parse the red, green, and blue values from the hex string
-        if let (Ok(r), Ok(g), Ok(b)) = (
+        if let (Ok(red), Ok(green), Ok(blue)) = (
             u8::from_str_radix(&hex[1..3], 16),
             u8::from_str_radix(&hex[3..5], 16),
             u8::from_str_radix(&hex[5..7], 16),
@@ -315,7 +315,7 @@ fn hex_to_ansi(hex: &str, color_type: ColorType) -> String {
                 ColorType::Foreground => 38,
                 ColorType::Background => 48,
             };
-            return format!("\x1b[{};2;{};{};{}m", code, r, g, b);
+            return format!("\x1b[{};2;{};{};{}m", code, red, green, blue);
         }
     }
     // Return empty string if the hex is invalid (will use reset instead)

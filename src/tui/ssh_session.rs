@@ -18,23 +18,23 @@ use vt100::Parser;
 /// Since we're running in a TUI that has taken over the terminal, we emulate a modern xterm
 /// terminal and respond directly. This prevents fish from timing out waiting for responses.
 fn respond_to_terminal_queries(data: &[u8], writer: &Arc<Mutex<Box<dyn Write + Send>>>) {
-    let mut i = 0;
-    while i < data.len() {
-        if data[i] == 0x1b && i + 1 < data.len() && data[i + 1] == b'[' {
+    let mut scan_idx = 0;
+    while scan_idx < data.len() {
+        if data[scan_idx] == 0x1b && scan_idx + 1 < data.len() && data[scan_idx + 1] == b'[' {
             // Found CSI sequence start (ESC[)
-            let mut j = i + 2;
-            let param_start = j;
+            let mut param_idx = scan_idx + 2;
+            let param_start = param_idx;
 
             // Collect parameter bytes (0x30-0x3F: digits, semicolons, >, etc.)
-            while j < data.len() && (0x30..=0x3F).contains(&data[j]) {
-                j += 1;
+            while param_idx < data.len() && (0x30..=0x3F).contains(&data[param_idx]) {
+                param_idx += 1;
             }
 
-            let params = &data[param_start..j];
+            let params = &data[param_start..param_idx];
 
             // Check for terminal query final bytes
-            if j < data.len() {
-                let final_byte = data[j];
+            if param_idx < data.len() {
+                let final_byte = data[param_idx];
 
                 // Generate appropriate response for terminal capability queries
                 let response = match final_byte {
@@ -73,18 +73,18 @@ fn respond_to_terminal_queries(data: &[u8], writer: &Arc<Mutex<Box<dyn Write + S
                 if let Some(response_bytes) = response {
                     // Write response back to PTY so the application (fish) receives it
                     log_debug!("Detected terminal query, sending response: {:?}", response_bytes);
-                    if let Ok(mut w) = writer.lock() {
-                        let _ = w.write_all(response_bytes);
-                        let _ = w.flush();
+                    if let Ok(mut writer_guard) = writer.lock() {
+                        let _ = writer_guard.write_all(response_bytes);
+                        let _ = writer_guard.flush();
                     }
                 }
 
-                i = j + 1;
+                scan_idx = param_idx + 1;
             } else {
-                i = j;
+                scan_idx = param_idx;
             }
         } else {
-            i += 1;
+            scan_idx += 1;
         }
     }
 }
@@ -117,22 +117,22 @@ fn forward_osc52(data: &[u8], osc_buf: &mut Vec<u8>) {
     }
 
     // Scan for OSC 52 start: ESC ] 52 ;
-    let mut i = 0;
-    while i < data.len() {
+    let mut scan_idx = 0;
+    while scan_idx < data.len() {
         // Look for ESC (0x1b)
-        if data[i] == 0x1b && i + 1 < data.len() && data[i + 1] == b']' {
+        if data[scan_idx] == 0x1b && scan_idx + 1 < data.len() && data[scan_idx + 1] == b']' {
             // Check if this is OSC 52
-            let rest = &data[i + 2..];
+            let rest = &data[scan_idx + 2..];
             if rest.starts_with(b"52;") {
                 // Found OSC 52 start — look for terminator in remaining data
-                let seq_start = i;
+                let seq_start = scan_idx;
                 if let Some(end_offset) = find_osc_end(&data[seq_start..]) {
                     // Complete sequence — forward it
                     let seq = &data[seq_start..seq_start + end_offset];
                     let mut stdout = io::stdout();
                     let _ = stdout.write_all(seq);
                     let _ = stdout.flush();
-                    i = seq_start + end_offset;
+                    scan_idx = seq_start + end_offset;
                     continue;
                 } else {
                     // Partial sequence — buffer it for next read
@@ -141,20 +141,20 @@ fn forward_osc52(data: &[u8], osc_buf: &mut Vec<u8>) {
                 }
             }
         }
-        i += 1;
+        scan_idx += 1;
     }
 }
 
 /// Find the end of an OSC sequence (after BEL or ST terminator), returning the byte position after the terminator.
 fn find_osc_end(data: &[u8]) -> Option<usize> {
-    for i in 0..data.len() {
-        if data[i] == 0x07 {
+    for byte_idx in 0..data.len() {
+        if data[byte_idx] == 0x07 {
             // BEL terminator
-            return Some(i + 1);
+            return Some(byte_idx + 1);
         }
-        if data[i] == 0x1b && i + 1 < data.len() && data[i + 1] == b'\\' {
+        if data[byte_idx] == 0x1b && byte_idx + 1 < data.len() && data[byte_idx + 1] == b'\\' {
             // ST terminator (ESC \)
-            return Some(i + 2);
+            return Some(byte_idx + 2);
         }
     }
     None
@@ -238,17 +238,17 @@ impl SessionManager {
                 pixel_width: 0,
                 pixel_height: 0,
             })
-            .map_err(|e| io::Error::other(e.to_string()))?;
+            .map_err(|err| io::Error::other(err.to_string()))?;
 
         // Build cossh command to get syntax highlighting
         let cossh_path = std::env::current_exe().unwrap_or_else(|_| std::path::PathBuf::from("cossh"));
 
         let mut cmd = if host.use_sshpass {
             // Use sshpass -e to pass the password from SSHPASS env var
-            let mut c = CommandBuilder::new("sshpass");
-            c.arg("-e");
-            c.arg(&cossh_path);
-            c
+            let mut sshpass_cmd = CommandBuilder::new("sshpass");
+            sshpass_cmd.arg("-e");
+            sshpass_cmd.arg(&cossh_path);
+            sshpass_cmd
         } else {
             CommandBuilder::new(&cossh_path)
         };
@@ -267,7 +267,7 @@ impl SessionManager {
         }
 
         let sshpass_info = if host.use_sshpass { " (via sshpass)" } else { "" };
-        let profile_info = host.profile.as_ref().map_or(String::new(), |p| format!(" [profile: {}]", p));
+        let profile_info = host.profile.as_ref().map_or(String::new(), |profile| format!(" [profile: {}]", profile));
         let logging_info = if force_ssh_logging { " [ssh-logging]" } else { "" };
         log_debug!(
             "Spawning cossh command: cossh {}{}{}{} (session: {})",
@@ -279,11 +279,11 @@ impl SessionManager {
         );
 
         // Spawn the command in the PTY
-        let child = pty_pair.slave.spawn_command(cmd).map_err(|e| io::Error::other(e.to_string()))?;
+        let child = pty_pair.slave.spawn_command(cmd).map_err(|err| io::Error::other(err.to_string()))?;
 
         // Get the master for reading/writing
-        let mut reader = pty_pair.master.try_clone_reader().map_err(|e| io::Error::other(e.to_string()))?;
-        let writer = pty_pair.master.take_writer().map_err(|e| io::Error::other(e.to_string()))?;
+        let mut reader = pty_pair.master.try_clone_reader().map_err(|err| io::Error::other(err.to_string()))?;
+        let writer = pty_pair.master.take_writer().map_err(|err| io::Error::other(err.to_string()))?;
 
         // Create VT100 parser for terminal emulation
         let parser = Arc::new(Mutex::new(Parser::new(40, 120, history_buffer)));
@@ -310,8 +310,8 @@ impl SessionManager {
                         }
                         break;
                     }
-                    Ok(n) => {
-                        let data = &buf[..n];
+                    Ok(bytes_read) => {
+                        let data = &buf[..bytes_read];
 
                         // Respond to terminal capability queries from PTY
                         // (fixes fish shell DA query timeout warning)

@@ -72,7 +72,7 @@ pub fn run_session_manager() -> io::Result<()> {
 fn run_app<B: ratatui::backend::Backend>(terminal: &mut Terminal<B>, app: &mut SessionManager) -> io::Result<()> {
     loop {
         app.check_clear_pending();
-        terminal.draw(|f| app.draw(f))?;
+        terminal.draw(|frame| app.draw(frame))?;
 
         if app.should_exit {
             break;
