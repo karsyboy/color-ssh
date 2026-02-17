@@ -46,9 +46,12 @@ impl SessionManager {
             return Ok(());
         }
 
+        let terminal_view_active = !self.focus_on_manager && !self.tabs.is_empty() && self.selected_tab < self.tabs.len();
         if key.code == KeyCode::Char('q') && key.modifiers.contains(KeyModifiers::CONTROL) {
-            self.should_exit = true;
-            return Ok(());
+            if !terminal_view_active {
+                self.should_exit = true;
+                return Ok(());
+            }
         }
 
         if self.quick_connect.is_some() {
@@ -274,5 +277,25 @@ mod tests {
         let key = KeyEvent::new(KeyCode::Char('q'), KeyModifiers::CONTROL);
         app.handle_key(key).expect("handle_key should succeed");
         assert!(app.should_exit);
+    }
+
+    #[test]
+    fn handle_key_ctrl_q_does_not_exit_in_terminal_view() {
+        let mut app = SessionManager::new().expect("app should initialize");
+        app.tabs.push(crate::tui::HostTab {
+            host: crate::ssh_config::SshHost::new("test-host".to_string()),
+            title: "test-host".to_string(),
+            session: None,
+            scroll_offset: 0,
+            terminal_search: crate::tui::TerminalSearchState::default(),
+            force_ssh_logging: false,
+            last_pty_size: None,
+        });
+        app.selected_tab = 0;
+        app.focus_on_manager = false;
+
+        let key = KeyEvent::new(KeyCode::Char('q'), KeyModifiers::CONTROL);
+        app.handle_key(key).expect("handle_key should succeed");
+        assert!(!app.should_exit);
     }
 }

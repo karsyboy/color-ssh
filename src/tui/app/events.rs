@@ -79,9 +79,6 @@ pub(crate) fn run_app<B: ratatui::backend::Backend>(terminal: &mut Terminal<B>, 
                     app.mark_ui_dirty();
                     match resolve_action(app) {
                         AppAction::Exit => app.should_exit = true,
-                        _ if key.code == crossterm::event::KeyCode::Char('q') && key.modifiers.contains(crossterm::event::KeyModifiers::CONTROL) => {
-                            app.should_exit = true;
-                        }
                         AppAction::Host(_) | AppAction::Tab(_) | AppAction::Terminal(_) | AppAction::QuickConnect(_) => app.handle_key(key)?,
                     }
                 }
