@@ -275,8 +275,8 @@ impl SessionManager {
 
                         // Detect clear screen sequences and drop replay history before the clear.
                         // This prevents scrolling back into cleared content after parser rebuild.
-                        if let Some(clear_end) = Self::last_clear_sequence_end(data) {
-                            reset_replay_bytes(&replay_log_clone, &data[clear_end..]);
+                        if let Some(clear_start) = Self::clear_replay_slice_start(data) {
+                            reset_replay_bytes(&replay_log_clone, &data[clear_start..]);
                             if let Ok(mut clear) = clear_pending_clone.lock() {
                                 *clear = true;
                             }
@@ -315,15 +315,21 @@ impl SessionManager {
         })
     }
 
-    /// Find the byte index immediately after the last clear sequence in `data`.
+    /// Find the byte index to keep when replay is reset after a clear.
     ///
-    /// Supported sequences:
+    /// Supported clear sequences:
     /// - `ESC[2J` clear screen
     /// - `ESC[3J` clear screen + scrollback
-    fn last_clear_sequence_end(data: &[u8]) -> Option<usize> {
-        // Look for ESC[2J (clear screen) or ESC[3J (clear scrollback)
-        // Also check for ESC[H ESC[2J (home + clear, common pattern)
-        let mut last_end = None;
+    ///
+    /// The returned index starts at the earliest contiguous control sequence in
+    /// the clear-chain (e.g., keeps `ESC[H ESC[2J ESC[3J` together) so parser
+    /// rebuild preserves cursor placement.
+    fn clear_replay_slice_start(data: &[u8]) -> Option<usize> {
+        let mut last_clear_start: Option<usize> = None;
+        let mut prev_end: Option<usize> = None;
+        let mut prev_chain_member = false;
+        let mut prev_chain_start = 0usize;
+
         let mut i = 0;
         while i + 2 < data.len() {
             if data[i] == 0x1b && data[i + 1] == b'[' {
@@ -334,19 +340,33 @@ impl SessionManager {
                     j += 1;
                 }
                 // Check if it ends with 'J'
-                if j < data.len() && data[j] == b'J' {
-                    // Extract the number before J
-                    let num_str = std::str::from_utf8(&data[i + 2..j]).unwrap_or("");
-                    if num_str == "2" || num_str == "3" {
-                        last_end = Some(j + 1);
+                if j < data.len() {
+                    let final_byte = data[j];
+                    let params = std::str::from_utf8(&data[i + 2..j]).unwrap_or("");
+                    let is_clear = final_byte == b'J' && (params == "2" || params == "3");
+                    let is_home = final_byte == b'H' || final_byte == b'f';
+                    let is_chain_member = is_clear || is_home;
+
+                    let chain_start = if is_chain_member && prev_chain_member && prev_end == Some(i) {
+                        prev_chain_start
+                    } else {
+                        i
+                    };
+
+                    if is_clear {
+                        last_clear_start = Some(chain_start);
                     }
+
+                    prev_end = Some(j + 1);
+                    prev_chain_member = is_chain_member;
+                    prev_chain_start = chain_start;
                 }
                 i = j;
             } else {
                 i += 1;
             }
         }
-        last_end
+        last_clear_start
     }
 
     /// Check if any tab has a pending clear screen, then reset scroll state and parser history.
