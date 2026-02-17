@@ -418,6 +418,7 @@ impl SessionManager {
                 tab.terminal_search.matches.clear();
                 tab.terminal_search.current = 0;
                 tab.terminal_search_cache = TerminalSearchCache::default();
+                tab.last_pty_size = None;
                 log_debug!("Successfully reconnected to {}", host.name);
             }
             Err(err) => {
