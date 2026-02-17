@@ -30,6 +30,19 @@ fn append_replay_bytes(replay_log: &Arc<Mutex<VecDeque<u8>>>, data: &[u8]) {
     }
 }
 
+fn reset_replay_bytes(replay_log: &Arc<Mutex<VecDeque<u8>>>, data: &[u8]) {
+    let Ok(mut replay) = replay_log.lock() else {
+        return;
+    };
+
+    replay.clear();
+    replay.extend(data.iter().copied());
+    let overflow = replay.len().saturating_sub(PARSER_REPLAY_BUFFER_MAX_BYTES);
+    if overflow > 0 {
+        replay.drain(..overflow);
+    }
+}
+
 fn rebuild_parser_from_replay(session: &SshSession, rows: u16, cols: u16, history_buffer: usize) {
     let replay_snapshot = match session.replay_log.lock() {
         Ok(replay) => replay.iter().copied().collect::<Vec<u8>>(),
@@ -260,14 +273,16 @@ impl SessionManager {
                         // so the inner TUI app's copy reaches the system clipboard.
                         forward_osc52(data, &mut osc_buf);
 
-                        // Keep a bounded replay log so terminal state can be rebuilt on resize.
-                        append_replay_bytes(&replay_log_clone, data);
-
-                        // Detect clear screen sequences: \x1b[2J or \x1b[3J
-                        if Self::contains_clear_sequence(data)
-                            && let Ok(mut clear) = clear_pending_clone.lock()
-                        {
-                            *clear = true;
+                        // Detect clear screen sequences and drop replay history before the clear.
+                        // This prevents scrolling back into cleared content after parser rebuild.
+                        if let Some(clear_end) = Self::last_clear_sequence_end(data) {
+                            reset_replay_bytes(&replay_log_clone, &data[clear_end..]);
+                            if let Ok(mut clear) = clear_pending_clone.lock() {
+                                *clear = true;
+                            }
+                        } else {
+                            // Keep a bounded replay log so terminal state can be rebuilt on resize.
+                            append_replay_bytes(&replay_log_clone, data);
                         }
 
                         if let Ok(mut parser) = parser_clone.lock() {
@@ -300,10 +315,15 @@ impl SessionManager {
         })
     }
 
-    /// Check if data contains a clear screen sequence
-    fn contains_clear_sequence(data: &[u8]) -> bool {
+    /// Find the byte index immediately after the last clear sequence in `data`.
+    ///
+    /// Supported sequences:
+    /// - `ESC[2J` clear screen
+    /// - `ESC[3J` clear screen + scrollback
+    fn last_clear_sequence_end(data: &[u8]) -> Option<usize> {
         // Look for ESC[2J (clear screen) or ESC[3J (clear scrollback)
         // Also check for ESC[H ESC[2J (home + clear, common pattern)
+        let mut last_end = None;
         let mut i = 0;
         while i + 2 < data.len() {
             if data[i] == 0x1b && data[i + 1] == b'[' {
@@ -318,7 +338,7 @@ impl SessionManager {
                     // Extract the number before J
                     let num_str = std::str::from_utf8(&data[i + 2..j]).unwrap_or("");
                     if num_str == "2" || num_str == "3" {
-                        return true;
+                        last_end = Some(j + 1);
                     }
                 }
                 i = j;
@@ -326,22 +346,30 @@ impl SessionManager {
                 i += 1;
             }
         }
-        false
+        last_end
     }
 
-    /// Check if any tab has a pending clear screen and reset scroll offset
+    /// Check if any tab has a pending clear screen, then reset scroll state and parser history.
     pub(crate) fn check_clear_pending(&mut self) {
         for tab in &mut self.tabs {
             if let Some(session) = &tab.session
                 && let Ok(mut clear) = session.clear_pending.lock()
                 && *clear
             {
-                // Reset scroll offset to show the cleared screen
+                // Reset scroll offset to show the cleared screen.
                 tab.scroll_offset = 0;
+                tab.terminal_search.matches.clear();
+                tab.terminal_search.current = 0;
+                tab.terminal_search_cache = TerminalSearchCache::default();
 
-                // Note: We DON'T recreate the parser because that would lose terminal state
-                // like mouse mode settings from TUI apps. The clear sequence is already
-                // processed by the parser, and scrollback will naturally age out.
+                // Rebuild from replay to enforce cleared history.
+                let (rows, cols) = if let Ok(parser) = session.parser.lock() {
+                    parser.screen().size()
+                } else {
+                    tab.last_pty_size.unwrap_or((40, 120))
+                };
+                rebuild_parser_from_replay(session, rows.max(1), cols.max(1), self.history_buffer);
+                session.render_epoch.fetch_add(1, Ordering::Relaxed);
 
                 *clear = false;
             }
