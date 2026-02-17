@@ -1,19 +1,12 @@
-//! Text selection and clipboard support
-//!
-//! Uses OSC 52 escape sequences via crossterm for clipboard operations.
-//! This works in most modern terminals: Konsole, Kitty, Alacritty, Wezterm, foot, etc.
+//! Selection extraction helpers.
 
-use super::SessionManager;
-use crossterm::clipboard::CopyToClipboard;
-use crossterm::execute;
-use std::io::{Write, stdout};
 use vt100::Parser;
 
-/// Check if a cell at (row, col) is within the current text selection
-pub fn is_cell_in_selection(row: i64, col: u16, start: Option<(i64, u16)>, end: Option<(i64, u16)>) -> bool {
+/// Check if a cell at `(row, col)` is within the current text selection.
+pub(crate) fn is_cell_in_selection(row: i64, col: u16, start: Option<(i64, u16)>, end: Option<(i64, u16)>) -> bool {
     let (start, end) = match (start, end) {
         (Some(selection_start), Some(selection_end)) => {
-            // Normalize so start <= end in reading order
+            // Normalize so start <= end in reading order.
             if selection_start.0 < selection_end.0 || (selection_start.0 == selection_end.0 && selection_start.1 <= selection_end.1) {
                 (selection_start, selection_end)
             } else {
@@ -27,27 +20,17 @@ pub fn is_cell_in_selection(row: i64, col: u16, start: Option<(i64, u16)>, end: 
         return false;
     }
     if start.0 == end.0 {
-        // Single row: selected from start.1 to end.1
         col >= start.1 && col <= end.1
     } else if row == start.0 {
-        // First row: from start.1 to end of line
         col >= start.1
     } else if row == end.0 {
-        // Last row: from beginning to end.1
         col <= end.1
     } else {
-        // Middle rows: entirely selected
         true
     }
 }
 
-/// Copy text to system clipboard using OSC 52 escape sequence
-fn copy_to_clipboard(text: &str) {
-    let _ = execute!(stdout(), CopyToClipboard::to_clipboard_from(text));
-    let _ = stdout().flush();
-}
-
-fn extract_selection_text(parser: &mut Parser, start: (i64, u16), end: (i64, u16), restore_scrollback: usize) -> String {
+pub(crate) fn extract_selection_text(parser: &mut Parser, start: (i64, u16), end: (i64, u16), restore_scrollback: usize) -> String {
     let (visible_rows, cols) = parser.screen().size();
     let mut result = String::new();
 
@@ -90,46 +73,6 @@ fn extract_selection_text(parser: &mut Parser, start: (i64, u16), end: (i64, u16
 
     parser.set_scrollback(restore_scrollback);
     result
-}
-
-impl SessionManager {
-    /// Copy the current text selection to clipboard
-    pub(super) fn copy_selection_to_clipboard(&self) {
-        let (start, end) = match (self.selection_start, self.selection_end) {
-            (Some(selection_start), Some(selection_end)) => {
-                // Normalize so start <= end in reading order
-                if selection_start.0 < selection_end.0 || (selection_start.0 == selection_end.0 && selection_start.1 <= selection_end.1) {
-                    (selection_start, selection_end)
-                } else {
-                    (selection_end, selection_start)
-                }
-            }
-            _ => return,
-        };
-
-        if self.tabs.is_empty() || self.selected_tab >= self.tabs.len() {
-            return;
-        }
-
-        let tab = &self.tabs[self.selected_tab];
-        let session = match &tab.session {
-            Some(session) => session,
-            None => return,
-        };
-        let restore_scrollback = tab.scroll_offset;
-
-        let text = if let Ok(mut parser) = session.parser.lock() {
-            extract_selection_text(&mut parser, start, end, restore_scrollback)
-        } else {
-            return;
-        };
-
-        if text.is_empty() {
-            return;
-        }
-
-        copy_to_clipboard(&text);
-    }
 }
 
 #[cfg(test)]

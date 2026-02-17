@@ -33,9 +33,9 @@ regex = "1.12.2"
 serde = {version ="1.0.228", features = ["derive"] }
 serde_yaml = "0.9.34"
 vt100 = "0.15.2"
+unicode-width = "0.1.14"
 
 # The profile that 'cargo dist' will build with
 [profile.dist]
 inherits = "release"
 lto = "thin"
-

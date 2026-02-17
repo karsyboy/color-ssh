@@ -1,57 +1,13 @@
 //! Mouse input handling and PTY mouse forwarding.
 
-use super::SessionManager;
+use crate::tui::{HostTreeRowKind, SessionManager};
 use crossterm::event::{self, KeyModifiers, MouseButton, MouseEventKind};
 use std::io;
 use std::time::Instant;
 
 impl SessionManager {
-    fn host_scrollbar_x(&self) -> Option<u16> {
-        let area = self.host_list_area;
-        if !self.host_panel_visible || area.width == 0 || area.height == 0 {
-            return None;
-        }
-
-        let total_rows = self.visible_host_row_count();
-        let viewport_height = area.height as usize;
-        if total_rows <= viewport_height {
-            return None;
-        }
-
-        Some(area.x + area.width.saturating_sub(1))
-    }
-
-    fn set_host_scroll_from_scrollbar_row(&mut self, mouse_row: u16) {
-        let area = self.host_list_area;
-        let total_rows = self.visible_host_row_count();
-        let viewport_height = area.height as usize;
-
-        if area.height == 0 || total_rows <= viewport_height {
-            return;
-        }
-
-        let max_offset = total_rows.saturating_sub(viewport_height);
-        let track_len = viewport_height.saturating_sub(1);
-        let local_row = mouse_row.saturating_sub(area.y).min(area.height.saturating_sub(1)) as usize;
-
-        let new_offset = if track_len == 0 {
-            0
-        } else {
-            (local_row.saturating_mul(max_offset) + (track_len / 2)) / track_len
-        }
-        .min(max_offset);
-
-        let relative_row = self
-            .selected_host_row
-            .saturating_sub(self.host_scroll_offset)
-            .min(viewport_height.saturating_sub(1));
-        self.host_scroll_offset = new_offset;
-        let new_selected = (self.host_scroll_offset + relative_row).min(total_rows.saturating_sub(1));
-        self.set_selected_row(new_selected);
-    }
-
     /// Handle mouse events.
-    pub(super) fn handle_mouse(&mut self, mouse: event::MouseEvent) -> io::Result<()> {
+    pub(crate) fn handle_mouse(&mut self, mouse: event::MouseEvent) -> io::Result<()> {
         if self.quick_connect.is_some() {
             return Ok(());
         }
@@ -115,7 +71,7 @@ impl SessionManager {
                         self.focus_manager_panel();
 
                         let row_kind = self.visible_host_rows[clicked_index].kind;
-                        if let super::HostTreeRowKind::Folder(folder_id) = row_kind {
+                        if let HostTreeRowKind::Folder(folder_id) = row_kind {
                             self.toggle_folder(folder_id);
                             self.last_click = None;
                         } else {
@@ -209,7 +165,7 @@ impl SessionManager {
                         let tab_width = tab_widths[idx];
                         let visible_end = (used + tab_width).min(visible_tab_width);
                         if local_col < visible_end {
-                            let close_pos = used + self.tabs[idx].title.len() + 1;
+                            let close_pos = used + self.tab_title_display_width(idx) + 1;
                             if close_pos < visible_end && local_col == close_pos {
                                 self.selected_tab = idx;
                                 self.close_current_tab();
@@ -473,7 +429,7 @@ impl SessionManager {
         Ok(())
     }
 
-    pub(super) fn max_scrollback_for_tab(&self, tab_idx: usize) -> usize {
+    pub(crate) fn max_scrollback_for_tab(&self, tab_idx: usize) -> usize {
         if tab_idx >= self.tabs.len() {
             return 0;
         }
@@ -491,7 +447,7 @@ impl SessionManager {
         }
     }
 
-    pub(super) fn is_pty_mouse_mode_active(&self) -> bool {
+    pub(crate) fn is_pty_mouse_mode_active(&self) -> bool {
         if self.tabs.is_empty() || self.selected_tab >= self.tabs.len() {
             return false;
         }

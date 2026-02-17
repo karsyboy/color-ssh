@@ -1,7 +1,8 @@
 //! Fuzzy search and host filtering logic
 
-use super::{HostTreeRow, HostTreeRowKind, SessionManager};
 use crate::ssh_config::{FolderId, TreeFolder};
+use crate::tui::state::HostSearchEntry;
+use crate::tui::{HostTreeRow, HostTreeRowKind, SessionManager};
 use std::collections::HashMap;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -60,7 +61,7 @@ fn strict_match_score(text_lower: &str, pattern_lower: &str) -> Option<i32> {
     }
 }
 
-fn compute_match_scores(search_entries: &[super::state::HostSearchEntry], query_lower: &str) -> HashMap<usize, i32> {
+fn compute_match_scores(search_entries: &[HostSearchEntry], query_lower: &str) -> HashMap<usize, i32> {
     let mut match_scores = HashMap::new();
 
     // Pass 1: strict contiguous matching.
@@ -285,7 +286,7 @@ impl SessionManager {
     }
 
     /// Update the filtered hosts based on search query with fuzzy matching.
-    pub(super) fn update_filtered_hosts(&mut self) {
+    pub(crate) fn update_filtered_hosts(&mut self) {
         let previous = self.selected_row_key();
 
         self.host_match_scores.clear();
@@ -299,7 +300,7 @@ impl SessionManager {
         self.repair_selection_after_rebuild(previous);
     }
 
-    pub(super) fn selected_host_idx(&self) -> Option<usize> {
+    pub(crate) fn selected_host_idx(&self) -> Option<usize> {
         match self.visible_host_rows.get(self.selected_host_row) {
             Some(HostTreeRow {
                 kind: HostTreeRowKind::Host(host_idx),
@@ -309,7 +310,7 @@ impl SessionManager {
         }
     }
 
-    pub(super) fn selected_folder_id(&self) -> Option<FolderId> {
+    pub(crate) fn selected_folder_id(&self) -> Option<FolderId> {
         match self.visible_host_rows.get(self.selected_host_row) {
             Some(HostTreeRow {
                 kind: HostTreeRowKind::Folder(folder_id),
@@ -319,27 +320,27 @@ impl SessionManager {
         }
     }
 
-    pub(super) fn set_selected_row(&mut self, row: usize) {
+    pub(crate) fn set_selected_row(&mut self, row: usize) {
         self.selected_host_row = row;
         self.sync_host_row_selection_state();
     }
 
-    pub(super) fn visible_host_row_count(&self) -> usize {
+    pub(crate) fn visible_host_row_count(&self) -> usize {
         self.visible_host_rows.len()
     }
 
-    pub(super) fn matched_host_count(&self) -> usize {
+    pub(crate) fn matched_host_count(&self) -> usize {
         self.host_match_scores.len()
     }
 
-    pub(super) fn is_folder_expanded(&self, folder_id: FolderId) -> bool {
+    pub(crate) fn is_folder_expanded(&self, folder_id: FolderId) -> bool {
         if !self.search_query.is_empty() {
             return true;
         }
         !self.collapsed_folders.contains(&folder_id)
     }
 
-    pub(super) fn set_folder_expanded(&mut self, folder_id: FolderId, expanded: bool) {
+    pub(crate) fn set_folder_expanded(&mut self, folder_id: FolderId, expanded: bool) {
         if !self.search_query.is_empty() {
             return;
         }
@@ -354,7 +355,7 @@ impl SessionManager {
         self.repair_selection_after_rebuild(Some(HostRowKey::Folder(folder_id)));
     }
 
-    pub(super) fn toggle_folder(&mut self, folder_id: FolderId) {
+    pub(crate) fn toggle_folder(&mut self, folder_id: FolderId) {
         let expanded = self.is_folder_expanded(folder_id);
         self.set_folder_expanded(folder_id, !expanded);
     }
@@ -371,7 +372,7 @@ impl SessionManager {
         None
     }
 
-    pub(super) fn folder_by_id(&self, folder_id: FolderId) -> Option<&TreeFolder> {
+    pub(crate) fn folder_by_id(&self, folder_id: FolderId) -> Option<&TreeFolder> {
         Self::folder_by_id_recursive(&self.host_tree_root, folder_id)
     }
 
@@ -383,12 +384,12 @@ impl SessionManager {
         count
     }
 
-    pub(super) fn folder_descendant_host_count(&self, folder_id: FolderId) -> usize {
+    pub(crate) fn folder_descendant_host_count(&self, folder_id: FolderId) -> usize {
         self.folder_by_id(folder_id).map(Self::count_hosts_recursive).unwrap_or(0)
     }
 
     /// Update host list scroll to keep selection visible.
-    pub(super) fn update_host_scroll(&mut self, viewport_height: usize) {
+    pub(crate) fn update_host_scroll(&mut self, viewport_height: usize) {
         if self.visible_host_rows.is_empty() || viewport_height == 0 {
             return;
         }
@@ -406,8 +407,8 @@ impl SessionManager {
 mod tests {
     use super::*;
 
-    fn search_entry(name: &str, hostname: Option<&str>, user: Option<&str>) -> super::super::state::HostSearchEntry {
-        super::super::state::HostSearchEntry {
+    fn search_entry(name: &str, hostname: Option<&str>, user: Option<&str>) -> HostSearchEntry {
+        HostSearchEntry {
             name_lower: name.to_string(),
             hostname_lower: hostname.map(str::to_string),
             user_lower: user.map(str::to_string),

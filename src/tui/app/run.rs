@@ -1,30 +1,15 @@
-//! Interactive TUI-based SSH host selector.
+//! TUI bootstrap and teardown lifecycle.
 
-mod input;
-mod mouse;
-mod render;
-mod search;
-mod selection;
-mod ssh_session;
-mod state;
-mod status_bar;
-
-pub(super) use state::{
-    ConnectRequest, HostTab, HostTreeRow, HostTreeRowKind, QuickConnectField, QuickConnectState, SessionManager, SshSession, TerminalSearchState,
-};
-
-use crate::{debug_enabled, log_debug, log_error};
+use super::events::run_app;
+use crate::tui::AppState;
+use crate::{log_debug, log_error};
 use crossterm::{
-    event::{self, DisableMouseCapture, EnableMouseCapture, Event},
+    event::{DisableMouseCapture, EnableMouseCapture},
     execute,
     terminal::{EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode},
 };
 use ratatui::{Terminal, backend::CrosstermBackend};
-use std::{
-    io,
-    process::Command,
-    time::{Duration, Instant},
-};
+use std::{io, process::Command};
 
 #[derive(Debug, Default)]
 struct TerminalModeGuard {
@@ -66,7 +51,7 @@ pub fn run_session_manager() -> io::Result<()> {
     let backend = CrosstermBackend::new(stdout);
     let mut terminal = Terminal::new(backend)?;
 
-    let mut app = SessionManager::new()?;
+    let mut app = AppState::new()?;
     let result = run_app(&mut terminal, &mut app);
     let selected_request = app.selected_host_to_connect.take();
     let show_cursor_result = terminal.show_cursor();
@@ -105,45 +90,5 @@ pub fn run_session_manager() -> io::Result<()> {
     }
 
     log_debug!("Session manager exited");
-    Ok(())
-}
-
-fn run_app<B: ratatui::backend::Backend>(terminal: &mut Terminal<B>, app: &mut SessionManager) -> io::Result<()> {
-    const EVENT_POLL_INTERVAL: Duration = Duration::from_millis(50);
-    const RENDER_HEARTBEAT: Duration = Duration::from_millis(250);
-
-    loop {
-        if app.should_draw(RENDER_HEARTBEAT) {
-            app.check_clear_pending();
-            let render_started_at = Instant::now();
-            terminal.draw(|frame| app.draw(frame))?;
-            app.mark_drawn();
-            if debug_enabled!() {
-                log_debug!("TUI frame rendered in {:?}", render_started_at.elapsed());
-            }
-        }
-
-        if app.should_exit {
-            break;
-        }
-
-        if event::poll(EVENT_POLL_INTERVAL)? {
-            match event::read()? {
-                Event::Key(key) => {
-                    app.mark_ui_dirty();
-                    app.handle_key(key)?;
-                }
-                Event::Mouse(mouse) => {
-                    app.mark_ui_dirty();
-                    app.handle_mouse(mouse)?;
-                }
-                Event::Resize(_, _) => {
-                    app.mark_ui_dirty();
-                }
-                _ => {}
-            }
-        }
-    }
-
     Ok(())
 }

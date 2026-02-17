@@ -1,6 +1,6 @@
 //! Global status bar rendering.
 
-use super::SessionManager;
+use crate::tui::SessionManager;
 use ratatui::{
     Frame,
     layout::{Alignment, Constraint, Direction, Layout, Rect},
@@ -18,7 +18,7 @@ enum StatusContext {
 }
 
 impl SessionManager {
-    pub(super) fn render_global_status_bar(&mut self, frame: &mut Frame, area: Rect) {
+    pub(crate) fn render_global_status_bar(&mut self, frame: &mut Frame, area: Rect) {
         if area.width == 0 || area.height == 0 {
             return;
         }
