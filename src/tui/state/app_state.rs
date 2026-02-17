@@ -127,7 +127,7 @@ impl AppState {
 
         self.last_terminal_size = (term_width, term_height);
     }
-        
+
     pub(crate) fn collect_descendant_folder_ids(folder: &TreeFolder, out: &mut HashSet<FolderId>) {
         for child in &folder.children {
             out.insert(child.id);

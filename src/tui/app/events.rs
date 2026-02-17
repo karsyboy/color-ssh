@@ -1,13 +1,9 @@
 //! Event loop and top-level event routing.
 
 use crate::tui::SessionManager;
-use crate::{debug_enabled, log_debug};
 use crossterm::event::{self, Event};
 use ratatui::Terminal;
-use std::{
-    io,
-    time::{Duration, Instant},
-};
+use std::{io, time::Duration};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum AppAction {
@@ -64,12 +60,13 @@ pub(crate) fn run_app<B: ratatui::backend::Backend>(terminal: &mut Terminal<B>, 
     loop {
         if app.should_draw(RENDER_HEARTBEAT) {
             app.check_clear_pending();
-            let render_started_at = Instant::now();
             terminal.draw(|frame| app.draw(frame))?;
             app.mark_drawn();
-            if debug_enabled!() {
-                log_debug!("TUI frame rendered in {:?}", render_started_at.elapsed());
-            }
+            // This is for troubleshooting render times
+            // let render_started_at = std::time::Instant::now();
+            // if crate::debug_enabled!() {
+            //     crate::log_debug!("TUI frame rendered in {:?}", render_started_at.elapsed());
+            // }
         }
 
         if app.should_exit {
