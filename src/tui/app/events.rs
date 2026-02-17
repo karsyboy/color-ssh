@@ -93,6 +93,9 @@ pub(crate) fn run_app<B: ratatui::backend::Backend>(terminal: &mut Terminal<B>, 
                     app.handle_mouse(mouse)?;
                 }
                 Event::Resize(_, _) => {
+                    if let Ok((width, height)) = crossterm::terminal::size() {
+                        app.handle_terminal_resize(width, height);
+                    }
                     app.mark_ui_dirty();
                 }
                 _ => {}

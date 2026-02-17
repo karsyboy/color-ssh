@@ -1,5 +1,6 @@
 //! Mouse input handling and PTY mouse forwarding.
 
+use crate::tui::state::{HOST_PANEL_MAX_WIDTH, HOST_PANEL_MIN_WIDTH};
 use crate::tui::{HostTreeRowKind, SessionManager};
 use crossterm::event::{self, KeyModifiers, MouseButton, MouseEventKind};
 use std::io;
@@ -229,7 +230,7 @@ impl SessionManager {
             MouseEventKind::Drag(MouseButton::Left) => {
                 if self.is_dragging_divider && self.host_panel_visible {
                     let new_width = mouse.column.saturating_sub(self.host_panel_area.x).saturating_add(1);
-                    self.host_panel_width = new_width.clamp(15, 80);
+                    self.host_panel_width = new_width.clamp(HOST_PANEL_MIN_WIDTH, HOST_PANEL_MAX_WIDTH);
                 } else if self.is_dragging_host_info_divider && self.host_panel_visible && self.host_info_visible {
                     const MIN_HOST_LIST_HEIGHT: u16 = 4;
                     const MIN_HOST_INFO_HEIGHT: u16 = 3;

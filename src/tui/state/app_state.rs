@@ -13,6 +13,9 @@ use std::{
     time::{Duration, Instant},
 };
 
+pub(crate) const HOST_PANEL_MIN_WIDTH: u16 = 15;
+pub(crate) const HOST_PANEL_MAX_WIDTH: u16 = 80;
+
 /// Connection request emitted when exiting the session manager into a direct `cossh` run.
 #[derive(Debug, Clone)]
 pub(crate) struct ConnectRequest {
@@ -59,12 +62,20 @@ pub struct AppState {
     pub(crate) host_info_visible: bool,
     pub(crate) quick_connect: Option<QuickConnectState>,
     pub(crate) quick_connect_default_ssh_logging: bool,
+    pub(crate) last_terminal_size: (u16, u16),
     pub(crate) ui_dirty: bool,
     pub(crate) last_draw_at: Instant,
     pub(crate) last_seen_render_epoch: u64,
 }
 
 impl AppState {
+    fn clamp_host_panel_width_for_terminal(width: u16, term_width: u16) -> u16 {
+        let max_for_terminal = term_width.saturating_sub(1).max(1);
+        let upper = HOST_PANEL_MAX_WIDTH.min(max_for_terminal);
+        let lower = HOST_PANEL_MIN_WIDTH.min(upper);
+        width.clamp(lower, upper)
+    }
+
     fn build_host_search_index(hosts: &[SshHost]) -> Vec<HostSearchEntry> {
         hosts
             .iter()
@@ -97,6 +108,26 @@ impl AppState {
         self.ui_dirty = false;
     }
 
+    pub(crate) fn handle_terminal_resize(&mut self, term_width: u16, term_height: u16) {
+        if term_width == 0 || term_height == 0 {
+            return;
+        }
+
+        let (prev_width, prev_height) = self.last_terminal_size;
+        if prev_width == term_width && prev_height == term_height {
+            return;
+        }
+
+        if prev_width > 0 && term_width != prev_width {
+            let scaled = ((self.host_panel_width as u32 * term_width as u32) + (prev_width as u32 / 2)) / prev_width as u32;
+            self.host_panel_width = Self::clamp_host_panel_width_for_terminal(scaled as u16, term_width);
+        } else {
+            self.host_panel_width = Self::clamp_host_panel_width_for_terminal(self.host_panel_width, term_width);
+        }
+
+        self.last_terminal_size = (term_width, term_height);
+    }
+        
     pub(crate) fn collect_descendant_folder_ids(folder: &TreeFolder, out: &mut HashSet<FolderId>) {
         for child in &folder.children {
             out.insert(child.id);
@@ -156,7 +187,7 @@ impl AppState {
             .unwrap_or(false);
 
         let (term_width, term_height) = crossterm::terminal::size().unwrap_or((100, 30));
-        let host_panel_width = (((term_width as u32 * host_view_size_percent as u32) / 100) as u16).clamp(15, 80);
+        let host_panel_width = Self::clamp_host_panel_width_for_terminal(((term_width as u32 * host_view_size_percent as u32) / 100) as u16, term_width);
         let content_height = term_height.saturating_sub(2);
         let mut host_info_height = ((content_height as u32 * info_view_size_percent as u32) / 100) as u16;
         host_info_height = host_info_height.max(3);
@@ -208,6 +239,7 @@ impl AppState {
             host_info_visible,
             quick_connect: None,
             quick_connect_default_ssh_logging,
+            last_terminal_size: (term_width, term_height),
             ui_dirty: true,
             last_draw_at: Instant::now(),
             last_seen_render_epoch: 0,
@@ -219,3 +251,31 @@ impl AppState {
 }
 
 pub(crate) type SessionManager = AppState;
+
+#[cfg(test)]
+mod tests {
+    use super::AppState;
+
+    #[test]
+    fn terminal_resize_scales_host_panel_width_proportionally() {
+        let mut app = AppState::new().expect("app should initialize");
+        app.last_terminal_size = (100, 30);
+        app.host_panel_width = 25;
+
+        app.handle_terminal_resize(200, 30);
+        assert_eq!(app.host_panel_width, 50);
+
+        app.handle_terminal_resize(120, 30);
+        assert_eq!(app.host_panel_width, 30);
+    }
+
+    #[test]
+    fn terminal_resize_clamps_host_panel_width_for_small_windows() {
+        let mut app = AppState::new().expect("app should initialize");
+        app.last_terminal_size = (120, 30);
+        app.host_panel_width = 30;
+
+        app.handle_terminal_resize(10, 30);
+        assert_eq!(app.host_panel_width, 9);
+    }
+}

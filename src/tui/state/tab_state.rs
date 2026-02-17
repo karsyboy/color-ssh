@@ -2,6 +2,7 @@
 
 use crate::ssh_config::SshHost;
 use portable_pty::{Child, MasterPty};
+use std::collections::VecDeque;
 use std::io::Write;
 use std::sync::{Arc, Mutex, atomic::AtomicU64};
 use vt100::Parser;
@@ -12,6 +13,7 @@ pub struct SshSession {
     pub(crate) writer: Arc<Mutex<Box<dyn Write + Send>>>,
     pub(crate) _child: Box<dyn Child + Send>,
     pub(crate) parser: Arc<Mutex<Parser>>,
+    pub(crate) replay_log: Arc<Mutex<VecDeque<u8>>>,
     pub(crate) exited: Arc<Mutex<bool>>,
     pub(crate) clear_pending: Arc<Mutex<bool>>,
     pub(crate) render_epoch: Arc<AtomicU64>,

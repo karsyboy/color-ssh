@@ -7,6 +7,7 @@ use crate::tui::{HostTab, SessionManager, SshSession, TerminalSearchState};
 use crate::{debug_enabled, log_debug, log_error};
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use portable_pty::{CommandBuilder, PtySize, native_pty_system};
+use std::collections::VecDeque;
 use std::io::{self, Read};
 use std::sync::{
     Arc, Mutex,
@@ -14,6 +15,35 @@ use std::sync::{
 };
 use std::time::Instant;
 use vt100::Parser;
+
+const PARSER_REPLAY_BUFFER_MAX_BYTES: usize = 8 * 1024 * 1024;
+
+fn append_replay_bytes(replay_log: &Arc<Mutex<VecDeque<u8>>>, data: &[u8]) {
+    let Ok(mut replay) = replay_log.lock() else {
+        return;
+    };
+
+    replay.extend(data.iter().copied());
+    let overflow = replay.len().saturating_sub(PARSER_REPLAY_BUFFER_MAX_BYTES);
+    if overflow > 0 {
+        replay.drain(..overflow);
+    }
+}
+
+fn rebuild_parser_from_replay(session: &SshSession, rows: u16, cols: u16, history_buffer: usize) {
+    let replay_snapshot = match session.replay_log.lock() {
+        Ok(replay) => replay.iter().copied().collect::<Vec<u8>>(),
+        Err(_) => Vec::new(),
+    };
+
+    if let Ok(mut parser) = session.parser.lock() {
+        let mut rebuilt = Parser::new(rows, cols, history_buffer);
+        if !replay_snapshot.is_empty() {
+            rebuilt.process(&replay_snapshot);
+        }
+        *parser = rebuilt;
+    }
+}
 
 pub(crate) fn encode_key_event_bytes(key: KeyEvent) -> Option<Vec<u8>> {
     let mut bytes = match key.code {
@@ -201,6 +231,8 @@ impl SessionManager {
         let clear_pending_clone = clear_pending.clone();
         let render_epoch = Arc::new(AtomicU64::new(0));
         let render_epoch_clone = render_epoch.clone();
+        let replay_log = Arc::new(Mutex::new(VecDeque::new()));
+        let replay_log_clone = replay_log.clone();
 
         // Spawn a thread to read from PTY
         std::thread::spawn(move || {
@@ -226,6 +258,9 @@ impl SessionManager {
                         // Forward any OSC 52 clipboard sequences to the real terminal
                         // so the inner TUI app's copy reaches the system clipboard.
                         forward_osc52(data, &mut osc_buf);
+
+                        // Keep a bounded replay log so terminal state can be rebuilt on resize.
+                        append_replay_bytes(&replay_log_clone, data);
 
                         // Detect clear screen sequences: \x1b[2J or \x1b[3J
                         if Self::contains_clear_sequence(data)
@@ -257,6 +292,7 @@ impl SessionManager {
             writer,
             _child: child,
             parser,
+            replay_log,
             exited,
             clear_pending,
             render_epoch,
@@ -363,10 +399,8 @@ impl SessionManager {
                 });
             }
 
-            // Also resize the VT100 parser
-            if let Ok(mut parser) = session.parser.lock() {
-                parser.set_size(rows, cols);
-            }
+            // Rebuild parser from replay log to preserve text when width changes.
+            rebuild_parser_from_replay(session, rows, cols, self.history_buffer);
 
             tab.last_pty_size = Some((rows, cols));
             if debug_enabled!() {

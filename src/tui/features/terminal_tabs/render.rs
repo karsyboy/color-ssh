@@ -76,6 +76,7 @@ impl SessionManager {
     /// Render the full UI.
     pub(crate) fn draw(&mut self, frame: &mut Frame) {
         let size = frame.area();
+        self.handle_terminal_resize(size.width, size.height);
         let root_chunks = Layout::default()
             .direction(Direction::Vertical)
             .constraints([Constraint::Min(0), Constraint::Length(1), Constraint::Length(1)])
