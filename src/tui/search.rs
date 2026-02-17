@@ -1,6 +1,6 @@
 //! Fuzzy search and host filtering logic
 
-use super::{App, HostTreeRow, HostTreeRowKind};
+use super::{HostTreeRow, HostTreeRowKind, SessionManager};
 use crate::ssh_config::{FolderId, TreeFolder};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -60,7 +60,7 @@ fn strict_match_score(text: &str, pattern: &str) -> Option<i32> {
     }
 }
 
-impl App {
+impl SessionManager {
     fn row_key_from_kind(kind: HostTreeRowKind) -> HostRowKey {
         match kind {
             HostTreeRowKind::Folder(id) => HostRowKey::Folder(id),

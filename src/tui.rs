@@ -1,453 +1,40 @@
-//! Interactive TUI-based SSH host selector
-//!
-//! Provides a terminal-based UI for selecting SSH hosts to connect to.
-//!
-//! This module is organized into submodules:
-//! - [`input`] — Keyboard and mouse input handling
-//! - [`render`] — UI rendering (host list, tabs, terminal content)
-//! - [`search`] — Fuzzy matching and host filtering
-//! - [`selection`] — Text selection and clipboard support
-//! - [`ssh_session`] — PTY session spawning and management
+//! Interactive TUI-based SSH host selector.
 
 mod input;
+mod mouse;
 mod render;
 mod search;
 mod selection;
 mod ssh_session;
+mod state;
+mod status_bar;
 
-use crate::ssh_config::{FolderId, SshHost, TreeFolder, load_ssh_host_tree};
-use crate::{config, log_debug, log_error};
+pub(super) use state::{
+    ConnectRequest, HostTab, HostTreeRow, HostTreeRowKind, QuickConnectField, QuickConnectState, SessionManager, SshSession, TerminalSearchState,
+};
+
+use crate::{log_debug, log_error};
 use crossterm::{
     event::{self, DisableMouseCapture, EnableMouseCapture, Event},
     execute,
     terminal::{EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode},
 };
-use portable_pty::{Child, MasterPty};
-use ratatui::{Terminal, backend::CrosstermBackend, layout::Rect, widgets::ListState};
-use std::io::Write;
-use std::sync::{Arc, Mutex};
-use std::{
-    cmp::Ordering,
-    collections::{HashMap, HashSet},
-    fs,
-    io::{self},
-    process::Command,
-    time::{Duration, Instant},
-};
-use vt100::Parser;
+use ratatui::{Terminal, backend::CrosstermBackend};
+use std::{io, process::Command, time::Duration};
 
-/// Represents an SSH session output buffer
-pub struct SshSession {
-    /// PTY master for resizing
-    pty_master: Arc<Mutex<Box<dyn MasterPty + Send>>>,
-    /// PTY writer for sending input
-    writer: Arc<Mutex<Box<dyn Write + Send>>>,
-    /// Child process
-    _child: Box<dyn Child + Send>,
-    /// VT100 parser for terminal emulation
-    parser: Arc<Mutex<Parser>>,
-    /// Whether the process has exited
-    exited: Arc<Mutex<bool>>,
-    /// Flag indicating a clear screen sequence was detected
-    clear_pending: Arc<Mutex<bool>>,
-}
-
-#[derive(Debug, Clone, Default)]
-pub struct TerminalSearchState {
-    /// Whether terminal search UI is active for this tab
-    active: bool,
-    /// Current terminal search query
-    query: String,
-    /// Match positions for terminal search (row, col, length)
-    matches: Vec<(i64, u16, usize)>,
-    /// Current match index in terminal search
-    current: usize,
-}
-
-/// Represents an open tab for a host
-pub struct HostTab {
-    /// The SSH host this tab represents
-    host: SshHost,
-    /// Tab title (usually host name)
-    title: String,
-    /// SSH session (if active)
-    session: Option<SshSession>,
-    /// Scrollback offset (0 = live view, >0 = scrolled up)
-    scroll_offset: usize,
-    /// Per-tab terminal search state
-    terminal_search: TerminalSearchState,
-    /// Force `-l` for this tab's nested cossh session
-    force_ssh_logging: bool,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum QuickConnectField {
-    User,
-    Host,
-    Profile,
-    Logging,
-    Connect,
-}
-
-impl QuickConnectField {
-    fn next(self) -> Self {
-        match self {
-            Self::User => Self::Host,
-            Self::Host => Self::Profile,
-            Self::Profile => Self::Logging,
-            Self::Logging => Self::Connect,
-            Self::Connect => Self::User,
-        }
-    }
-
-    fn prev(self) -> Self {
-        match self {
-            Self::User => Self::Connect,
-            Self::Host => Self::User,
-            Self::Profile => Self::Host,
-            Self::Logging => Self::Profile,
-            Self::Connect => Self::Logging,
-        }
-    }
-}
-
-#[derive(Debug, Clone)]
-pub(crate) struct QuickConnectState {
-    pub(crate) user: String,
-    pub(crate) host: String,
-    pub(crate) profile_options: Vec<String>,
-    pub(crate) profile_index: usize,
-    pub(crate) ssh_logging: bool,
-    pub(crate) selected: QuickConnectField,
-    pub(crate) error: Option<String>,
-}
-
-impl QuickConnectState {
-    fn new(default_ssh_logging: bool, mut profile_options: Vec<String>) -> Self {
-        if profile_options.is_empty() {
-            profile_options.push("default".to_string());
-        }
-        let profile_index = profile_options.iter().position(|profile| profile.eq_ignore_ascii_case("default")).unwrap_or(0);
-
-        Self {
-            user: String::new(),
-            host: String::new(),
-            profile_options,
-            profile_index,
-            ssh_logging: default_ssh_logging,
-            selected: QuickConnectField::User,
-            error: None,
-        }
-    }
-
-    fn selected_profile_label(&self) -> &str {
-        self.profile_options.get(self.profile_index).map(String::as_str).unwrap_or("default")
-    }
-
-    fn selected_profile_for_cli(&self) -> Option<String> {
-        let profile = self.selected_profile_label();
-        if profile.eq_ignore_ascii_case("default") {
-            None
-        } else {
-            Some(profile.to_string())
-        }
-    }
-
-    fn select_next_profile(&mut self) {
-        if self.profile_options.is_empty() {
-            return;
-        }
-        self.profile_index = (self.profile_index + 1) % self.profile_options.len();
-    }
-
-    fn select_prev_profile(&mut self) {
-        if self.profile_options.is_empty() {
-            return;
-        }
-        if self.profile_index == 0 {
-            self.profile_index = self.profile_options.len() - 1;
-        } else {
-            self.profile_index -= 1;
-        }
-    }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum HostTreeRowKind {
-    Folder(FolderId),
-    Host(usize),
-}
-
-#[derive(Debug, Clone)]
-pub(crate) struct HostTreeRow {
-    pub(crate) kind: HostTreeRowKind,
-    pub(crate) depth: usize,
-    pub(crate) display_name: String,
-    pub(crate) expanded: bool,
-}
-
-/// Main application state
-pub struct App {
-    /// List of all SSH hosts
-    hosts: Vec<SshHost>,
-    /// Root of the include-derived host tree
-    host_tree_root: TreeFolder,
-    /// Flattened rows currently visible in the host panel tree
-    visible_host_rows: Vec<HostTreeRow>,
-    /// Currently selected row in the visible host tree
-    selected_host_row: usize,
-    /// Match scores by host index when host search is active
-    host_match_scores: HashMap<usize, i32>,
-    /// Collapsed folder IDs (expanded by default)
-    collapsed_folders: HashSet<FolderId>,
-    /// List state for the host list
-    host_list_state: ListState,
-    /// Search query
-    search_query: String,
-    /// Whether we're in search mode
-    search_mode: bool,
-    /// Whether to exit the app
-    should_exit: bool,
-    /// Selected host to connect to (if any)
-    selected_host_to_connect: Option<SshHost>,
-    /// Cached area for the host list
-    host_list_area: Rect,
-    /// Cached area for the host info pane
-    host_info_area: Rect,
-    /// Host list scroll offset
-    host_scroll_offset: usize,
-    /// Width of the host panel in columns (adjustable with Ctrl+Left/Right)
-    host_panel_width: u16,
-    /// Height of the host info pane in rows when visible
-    host_info_height: u16,
-    /// Open tabs for hosts
-    tabs: Vec<HostTab>,
-    /// Currently selected tab index
-    selected_tab: usize,
-    /// Whether the focus is on the session manager (true) or tabs (false)
-    focus_on_manager: bool,
-    /// Start of text selection as absolute coords (absolute_row, col)
-    /// absolute_row = screen_row - scroll_offset (can be negative for scrollback)
-    selection_start: Option<(i64, u16)>,
-    /// End of text selection as absolute coords (absolute_row, col)
-    selection_end: Option<(i64, u16)>,
-    /// Whether we're currently dragging a selection
-    is_selecting: bool,
-    /// Whether a drag event actually moved the mouse (distinguishes click from single-char select)
-    selection_dragged: bool,
-    /// Cached area for the tab terminal content (for mouse coordinate mapping)
-    tab_content_area: Rect,
-    /// Cached area for the tab bar (for mouse click on tabs)
-    tab_bar_area: Rect,
-    /// Cached area for the entire host panel (host list + info)
-    host_panel_area: Rect,
-    /// Last left-click time and position (for double-click detection)
-    last_click: Option<(Instant, u16, u16)>,
-    /// Whether we're currently dragging the panel divider to resize
-    is_dragging_divider: bool,
-    /// Whether we're dragging the host list scrollbar thumb/track
-    is_dragging_host_scrollbar: bool,
-    /// Whether we're dragging the divider between host list and host info panes
-    is_dragging_host_info_divider: bool,
-    /// Cached area for the exit button (top-right corner)
-    exit_button_area: Rect,
-    /// Horizontal scroll offset for the tab bar (in chars)
-    tab_scroll_offset: usize,
-    /// History buffer size (scrollback lines for VT100 parser)
-    history_buffer: usize,
-    /// Whether the host panel is visible (can be toggled with Ctrl+B)
-    host_panel_visible: bool,
-    /// Whether the host info pane is visible
-    host_info_visible: bool,
-    /// Optional quick-connect form state (shown as modal when present)
-    quick_connect: Option<QuickConnectState>,
-    /// Default logging checkbox state for quick-connect forms
-    quick_connect_default_ssh_logging: bool,
-}
-
-impl App {
-    fn discover_quick_connect_profiles(&self) -> Vec<String> {
-        let mut profiles: HashSet<String> = HashSet::new();
-        profiles.insert("default".to_string());
-
-        let config_dir = config::SESSION_CONFIG
-            .get()
-            .and_then(|c| c.read().ok().map(|cfg| cfg.metadata.config_path.parent().map(|p| p.to_path_buf())))
-            .flatten();
-
-        if let Some(config_dir) = config_dir
-            && let Ok(entries) = fs::read_dir(config_dir)
-        {
-            for entry in entries.flatten() {
-                let filename = entry.file_name();
-                let Some(filename) = filename.to_str() else {
-                    continue;
-                };
-
-                if filename == ".cossh-config.yaml" {
-                    profiles.insert("default".to_string());
-                    continue;
-                }
-
-                if let Some(profile_name) = filename.strip_suffix(".cossh-config.yaml")
-                    && !profile_name.is_empty()
-                    && !profile_name.starts_with('.')
-                {
-                    profiles.insert(profile_name.to_string());
-                }
-            }
-        }
-
-        let mut profile_list: Vec<String> = profiles.into_iter().collect();
-        profile_list.sort_by(|a, b| match (a.eq_ignore_ascii_case("default"), b.eq_ignore_ascii_case("default")) {
-            (true, false) => Ordering::Less,
-            (false, true) => Ordering::Greater,
-            _ => a.to_lowercase().cmp(&b.to_lowercase()),
-        });
-
-        profile_list
-    }
-
-    fn collect_descendant_folder_ids(folder: &TreeFolder, out: &mut HashSet<FolderId>) {
-        for child in &folder.children {
-            out.insert(child.id);
-            Self::collect_descendant_folder_ids(child, out);
-        }
-    }
-
-    fn current_tab_search(&self) -> Option<&TerminalSearchState> {
-        self.tabs.get(self.selected_tab).map(|tab| &tab.terminal_search)
-    }
-
-    fn current_tab_search_mut(&mut self) -> Option<&mut TerminalSearchState> {
-        self.tabs.get_mut(self.selected_tab).map(|tab| &mut tab.terminal_search)
-    }
-
-    /// Create a new App instance
-    pub fn new() -> io::Result<Self> {
-        log_debug!("Initializing session manager");
-
-        let tree_model = load_ssh_host_tree().unwrap_or_else(|e| {
-            log_error!("Failed to load SSH hosts: {}", e);
-            let fallback_root = TreeFolder {
-                id: 0,
-                name: "config".to_string(),
-                path: std::path::PathBuf::from("~/.ssh/config"),
-                children: Vec::new(),
-                host_indices: Vec::new(),
-            };
-            crate::ssh_config::SshHostTreeModel {
-                root: fallback_root,
-                hosts: Vec::new(),
-            }
-        });
-        let hosts = tree_model.hosts;
-        let host_tree_root = tree_model.root;
-        let (history_buffer, host_tree_start_collapsed, host_info_visible, host_view_size_percent, info_view_size_percent) = config::SESSION_CONFIG
-            .get()
-            .and_then(|c| {
-                c.read().ok().and_then(|cfg| {
-                    cfg.interactive_settings.as_ref().map(|interactive| {
-                        (
-                            interactive.history_buffer,
-                            interactive.host_tree_starts_collapsed(),
-                            interactive.info_view,
-                            interactive.host_view_size,
-                            interactive.info_view_size,
-                        )
-                    })
-                })
-            })
-            .unwrap_or((1000, true, true, 25, 40));
-
-        let quick_connect_default_ssh_logging = config::SESSION_CONFIG
-            .get()
-            .and_then(|c| c.read().ok().map(|cfg| cfg.settings.ssh_logging))
-            .unwrap_or(false);
-
-        let (term_width, term_height) = crossterm::terminal::size().unwrap_or((100, 30));
-        let host_panel_width = (((term_width as u32 * host_view_size_percent as u32) / 100) as u16).clamp(15, 80);
-        let content_height = term_height.saturating_sub(2);
-        let mut host_info_height = ((content_height as u32 * info_view_size_percent as u32) / 100) as u16;
-        host_info_height = host_info_height.max(3);
-        if content_height > 4 {
-            host_info_height = host_info_height.min(content_height.saturating_sub(4));
-        }
-        let mut collapsed_folders = HashSet::new();
-        if host_tree_start_collapsed {
-            Self::collect_descendant_folder_ids(&host_tree_root, &mut collapsed_folders);
-        }
-
-        log_debug!("Loaded {} SSH hosts", hosts.len());
-
-        let mut host_list_state = ListState::default();
-        if !hosts.is_empty() {
-            host_list_state.select(Some(0));
-        }
-
-        let mut app = Self {
-            hosts,
-            host_tree_root,
-            visible_host_rows: Vec::new(),
-            selected_host_row: 0,
-            host_match_scores: HashMap::new(),
-            collapsed_folders,
-            host_list_state,
-            host_list_area: Rect::default(),
-            host_info_area: Rect::default(),
-            host_scroll_offset: 0,
-            host_panel_width,
-            host_info_height,
-            search_query: String::new(),
-            search_mode: false,
-            should_exit: false,
-            selected_host_to_connect: None,
-            tabs: Vec::new(),
-            selected_tab: 0,
-            focus_on_manager: true,
-            selection_start: None,
-            selection_end: None,
-            is_selecting: false,
-            selection_dragged: false,
-            tab_content_area: Rect::default(),
-            tab_bar_area: Rect::default(),
-            host_panel_area: Rect::default(),
-            last_click: None,
-            is_dragging_divider: false,
-            is_dragging_host_scrollbar: false,
-            is_dragging_host_info_divider: false,
-            exit_button_area: Rect::default(),
-            tab_scroll_offset: 0,
-            history_buffer,
-            host_panel_visible: true,
-            host_info_visible,
-            quick_connect: None,
-            quick_connect_default_ssh_logging,
-        };
-
-        app.update_filtered_hosts();
-        Ok(app)
-    }
-}
-
-/// Run the interactive session manager
+/// Run the interactive session manager.
 pub fn run_session_manager() -> io::Result<()> {
     log_debug!("Starting interactive session manager");
 
-    // Setup terminal
     enable_raw_mode()?;
     let mut stdout = io::stdout();
     execute!(stdout, EnterAlternateScreen, EnableMouseCapture)?;
     let backend = CrosstermBackend::new(stdout);
     let mut terminal = Terminal::new(backend)?;
 
-    // Create app
-    let mut app = App::new()?;
-
-    // Main loop
+    let mut app = SessionManager::new()?;
     let result = run_app(&mut terminal, &mut app);
 
-    // Restore terminal
     disable_raw_mode()?;
     execute!(terminal.backend_mut(), LeaveAlternateScreen, DisableMouseCapture)?;
     terminal.show_cursor()?;
@@ -458,15 +45,20 @@ pub fn run_session_manager() -> io::Result<()> {
         return Err(err);
     }
 
-    // If a host was selected, connect to it
-    if let Some(host) = app.selected_host_to_connect {
-        log_debug!("Connecting to host: {}", host.name);
+    if let Some(request) = app.selected_host_to_connect {
+        log_debug!("Connecting to host: {}", request.target);
 
-        // Get current executable (cossh)
         let cossh_path = std::env::current_exe().unwrap_or_else(|_| std::path::PathBuf::from("cossh"));
+        let mut cmd = Command::new(cossh_path);
 
-        // Execute cossh with the host
-        let status = Command::new(cossh_path).arg(&host.name).status()?;
+        if request.force_ssh_logging {
+            cmd.arg("-l");
+        }
+        if let Some(profile) = request.profile {
+            cmd.arg("-P").arg(profile);
+        }
+
+        let status = cmd.arg(request.target).status()?;
 
         if !status.success() {
             log_error!("SSH connection failed with code: {:?}", status.code());
@@ -477,30 +69,20 @@ pub fn run_session_manager() -> io::Result<()> {
     Ok(())
 }
 
-/// Run the app event loop
-fn run_app<B: ratatui::backend::Backend>(terminal: &mut Terminal<B>, app: &mut App) -> io::Result<()> {
+fn run_app<B: ratatui::backend::Backend>(terminal: &mut Terminal<B>, app: &mut SessionManager) -> io::Result<()> {
     loop {
-        // Check for pending clear screen and reset scroll offset
         app.check_clear_pending();
-
         terminal.draw(|f| app.draw(f))?;
 
         if app.should_exit {
             break;
         }
 
-        // Poll for events with shorter timeout for better responsiveness
         if event::poll(Duration::from_millis(50))? {
             match event::read()? {
-                Event::Key(key) => {
-                    app.handle_key(key)?;
-                }
-                Event::Mouse(mouse) => {
-                    app.handle_mouse(mouse)?;
-                }
-                Event::Resize(_, _) => {
-                    // Terminal was resized, redraw on next iteration
-                }
+                Event::Key(key) => app.handle_key(key)?,
+                Event::Mouse(mouse) => app.handle_mouse(mouse)?,
+                Event::Resize(_, _) => {}
                 _ => {}
             }
         }

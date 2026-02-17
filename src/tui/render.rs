@@ -1,10 +1,10 @@
 //! UI rendering for the session manager
 
-use super::App;
+use super::SessionManager;
 use super::selection::is_cell_in_selection;
 use ratatui::{
     Frame,
-    layout::{Alignment, Constraint, Direction, Layout, Rect},
+    layout::{Constraint, Direction, Layout, Rect},
     style::{Color, Modifier, Style},
     text::{Line, Span},
     widgets::{Block, Borders, Clear, List, ListItem, ListState, Paragraph, Wrap},
@@ -71,15 +71,7 @@ fn draw_horizontal_rule(frame: &mut Frame, y: u16, x: u16, width: u16, style: St
     }
 }
 
-#[derive(Debug, Clone, Copy)]
-enum StatusContext {
-    HostSearch,
-    TerminalSearch,
-    Host,
-    Terminal,
-}
-
-impl App {
+impl SessionManager {
     /// Render the UI
     pub(super) fn draw(&mut self, frame: &mut Frame) {
         let size = frame.area();
@@ -210,141 +202,12 @@ impl App {
         self.render_quick_connect_modal(frame, size);
     }
 
-    /// Render the global one-line status bar at the bottom.
-    fn render_global_status_bar(&mut self, frame: &mut Frame, area: Rect) {
-        if area.width == 0 || area.height == 0 {
-            self.exit_button_area = Rect::default();
-            return;
-        }
-
-        let (left_spans, right_spans) = self.build_status_line_sections();
-        let base_style = Style::default().fg(Color::Gray);
-
-        if right_spans.is_empty() {
-            let status = Paragraph::new(Line::from(left_spans)).style(base_style);
-            frame.render_widget(status, area);
-            self.exit_button_area = Rect::default();
-            return;
-        }
-
-        let right_width = self.spans_display_width(&right_spans).min(area.width as usize) as u16;
-        let chunks = Layout::default()
-            .direction(Direction::Horizontal)
-            .constraints([Constraint::Min(0), Constraint::Length(right_width)])
-            .split(area);
-
-        let left = Paragraph::new(Line::from(left_spans)).style(base_style);
-        let right = Paragraph::new(Line::from(right_spans)).style(base_style).alignment(Alignment::Right);
-        frame.render_widget(left, chunks[0]);
-        frame.render_widget(right, chunks[1]);
-        self.exit_button_area = Rect::default();
-    }
-
-    /// Build status line sections for the current app context.
-    fn build_status_line_sections(&self) -> (Vec<Span<'static>>, Vec<Span<'static>>) {
-        match self.resolve_status_context() {
-            StatusContext::HostSearch => self.build_search_mode_status_spans(),
-            StatusContext::TerminalSearch => self.build_terminal_search_status_spans(),
-            StatusContext::Host => self.build_manager_status_spans(),
-            StatusContext::Terminal => self.build_terminal_status_spans(),
-        }
-    }
-
-    fn spans_display_width(&self, spans: &[Span<'static>]) -> usize {
-        spans.iter().map(|span| span.content.chars().count()).sum()
-    }
-
-    /// Determine the status bar context based on focus and search modes.
-    fn resolve_status_context(&self) -> StatusContext {
-        if self.search_mode {
-            return StatusContext::HostSearch;
-        }
-        if self.has_terminal_focus() && self.current_tab_search().map(|s| s.active).unwrap_or(false) {
-            return StatusContext::TerminalSearch;
-        }
-        if self.has_terminal_focus() {
-            return StatusContext::Terminal;
-        }
-        StatusContext::Host
-    }
-
-    /// True when the terminal/session pane is focused and a tab is active.
-    fn has_terminal_focus(&self) -> bool {
-        !self.focus_on_manager && !self.tabs.is_empty() && self.selected_tab < self.tabs.len()
-    }
-
-    /// Visual separator between context and status sections.
-    fn context_split_indicator(&self) -> Span<'static> {
-        Span::styled(" || ", Style::default().fg(Color::DarkGray))
-    }
-
-    /// Get selected host name from the host list context.
-    fn selected_host_name(&self) -> Option<String> {
-        if let Some(host_idx) = self.selected_host_idx() {
-            return self.hosts.get(host_idx).map(|host| host.name.clone());
-        }
-        if let Some(folder_id) = self.selected_folder_id() {
-            return self.folder_by_id(folder_id).map(|folder| format!("Folder: {}", folder.name));
-        }
-        None
-    }
-
-    /// Status text for host/manager focus.
-    fn build_manager_status_spans(&self) -> (Vec<Span<'static>>, Vec<Span<'static>>) {
-        let host_name = self.selected_host_name().unwrap_or_else(|| "none".to_string());
-        let mut left = vec![
-            Span::styled("Host", Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD)),
-            self.context_split_indicator(),
-            Span::styled(host_name, Style::default().fg(Color::White)),
-        ];
-        if !self.search_query.is_empty() {
-            left.push(self.context_split_indicator());
-            left.push(Span::styled("filter:", Style::default().fg(Color::DarkGray)));
-            left.push(Span::styled(" ", Style::default()));
-            left.push(Span::styled(self.search_query.clone(), Style::default().fg(Color::Yellow)));
-            left.push(Span::styled(" ", Style::default()));
-            left.push(Span::styled("(", Style::default().fg(Color::DarkGray)));
-            left.push(Span::styled("^C", Style::default().fg(Color::Red)));
-            left.push(Span::styled(" clear)", Style::default().fg(Color::DarkGray)));
-        }
-
-        let mut right = vec![
-            Span::styled("↑/↓", Style::default().fg(Color::Cyan)),
-            Span::styled(":move | ", Style::default().fg(Color::DarkGray)),
-            Span::styled("PgUp/Dn", Style::default().fg(Color::Cyan)),
-            Span::styled(":page | ", Style::default().fg(Color::DarkGray)),
-            Span::styled("Home/End", Style::default().fg(Color::Cyan)),
-            Span::styled(":edge | ", Style::default().fg(Color::DarkGray)),
-            Span::styled("^F", Style::default().fg(Color::Yellow)),
-            Span::styled(":find | ", Style::default().fg(Color::DarkGray)),
-            Span::styled("Enter", Style::default().fg(Color::Green)),
-            Span::styled(":open | ", Style::default().fg(Color::DarkGray)),
-            Span::styled("c", Style::default().fg(Color::Cyan)),
-            Span::styled(":collapse | ", Style::default().fg(Color::DarkGray)),
-            Span::styled("i", Style::default().fg(Color::Cyan)),
-            Span::styled(":info | ", Style::default().fg(Color::DarkGray)),
-            Span::styled("^←/^→", Style::default().fg(Color::Cyan)),
-            Span::styled(":resize | ", Style::default().fg(Color::DarkGray)),
-            Span::styled("q", Style::default().fg(Color::Yellow)),
-            Span::styled(":quick | ", Style::default().fg(Color::DarkGray)),
-        ];
-
-        if !self.tabs.is_empty() {
-            right.push(Span::styled("S-Tab", Style::default().fg(Color::Cyan)));
-            right.push(Span::styled(":tabs | ", Style::default().fg(Color::DarkGray)));
-        }
-
-        right.push(Span::styled("^Q", Style::default().fg(Color::Red)));
-        right.push(Span::styled(":quit", Style::default().fg(Color::DarkGray)));
-        (left, right)
-    }
-
     fn render_quick_connect_modal(&self, frame: &mut Frame, full_area: Rect) {
         let Some(form) = &self.quick_connect else {
             return;
         };
 
-        let width = full_area.width.min(74).max(44);
+        let width = full_area.width.clamp(44, 74);
         let height = if form.error.is_some() { 12 } else { 11 };
         let area = Self::centered_rect(width, height, full_area);
 
@@ -446,136 +309,6 @@ impl App {
         let x = area.x + area.width.saturating_sub(popup_width) / 2;
         let y = area.y + area.height.saturating_sub(popup_height) / 2;
         Rect::new(x, y, popup_width, popup_height)
-    }
-
-    /// Status text for terminal/session focus.
-    fn build_terminal_status_spans(&self) -> (Vec<Span<'static>>, Vec<Span<'static>>) {
-        if self.tabs.is_empty() || self.selected_tab >= self.tabs.len() {
-            return (
-                vec![
-                    Span::styled("Terminal", Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)),
-                    Span::styled(" | ", Style::default().fg(Color::DarkGray)),
-                    Span::styled("No active terminal", Style::default().fg(Color::DarkGray)),
-                ],
-                Vec::new(),
-            );
-        }
-
-        let tab = &self.tabs[self.selected_tab];
-        let is_exited = tab.session.as_ref().and_then(|s| s.exited.lock().ok().map(|e| *e)).unwrap_or(true);
-
-        let status_icon_color = if is_exited { Color::Red } else { Color::Green };
-        let scroll_info = if tab.scroll_offset > 0 {
-            format!(" +{}", tab.scroll_offset)
-        } else {
-            String::new()
-        };
-
-        let mut left = vec![
-            Span::styled("Terminal", Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)),
-            self.context_split_indicator(),
-            Span::styled("●", Style::default().fg(status_icon_color).add_modifier(Modifier::BOLD)),
-            Span::styled(" ", Style::default()),
-            Span::styled(tab.host.name.clone(), Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD)),
-        ];
-
-        if !scroll_info.is_empty() {
-            left.push(Span::styled(" sb:", Style::default().fg(Color::DarkGray)));
-            left.push(Span::styled(scroll_info, Style::default().fg(Color::Yellow)));
-        }
-
-        let mut right = Vec::new();
-
-        if is_exited {
-            right.push(Span::styled("Enter", Style::default().fg(Color::Green)));
-            right.push(Span::styled(":reconnect | ", Style::default().fg(Color::DarkGray)));
-            right.push(Span::styled("S-Tab", Style::default().fg(Color::Cyan)));
-            right.push(Span::styled(":host | ", Style::default().fg(Color::DarkGray)));
-            right.push(Span::styled("A-←/→", Style::default().fg(Color::Cyan)));
-            right.push(Span::styled(":tab | ", Style::default().fg(Color::DarkGray)));
-            right.push(Span::styled("^B", Style::default().fg(Color::Cyan)));
-            right.push(Span::styled(":panel | ", Style::default().fg(Color::DarkGray)));
-            right.push(Span::styled("^F", Style::default().fg(Color::Cyan)));
-            right.push(Span::styled(":find | ", Style::default().fg(Color::DarkGray)));
-            right.push(Span::styled("A-c", Style::default().fg(Color::Yellow)));
-            right.push(Span::styled(":copy | ", Style::default().fg(Color::DarkGray)));
-            right.push(Span::styled("S-PgUp/Dn", Style::default().fg(Color::Yellow)));
-            right.push(Span::styled(":scroll | ", Style::default().fg(Color::DarkGray)));
-            right.push(Span::styled("^W", Style::default().fg(Color::Red)));
-            right.push(Span::styled(":close", Style::default().fg(Color::DarkGray)));
-            return (left, right);
-        }
-
-        right.extend([
-            Span::styled("S-Tab", Style::default().fg(Color::Cyan)),
-            Span::styled(":host | ", Style::default().fg(Color::DarkGray)),
-            Span::styled("A-←/→", Style::default().fg(Color::Cyan)),
-            Span::styled(":tab | ", Style::default().fg(Color::DarkGray)),
-            Span::styled("^B", Style::default().fg(Color::Cyan)),
-            Span::styled(":panel | ", Style::default().fg(Color::DarkGray)),
-            Span::styled("^F", Style::default().fg(Color::Cyan)),
-            Span::styled(":find | ", Style::default().fg(Color::DarkGray)),
-            Span::styled("A-c", Style::default().fg(Color::Yellow)),
-            Span::styled(":copy | ", Style::default().fg(Color::DarkGray)),
-            Span::styled("S-PgUp/Dn", Style::default().fg(Color::Yellow)),
-            Span::styled(":scroll | ", Style::default().fg(Color::DarkGray)),
-            Span::styled("^W", Style::default().fg(Color::Red)),
-            Span::styled(":close", Style::default().fg(Color::DarkGray)),
-        ]);
-
-        (left, right)
-    }
-
-    /// Status text while host search is active.
-    fn build_search_mode_status_spans(&self) -> (Vec<Span<'static>>, Vec<Span<'static>>) {
-        let left = vec![
-            Span::styled("Host Search", Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD)),
-            self.context_split_indicator(),
-            Span::styled(self.search_query.clone(), Style::default().fg(Color::White)),
-            Span::styled("_", Style::default().fg(Color::White)),
-        ];
-        let right = vec![
-            Span::styled("Enter", Style::default().fg(Color::Green)),
-            Span::styled(" | ", Style::default().fg(Color::DarkGray)),
-            Span::styled("Esc", Style::default().fg(Color::Red)),
-            Span::styled("/", Style::default().fg(Color::DarkGray)),
-            Span::styled("^C", Style::default().fg(Color::Red)),
-            Span::styled(":clear", Style::default().fg(Color::DarkGray)),
-        ];
-        (left, right)
-    }
-
-    /// Status text while terminal search is active in a tab.
-    fn build_terminal_search_status_spans(&self) -> (Vec<Span<'static>>, Vec<Span<'static>>) {
-        let (query, matches_len, current_idx) = if let Some(search) = self.current_tab_search() {
-            (search.query.clone(), search.matches.len(), search.current)
-        } else {
-            (String::new(), 0, 0)
-        };
-
-        let match_info = if matches_len > 0 {
-            format!("{}/{}", current_idx + 1, matches_len)
-        } else {
-            "0/0".to_string()
-        };
-
-        let left = vec![
-            Span::styled("Terminal Search", Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD)),
-            self.context_split_indicator(),
-            Span::styled(query, Style::default().fg(Color::White)),
-            Span::styled("_", Style::default().fg(Color::White)),
-            Span::styled(" ", Style::default()),
-            Span::styled(format!("({})", match_info), Style::default().fg(Color::Yellow)),
-        ];
-        let right = vec![
-            Span::styled("Enter", Style::default().fg(Color::Green)),
-            Span::styled(" | ", Style::default().fg(Color::DarkGray)),
-            Span::styled("Esc", Style::default().fg(Color::Red)),
-            Span::styled(":clear | ", Style::default().fg(Color::DarkGray)),
-            Span::styled("↑/↓", Style::default().fg(Color::Cyan)),
-            Span::styled(":next/prev", Style::default().fg(Color::DarkGray)),
-        ];
-        (left, right)
     }
 
     /// Render the host list
@@ -1039,107 +772,107 @@ impl App {
         if session_active {
             // Now render VT100 screen directly into the buffer cell-by-cell
             let tab = &self.tabs[tab_idx];
-            if let Some(session) = &tab.session {
-                if let Ok(mut parser) = session.parser.lock() {
-                    parser.set_scrollback(scroll_offset);
-                    let screen = parser.screen();
-                    let (vt_rows, vt_cols) = screen.size();
-                    let cursor_position = screen.cursor_position();
-                    let hide_cursor = screen.hide_cursor();
+            if let Some(session) = &tab.session
+                && let Ok(mut parser) = session.parser.lock()
+            {
+                parser.set_scrollback(scroll_offset);
+                let screen = parser.screen();
+                let (vt_rows, vt_cols) = screen.size();
+                let cursor_position = screen.cursor_position();
+                let hide_cursor = screen.hide_cursor();
 
-                    let buf = frame.buffer_mut();
+                let buf = frame.buffer_mut();
 
-                    let render_rows = area.height.min(vt_rows);
-                    let render_cols = area.width.min(vt_cols);
+                let render_rows = area.height.min(vt_rows);
+                let render_cols = area.width.min(vt_cols);
 
-                    for row in 0..render_rows {
-                        for col in 0..render_cols {
-                            let cell = match screen.cell(row, col) {
-                                Some(c) => c,
-                                None => continue,
-                            };
+                for row in 0..render_rows {
+                    for col in 0..render_cols {
+                        let cell = match screen.cell(row, col) {
+                            Some(c) => c,
+                            None => continue,
+                        };
 
-                            let ch = if cell.has_contents() { cell.contents() } else { " ".to_string() };
+                        let ch = if cell.has_contents() { cell.contents() } else { " ".to_string() };
 
-                            let is_cursor = !hide_cursor && scroll_offset == 0 && row == cursor_position.0 && col == cursor_position.1;
-                            let abs_row = row as i64 - scroll_offset as i64;
-                            let is_selected = is_cell_in_selection(abs_row, col, sel_start, sel_end);
+                        let is_cursor = !hide_cursor && scroll_offset == 0 && row == cursor_position.0 && col == cursor_position.1;
+                        let abs_row = row as i64 - scroll_offset as i64;
+                        let is_selected = is_cell_in_selection(abs_row, col, sel_start, sel_end);
 
-                            // Check if this cell is part of a search match
-                            let is_search_match = self.is_cell_in_search_match(abs_row, col);
-                            let is_current_search_match = self.is_cell_in_current_search_match(abs_row, col);
+                        // Check if this cell is part of a search match
+                        let is_search_match = self.is_cell_in_search_match(abs_row, col);
+                        let is_current_search_match = self.is_cell_in_current_search_match(abs_row, col);
 
-                            // Build the style from VT100 cell attributes
-                            let style = if is_current_search_match {
-                                // Highlight current search match more prominently
-                                let mut s = Style::default().bg(Color::Yellow).fg(Color::Black);
-                                if cell.bold() {
-                                    s = s.add_modifier(Modifier::BOLD);
-                                }
-                                s
-                            } else if is_search_match {
-                                // Highlight other search matches
-                                let mut s = Style::default().bg(Color::DarkGray).fg(Color::Yellow);
-                                if cell.bold() {
-                                    s = s.add_modifier(Modifier::BOLD);
-                                }
-                                s
-                            } else if is_selected {
-                                let mut s = Style::default().bg(Color::Blue).fg(Color::White);
-                                if cell.bold() {
-                                    s = s.add_modifier(Modifier::BOLD);
-                                }
-                                s
-                            } else if is_cursor {
-                                let mut s = Style::default().bg(Color::White).fg(Color::Black);
-                                if cell.bold() {
-                                    s = s.add_modifier(Modifier::BOLD);
-                                }
-                                s
-                            } else {
-                                let mut fg_color = vt100_to_ratatui_color(cell.fgcolor());
-                                let mut bg_color = vt100_to_ratatui_color(cell.bgcolor());
-
-                                // Handle inverse/reverse video
-                                if cell.inverse() {
-                                    std::mem::swap(&mut fg_color, &mut bg_color);
-                                    // If either was default/reset, map to sensible defaults
-                                    if fg_color == Color::Reset {
-                                        fg_color = Color::Black;
-                                    }
-                                    if bg_color == Color::Reset {
-                                        bg_color = Color::White;
-                                    }
-                                }
-
-                                let mut s = Style::default();
-
-                                if fg_color != Color::Reset {
-                                    s = s.fg(fg_color);
-                                }
-                                if bg_color != Color::Reset {
-                                    s = s.bg(bg_color);
-                                }
-                                if cell.bold() {
-                                    s = s.add_modifier(Modifier::BOLD);
-                                }
-                                if cell.italic() {
-                                    s = s.add_modifier(Modifier::ITALIC);
-                                }
-                                if cell.underline() {
-                                    s = s.add_modifier(Modifier::UNDERLINED);
-                                }
-                                s
-                            };
-
-                            let buf_x = area.x + col;
-                            let buf_y = area.y + row;
-
-                            if buf_x < area.x + area.width && buf_y < area.y + area.height {
-                                let buf_cell = &mut buf[(buf_x, buf_y)];
-                                buf_cell.set_symbol(&ch);
-                                buf_cell.set_style(style);
+                        // Build the style from VT100 cell attributes
+                        let style = if is_current_search_match {
+                            // Highlight current search match more prominently
+                            let mut s = Style::default().bg(Color::Yellow).fg(Color::Black);
+                            if cell.bold() {
+                                s = s.add_modifier(Modifier::BOLD);
                             }
+                            s
+                        } else if is_search_match {
+                            // Highlight other search matches
+                            let mut s = Style::default().bg(Color::DarkGray).fg(Color::Yellow);
+                            if cell.bold() {
+                                s = s.add_modifier(Modifier::BOLD);
+                            }
+                            s
+                        } else if is_selected {
+                            let mut s = Style::default().bg(Color::Blue).fg(Color::White);
+                            if cell.bold() {
+                                s = s.add_modifier(Modifier::BOLD);
+                            }
+                            s
+                        } else if is_cursor {
+                            let mut s = Style::default().bg(Color::White).fg(Color::Black);
+                            if cell.bold() {
+                                s = s.add_modifier(Modifier::BOLD);
+                            }
+                            s
+                        } else {
+                            let mut fg_color = vt100_to_ratatui_color(cell.fgcolor());
+                            let mut bg_color = vt100_to_ratatui_color(cell.bgcolor());
+
+                            // Handle inverse/reverse video
+                            if cell.inverse() {
+                                std::mem::swap(&mut fg_color, &mut bg_color);
+                                // If either was default/reset, map to sensible defaults
+                                if fg_color == Color::Reset {
+                                    fg_color = Color::Black;
+                                }
+                                if bg_color == Color::Reset {
+                                    bg_color = Color::White;
+                                }
+                            }
+
+                            let mut s = Style::default();
+
+                            if fg_color != Color::Reset {
+                                s = s.fg(fg_color);
+                            }
+                            if bg_color != Color::Reset {
+                                s = s.bg(bg_color);
+                            }
+                            if cell.bold() {
+                                s = s.add_modifier(Modifier::BOLD);
+                            }
+                            if cell.italic() {
+                                s = s.add_modifier(Modifier::ITALIC);
+                            }
+                            if cell.underline() {
+                                s = s.add_modifier(Modifier::UNDERLINED);
+                            }
+                            s
+                        };
+
+                        let buf_x = area.x + col;
+                        let buf_y = area.y + row;
+
+                        if buf_x < area.x + area.width && buf_y < area.y + area.height {
+                            let buf_cell = &mut buf[(buf_x, buf_y)];
+                            buf_cell.set_symbol(&ch);
+                            buf_cell.set_style(style);
                         }
                     }
                 }

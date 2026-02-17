@@ -1,6 +1,6 @@
 //! SSH session spawning and PTY management
 
-use super::{App, HostTab, SshSession, TerminalSearchState};
+use super::{HostTab, SessionManager, SshSession, TerminalSearchState};
 use crate::ssh_config::SshHost;
 use crate::{log_debug, log_error};
 use portable_pty::{CommandBuilder, PtySize, native_pty_system};
@@ -160,7 +160,7 @@ fn find_osc_end(data: &[u8]) -> Option<usize> {
     None
 }
 
-impl App {
+impl SessionManager {
     /// Select a host to open in a new tab
     pub(super) fn select_host_to_connect(&mut self) {
         let Some(host_idx) = self.selected_host_idx() else {
@@ -199,8 +199,8 @@ impl App {
         // Spawn SSH session
         let session = match Self::spawn_ssh_session(&host, &tab_title, self.history_buffer, force_ssh_logging) {
             Ok(session) => Some(session),
-            Err(e) => {
-                log_error!("Failed to spawn SSH session: {}", e);
+            Err(err) => {
+                log_error!("Failed to spawn SSH session: {}", err);
                 None
             }
         };
@@ -322,10 +322,10 @@ impl App {
                         forward_osc52(data, &mut osc_buf);
 
                         // Detect clear screen sequences: \x1b[2J or \x1b[3J
-                        if Self::contains_clear_sequence(data) {
-                            if let Ok(mut clear) = clear_pending_clone.lock() {
-                                *clear = true;
-                            }
+                        if Self::contains_clear_sequence(data)
+                            && let Ok(mut clear) = clear_pending_clone.lock()
+                        {
+                            *clear = true;
                         }
 
                         if let Ok(mut parser) = parser_clone.lock() {
@@ -333,8 +333,8 @@ impl App {
                             parser.process(data);
                         }
                     }
-                    Err(e) => {
-                        log_error!("Error reading from PTY: {}", e);
+                    Err(err) => {
+                        log_error!("Error reading from PTY: {}", err);
                         if let Ok(mut exited) = exited_clone.lock() {
                             *exited = true;
                         }
@@ -387,19 +387,18 @@ impl App {
     /// Check if any tab has a pending clear screen and reset scroll offset
     pub(super) fn check_clear_pending(&mut self) {
         for tab in &mut self.tabs {
-            if let Some(session) = &tab.session {
-                if let Ok(mut clear) = session.clear_pending.lock() {
-                    if *clear {
-                        // Reset scroll offset to show the cleared screen
-                        tab.scroll_offset = 0;
+            if let Some(session) = &tab.session
+                && let Ok(mut clear) = session.clear_pending.lock()
+                && *clear
+            {
+                // Reset scroll offset to show the cleared screen
+                tab.scroll_offset = 0;
 
-                        // Note: We DON'T recreate the parser because that would lose terminal state
-                        // like mouse mode settings from TUI apps. The clear sequence is already
-                        // processed by the parser, and scrollback will naturally age out.
+                // Note: We DON'T recreate the parser because that would lose terminal state
+                // like mouse mode settings from TUI apps. The clear sequence is already
+                // processed by the parser, and scrollback will naturally age out.
 
-                        *clear = false;
-                    }
-                }
+                *clear = false;
             }
         }
     }
@@ -425,8 +424,8 @@ impl App {
                 tab.scroll_offset = 0;
                 log_debug!("Successfully reconnected to {}", host.name);
             }
-            Err(e) => {
-                log_error!("Failed to reconnect SSH session: {}", e);
+            Err(err) => {
+                log_error!("Failed to reconnect SSH session: {}", err);
             }
         }
     }

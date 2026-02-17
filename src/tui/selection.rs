@@ -3,7 +3,7 @@
 //! Uses OSC 52 escape sequences via crossterm for clipboard operations.
 //! This works in most modern terminals: Konsole, Kitty, Alacritty, Wezterm, foot, etc.
 
-use super::App;
+use super::SessionManager;
 use crossterm::clipboard::CopyToClipboard;
 use crossterm::execute;
 use std::io::{Write, stdout};
@@ -42,7 +42,7 @@ fn copy_to_clipboard(text: &str) {
     let _ = stdout().flush();
 }
 
-impl App {
+impl SessionManager {
     /// Copy the current text selection to clipboard
     pub(super) fn copy_selection_to_clipboard(&self) {
         let (start, end) = match (self.selection_start, self.selection_end) {
