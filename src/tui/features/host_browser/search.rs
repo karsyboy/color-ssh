@@ -35,9 +35,8 @@ fn fuzzy_match(text_lower: &str, pattern_lower: &str) -> Option<i32> {
                 pattern_chars.next();
                 found = true;
                 break;
-            } else {
-                consecutive = 0;
             }
+            consecutive = 0;
         }
 
         if !found {

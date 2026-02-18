@@ -1,4 +1,4 @@
 //! Shared UI widgets and theme helpers.
 
-pub(crate) mod status_bar;
-pub(crate) mod theme;
+pub(super) mod status_bar;
+pub(super) mod theme;

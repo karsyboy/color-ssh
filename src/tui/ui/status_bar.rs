@@ -19,7 +19,7 @@ enum StatusContext {
 }
 
 impl SessionManager {
-    pub(crate) fn render_global_status_bar(&mut self, frame: &mut Frame, area: Rect) {
+    pub(crate) fn render_global_status_bar(&self, frame: &mut Frame, area: Rect) {
         if area.width == 0 || area.height == 0 {
             return;
         }
@@ -33,7 +33,7 @@ impl SessionManager {
             return;
         }
 
-        let right_width = self.spans_display_width(&right_spans).min(area.width as usize) as u16;
+        let right_width = Self::spans_display_width(&right_spans).min(area.width as usize) as u16;
         let chunks = Layout::default()
             .direction(Direction::Horizontal)
             .constraints([Constraint::Min(0), Constraint::Length(right_width)])
@@ -54,7 +54,7 @@ impl SessionManager {
         }
     }
 
-    fn spans_display_width(&self, spans: &[Span<'static>]) -> usize {
+    fn spans_display_width(spans: &[Span<'static>]) -> usize {
         spans.iter().map(|span| display_width(span.content.as_ref())).sum()
     }
 
@@ -62,7 +62,7 @@ impl SessionManager {
         if self.search_mode {
             return StatusContext::HostSearch;
         }
-        if self.has_terminal_focus() && self.current_tab_search().map(|search_state| search_state.active).unwrap_or(false) {
+        if self.has_terminal_focus() && self.current_tab_search().is_some_and(|search_state| search_state.active) {
             return StatusContext::TerminalSearch;
         }
         if self.has_terminal_focus() {
@@ -75,7 +75,7 @@ impl SessionManager {
         !self.focus_on_manager && !self.tabs.is_empty() && self.selected_tab < self.tabs.len()
     }
 
-    fn context_split_indicator(&self) -> Span<'static> {
+    fn context_split_indicator() -> Span<'static> {
         Span::styled(" || ", Style::default().fg(Color::DarkGray))
     }
 
@@ -93,11 +93,11 @@ impl SessionManager {
         let host_name = self.selected_host_name().unwrap_or_else(|| "none".to_string());
         let mut left = vec![
             Span::styled("Host", Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD)),
-            self.context_split_indicator(),
+            Self::context_split_indicator(),
             Span::styled(host_name, Style::default().fg(Color::White)),
         ];
         if !self.search_query.is_empty() {
-            left.push(self.context_split_indicator());
+            left.push(Self::context_split_indicator());
             left.push(Span::styled("filter:", Style::default().fg(Color::DarkGray)));
             left.push(Span::styled(" ", Style::default()));
             left.push(Span::styled(self.search_query.clone(), Style::default().fg(Color::Yellow)));
@@ -166,7 +166,7 @@ impl SessionManager {
 
         let mut left = vec![
             Span::styled("Terminal", Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)),
-            self.context_split_indicator(),
+            Self::context_split_indicator(),
             Span::styled("●", Style::default().fg(status_icon_color).add_modifier(Modifier::BOLD)),
             Span::styled(" ", Style::default()),
             Span::styled(tab.host.name.clone(), Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD)),
@@ -222,7 +222,7 @@ impl SessionManager {
     fn build_search_mode_status_spans(&self) -> (Vec<Span<'static>>, Vec<Span<'static>>) {
         let left = vec![
             Span::styled("Host Search", Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD)),
-            self.context_split_indicator(),
+            Self::context_split_indicator(),
             Span::styled(self.search_query.clone(), Style::default().fg(Color::White)),
             Span::styled("_", Style::default().fg(Color::White)),
         ];
@@ -238,11 +238,9 @@ impl SessionManager {
     }
 
     fn build_terminal_search_status_spans(&self) -> (Vec<Span<'static>>, Vec<Span<'static>>) {
-        let (query, matches_len, current_idx) = if let Some(search) = self.current_tab_search() {
-            (search.query.clone(), search.matches.len(), search.current)
-        } else {
-            (String::new(), 0, 0)
-        };
+        let (query, matches_len, current_idx) = self
+            .current_tab_search()
+            .map_or_else(|| (String::new(), 0, 0), |search| (search.query.clone(), search.matches.len(), search.current));
 
         let match_info = if matches_len > 0 {
             format!("{}/{}", current_idx + 1, matches_len)
@@ -252,11 +250,11 @@ impl SessionManager {
 
         let left = vec![
             Span::styled("Terminal Search", Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD)),
-            self.context_split_indicator(),
+            Self::context_split_indicator(),
             Span::styled(query, Style::default().fg(Color::White)),
             Span::styled("_", Style::default().fg(Color::White)),
             Span::styled(" ", Style::default()),
-            Span::styled(format!("({})", match_info), Style::default().fg(Color::Yellow)),
+            Span::styled(format!("({match_info})"), Style::default().fg(Color::Yellow)),
         ];
         let right = vec![
             Span::styled("Enter", Style::default().fg(Color::Green)),
@@ -277,8 +275,7 @@ mod tests {
 
     #[test]
     fn calculates_span_width_using_unicode_display_width() {
-        let app = SessionManager::new_for_tests();
         let spans = vec![Span::raw("a界"), Span::raw("x")];
-        assert_eq!(app.spans_display_width(&spans), 4);
+        assert_eq!(SessionManager::spans_display_width(&spans), 4);
     }
 }

@@ -40,8 +40,8 @@ impl SessionManager {
             None => return,
         };
 
-        let text = if let Ok(mut parser) = session.parser.lock() {
-            extract_selection_text(&mut parser, start, end)
+        let text = if let Ok(parser) = session.parser.lock() {
+            extract_selection_text(&parser, start, end)
         } else {
             return;
         };

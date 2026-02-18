@@ -62,7 +62,7 @@ fn build_cli_command() -> Command {
         )
         .arg(Arg::new("ssh_args").help("SSH arguments to forward to the SSH command").num_args(1..))
         .after_help(
-            r#"
+            r"
 cossh                                              # Launch interactive session manager
 cossh -d                                           # Launch interactive session manager with debug enabled
 cossh -d user@example.com                          # Debug mode enabled
@@ -71,7 +71,7 @@ cossh -l -P network user@firewall.example.com      # Use 'network' config profil
 cossh -l user@host -p 2222                         # Both modes with SSH args
 cossh -tld -P network localhost                    # Test mode: force logging from CLI flags only
 cossh user@host -G                                 # Non-interactive command
-"#,
+",
         )
 }
 
@@ -128,13 +128,13 @@ where
 /// ```
 ///
 /// # Returns
-/// A MainArgs struct containing all parsed arguments
+/// A `MainArgs` struct containing all parsed arguments
 pub fn main_args() -> MainArgs {
     let cmd = build_cli_command();
     let parsed = parse_main_args_from(&cmd, std::env::args_os());
 
     if !parsed.interactive && parsed.ssh_args.is_empty() {
-        let mut help_cmd = cmd.clone();
+        let mut help_cmd = cmd;
         let _ = help_cmd.print_long_help();
         println!();
         std::process::exit(2);

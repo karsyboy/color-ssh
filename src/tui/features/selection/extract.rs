@@ -30,7 +30,7 @@ pub(crate) fn is_cell_in_selection(row: i64, col: u16, start: Option<(i64, u16)>
     }
 }
 
-pub(crate) fn extract_selection_text(parser: &mut Parser, start: (i64, u16), end: (i64, u16)) -> String {
+pub(crate) fn extract_selection_text(parser: &Parser, start: (i64, u16), end: (i64, u16)) -> String {
     parser.selection_text(start, end)
 }
 
@@ -46,7 +46,7 @@ mod tests {
         parser.set_scrollback(1);
         let before_cell = parser.screen().cell(0, 0).map(|cell| cell.contents()).unwrap_or_default();
 
-        let _ = extract_selection_text(&mut parser, (0, 0), (0, 2));
+        let _ = extract_selection_text(&parser, (0, 0), (0, 2));
         let after_cell = parser.screen().cell(0, 0).map(|cell| cell.contents()).unwrap_or_default();
 
         assert_eq!(before_cell, after_cell);

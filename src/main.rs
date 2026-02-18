@@ -24,7 +24,7 @@ fn extract_ssh_destination(ssh_args: &[String]) -> Option<String> {
         }
 
         // Extract just the hostname part after @ if it exist
-        return Some(arg.split_once('@').map_or_else(|| arg.to_string(), |(_, host)| host.to_string()));
+        return Some(arg.split_once('@').map_or_else(|| arg.clone(), |(_, host)| host.to_string()));
     }
 
     None
@@ -59,7 +59,7 @@ fn main() -> Result<ExitCode> {
         // Init config so session manager can read interactive settings (if configured)
         let _ = config::init_session_config(args.profile.clone());
         if let Err(err) = tui::run_session_manager() {
-            eprintln!("Session manager error: {}", err);
+            eprintln!("Session manager error: {err}");
             let _ = logger.flush_debug();
             std::process::exit(1);
         }
@@ -68,7 +68,7 @@ fn main() -> Result<ExitCode> {
     }
 
     if let Err(err) = config::init_session_config(args.profile.clone()) {
-        eprintln!("Failed to initialize config: {}", err);
+        eprintln!("Failed to initialize config: {err}");
         let _ = logger.flush_debug();
         std::process::exit(1);
     }
@@ -123,8 +123,8 @@ fn main() -> Result<ExitCode> {
             " ",
         ];
 
-        for line in title.iter() {
-            println!("{}\x1b[0m", line);
+        for line in &title {
+            println!("{line}\x1b[0m");
         }
     }
 
@@ -133,9 +133,9 @@ fn main() -> Result<ExitCode> {
         let session_hostname = extract_ssh_destination(&args.ssh_args).unwrap_or_else(|| "unknown".to_string());
 
         // Use COSSH_SESSION_NAME env var if set (from session manager tabs), otherwise use hostname
-        let session_name = std::env::var("COSSH_SESSION_NAME").unwrap_or_else(|_| session_hostname.to_string());
+        let session_name = std::env::var("COSSH_SESSION_NAME").unwrap_or_else(|_| session_hostname.clone());
         config::get_config().write().unwrap().metadata.session_name = session_name.clone();
-        log_debug!("Session name set to: {}", session_name);
+        log_debug!("Session name set to: {session_name}");
     }
 
     // Start the config file watcher in the background
@@ -146,7 +146,7 @@ fn main() -> Result<ExitCode> {
     log_info!("Launching SSH process handler");
     let exit_code = process::process_handler(args.ssh_args, args.is_non_interactive).map_err(|err| {
         log_error!("Process handler failed: {}", err);
-        eprintln!("Process failed: {}", err);
+        eprintln!("Process failed: {err}");
         let _ = logger.flush_debug();
         err
     })?;
