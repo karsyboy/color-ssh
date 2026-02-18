@@ -2,3 +2,4 @@
 Cargo.lock
 .vscode
 tst_code
+scripts/bench/benchmarks

@@ -15,6 +15,8 @@ use std::{
     {env, fs, io},
 };
 
+const DEFAULT_CONFIG_FILENAME: &str = "cossh-config.yaml";
+
 pub struct ConfigLoader {
     config_path: PathBuf,
 }
@@ -30,10 +32,10 @@ impl ConfigLoader {
         log_debug!("Searching for configuration file...");
         let config_filename = match profile {
             Some(profile_name) if !profile_name.is_empty() => format!("{}.cossh-config.yaml", profile_name),
-            _ => ".cossh-config.yaml".to_string(),
+            _ => DEFAULT_CONFIG_FILENAME.to_string(),
         };
 
-        // Check first possible location: ~/.color-ssh/{profile}.cossh-config.yaml
+        // Check first possible location: ~/.color-ssh/{config_filename}
         if let Some(home_dir) = dirs::home_dir() {
             let cossh_dir_path = home_dir.join(".color-ssh").join(&config_filename);
             log_debug!("Checking: {:?}", cossh_dir_path);
@@ -43,7 +45,7 @@ impl ConfigLoader {
             }
         }
 
-        // Check second possible location: ~/{profile}.cossh-config.yaml
+        // Check second possible location: ~/{config_filename}
         if let Some(home_dir) = dirs::home_dir() {
             let home_dir_path = home_dir.join(&config_filename);
             log_debug!("Checking: {:?}", home_dir_path);
@@ -54,12 +56,11 @@ impl ConfigLoader {
         }
 
         // Check third possible location: current working directory
-        let current_dir_path = env::current_dir()
-            .unwrap_or_else(|err| {
-                eprintln!("Failed to get current directory: {}", err);
-                std::process::exit(1);
-            })
-            .join(&config_filename);
+        let current_dir = env::current_dir().unwrap_or_else(|err| {
+            eprintln!("Failed to get current directory: {}", err);
+            std::process::exit(1);
+        });
+        let current_dir_path = current_dir.join(&config_filename);
         log_debug!("Checking: {:?}", current_dir_path);
         if current_dir_path.exists() {
             log_info!("Found config at: {:?}", current_dir_path);
@@ -91,7 +92,7 @@ impl ConfigLoader {
     fn create_default_config() -> io::Result<PathBuf> {
         let home_dir = dirs::home_dir().ok_or_else(|| io::Error::new(io::ErrorKind::NotFound, "Failed to get home directory"))?;
         let cossh_dir = home_dir.join(".color-ssh");
-        let config_path = cossh_dir.join(".cossh-config.yaml");
+        let config_path = cossh_dir.join(DEFAULT_CONFIG_FILENAME);
 
         // Create the .cossh directory if it does not exist
         if !cossh_dir.exists() {

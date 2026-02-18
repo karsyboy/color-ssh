@@ -125,11 +125,11 @@ mod tests {
 
     #[test]
     fn reloads_only_for_modify_or_create_on_target_file() {
-        let config_name = ".cossh-config.yaml";
-        let modify_event = event(EventKind::Modify(ModifyKind::Any), &["/tmp/.cossh-config.yaml"]);
-        let create_event = event(EventKind::Create(CreateKind::Any), &["/tmp/.cossh-config.yaml"]);
+        let config_name = "cossh-config.yaml";
+        let modify_event = event(EventKind::Modify(ModifyKind::Any), &["/tmp/cossh-config.yaml"]);
+        let create_event = event(EventKind::Create(CreateKind::Any), &["/tmp/cossh-config.yaml"]);
         let wrong_file = event(EventKind::Modify(ModifyKind::Any), &["/tmp/other.yaml"]);
-        let remove_event = event(EventKind::Remove(RemoveKind::Any), &["/tmp/.cossh-config.yaml"]);
+        let remove_event = event(EventKind::Remove(RemoveKind::Any), &["/tmp/cossh-config.yaml"]);
 
         assert!(should_reload_for_event(&modify_event, config_name));
         assert!(should_reload_for_event(&create_event, config_name));

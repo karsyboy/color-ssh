@@ -84,7 +84,7 @@ Configuration files are looked for in the following order:
 1. **Current directory**: `./[profile].cossh-config.yaml`
 2. **Home directory**: `~/.color-ssh/[profile].cossh-config.yaml`
 
-If no configuration file is found the default configuration will be created at  `~/.color-ssh/.cossh-config.yaml`.
+If no configuration file is found the default configuration will be created at  `~/.color-ssh/cossh-config.yaml`.
 
 
 ## Uninstall

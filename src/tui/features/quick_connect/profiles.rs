@@ -30,7 +30,7 @@ impl SessionManager {
                     continue;
                 };
 
-                if filename == ".cossh-config.yaml" {
+                if filename == "cossh-config.yaml" {
                     profiles.insert("default".to_string());
                     continue;
                 }
