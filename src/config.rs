@@ -62,6 +62,18 @@ pub fn init_session_config(profile: Option<String>) -> Result<(), ConfigError> {
     Ok(())
 }
 
+/// Load `interactive_settings.history_buffer` for a specific profile, if available.
+pub(crate) fn history_buffer_for_profile(profile: Option<&str>) -> Option<usize> {
+    let profile = profile?.trim();
+    if profile.is_empty() {
+        return None;
+    }
+
+    let config_loader = loader::ConfigLoader::new(Some(profile.to_string())).ok()?;
+    let config = config_loader.load_config().ok()?;
+    config.interactive_settings.map(|interactive| interactive.history_buffer)
+}
+
 pub(crate) fn current_config_version() -> u64 {
     CONFIG_VERSION.load(Ordering::Acquire)
 }

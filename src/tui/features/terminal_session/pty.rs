@@ -62,6 +62,10 @@ pub(crate) fn encode_key_event_bytes(key: KeyEvent) -> Option<Vec<u8>> {
 }
 
 impl SessionManager {
+    fn resolved_history_buffer_for_host(&self, host: &SshHost) -> usize {
+        crate::config::history_buffer_for_profile(host.profile.as_deref()).unwrap_or(self.history_buffer)
+    }
+
     /// Select a host to open in a new tab
     pub(crate) fn select_host_to_connect(&mut self) {
         let Some(host_idx) = self.selected_host_idx() else {
@@ -96,9 +100,11 @@ impl SessionManager {
         } else {
             format!("{}_{}", host.name, existing_count)
         };
+        let history_buffer = self.resolved_history_buffer_for_host(&host);
+        log_debug!("Using history buffer {} for tab '{}' (profile: {:?})", history_buffer, tab_title, host.profile);
 
         // Spawn SSH session
-        let session = match Self::spawn_ssh_session(&host, &tab_title, self.history_buffer, force_ssh_logging) {
+        let session = match Self::spawn_ssh_session(&host, &tab_title, history_buffer, force_ssh_logging) {
             Ok(session) => Some(session),
             Err(err) => {
                 log_error!("Failed to spawn SSH session: {}", err);
@@ -254,7 +260,14 @@ impl SessionManager {
         // Spawn a new SSH session
         let tab_title = tab.title.clone();
         let force_ssh_logging = self.tabs[self.selected_tab].force_ssh_logging;
-        match Self::spawn_ssh_session(&host, &tab_title, self.history_buffer, force_ssh_logging) {
+        let history_buffer = self.resolved_history_buffer_for_host(&host);
+        log_debug!(
+            "Using history buffer {} for reconnect tab '{}' (profile: {:?})",
+            history_buffer,
+            tab_title,
+            host.profile
+        );
+        match Self::spawn_ssh_session(&host, &tab_title, history_buffer, force_ssh_logging) {
             Ok(session) => {
                 let tab = &mut self.tabs[self.selected_tab];
                 tab.session = Some(session);
