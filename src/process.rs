@@ -10,6 +10,10 @@ use std::{
 const STDOUT_FLUSH_BYTES: usize = 32 * 1024;
 const STDOUT_FLUSH_INTERVAL: Duration = Duration::from_millis(50);
 
+fn requires_immediate_terminal_flush(output: &str) -> bool {
+    output.as_bytes().iter().any(|byte| matches!(*byte, b'\r' | 0x1b | 0x08))
+}
+
 fn map_exit_code(success: bool, code: Option<i32>) -> ExitCode {
     if success {
         ExitCode::SUCCESS
@@ -89,7 +93,8 @@ pub fn process_handler(process_args: Vec<String>, is_non_interactive: bool) -> R
                 }
 
                 pending_stdout_bytes = pending_stdout_bytes.saturating_add(processed_chunk.len());
-                if pending_stdout_bytes >= STDOUT_FLUSH_BYTES || last_stdout_flush.elapsed() >= STDOUT_FLUSH_INTERVAL {
+                let immediate_flush = requires_immediate_terminal_flush(&processed_chunk);
+                if immediate_flush || pending_stdout_bytes >= STDOUT_FLUSH_BYTES || last_stdout_flush.elapsed() >= STDOUT_FLUSH_INTERVAL {
                     if let Err(err) = stdout.flush() {
                         log_error!("Failed to flush stdout: {}", err);
                         break;
@@ -213,7 +218,7 @@ fn spawn_ssh_passthrough(args: &[String]) -> Result<ExitCode> {
 
 #[cfg(test)]
 mod tests {
-    use super::map_exit_code;
+    use super::{map_exit_code, requires_immediate_terminal_flush};
     use std::process::ExitCode;
 
     #[test]
@@ -231,5 +236,13 @@ mod tests {
         assert_eq!(map_exit_code(false, Some(300)), ExitCode::from(255));
         assert_eq!(map_exit_code(false, Some(-1)), ExitCode::from(255));
         assert_eq!(map_exit_code(false, None), ExitCode::from(1));
+    }
+
+    #[test]
+    fn immediate_flush_detects_cursor_control_sequences() {
+        assert!(requires_immediate_terminal_flush("\rprompt"));
+        assert!(requires_immediate_terminal_flush("\x1b[2J"));
+        assert!(requires_immediate_terminal_flush("abc\x08"));
+        assert!(!requires_immediate_terminal_flush("plain text\nnext line"));
     }
 }
