@@ -59,7 +59,6 @@ pub(crate) fn run_app<B: ratatui::backend::Backend>(terminal: &mut Terminal<B>, 
 
     loop {
         if app.should_draw(RENDER_HEARTBEAT) {
-            app.check_clear_pending();
             terminal.draw(|frame| app.draw(frame))?;
             app.mark_drawn();
             // This is for troubleshooting render times

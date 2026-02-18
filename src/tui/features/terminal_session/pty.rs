@@ -7,7 +7,6 @@ use crate::tui::{HostTab, SessionManager, SshSession, TerminalSearchCache, Termi
 use crate::{debug_enabled, log_debug, log_error};
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use portable_pty::{CommandBuilder, PtySize, native_pty_system};
-use std::collections::VecDeque;
 use std::io::{self, Read};
 use std::sync::{
     Arc, Mutex,
@@ -15,48 +14,6 @@ use std::sync::{
 };
 use std::time::Instant;
 use vt100::Parser;
-
-const PARSER_REPLAY_BUFFER_MAX_BYTES: usize = 8 * 1024 * 1024;
-
-fn append_replay_bytes(replay_log: &Arc<Mutex<VecDeque<u8>>>, data: &[u8]) {
-    let Ok(mut replay) = replay_log.lock() else {
-        return;
-    };
-
-    replay.extend(data.iter().copied());
-    let overflow = replay.len().saturating_sub(PARSER_REPLAY_BUFFER_MAX_BYTES);
-    if overflow > 0 {
-        replay.drain(..overflow);
-    }
-}
-
-fn reset_replay_bytes(replay_log: &Arc<Mutex<VecDeque<u8>>>, data: &[u8]) {
-    let Ok(mut replay) = replay_log.lock() else {
-        return;
-    };
-
-    replay.clear();
-    replay.extend(data.iter().copied());
-    let overflow = replay.len().saturating_sub(PARSER_REPLAY_BUFFER_MAX_BYTES);
-    if overflow > 0 {
-        replay.drain(..overflow);
-    }
-}
-
-fn rebuild_parser_from_replay(session: &SshSession, rows: u16, cols: u16, history_buffer: usize) {
-    let replay_snapshot = match session.replay_log.lock() {
-        Ok(replay) => replay.iter().copied().collect::<Vec<u8>>(),
-        Err(_) => Vec::new(),
-    };
-
-    if let Ok(mut parser) = session.parser.lock() {
-        let mut rebuilt = Parser::new(rows, cols, history_buffer);
-        if !replay_snapshot.is_empty() {
-            rebuilt.process(&replay_snapshot);
-        }
-        *parser = rebuilt;
-    }
-}
 
 pub(crate) fn encode_key_event_bytes(key: KeyEvent) -> Option<Vec<u8>> {
     let mut bytes = match key.code {
@@ -241,12 +198,8 @@ impl SessionManager {
         let pty_master = Arc::new(Mutex::new(pty_pair.master));
         let writer = Arc::new(Mutex::new(writer));
         let writer_clone = writer.clone();
-        let clear_pending = Arc::new(Mutex::new(false));
-        let clear_pending_clone = clear_pending.clone();
         let render_epoch = Arc::new(AtomicU64::new(0));
         let render_epoch_clone = render_epoch.clone();
-        let replay_log = Arc::new(Mutex::new(VecDeque::new()));
-        let replay_log_clone = replay_log.clone();
 
         // Spawn a thread to read from PTY
         std::thread::spawn(move || {
@@ -273,20 +226,6 @@ impl SessionManager {
                         // so the inner TUI app's copy reaches the system clipboard.
                         forward_osc52(data, &mut osc_buf);
 
-                        // Detect replay reset boundaries (clear-screen and alt-screen exits) and
-                        // drop replay history before that boundary.
-                        // This prevents stale full-screen content (e.g., nano) from persisting
-                        // after parser rebuild paths.
-                        if let Some(reset_start) = Self::replay_reset_slice_start(data) {
-                            reset_replay_bytes(&replay_log_clone, &data[reset_start..]);
-                            if let Ok(mut clear) = clear_pending_clone.lock() {
-                                *clear = true;
-                            }
-                        } else {
-                            // Keep a bounded replay log so terminal state can be rebuilt on resize.
-                            append_replay_bytes(&replay_log_clone, data);
-                        }
-
                         if let Ok(mut parser) = parser_clone.lock() {
                             // Process the data through VT100 parser
                             parser.process(data);
@@ -310,128 +249,9 @@ impl SessionManager {
             writer,
             _child: child,
             parser,
-            replay_log,
             exited,
-            clear_pending,
             render_epoch,
         })
-    }
-
-    /// Find the byte index to keep when replay is reset after a clear.
-    ///
-    /// Supported clear sequences:
-    /// - `ESC[2J` clear screen
-    /// - `ESC[3J` clear screen + scrollback
-    ///
-    /// The returned index starts at the earliest contiguous control sequence in
-    /// the clear-chain (e.g., keeps `ESC[H ESC[2J ESC[3J` together) so parser
-    /// rebuild preserves cursor placement.
-    fn clear_replay_slice_start(data: &[u8]) -> Option<usize> {
-        let mut last_clear_start: Option<usize> = None;
-        let mut prev_end: Option<usize> = None;
-        let mut prev_chain_member = false;
-        let mut prev_chain_start = 0usize;
-
-        let mut i = 0;
-        while i + 2 < data.len() {
-            if data[i] == 0x1b && data[i + 1] == b'[' {
-                // Found ESC[
-                let mut j = i + 2;
-                // Skip any digits or semicolons
-                while j < data.len() && (data[j].is_ascii_digit() || data[j] == b';') {
-                    j += 1;
-                }
-                // Check if it ends with 'J'
-                if j < data.len() {
-                    let final_byte = data[j];
-                    let params = std::str::from_utf8(&data[i + 2..j]).unwrap_or("");
-                    let is_clear = final_byte == b'J' && (params == "2" || params == "3");
-                    let is_home = final_byte == b'H' || final_byte == b'f';
-                    let is_chain_member = is_clear || is_home;
-
-                    let chain_start = if is_chain_member && prev_chain_member && prev_end == Some(i) {
-                        prev_chain_start
-                    } else {
-                        i
-                    };
-
-                    if is_clear {
-                        last_clear_start = Some(chain_start);
-                    }
-
-                    prev_end = Some(j + 1);
-                    prev_chain_member = is_chain_member;
-                    prev_chain_start = chain_start;
-                }
-                i = j;
-            } else {
-                i += 1;
-            }
-        }
-        last_clear_start
-    }
-
-    /// Return the last index where an alternate-screen exit sequence starts.
-    ///
-    /// Supported sequences:
-    /// - `ESC[?1049l` (xterm alternate screen leave)
-    /// - `ESC[?1047l`
-    /// - `ESC[?47l`
-    fn alternate_screen_exit_slice_start(data: &[u8]) -> Option<usize> {
-        fn last_subsequence_start(haystack: &[u8], needle: &[u8]) -> Option<usize> {
-            if needle.is_empty() || haystack.len() < needle.len() {
-                return None;
-            }
-            haystack.windows(needle.len()).rposition(|window| window == needle)
-        }
-
-        let mut last: Option<usize> = None;
-        for needle in [b"\x1b[?1049l".as_slice(), b"\x1b[?1047l".as_slice(), b"\x1b[?47l".as_slice()] {
-            if let Some(pos) = last_subsequence_start(data, needle) {
-                last = Some(last.map_or(pos, |current| current.max(pos)));
-            }
-        }
-        last
-    }
-
-    /// Find the last replay reset boundary in this chunk.
-    ///
-    /// If both clear-screen and alternate-screen-exit sequences exist, prefer whichever
-    /// appears later in the chunk.
-    fn replay_reset_slice_start(data: &[u8]) -> Option<usize> {
-        match (Self::clear_replay_slice_start(data), Self::alternate_screen_exit_slice_start(data)) {
-            (Some(clear_pos), Some(alt_pos)) => Some(clear_pos.max(alt_pos)),
-            (Some(clear_pos), None) => Some(clear_pos),
-            (None, Some(alt_pos)) => Some(alt_pos),
-            (None, None) => None,
-        }
-    }
-
-    /// Check if any tab has a pending clear screen, then reset scroll state and parser history.
-    pub(crate) fn check_clear_pending(&mut self) {
-        for tab in &mut self.tabs {
-            if let Some(session) = &tab.session
-                && let Ok(mut clear) = session.clear_pending.lock()
-                && *clear
-            {
-                // Reset scroll offset to show the cleared screen.
-                tab.scroll_offset = 0;
-                tab.terminal_search.matches.clear();
-                tab.terminal_search.current = 0;
-                tab.terminal_search_cache = TerminalSearchCache::default();
-
-                // Rebuild from replay to enforce cleared history.
-                let (rows, cols) = if let Ok(parser) = session.parser.lock() {
-                    parser.screen().size()
-                } else {
-                    tab.last_pty_size.unwrap_or((40, 120))
-                };
-                rebuild_parser_from_replay(session, rows.max(1), cols.max(1), self.history_buffer);
-                session.render_epoch.fetch_add(1, Ordering::Relaxed);
-
-                *clear = false;
-            }
-        }
     }
 
     /// Reconnect a disconnected session in the current tab
@@ -490,8 +310,10 @@ impl SessionManager {
                 });
             }
 
-            // Rebuild parser from replay log to preserve text when width changes.
-            rebuild_parser_from_replay(session, rows, cols, self.history_buffer);
+            // Let the terminal emulator handle resize semantics directly.
+            if let Ok(mut parser) = session.parser.lock() {
+                parser.set_size(rows, cols);
+            }
             session.render_epoch.fetch_add(1, Ordering::Relaxed);
 
             tab.last_pty_size = Some((rows, cols));
@@ -504,7 +326,7 @@ impl SessionManager {
 
 #[cfg(test)]
 mod tests {
-    use super::{SessionManager, encode_key_event_bytes};
+    use super::encode_key_event_bytes;
     use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
     #[test]
@@ -542,46 +364,5 @@ mod tests {
     fn encode_key_event_bytes_alt_arrow_prefixes_escape() {
         let key = KeyEvent::new(KeyCode::Up, KeyModifiers::ALT);
         assert_eq!(encode_key_event_bytes(key), Some(b"\x1b\x1b[A".to_vec()));
-    }
-
-    #[test]
-    fn detects_clear_sequence_start_for_esc_2j_and_esc_3j() {
-        assert_eq!(SessionManager::clear_replay_slice_start(b"hello\x1b[2J"), Some(5));
-        assert_eq!(SessionManager::clear_replay_slice_start(b"hello\x1b[3J"), Some(5));
-    }
-
-    #[test]
-    fn keeps_contiguous_home_and_clear_chain_when_detecting_start() {
-        let data = b"abc\x1b[H\x1b[2J\x1b[3J";
-        assert_eq!(SessionManager::clear_replay_slice_start(data), Some(3));
-    }
-
-    #[test]
-    fn prefers_latest_clear_chain_start_when_multiple_clears_exist() {
-        let data = b"abc\x1b[2Jjunk\x1b[H\x1b[3J";
-        assert_eq!(SessionManager::clear_replay_slice_start(data), Some(11));
-    }
-
-    #[test]
-    fn returns_none_when_no_clear_sequence_is_present() {
-        assert_eq!(SessionManager::clear_replay_slice_start(b"normal output only"), None);
-    }
-
-    #[test]
-    fn detects_alternate_screen_exit_sequences() {
-        assert_eq!(SessionManager::alternate_screen_exit_slice_start(b"aa\x1b[?1049lbb"), Some(2));
-        assert_eq!(SessionManager::alternate_screen_exit_slice_start(b"aa\x1b[?1047lbb"), Some(2));
-        assert_eq!(SessionManager::alternate_screen_exit_slice_start(b"aa\x1b[?47lbb"), Some(2));
-    }
-
-    #[test]
-    fn replay_reset_prefers_latest_boundary_between_clear_and_alt_exit() {
-        let data = b"xx\x1b[2Jyy\x1b[?1049l";
-        assert_eq!(SessionManager::replay_reset_slice_start(data), Some(8));
-    }
-
-    #[test]
-    fn replay_reset_returns_none_when_no_boundary_exists() {
-        assert_eq!(SessionManager::replay_reset_slice_start(b"plain shell output"), None);
     }
 }
