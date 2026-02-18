@@ -106,7 +106,7 @@ impl SessionManager {
 mod tests {
     use super::SessionManager;
     use crate::ssh_config::SshHost;
-    use crate::tui::{HostTab, TerminalSearchCache, TerminalSearchState};
+    use crate::tui::{HostTab, TerminalSearchState};
 
     fn app_with_tab_titles(titles: &[&str]) -> SessionManager {
         let mut app = SessionManager::new_for_tests();
@@ -117,7 +117,6 @@ mod tests {
                 session: None,
                 scroll_offset: 0,
                 terminal_search: TerminalSearchState::default(),
-                terminal_search_cache: TerminalSearchCache::default(),
                 force_ssh_logging: false,
                 last_pty_size: None,
             });

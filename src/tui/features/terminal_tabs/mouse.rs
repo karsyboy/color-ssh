@@ -448,39 +448,23 @@ impl SessionManager {
     }
 
     pub(crate) fn is_pty_mouse_mode_active(&self) -> bool {
-        if self.tabs.is_empty() || self.selected_tab >= self.tabs.len() {
-            return false;
-        }
-        if let Some(session) = &self.tabs[self.selected_tab].session
-            && let Ok(parser) = session.parser.lock()
-        {
-            return parser.screen().mouse_protocol_mode() != terminal_emulator::MouseProtocolMode::None;
-        }
-        false
+        self.pty_mouse_mode() != terminal_emulator::MouseProtocolMode::None
     }
 
-    fn pty_mouse_encoding(&self) -> terminal_emulator::MouseProtocolEncoding {
+    fn pty_mouse_protocol(&self) -> (terminal_emulator::MouseProtocolMode, terminal_emulator::MouseProtocolEncoding) {
         if self.tabs.is_empty() || self.selected_tab >= self.tabs.len() {
-            return terminal_emulator::MouseProtocolEncoding::Default;
+            return (terminal_emulator::MouseProtocolMode::None, terminal_emulator::MouseProtocolEncoding::Default);
         }
         if let Some(session) = &self.tabs[self.selected_tab].session
             && let Ok(parser) = session.parser.lock()
         {
-            return parser.screen().mouse_protocol_encoding();
+            return parser.screen().mouse_protocol();
         }
-        terminal_emulator::MouseProtocolEncoding::Default
+        (terminal_emulator::MouseProtocolMode::None, terminal_emulator::MouseProtocolEncoding::Default)
     }
 
     fn pty_mouse_mode(&self) -> terminal_emulator::MouseProtocolMode {
-        if self.tabs.is_empty() || self.selected_tab >= self.tabs.len() {
-            return terminal_emulator::MouseProtocolMode::None;
-        }
-        if let Some(session) = &self.tabs[self.selected_tab].session
-            && let Ok(parser) = session.parser.lock()
-        {
-            return parser.screen().mouse_protocol_mode();
-        }
-        terminal_emulator::MouseProtocolMode::None
+        self.pty_mouse_protocol().0
     }
 
     fn mouse_to_vt_coords(&self, column: u16, row: u16) -> Option<(u16, u16)> {
@@ -516,7 +500,7 @@ impl SessionManager {
         if self.selected_tab >= self.tabs.len() {
             return Ok(());
         }
-        let encoding = self.pty_mouse_encoding();
+        let encoding = self.pty_mouse_protocol().1;
         let bytes = Self::encode_mouse_event_bytes(encoding, button, col, row, is_release);
         self.write_bytes_to_active_pty(&bytes)
     }
@@ -527,7 +511,7 @@ mod tests {
     use super::SessionManager;
     use crate::ssh_config::SshHost;
     use crate::tui::terminal_emulator::MouseProtocolEncoding;
-    use crate::tui::{HostTab, TerminalSearchCache, TerminalSearchState};
+    use crate::tui::{HostTab, TerminalSearchState};
     use crossterm::event::{KeyModifiers, MouseButton, MouseEvent, MouseEventKind};
     use ratatui::layout::Rect;
 
@@ -544,7 +528,6 @@ mod tests {
                 session: None,
                 scroll_offset: 0,
                 terminal_search: TerminalSearchState::default(),
-                terminal_search_cache: TerminalSearchCache::default(),
                 force_ssh_logging: false,
                 last_pty_size: None,
             });

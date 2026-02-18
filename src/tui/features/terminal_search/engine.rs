@@ -1,66 +1,10 @@
 //! Terminal-search indexing and viewport sync.
 
-use crate::tui::terminal_emulator::Parser;
-use crate::tui::{SessionManager, TerminalSearchRowSnapshot};
+use crate::tui::SessionManager;
 use crate::{debug_enabled, log_debug};
-use std::sync::atomic::Ordering as AtomicOrdering;
 use std::time::Instant;
 
-fn find_matches_in_cached_rows(rows: &[TerminalSearchRowSnapshot], query_lower: &str, query_char_count: usize) -> Vec<(i64, u16, usize)> {
-    let mut matches = Vec::new();
-    for row in rows {
-        let mut search_start = 0;
-        while let Some(pos) = row.row_text_lower[search_start..].find(query_lower) {
-            let match_pos = search_start + pos;
-            let match_col = SessionManager::match_col_for_start(&row.col_start_byte_offsets, match_pos);
-            matches.push((row.abs_row, match_col as u16, query_char_count));
-            search_start = match_pos.saturating_add(1);
-        }
-    }
-    matches
-}
-
 impl SessionManager {
-    fn build_terminal_search_cache_rows(parser: &mut Parser) -> Vec<TerminalSearchRowSnapshot> {
-        let max_scrollback = parser.max_scrollback();
-        parser.with_scrollback_restored(|parser| {
-            let mut rows_out = Vec::new();
-
-            for scrollback_pos in (0..=max_scrollback).rev() {
-                parser.set_scrollback(scrollback_pos);
-                let (rows, _) = parser.screen().size();
-
-                let mut collect_row = |row: u16| {
-                    if let Some(snapshot) = parser.row_snapshot_lowercase(row) {
-                        rows_out.push(TerminalSearchRowSnapshot {
-                            abs_row: row as i64 - scrollback_pos as i64,
-                            row_text_lower: snapshot.text,
-                            col_start_byte_offsets: snapshot.col_start_byte_offsets,
-                        });
-                    }
-                };
-
-                if scrollback_pos == 0 {
-                    for row in 0..rows {
-                        collect_row(row);
-                    }
-                } else {
-                    collect_row(0);
-                }
-            }
-
-            rows_out
-        })
-    }
-
-    fn match_col_for_start(col_start_byte_offsets: &[usize], start_pos: usize) -> usize {
-        match col_start_byte_offsets.binary_search(&start_pos) {
-            Ok(col) => col,
-            Err(0) => 0,
-            Err(insert) => insert.saturating_sub(1),
-        }
-    }
-
     pub(crate) fn update_terminal_search(&mut self) {
         if self.tabs.is_empty() || self.selected_tab >= self.tabs.len() {
             return;
@@ -68,40 +12,26 @@ impl SessionManager {
         let search_started_at = Instant::now();
 
         let selected_tab = self.selected_tab;
-        let (query_lower, query_char_count) = {
+        let query = {
             let search = &mut self.tabs[selected_tab].terminal_search;
             search.matches.clear();
             search.current = 0;
             if search.query.is_empty() {
                 return;
             }
-            let query_lower = search.query.to_lowercase();
-            let query_char_count = query_lower.chars().count();
-            (query_lower, query_char_count)
+            search.query.clone()
         };
 
-        let (parser_arc, render_epoch) = match self.tabs[selected_tab].session.as_ref() {
-            Some(session) => (session.parser.clone(), session.render_epoch.load(AtomicOrdering::Relaxed)),
+        let parser_arc = match self.tabs[selected_tab].session.as_ref() {
+            Some(session) => session.parser.clone(),
             None => return,
         };
 
-        let cache_stale =
-            self.tabs[selected_tab].terminal_search_cache.rows.is_empty() || self.tabs[selected_tab].terminal_search_cache.render_epoch != render_epoch;
-
-        if cache_stale {
-            if let Ok(mut parser) = parser_arc.lock() {
-                let rows = Self::build_terminal_search_cache_rows(&mut parser);
-                if let Some(tab) = self.tabs.get_mut(selected_tab) {
-                    tab.terminal_search_cache.rows = rows;
-                    tab.terminal_search_cache.render_epoch = render_epoch;
-                }
-            } else if let Some(tab) = self.tabs.get_mut(selected_tab) {
-                tab.terminal_search_cache.rows.clear();
-                tab.terminal_search_cache.render_epoch = render_epoch;
-            }
-        }
-
-        let matches = find_matches_in_cached_rows(&self.tabs[selected_tab].terminal_search_cache.rows, &query_lower, query_char_count);
+        let matches = if let Ok(parser) = parser_arc.lock() {
+            parser.search_literal_matches(&query)
+        } else {
+            Vec::new()
+        };
 
         if let Some(search) = self.tabs.get_mut(selected_tab).map(|tab| &mut tab.terminal_search) {
             search.matches = matches;
@@ -156,41 +86,21 @@ impl SessionManager {
 
 #[cfg(test)]
 mod tests {
-    use super::{SessionManager, find_matches_in_cached_rows};
-    use crate::tui::TerminalSearchRowSnapshot;
     use crate::tui::terminal_emulator::Parser;
 
     #[test]
-    fn restores_scrollback_after_building_search_cache_rows() {
-        let mut parser = Parser::new(2, 5, 50);
-        parser.process(b"11111\r\n22222\r\n33333\r\n");
-        parser.set_scrollback(1);
-        let before = parser.screen().cell(0, 0).map(|cell| cell.contents()).unwrap_or_default();
-
-        let rows = SessionManager::build_terminal_search_cache_rows(&mut parser);
-        let after = parser.screen().cell(0, 0).map(|cell| cell.contents()).unwrap_or_default();
-
-        assert!(!rows.is_empty());
-        assert_eq!(before, after);
+    fn search_literal_matches_finds_multiple_matches_on_same_row() {
+        let mut parser = Parser::new(2, 20, 50);
+        parser.process(b"alpha alpha\\r\\n");
+        let matches = parser.search_literal_matches("alpha");
+        assert_eq!(matches, vec![(0, 0, 5), (0, 6, 5)]);
     }
 
     #[test]
-    fn maps_start_byte_offset_to_column_with_binary_search() {
-        let offsets = vec![0, 1, 2, 3, 4];
-        assert_eq!(SessionManager::match_col_for_start(&offsets, 0), 0);
-        assert_eq!(SessionManager::match_col_for_start(&offsets, 3), 3);
-        assert_eq!(SessionManager::match_col_for_start(&offsets, 10), 4);
-    }
-
-    #[test]
-    fn finds_multiple_matches_per_row_from_cached_snapshots() {
-        let rows = vec![TerminalSearchRowSnapshot {
-            abs_row: 3,
-            row_text_lower: "alpha alpha".to_string(),
-            col_start_byte_offsets: (0..11).collect(),
-        }];
-
-        let matches = find_matches_in_cached_rows(&rows, "alpha", 5);
-        assert_eq!(matches, vec![(3, 0, 5), (3, 6, 5)]);
+    fn search_literal_matches_is_case_insensitive() {
+        let mut parser = Parser::new(2, 20, 50);
+        parser.process(b"Status STATUS status\\r\\n");
+        let matches = parser.search_literal_matches("status");
+        assert_eq!(matches.len(), 3);
     }
 }

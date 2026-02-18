@@ -2,7 +2,7 @@
 
 use crate::ssh_config::SshHost;
 use crate::tui::terminal_emulator::Parser;
-use crate::tui::{HostTab, SessionManager, SshSession, TerminalSearchCache, TerminalSearchState};
+use crate::tui::{HostTab, SessionManager, SshSession, TerminalSearchState};
 use crate::{debug_enabled, log_debug, log_error};
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use portable_pty::{CommandBuilder, PtySize, native_pty_system};
@@ -113,7 +113,6 @@ impl SessionManager {
             session,
             scroll_offset: 0,
             terminal_search: TerminalSearchState::default(),
-            terminal_search_cache: TerminalSearchCache::default(),
             force_ssh_logging,
             last_pty_size: None,
         };
@@ -262,7 +261,6 @@ impl SessionManager {
                 tab.scroll_offset = 0;
                 tab.terminal_search.matches.clear();
                 tab.terminal_search.current = 0;
-                tab.terminal_search_cache = TerminalSearchCache::default();
                 tab.last_pty_size = None;
                 log_debug!("Successfully reconnected to {}", host.name);
             }

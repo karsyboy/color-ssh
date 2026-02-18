@@ -24,19 +24,6 @@ pub struct TerminalSearchState {
     pub(crate) current: usize,
 }
 
-#[derive(Debug, Clone, Default)]
-pub struct TerminalSearchRowSnapshot {
-    pub(crate) abs_row: i64,
-    pub(crate) row_text_lower: String,
-    pub(crate) col_start_byte_offsets: Vec<usize>,
-}
-
-#[derive(Debug, Clone, Default)]
-pub struct TerminalSearchCache {
-    pub(crate) render_epoch: u64,
-    pub(crate) rows: Vec<TerminalSearchRowSnapshot>,
-}
-
 /// Represents an open host tab.
 pub struct HostTab {
     pub(crate) host: SshHost,
@@ -44,7 +31,6 @@ pub struct HostTab {
     pub(crate) session: Option<SshSession>,
     pub(crate) scroll_offset: usize,
     pub(crate) terminal_search: TerminalSearchState,
-    pub(crate) terminal_search_cache: TerminalSearchCache,
     pub(crate) force_ssh_logging: bool,
     pub(crate) last_pty_size: Option<(u16, u16)>,
 }

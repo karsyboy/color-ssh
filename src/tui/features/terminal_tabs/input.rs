@@ -244,7 +244,6 @@ mod tests {
             session: None,
             scroll_offset: 0,
             terminal_search: crate::tui::TerminalSearchState::default(),
-            terminal_search_cache: crate::tui::TerminalSearchCache::default(),
             force_ssh_logging: false,
             last_pty_size: None,
         });

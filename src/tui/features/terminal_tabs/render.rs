@@ -13,11 +13,6 @@ use ratatui::{
     widgets::Paragraph,
 };
 
-/// Convert terminal-emulator color to Ratatui color.
-fn terminal_color_to_ratatui(color: terminal_emulator::AnsiColor) -> Color {
-    terminal_emulator::to_ratatui_color(color)
-}
-
 fn draw_vertical_rule(frame: &mut Frame, x: u16, y: u16, height: u16, style: Style) {
     if height == 0 {
         return;
@@ -343,8 +338,8 @@ impl SessionManager {
                             }
                             s
                         } else {
-                            let mut fg_color = terminal_color_to_ratatui(cell.fgcolor());
-                            let mut bg_color = terminal_color_to_ratatui(cell.bgcolor());
+                            let mut fg_color = terminal_emulator::to_ratatui_color(cell.fgcolor());
+                            let mut bg_color = terminal_emulator::to_ratatui_color(cell.bgcolor());
 
                             if cell.inverse() {
                                 std::mem::swap(&mut fg_color, &mut bg_color);

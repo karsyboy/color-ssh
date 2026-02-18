@@ -61,7 +61,7 @@ impl SessionManager {
 mod tests {
     use super::SessionManager;
     use crate::ssh_config::SshHost;
-    use crate::tui::{HostTab, TerminalSearchCache, TerminalSearchState};
+    use crate::tui::{HostTab, TerminalSearchState};
     use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
     fn app_with_active_search() -> SessionManager {
@@ -77,7 +77,6 @@ mod tests {
                 matches: Vec::new(),
                 current: 0,
             },
-            terminal_search_cache: TerminalSearchCache::default(),
             force_ssh_logging: false,
             last_pty_size: None,
         });
