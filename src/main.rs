@@ -43,12 +43,9 @@ fn main() -> Result<ExitCode> {
 
     let logger = log::Logger::new();
 
-    // Enable debug logging initially to capture config load
-    if args.test_mode {
-        if args.debug {
-            logger.enable_debug();
-        }
-    } else {
+    // Enable debug logging only when explicitly requested on CLI.
+    // Config-based debug mode is applied after loading config.
+    if args.debug {
         logger.enable_debug();
     }
     log_info!("color-ssh v0.6.0 starting");
@@ -57,7 +54,25 @@ fn main() -> Result<ExitCode> {
     if args.interactive {
         log_info!("Launching interactive session manager");
         // Init config so session manager can read interactive settings (if configured)
-        let _ = config::init_session_config(args.profile.clone());
+        let debug_from_config = if config::init_session_config(args.profile.clone()).is_ok() {
+            config::get_config().read().unwrap().settings.debug_mode
+        } else {
+            false
+        };
+        let (final_debug, _) = resolve_logging_settings(&args, debug_from_config, false);
+        if final_debug {
+            if !logger.is_debug_enabled() {
+                logger.enable_debug();
+            }
+            if args.debug {
+                log_debug!("Debug mode enabled via CLI argument");
+            } else {
+                log_debug!("Debug mode enabled via config file");
+            }
+        } else {
+            logger.disable_debug();
+        }
+
         if let Err(err) = tui::run_session_manager() {
             eprintln!("Session manager error: {err}");
             let _ = logger.flush_debug();
@@ -87,6 +102,9 @@ fn main() -> Result<ExitCode> {
     let (final_debug, final_ssh_log) = resolve_logging_settings(&args, debug_from_config, ssh_log_from_config);
 
     if final_debug {
+        if !logger.is_debug_enabled() {
+            logger.enable_debug();
+        }
         if args.debug {
             log_debug!("Debug mode enabled via CLI argument");
         } else {
