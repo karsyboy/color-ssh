@@ -10,29 +10,8 @@ use std::{
 const STDOUT_FLUSH_BYTES: usize = 32 * 1024;
 const STDOUT_FLUSH_INTERVAL: Duration = Duration::from_millis(50);
 
-fn requires_immediate_terminal_flush(output: &[u8]) -> bool {
-    output.iter().any(|byte| matches!(*byte, b'\r' | 0x1b | 0x08))
-}
-
-fn update_alt_screen_mode(chunk: &[u8], alt_screen_active: &mut bool) -> bool {
-    let mut toggled = false;
-    let mut idx = 0usize;
-
-    while idx < chunk.len() {
-        let rest = &chunk[idx..];
-
-        if rest.starts_with(b"\x1b[?1049h") || rest.starts_with(b"\x1b[?1047h") || rest.starts_with(b"\x1b[?47h") {
-            *alt_screen_active = true;
-            toggled = true;
-        } else if rest.starts_with(b"\x1b[?1049l") || rest.starts_with(b"\x1b[?1047l") || rest.starts_with(b"\x1b[?47l") {
-            *alt_screen_active = false;
-            toggled = true;
-        }
-
-        idx += 1;
-    }
-
-    toggled
+fn requires_immediate_terminal_flush(output: &str) -> bool {
+    output.as_bytes().iter().any(|byte| matches!(*byte, b'\r' | 0x1b | 0x08))
 }
 
 fn map_exit_code(success: bool, code: Option<i32>) -> ExitCode {
@@ -69,7 +48,7 @@ pub fn process_handler(process_args: Vec<String>, is_non_interactive: bool) -> R
     })?;
 
     // Create a channel for sending and receiving chunks from SSH
-    let (tx, rx): (Sender<Vec<u8>>, Receiver<Vec<u8>>) = mpsc::channel();
+    let (tx, rx): (Sender<String>, Receiver<String>) = mpsc::channel();
 
     let reset_color = "\x1b[0m";
 
@@ -95,8 +74,6 @@ pub fn process_handler(process_args: Vec<String>, is_non_interactive: bool) -> R
             let mut stdout = stdout.lock();
             let mut pending_stdout_bytes = 0usize;
             let mut last_stdout_flush = Instant::now();
-            let mut alt_screen_active = false;
-
             while let Ok(chunk) = rx.recv() {
                 // Check if config has been reloaded and update rules if needed.
                 let current_version = config::current_config_version();
@@ -108,43 +85,16 @@ pub fn process_handler(process_args: Vec<String>, is_non_interactive: bool) -> R
                     log_debug!("Rules updated due to config reload (version {})", cached_version);
                 }
 
-                let alt_screen_toggled = update_alt_screen_mode(&chunk, &mut alt_screen_active);
-                if alt_screen_active || alt_screen_toggled {
-                    if let Err(err) = stdout.write_all(&chunk) {
-                        log_error!("Failed to write passthrough output to stdout: {}", err);
-                        break;
-                    }
-                    pending_stdout_bytes = pending_stdout_bytes.saturating_add(chunk.len());
-                    let immediate_flush = requires_immediate_terminal_flush(&chunk);
-                    if immediate_flush || pending_stdout_bytes >= STDOUT_FLUSH_BYTES || last_stdout_flush.elapsed() >= STDOUT_FLUSH_INTERVAL {
-                        if let Err(err) = stdout.flush() {
-                            log_error!("Failed to flush stdout: {}", err);
-                            break;
-                        }
-                        pending_stdout_bytes = 0;
-                        last_stdout_flush = Instant::now();
-                    }
-                    continue;
-                }
-
-                let chunk_text = String::from_utf8_lossy(&chunk);
-                let processed_chunk = highlighter::process_chunk_with_scratch(
-                    &chunk_text,
-                    chunk_id,
-                    &cached_rules,
-                    cached_rule_set.as_ref(),
-                    reset_color,
-                    &mut highlight_scratch,
-                );
+                let processed_chunk =
+                    highlighter::process_chunk_with_scratch(&chunk, chunk_id, &cached_rules, cached_rule_set.as_ref(), reset_color, &mut highlight_scratch);
                 chunk_id += 1;
-                let processed_bytes = processed_chunk.as_bytes();
-                if let Err(err) = stdout.write_all(processed_bytes) {
+                if let Err(err) = stdout.write_all(processed_chunk.as_bytes()) {
                     log_error!("Failed to write processed output to stdout: {}", err);
                     break;
                 }
 
-                pending_stdout_bytes = pending_stdout_bytes.saturating_add(processed_bytes.len());
-                let immediate_flush = requires_immediate_terminal_flush(processed_bytes);
+                pending_stdout_bytes = pending_stdout_bytes.saturating_add(processed_chunk.len());
+                let immediate_flush = requires_immediate_terminal_flush(&processed_chunk);
                 if immediate_flush || pending_stdout_bytes >= STDOUT_FLUSH_BYTES || last_stdout_flush.elapsed() >= STDOUT_FLUSH_INTERVAL {
                     if let Err(err) = stdout.flush() {
                         log_error!("Failed to flush stdout: {}", err);
@@ -181,9 +131,8 @@ pub fn process_handler(process_args: Vec<String>, is_non_interactive: bool) -> R
                 total_bytes += bytes_read;
 
                 // Convert the read data to a String and send it to the processing thread
-                let chunk = buffer[..bytes_read].to_vec();
-                let chunk_for_log = String::from_utf8_lossy(&chunk);
-                if let Err(err) = log::LOGGER.log_ssh_raw(&chunk_for_log) {
+                let chunk = String::from_utf8_lossy(&buffer[..bytes_read]).to_string();
+                if let Err(err) = log::LOGGER.log_ssh_raw(&chunk) {
                     log_error!("Failed to write SSH log data: {}", err);
                 }
 
@@ -270,7 +219,7 @@ fn spawn_ssh_passthrough(args: &[String]) -> Result<ExitCode> {
 
 #[cfg(test)]
 mod tests {
-    use super::{map_exit_code, requires_immediate_terminal_flush, update_alt_screen_mode};
+    use super::{map_exit_code, requires_immediate_terminal_flush};
     use std::process::ExitCode;
 
     #[test]
@@ -292,19 +241,9 @@ mod tests {
 
     #[test]
     fn immediate_flush_detects_cursor_control_sequences() {
-        assert!(requires_immediate_terminal_flush(b"\rprompt"));
-        assert!(requires_immediate_terminal_flush(b"\x1b[2J"));
-        assert!(requires_immediate_terminal_flush(b"abc\x08"));
-        assert!(!requires_immediate_terminal_flush(b"plain text\nnext line"));
-    }
-
-    #[test]
-    fn alt_screen_mode_toggles_on_and_off() {
-        let mut alt_screen_active = false;
-        assert!(update_alt_screen_mode(b"\x1b[?1049h", &mut alt_screen_active));
-        assert!(alt_screen_active);
-
-        assert!(update_alt_screen_mode(b"\x1b[?1049l", &mut alt_screen_active));
-        assert!(!alt_screen_active);
+        assert!(requires_immediate_terminal_flush("\rprompt"));
+        assert!(requires_immediate_terminal_flush("\x1b[2J"));
+        assert!(requires_immediate_terminal_flush("abc\x08"));
+        assert!(!requires_immediate_terminal_flush("plain text\nnext line"));
     }
 }
