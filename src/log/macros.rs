@@ -17,6 +17,11 @@ macro_rules! debug_enabled {
 /// Log a debug message
 #[macro_export]
 macro_rules! log_debug {
+    ($msg:expr) => {{
+        if $crate::log::LOGGER.is_debug_enabled() {
+            let _ = $crate::log::LOGGER.log_debug(::core::convert::AsRef::<str>::as_ref(&$msg));
+        }
+    }};
     ($($arg:tt)*) => {{
         if $crate::log::LOGGER.is_debug_enabled() {
             let _ = $crate::log::LOGGER.log_debug(&format!($($arg)*));
@@ -27,6 +32,11 @@ macro_rules! log_debug {
 /// Log an informational message
 #[macro_export]
 macro_rules! log_info {
+    ($msg:expr) => {{
+        if $crate::log::LOGGER.is_debug_enabled() {
+            let _ = $crate::log::LOGGER.log_info(::core::convert::AsRef::<str>::as_ref(&$msg));
+        }
+    }};
     ($($arg:tt)*) => {{
         if $crate::log::LOGGER.is_debug_enabled() {
             let _ = $crate::log::LOGGER.log_info(&format!($($arg)*));
@@ -37,6 +47,11 @@ macro_rules! log_info {
 /// Log a warning message
 #[macro_export]
 macro_rules! log_warn {
+    ($msg:expr) => {{
+        if $crate::log::LOGGER.is_debug_enabled() {
+            let _ = $crate::log::LOGGER.log_warn(::core::convert::AsRef::<str>::as_ref(&$msg));
+        }
+    }};
     ($($arg:tt)*) => {{
         if $crate::log::LOGGER.is_debug_enabled() {
             let _ = $crate::log::LOGGER.log_warn(&format!($($arg)*));
@@ -47,6 +62,11 @@ macro_rules! log_warn {
 /// Log an error message
 #[macro_export]
 macro_rules! log_error {
+    ($msg:expr) => {{
+        if $crate::log::LOGGER.is_debug_enabled() {
+            let _ = $crate::log::LOGGER.log_error(::core::convert::AsRef::<str>::as_ref(&$msg));
+        }
+    }};
     ($($arg:tt)*) => {{
         if $crate::log::LOGGER.is_debug_enabled() {
             let _ = $crate::log::LOGGER.log_error(&format!($($arg)*));

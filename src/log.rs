@@ -51,7 +51,9 @@ impl Logger {
     }
 
     pub fn disable_debug(&self) {
-        DEBUG_MODE.store(false, Ordering::SeqCst);
+        if DEBUG_MODE.swap(false, Ordering::SeqCst) {
+            let _ = self.debug_logger.flush();
+        }
     }
 
     pub fn enable_ssh_logging(&self) {
@@ -96,6 +98,10 @@ impl Logger {
             self.debug_logger.log(LogLevel::Error, message)?;
         }
         Ok(())
+    }
+
+    pub fn flush_debug(&self) -> Result<(), LogError> {
+        self.debug_logger.flush()
     }
 
     pub fn log_ssh(&self, message: &str) -> Result<(), LogError> {

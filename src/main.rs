@@ -46,13 +46,16 @@ fn main() -> Result<ExitCode> {
         let _ = config::init_session_config(args.profile.clone());
         if let Err(err) = tui::run_session_manager() {
             eprintln!("Session manager error: {}", err);
+            let _ = logger.flush_debug();
             std::process::exit(1);
         }
+        let _ = logger.flush_debug();
         return Ok(ExitCode::SUCCESS);
     }
 
     if let Err(err) = config::init_session_config(args.profile.clone()) {
         eprintln!("Failed to initialize config: {}", err);
+        let _ = logger.flush_debug();
         std::process::exit(1);
     }
 
@@ -131,10 +134,12 @@ fn main() -> Result<ExitCode> {
     let exit_code = process::process_handler(args.ssh_args, args.is_non_interactive).map_err(|err| {
         log_error!("Process handler failed: {}", err);
         eprintln!("Process failed: {}", err);
+        let _ = logger.flush_debug();
         err
     })?;
 
     log_info!("color-ssh exiting with code: {:?}", exit_code);
+    let _ = logger.flush_debug();
     Ok(exit_code)
 }
 

@@ -7,13 +7,33 @@ use super::{LogError, LogLevel, formatter::LogFormatter};
 use once_cell::sync::Lazy;
 use std::{
     fs::{File, OpenOptions},
-    io::Write,
+    io::{BufWriter, Write},
     path::PathBuf,
     sync::Mutex,
+    time::{Duration, Instant},
 };
 
-/// Global debug log file handle
-static DEBUG_LOG_FILE: Lazy<Mutex<Option<File>>> = Lazy::new(|| Mutex::new(None));
+const DEBUG_LOG_FLUSH_BYTES: usize = 16 * 1024;
+const DEBUG_LOG_FLUSH_INTERVAL: Duration = Duration::from_millis(100);
+
+struct DebugLogState {
+    writer: Option<BufWriter<File>>,
+    pending_bytes: usize,
+    last_flush: Instant,
+}
+
+impl DebugLogState {
+    fn new() -> Self {
+        Self {
+            writer: None,
+            pending_bytes: 0,
+            last_flush: Instant::now(),
+        }
+    }
+}
+
+/// Global debug log writer state shared across all logger instances.
+static DEBUG_LOG_STATE: Lazy<Mutex<DebugLogState>> = Lazy::new(|| Mutex::new(DebugLogState::new()));
 
 /// Debug logger that writes formatted log messages to a file
 #[derive(Clone)]
@@ -41,19 +61,37 @@ impl DebugLogger {
     // Write a log message to the debug log file
     pub fn log(&self, level: LogLevel, message: &str) -> Result<(), LogError> {
         let formatted = self.formatter.format(Some(level), message);
-        let mut file_guard = DEBUG_LOG_FILE.lock().unwrap();
+        let mut state = DEBUG_LOG_STATE.lock().unwrap();
 
         // Lazy initialization: create log file on first use
-        if file_guard.is_none() {
-            *file_guard = Some(self.create_log_file()?);
+        if state.writer.is_none() {
+            state.writer = Some(BufWriter::new(self.create_log_file()?));
         }
 
-        // Write and flush to ensure the log is persisted immediately
-        if let Some(file) = file_guard.as_mut() {
-            writeln!(file, "{}", formatted)?;
-            file.flush()?; // Flush immediately so logs aren't lost on crash
+        if let Some(writer) = state.writer.as_mut() {
+            writer.write_all(formatted.as_bytes())?;
+            writer.write_all(b"\n")?;
+            state.pending_bytes = state.pending_bytes.saturating_add(formatted.len() + 1);
         }
 
+        if should_flush(state.pending_bytes, state.last_flush.elapsed()) {
+            if let Some(writer) = state.writer.as_mut() {
+                writer.flush()?;
+            }
+            state.pending_bytes = 0;
+            state.last_flush = Instant::now();
+        }
+
+        Ok(())
+    }
+
+    pub fn flush(&self) -> Result<(), LogError> {
+        let mut state = DEBUG_LOG_STATE.lock().unwrap();
+        if let Some(writer) = state.writer.as_mut() {
+            writer.flush()?;
+            state.pending_bytes = 0;
+            state.last_flush = Instant::now();
+        }
         Ok(())
     }
 
@@ -78,5 +116,22 @@ impl DebugLogger {
         std::fs::create_dir_all(&log_dir)?;
 
         Ok(log_dir.join("cossh.log"))
+    }
+}
+
+fn should_flush(pending_bytes: usize, elapsed_since_flush: Duration) -> bool {
+    pending_bytes >= DEBUG_LOG_FLUSH_BYTES || elapsed_since_flush >= DEBUG_LOG_FLUSH_INTERVAL
+}
+
+#[cfg(test)]
+mod tests {
+    use super::should_flush;
+    use std::time::Duration;
+
+    #[test]
+    fn should_flush_on_size_or_interval() {
+        assert!(!should_flush(512, Duration::from_millis(20)));
+        assert!(should_flush(16 * 1024, Duration::from_millis(20)));
+        assert!(should_flush(1, Duration::from_millis(100)));
     }
 }
