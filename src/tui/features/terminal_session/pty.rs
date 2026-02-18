@@ -273,10 +273,12 @@ impl SessionManager {
                         // so the inner TUI app's copy reaches the system clipboard.
                         forward_osc52(data, &mut osc_buf);
 
-                        // Detect clear screen sequences and drop replay history before the clear.
-                        // This prevents scrolling back into cleared content after parser rebuild.
-                        if let Some(clear_start) = Self::clear_replay_slice_start(data) {
-                            reset_replay_bytes(&replay_log_clone, &data[clear_start..]);
+                        // Detect replay reset boundaries (clear-screen and alt-screen exits) and
+                        // drop replay history before that boundary.
+                        // This prevents stale full-screen content (e.g., nano) from persisting
+                        // after parser rebuild paths.
+                        if let Some(reset_start) = Self::replay_reset_slice_start(data) {
+                            reset_replay_bytes(&replay_log_clone, &data[reset_start..]);
                             if let Ok(mut clear) = clear_pending_clone.lock() {
                                 *clear = true;
                             }
@@ -367,6 +369,42 @@ impl SessionManager {
             }
         }
         last_clear_start
+    }
+
+    /// Return the last index where an alternate-screen exit sequence starts.
+    ///
+    /// Supported sequences:
+    /// - `ESC[?1049l` (xterm alternate screen leave)
+    /// - `ESC[?1047l`
+    /// - `ESC[?47l`
+    fn alternate_screen_exit_slice_start(data: &[u8]) -> Option<usize> {
+        fn last_subsequence_start(haystack: &[u8], needle: &[u8]) -> Option<usize> {
+            if needle.is_empty() || haystack.len() < needle.len() {
+                return None;
+            }
+            haystack.windows(needle.len()).rposition(|window| window == needle)
+        }
+
+        let mut last: Option<usize> = None;
+        for needle in [b"\x1b[?1049l".as_slice(), b"\x1b[?1047l".as_slice(), b"\x1b[?47l".as_slice()] {
+            if let Some(pos) = last_subsequence_start(data, needle) {
+                last = Some(last.map_or(pos, |current| current.max(pos)));
+            }
+        }
+        last
+    }
+
+    /// Find the last replay reset boundary in this chunk.
+    ///
+    /// If both clear-screen and alternate-screen-exit sequences exist, prefer whichever
+    /// appears later in the chunk.
+    fn replay_reset_slice_start(data: &[u8]) -> Option<usize> {
+        match (Self::clear_replay_slice_start(data), Self::alternate_screen_exit_slice_start(data)) {
+            (Some(clear_pos), Some(alt_pos)) => Some(clear_pos.max(alt_pos)),
+            (Some(clear_pos), None) => Some(clear_pos),
+            (None, Some(alt_pos)) => Some(alt_pos),
+            (None, None) => None,
+        }
     }
 
     /// Check if any tab has a pending clear screen, then reset scroll state and parser history.
@@ -527,5 +565,23 @@ mod tests {
     #[test]
     fn returns_none_when_no_clear_sequence_is_present() {
         assert_eq!(SessionManager::clear_replay_slice_start(b"normal output only"), None);
+    }
+
+    #[test]
+    fn detects_alternate_screen_exit_sequences() {
+        assert_eq!(SessionManager::alternate_screen_exit_slice_start(b"aa\x1b[?1049lbb"), Some(2));
+        assert_eq!(SessionManager::alternate_screen_exit_slice_start(b"aa\x1b[?1047lbb"), Some(2));
+        assert_eq!(SessionManager::alternate_screen_exit_slice_start(b"aa\x1b[?47lbb"), Some(2));
+    }
+
+    #[test]
+    fn replay_reset_prefers_latest_boundary_between_clear_and_alt_exit() {
+        let data = b"xx\x1b[2Jyy\x1b[?1049l";
+        assert_eq!(SessionManager::replay_reset_slice_start(data), Some(8));
+    }
+
+    #[test]
+    fn replay_reset_returns_none_when_no_boundary_exists() {
+        assert_eq!(SessionManager::replay_reset_slice_start(b"plain shell output"), None);
     }
 }
