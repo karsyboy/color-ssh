@@ -62,6 +62,10 @@ impl LogFormatter {
     pub fn set_include_break(&mut self, include: bool) {
         self.include_break = include;
     }
+
+    pub(crate) fn uses_cached_timestamp_prefix_without_level(&self) -> bool {
+        self.include_timestamp && self.include_break && !self.include_level
+    }
 }
 
 impl Default for LogFormatter {

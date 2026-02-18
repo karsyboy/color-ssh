@@ -59,6 +59,7 @@ pub fn process_handler(process_args: Vec<String>, is_non_interactive: bool) -> R
         .spawn(move || {
             log_debug!("Output processing thread started");
             let mut chunk_id = 0;
+            let mut highlight_scratch = highlighter::HighlightScratch::default();
 
             // Cache rules and track config version for hot-reload support.
             let (mut cached_rules, mut cached_rule_set, mut cached_version) = {
@@ -85,7 +86,8 @@ pub fn process_handler(process_args: Vec<String>, is_non_interactive: bool) -> R
                     log_debug!("Rules updated due to config reload (version {})", cached_version);
                 }
 
-                let processed_chunk = highlighter::process_chunk(chunk, chunk_id, &cached_rules, cached_rule_set.as_ref(), reset_color);
+                let processed_chunk =
+                    highlighter::process_chunk_with_scratch(&chunk, chunk_id, &cached_rules, cached_rule_set.as_ref(), reset_color, &mut highlight_scratch);
                 chunk_id += 1;
                 if let Err(err) = stdout.write_all(processed_chunk.as_bytes()) {
                     log_error!("Failed to write processed output to stdout: {}", err);
