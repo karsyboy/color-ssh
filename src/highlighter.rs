@@ -31,12 +31,6 @@ pub struct HighlightScratch {
     highlighted: String,
 }
 
-/// Backward-compatible wrapper that uses temporary scratch storage.
-pub fn process_chunk(chunk: String, chunk_id: i32, rules: &[(Regex, String)], rule_set: Option<&RegexSet>, reset_color: &str) -> String {
-    let mut scratch = HighlightScratch::default();
-    process_chunk_with_scratch(&chunk, chunk_id, rules, rule_set, reset_color, &mut scratch).into_owned()
-}
-
 /// Processes a chunk using reusable scratch buffers to reduce per-chunk allocations.
 pub fn process_chunk_with_scratch<'a>(
     chunk: &'a str,
@@ -299,17 +293,22 @@ fn top_rule_timing_summary(rule_timings_ns: &[u128], limit: usize) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::{HighlightScratch, MAX_RULES_FOR_REGEXSET_PREFILTER, process_chunk, process_chunk_with_scratch};
+    use super::{HighlightScratch, MAX_RULES_FOR_REGEXSET_PREFILTER, process_chunk_with_scratch};
     use regex::{Regex, RegexSet};
     use serde_yaml::Value;
     use std::{fs, path::Path, time::Instant};
+
+    fn process_chunk_once(chunk: &str, chunk_id: i32, rules: &[(Regex, String)], rule_set: Option<&RegexSet>, reset_color: &str) -> String {
+        let mut scratch = HighlightScratch::default();
+        process_chunk_with_scratch(chunk, chunk_id, rules, rule_set, reset_color, &mut scratch).into_owned()
+    }
 
     #[test]
     fn highlights_text_when_match_exists_inside_ansi_sequences() {
         let rules = vec![(Regex::new("error").expect("regex"), "<red>".to_string())];
         let chunk = "\x1b[31merror\x1b[0m".to_string();
 
-        let output = process_chunk(chunk, 0, &rules, None, "</red>");
+        let output = process_chunk_once(&chunk, 0, &rules, None, "</red>");
         assert!(output.contains("<red>error"));
         assert!(output.ends_with("</red>"));
     }
@@ -321,7 +320,7 @@ mod tests {
             (Regex::new("abc").expect("regex"), "<b>".to_string()),
         ];
 
-        let output = process_chunk("abc".to_string(), 1, &rules, None, "</>");
+        let output = process_chunk_once("abc", 1, &rules, None, "</>");
         assert_eq!(output, "<a>ab</>c");
     }
 
@@ -329,13 +328,13 @@ mod tests {
     fn maps_newlines_as_spaces_for_matching_but_preserves_raw_text() {
         let rules = vec![(Regex::new("a b").expect("regex"), "<x>".to_string())];
 
-        let output = process_chunk("a\nb".to_string(), 2, &rules, None, "</x>");
+        let output = process_chunk_once("a\nb", 2, &rules, None, "</x>");
         assert_eq!(output, "<x>a\nb</x>");
     }
 
     #[test]
     fn returns_original_chunk_when_no_rules_exist() {
-        let output = process_chunk("plain text".to_string(), 3, &[], None, "</>");
+        let output = process_chunk_once("plain text", 3, &[], None, "</>");
         assert_eq!(output, "plain text");
     }
 
@@ -348,37 +347,37 @@ mod tests {
         ];
         let patterns: Vec<&str> = rules.iter().map(|(regex, _)| regex.as_str()).collect();
         let rule_set = RegexSet::new(patterns).expect("regex set");
-        let chunk = "warn and error and ok".to_string();
+        let chunk = "warn and error and ok";
 
-        let with_prefilter = process_chunk(chunk.clone(), 4, &rules, Some(&rule_set), "</>");
-        let without_prefilter = process_chunk(chunk, 4, &rules, None, "</>");
+        let with_prefilter = process_chunk_once(chunk, 4, &rules, Some(&rule_set), "</>");
+        let without_prefilter = process_chunk_once(chunk, 4, &rules, None, "</>");
         assert_eq!(with_prefilter, without_prefilter);
     }
 
     #[test]
-    fn scratch_path_matches_wrapper_output_for_plain_text() {
+    fn scratch_path_matches_single_shot_output_for_plain_text() {
         let rules = vec![(Regex::new("status").expect("regex"), "<c>".to_string())];
         let chunk = "status ok".to_string();
 
-        let wrapped = process_chunk(chunk.clone(), 5, &rules, None, "</c>");
+        let single_shot = process_chunk_once(&chunk, 5, &rules, None, "</c>");
 
         let mut scratch = HighlightScratch::default();
         let from_scratch = process_chunk_with_scratch(&chunk, 5, &rules, None, "</c>", &mut scratch).into_owned();
 
-        assert_eq!(wrapped, from_scratch);
+        assert_eq!(single_shot, from_scratch);
     }
 
     #[test]
-    fn scratch_path_matches_wrapper_output_for_ansi_text() {
+    fn scratch_path_matches_single_shot_output_for_ansi_text() {
         let rules = vec![(Regex::new("error").expect("regex"), "<e>".to_string())];
         let chunk = "\x1b[31merror\x1b[0m happened".to_string();
 
-        let wrapped = process_chunk(chunk.clone(), 6, &rules, None, "</e>");
+        let single_shot = process_chunk_once(&chunk, 6, &rules, None, "</e>");
 
         let mut scratch = HighlightScratch::default();
         let from_scratch = process_chunk_with_scratch(&chunk, 6, &rules, None, "</e>", &mut scratch).into_owned();
 
-        assert_eq!(wrapped, from_scratch);
+        assert_eq!(single_shot, from_scratch);
     }
 
     #[test]

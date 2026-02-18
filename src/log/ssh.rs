@@ -229,8 +229,7 @@ fn format_log_line(state: &mut SshLogWorkerState, formatter: &LogFormatter, mess
         let now_millis = now.timestamp_millis();
         if state.cached_timestamp_millis != Some(now_millis) {
             state.cached_prefix.clear();
-            state.cached_prefix
-                .push_str(&now.format("%Y-%m-%d %H:%M:%S%.3f").to_string());
+            state.cached_prefix.push_str(&now.format("%Y-%m-%d %H:%M:%S%.3f").to_string());
             state.cached_prefix.push(' ');
             state.cached_prefix.push('█');
             state.cached_prefix.push(' ');

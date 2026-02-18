@@ -94,6 +94,7 @@ pub fn config_watcher(profile: Option<String>) -> Option<RecommendedWatcher> {
                 }
                 Err(err) => {
                     log_error!("Error receiving from channel: {}", err);
+                    break;
                 }
             }
         }
