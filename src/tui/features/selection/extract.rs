@@ -1,6 +1,6 @@
 //! Selection extraction helpers.
 
-use vt100::Parser;
+use crate::tui::terminal_emulator::Parser;
 
 /// Check if a cell at `(row, col)` is within the current text selection.
 pub(crate) fn is_cell_in_selection(row: i64, col: u16, start: Option<(i64, u16)>, end: Option<(i64, u16)>) -> bool {
@@ -78,7 +78,7 @@ pub(crate) fn extract_selection_text(parser: &mut Parser, start: (i64, u16), end
 #[cfg(test)]
 mod tests {
     use super::extract_selection_text;
-    use vt100::Parser;
+    use crate::tui::terminal_emulator::Parser;
 
     #[test]
     fn extract_selection_text_restores_scrollback_view() {

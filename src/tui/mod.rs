@@ -3,6 +3,7 @@
 mod app;
 mod features;
 mod state;
+mod terminal_emulator;
 mod ui;
 
 pub(crate) use state::{

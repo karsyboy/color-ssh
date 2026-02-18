@@ -1,5 +1,6 @@
 //! Terminal-search indexing and viewport sync.
 
+use crate::tui::terminal_emulator::Parser;
 use crate::tui::{SessionManager, TerminalSearchRowSnapshot};
 use crate::{debug_enabled, log_debug};
 use std::sync::atomic::Ordering as AtomicOrdering;
@@ -20,7 +21,7 @@ fn find_matches_in_cached_rows(rows: &[TerminalSearchRowSnapshot], query_lower: 
 }
 
 impl SessionManager {
-    fn build_terminal_search_cache_rows(parser: &mut vt100::Parser, restore_scrollback: usize) -> Vec<TerminalSearchRowSnapshot> {
+    fn build_terminal_search_cache_rows(parser: &mut Parser, restore_scrollback: usize) -> Vec<TerminalSearchRowSnapshot> {
         parser.set_scrollback(usize::MAX);
         let max_scrollback = parser.screen().scrollback();
         let mut rows_out = Vec::new();
@@ -179,7 +180,7 @@ impl SessionManager {
 mod tests {
     use super::{SessionManager, find_matches_in_cached_rows};
     use crate::tui::TerminalSearchRowSnapshot;
-    use vt100::Parser;
+    use crate::tui::terminal_emulator::Parser;
 
     #[test]
     fn restores_scrollback_after_building_search_cache_rows() {

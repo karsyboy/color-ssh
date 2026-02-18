@@ -3,6 +3,7 @@
 use crate::tui::SessionManager;
 use crate::tui::features::selection::extract::is_cell_in_selection;
 use crate::tui::features::terminal_search::render_highlight::build_search_row_ranges;
+use crate::tui::terminal_emulator;
 use crate::tui::ui::theme::{display_width, truncate_to_display_width};
 use ratatui::{
     Frame,
@@ -12,11 +13,41 @@ use ratatui::{
     widgets::Paragraph,
 };
 
-/// Convert VT100 color to Ratatui color.
-fn vt100_to_ratatui_color(color: vt100::Color) -> Color {
+/// Convert terminal-emulator color to Ratatui color.
+fn terminal_color_to_ratatui(color: terminal_emulator::AnsiColor) -> Color {
     match color {
-        vt100::Color::Default => Color::Reset,
-        vt100::Color::Idx(idx) => match idx {
+        terminal_emulator::AnsiColor::Named(named) => match named {
+            alacritty_terminal::vte::ansi::NamedColor::Black => Color::Black,
+            alacritty_terminal::vte::ansi::NamedColor::Red => Color::Red,
+            alacritty_terminal::vte::ansi::NamedColor::Green => Color::Green,
+            alacritty_terminal::vte::ansi::NamedColor::Yellow => Color::Yellow,
+            alacritty_terminal::vte::ansi::NamedColor::Blue => Color::Blue,
+            alacritty_terminal::vte::ansi::NamedColor::Magenta => Color::Magenta,
+            alacritty_terminal::vte::ansi::NamedColor::Cyan => Color::Cyan,
+            alacritty_terminal::vte::ansi::NamedColor::White => Color::Gray,
+            alacritty_terminal::vte::ansi::NamedColor::BrightBlack => Color::DarkGray,
+            alacritty_terminal::vte::ansi::NamedColor::BrightRed => Color::LightRed,
+            alacritty_terminal::vte::ansi::NamedColor::BrightGreen => Color::LightGreen,
+            alacritty_terminal::vte::ansi::NamedColor::BrightYellow => Color::LightYellow,
+            alacritty_terminal::vte::ansi::NamedColor::BrightBlue => Color::LightBlue,
+            alacritty_terminal::vte::ansi::NamedColor::BrightMagenta => Color::LightMagenta,
+            alacritty_terminal::vte::ansi::NamedColor::BrightCyan => Color::LightCyan,
+            alacritty_terminal::vte::ansi::NamedColor::BrightWhite => Color::White,
+            alacritty_terminal::vte::ansi::NamedColor::DimBlack => Color::Black,
+            alacritty_terminal::vte::ansi::NamedColor::DimRed => Color::Red,
+            alacritty_terminal::vte::ansi::NamedColor::DimGreen => Color::Green,
+            alacritty_terminal::vte::ansi::NamedColor::DimYellow => Color::Yellow,
+            alacritty_terminal::vte::ansi::NamedColor::DimBlue => Color::Blue,
+            alacritty_terminal::vte::ansi::NamedColor::DimMagenta => Color::Magenta,
+            alacritty_terminal::vte::ansi::NamedColor::DimCyan => Color::Cyan,
+            alacritty_terminal::vte::ansi::NamedColor::DimWhite => Color::Gray,
+            alacritty_terminal::vte::ansi::NamedColor::Foreground
+            | alacritty_terminal::vte::ansi::NamedColor::Background
+            | alacritty_terminal::vte::ansi::NamedColor::Cursor => Color::Reset,
+            alacritty_terminal::vte::ansi::NamedColor::BrightForeground => Color::White,
+            alacritty_terminal::vte::ansi::NamedColor::DimForeground => Color::DarkGray,
+        },
+        terminal_emulator::AnsiColor::Indexed(idx) => match idx {
             0 => Color::Black,
             1 => Color::Red,
             2 => Color::Green,
@@ -35,7 +66,7 @@ fn vt100_to_ratatui_color(color: vt100::Color) -> Color {
             15 => Color::White,
             _ => Color::Indexed(idx),
         },
-        vt100::Color::Rgb(r, g, b) => Color::Rgb(r, g, b),
+        terminal_emulator::AnsiColor::Spec(rgb) => Color::Rgb(rgb.r, rgb.g, rgb.b),
     }
 }
 
@@ -364,8 +395,8 @@ impl SessionManager {
                             }
                             s
                         } else {
-                            let mut fg_color = vt100_to_ratatui_color(cell.fgcolor());
-                            let mut bg_color = vt100_to_ratatui_color(cell.bgcolor());
+                            let mut fg_color = terminal_color_to_ratatui(cell.fgcolor());
+                            let mut bg_color = terminal_color_to_ratatui(cell.bgcolor());
 
                             if cell.inverse() {
                                 std::mem::swap(&mut fg_color, &mut bg_color);

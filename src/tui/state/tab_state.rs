@@ -1,10 +1,10 @@
 //! Per-tab and PTY session state.
 
 use crate::ssh_config::SshHost;
+use crate::tui::terminal_emulator::Parser;
 use portable_pty::{Child, MasterPty};
 use std::io::Write;
 use std::sync::{Arc, Mutex, atomic::AtomicU64};
-use vt100::Parser;
 
 /// Represents an SSH session output buffer.
 pub struct SshSession {

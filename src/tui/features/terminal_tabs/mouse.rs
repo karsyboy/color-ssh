@@ -1,6 +1,7 @@
 //! Mouse input handling and PTY mouse forwarding.
 
 use crate::tui::state::{HOST_PANEL_MAX_WIDTH, HOST_PANEL_MIN_WIDTH};
+use crate::tui::terminal_emulator;
 use crate::tui::{HostTreeRowKind, SessionManager};
 use crossterm::event::{self, KeyModifiers, MouseButton, MouseEventKind};
 use std::io;
@@ -249,7 +250,7 @@ impl SessionManager {
                     self.set_host_scroll_from_scrollbar_row(mouse.row);
                 } else if self.is_pty_mouse_mode_active() {
                     let mode = self.pty_mouse_mode();
-                    if (mode == vt100::MouseProtocolMode::AnyMotion || mode == vt100::MouseProtocolMode::ButtonMotion)
+                    if (mode == terminal_emulator::MouseProtocolMode::AnyMotion || mode == terminal_emulator::MouseProtocolMode::ButtonMotion)
                         && let Some((col, row)) = self.mouse_to_vt_coords(mouse.column, mouse.row)
                     {
                         self.send_mouse_to_pty(32, col, row, false)?;
@@ -308,7 +309,7 @@ impl SessionManager {
                     }
                 } else if self.is_pty_mouse_mode_active() {
                     let mode = self.pty_mouse_mode();
-                    if mode != vt100::MouseProtocolMode::Press
+                    if mode != terminal_emulator::MouseProtocolMode::Press
                         && let Some((col, row)) = self.mouse_to_vt_coords(mouse.column, mouse.row)
                     {
                         self.send_mouse_to_pty(0, col, row, true)?;
@@ -399,7 +400,7 @@ impl SessionManager {
             MouseEventKind::Up(MouseButton::Middle) => {
                 if self.is_pty_mouse_mode_active() {
                     let mode = self.pty_mouse_mode();
-                    if mode != vt100::MouseProtocolMode::Press
+                    if mode != terminal_emulator::MouseProtocolMode::Press
                         && let Some((col, row)) = self.mouse_to_vt_coords(mouse.column, mouse.row)
                     {
                         self.send_mouse_to_pty(1, col, row, true)?;
@@ -409,7 +410,7 @@ impl SessionManager {
             MouseEventKind::Up(MouseButton::Right) => {
                 if self.is_pty_mouse_mode_active() {
                     let mode = self.pty_mouse_mode();
-                    if mode != vt100::MouseProtocolMode::Press
+                    if mode != terminal_emulator::MouseProtocolMode::Press
                         && let Some((col, row)) = self.mouse_to_vt_coords(mouse.column, mouse.row)
                     {
                         self.send_mouse_to_pty(2, col, row, true)?;
@@ -419,7 +420,7 @@ impl SessionManager {
             MouseEventKind::Moved => {
                 if self.is_pty_mouse_mode_active() {
                     let mode = self.pty_mouse_mode();
-                    if mode == vt100::MouseProtocolMode::AnyMotion
+                    if mode == terminal_emulator::MouseProtocolMode::AnyMotion
                         && let Some((col, row)) = self.mouse_to_vt_coords(mouse.column, mouse.row)
                     {
                         self.send_mouse_to_pty(35, col, row, false)?;
@@ -456,33 +457,33 @@ impl SessionManager {
         if let Some(session) = &self.tabs[self.selected_tab].session
             && let Ok(parser) = session.parser.lock()
         {
-            return parser.screen().mouse_protocol_mode() != vt100::MouseProtocolMode::None;
+            return parser.screen().mouse_protocol_mode() != terminal_emulator::MouseProtocolMode::None;
         }
         false
     }
 
-    fn pty_mouse_encoding(&self) -> vt100::MouseProtocolEncoding {
+    fn pty_mouse_encoding(&self) -> terminal_emulator::MouseProtocolEncoding {
         if self.tabs.is_empty() || self.selected_tab >= self.tabs.len() {
-            return vt100::MouseProtocolEncoding::Default;
+            return terminal_emulator::MouseProtocolEncoding::Default;
         }
         if let Some(session) = &self.tabs[self.selected_tab].session
             && let Ok(parser) = session.parser.lock()
         {
             return parser.screen().mouse_protocol_encoding();
         }
-        vt100::MouseProtocolEncoding::Default
+        terminal_emulator::MouseProtocolEncoding::Default
     }
 
-    fn pty_mouse_mode(&self) -> vt100::MouseProtocolMode {
+    fn pty_mouse_mode(&self) -> terminal_emulator::MouseProtocolMode {
         if self.tabs.is_empty() || self.selected_tab >= self.tabs.len() {
-            return vt100::MouseProtocolMode::None;
+            return terminal_emulator::MouseProtocolMode::None;
         }
         if let Some(session) = &self.tabs[self.selected_tab].session
             && let Ok(parser) = session.parser.lock()
         {
             return parser.screen().mouse_protocol_mode();
         }
-        vt100::MouseProtocolMode::None
+        terminal_emulator::MouseProtocolMode::None
     }
 
     fn mouse_to_vt_coords(&self, column: u16, row: u16) -> Option<(u16, u16)> {
@@ -496,9 +497,9 @@ impl SessionManager {
         }
     }
 
-    fn encode_mouse_event_bytes(encoding: vt100::MouseProtocolEncoding, button: u8, col: u16, row: u16, is_release: bool) -> Vec<u8> {
+    fn encode_mouse_event_bytes(encoding: terminal_emulator::MouseProtocolEncoding, button: u8, col: u16, row: u16, is_release: bool) -> Vec<u8> {
         match encoding {
-            vt100::MouseProtocolEncoding::Sgr => {
+            terminal_emulator::MouseProtocolEncoding::Sgr => {
                 let suffix = if is_release { 'm' } else { 'M' };
                 format!("\x1b[<{};{};{}{}", button, col, row, suffix).into_bytes()
             }
@@ -528,6 +529,7 @@ impl SessionManager {
 mod tests {
     use super::SessionManager;
     use crate::ssh_config::SshHost;
+    use crate::tui::terminal_emulator::MouseProtocolEncoding;
     use crate::tui::{HostTab, TerminalSearchCache, TerminalSearchState};
     use crossterm::event::{KeyModifiers, MouseButton, MouseEvent, MouseEventKind};
     use ratatui::layout::Rect;
@@ -555,8 +557,8 @@ mod tests {
 
     #[test]
     fn encode_mouse_event_bytes_sgr_press_and_release() {
-        let press = SessionManager::encode_mouse_event_bytes(vt100::MouseProtocolEncoding::Sgr, 0, 10, 5, false);
-        let release = SessionManager::encode_mouse_event_bytes(vt100::MouseProtocolEncoding::Sgr, 0, 10, 5, true);
+        let press = SessionManager::encode_mouse_event_bytes(MouseProtocolEncoding::Sgr, 0, 10, 5, false);
+        let release = SessionManager::encode_mouse_event_bytes(MouseProtocolEncoding::Sgr, 0, 10, 5, true);
 
         assert_eq!(press, b"\x1b[<0;10;5M".to_vec());
         assert_eq!(release, b"\x1b[<0;10;5m".to_vec());
@@ -564,7 +566,7 @@ mod tests {
 
     #[test]
     fn encode_mouse_event_bytes_default_clamps_large_coords() {
-        let bytes = SessionManager::encode_mouse_event_bytes(vt100::MouseProtocolEncoding::Default, 0, 500, 900, false);
+        let bytes = SessionManager::encode_mouse_event_bytes(MouseProtocolEncoding::Default, 0, 500, 900, false);
         assert_eq!(bytes, vec![0x1b, b'[', b'M', 32, 255, 255]);
     }
 

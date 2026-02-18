@@ -3,6 +3,7 @@
 use super::osc52::forward_osc52;
 use super::terminal_queries::respond_to_terminal_queries;
 use crate::ssh_config::SshHost;
+use crate::tui::terminal_emulator::Parser;
 use crate::tui::{HostTab, SessionManager, SshSession, TerminalSearchCache, TerminalSearchState};
 use crate::{debug_enabled, log_debug, log_error};
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
@@ -13,7 +14,6 @@ use std::sync::{
     atomic::{AtomicU64, Ordering},
 };
 use std::time::Instant;
-use vt100::Parser;
 
 pub(crate) fn encode_key_event_bytes(key: KeyEvent) -> Option<Vec<u8>> {
     let mut bytes = match key.code {
