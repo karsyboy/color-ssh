@@ -437,11 +437,8 @@ impl SessionManager {
             return 0;
         }
         if let Some(session) = &self.tabs[tab_idx].session {
-            if let Ok(mut parser) = session.parser.lock() {
-                parser.set_scrollback(usize::MAX);
-                let max = parser.screen().scrollback();
-                parser.set_scrollback(0);
-                max
+            if let Ok(parser) = session.parser.lock() {
+                parser.screen().scrollback()
             } else {
                 0
             }

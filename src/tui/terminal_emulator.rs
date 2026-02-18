@@ -1,12 +1,43 @@
 //! Lightweight terminal-emulator wrapper backed by `alacritty_terminal`.
 
-use alacritty_terminal::event::VoidListener;
+use alacritty_terminal::event::{Event, EventListener};
 use alacritty_terminal::grid::{Dimensions, Scroll};
 use alacritty_terminal::index::{Column, Line};
 use alacritty_terminal::term::cell::{Cell as TermCell, Flags};
 use alacritty_terminal::term::{Config as TermConfig, Term, TermMode};
+use alacritty_terminal::vte::ansi::{NamedColor, Processor};
+use crossterm::clipboard::CopyToClipboard;
+use crossterm::execute;
+use ratatui::style::Color as UiColor;
+use std::io::{Write, stdout};
+use std::sync::{Arc, Mutex};
+
 pub(crate) use alacritty_terminal::vte::ansi::Color as AnsiColor;
-use alacritty_terminal::vte::ansi::Processor;
+
+pub(crate) type PtyWriter = Arc<Mutex<Box<dyn Write + Send>>>;
+
+#[derive(Debug, Clone, Default)]
+pub(crate) struct RowTextSnapshot {
+    pub(crate) text: String,
+    pub(crate) col_start_byte_offsets: Vec<usize>,
+}
+
+impl RowTextSnapshot {
+    pub(crate) fn slice_columns(&self, start_col: u16, end_col_inclusive: u16) -> &str {
+        if end_col_inclusive < start_col {
+            return "";
+        }
+
+        let start = self.col_start_byte_offsets.get(start_col as usize).copied().unwrap_or(self.text.len());
+        let end_exclusive = self
+            .col_start_byte_offsets
+            .get(end_col_inclusive.saturating_add(1) as usize)
+            .copied()
+            .unwrap_or(self.text.len());
+
+        self.text.get(start..end_exclusive).unwrap_or_default()
+    }
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum MouseProtocolEncoding {
@@ -20,6 +51,42 @@ pub(crate) enum MouseProtocolMode {
     Press,
     ButtonMotion,
     AnyMotion,
+}
+
+#[derive(Clone, Default)]
+struct ParserEventListener {
+    pty_writer: Option<PtyWriter>,
+}
+
+impl ParserEventListener {
+    fn with_pty_writer(pty_writer: PtyWriter) -> Self {
+        Self { pty_writer: Some(pty_writer) }
+    }
+
+    fn write_pty(&self, bytes: &[u8]) {
+        if let Some(pty_writer) = &self.pty_writer
+            && let Ok(mut guard) = pty_writer.lock()
+        {
+            let _ = guard.write_all(bytes);
+            let _ = guard.flush();
+        }
+    }
+
+    fn copy_to_clipboard(text: &str) {
+        let mut out = stdout();
+        let _ = execute!(out, CopyToClipboard::to_clipboard_from(text));
+        let _ = out.flush();
+    }
+}
+
+impl EventListener for ParserEventListener {
+    fn send_event(&self, event: Event) {
+        match event {
+            Event::PtyWrite(text) => self.write_pty(text.as_bytes()),
+            Event::ClipboardStore(_, text) => Self::copy_to_clipboard(&text),
+            _ => {}
+        }
+    }
 }
 
 #[derive(Clone, Copy)]
@@ -54,19 +121,28 @@ impl Dimensions for TermDimensions {
 }
 
 pub(crate) struct Parser {
-    term: Term<VoidListener>,
+    term: Term<ParserEventListener>,
     processor: Processor,
     dimensions: TermDimensions,
 }
 
 impl Parser {
+    #[cfg(test)]
     pub(crate) fn new(rows: u16, cols: u16, history: usize) -> Self {
+        Self::new_with_listener(rows, cols, history, ParserEventListener::default())
+    }
+
+    pub(crate) fn new_with_pty_writer(rows: u16, cols: u16, history: usize, pty_writer: PtyWriter) -> Self {
+        Self::new_with_listener(rows, cols, history, ParserEventListener::with_pty_writer(pty_writer))
+    }
+
+    fn new_with_listener(rows: u16, cols: u16, history: usize, event_listener: ParserEventListener) -> Self {
         let dimensions = TermDimensions::new(rows, cols, history);
         let config = TermConfig {
             scrolling_history: history,
             ..TermConfig::default()
         };
-        let term = Term::new(config, &dimensions, VoidListener);
+        let term = Term::new(config, &dimensions, event_listener);
         Self {
             term,
             processor: Processor::new(),
@@ -97,8 +173,60 @@ impl Parser {
         Screen { parser: self }
     }
 
-    fn max_scrollback(&self) -> usize {
+    pub(crate) fn max_scrollback(&self) -> usize {
         self.term.grid().history_size()
+    }
+
+    pub(crate) fn current_scrollback(&self) -> usize {
+        self.term.grid().display_offset()
+    }
+
+    pub(crate) fn with_scrollback_restored<R>(&mut self, f: impl FnOnce(&mut Self) -> R) -> R {
+        let restore_scrollback = self.current_scrollback();
+        let out = f(self);
+        self.set_scrollback(restore_scrollback);
+        out
+    }
+
+    pub(crate) fn row_snapshot(&self, row: u16) -> Option<RowTextSnapshot> {
+        self.row_snapshot_internal(row, false)
+    }
+
+    pub(crate) fn row_snapshot_lowercase(&self, row: u16) -> Option<RowTextSnapshot> {
+        self.row_snapshot_internal(row, true)
+    }
+
+    fn row_snapshot_internal(&self, row: u16, lowercase: bool) -> Option<RowTextSnapshot> {
+        let screen = self.screen();
+        let (rows, cols) = screen.size();
+        if row >= rows {
+            return None;
+        }
+
+        let mut snapshot = RowTextSnapshot {
+            text: String::new(),
+            col_start_byte_offsets: Vec::with_capacity(cols as usize),
+        };
+
+        for col in 0..cols {
+            snapshot.col_start_byte_offsets.push(snapshot.text.len());
+            if let Some(cell) = screen.cell(row, col) {
+                if cell.has_contents() {
+                    let contents = cell.contents();
+                    if lowercase {
+                        snapshot.text.push_str(&contents.to_lowercase());
+                    } else {
+                        snapshot.text.push_str(&contents);
+                    }
+                } else {
+                    snapshot.text.push(' ');
+                }
+            } else {
+                snapshot.text.push(' ');
+            }
+        }
+
+        Some(snapshot)
     }
 }
 
@@ -209,5 +337,59 @@ impl<'a> CellRef<'a> {
 
     pub(crate) fn inverse(&self) -> bool {
         self.cell.flags.contains(Flags::INVERSE)
+    }
+}
+
+pub(crate) fn to_ratatui_color(color: AnsiColor) -> UiColor {
+    match color {
+        AnsiColor::Named(named) => match named {
+            NamedColor::Black => UiColor::Black,
+            NamedColor::Red => UiColor::Red,
+            NamedColor::Green => UiColor::Green,
+            NamedColor::Yellow => UiColor::Yellow,
+            NamedColor::Blue => UiColor::Blue,
+            NamedColor::Magenta => UiColor::Magenta,
+            NamedColor::Cyan => UiColor::Cyan,
+            NamedColor::White => UiColor::Gray,
+            NamedColor::BrightBlack => UiColor::DarkGray,
+            NamedColor::BrightRed => UiColor::LightRed,
+            NamedColor::BrightGreen => UiColor::LightGreen,
+            NamedColor::BrightYellow => UiColor::LightYellow,
+            NamedColor::BrightBlue => UiColor::LightBlue,
+            NamedColor::BrightMagenta => UiColor::LightMagenta,
+            NamedColor::BrightCyan => UiColor::LightCyan,
+            NamedColor::BrightWhite => UiColor::White,
+            NamedColor::DimBlack => UiColor::Black,
+            NamedColor::DimRed => UiColor::Red,
+            NamedColor::DimGreen => UiColor::Green,
+            NamedColor::DimYellow => UiColor::Yellow,
+            NamedColor::DimBlue => UiColor::Blue,
+            NamedColor::DimMagenta => UiColor::Magenta,
+            NamedColor::DimCyan => UiColor::Cyan,
+            NamedColor::DimWhite => UiColor::Gray,
+            NamedColor::Foreground | NamedColor::Background | NamedColor::Cursor => UiColor::Reset,
+            NamedColor::BrightForeground => UiColor::White,
+            NamedColor::DimForeground => UiColor::DarkGray,
+        },
+        AnsiColor::Indexed(idx) => match idx {
+            0 => UiColor::Black,
+            1 => UiColor::Red,
+            2 => UiColor::Green,
+            3 => UiColor::Yellow,
+            4 => UiColor::Blue,
+            5 => UiColor::Magenta,
+            6 => UiColor::Cyan,
+            7 => UiColor::Gray,
+            8 => UiColor::DarkGray,
+            9 => UiColor::LightRed,
+            10 => UiColor::LightGreen,
+            11 => UiColor::LightYellow,
+            12 => UiColor::LightBlue,
+            13 => UiColor::LightMagenta,
+            14 => UiColor::LightCyan,
+            15 => UiColor::White,
+            _ => UiColor::Indexed(idx),
+        },
+        AnsiColor::Spec(rgb) => UiColor::Rgb(rgb.r, rgb.g, rgb.b),
     }
 }

@@ -15,59 +15,7 @@ use ratatui::{
 
 /// Convert terminal-emulator color to Ratatui color.
 fn terminal_color_to_ratatui(color: terminal_emulator::AnsiColor) -> Color {
-    match color {
-        terminal_emulator::AnsiColor::Named(named) => match named {
-            alacritty_terminal::vte::ansi::NamedColor::Black => Color::Black,
-            alacritty_terminal::vte::ansi::NamedColor::Red => Color::Red,
-            alacritty_terminal::vte::ansi::NamedColor::Green => Color::Green,
-            alacritty_terminal::vte::ansi::NamedColor::Yellow => Color::Yellow,
-            alacritty_terminal::vte::ansi::NamedColor::Blue => Color::Blue,
-            alacritty_terminal::vte::ansi::NamedColor::Magenta => Color::Magenta,
-            alacritty_terminal::vte::ansi::NamedColor::Cyan => Color::Cyan,
-            alacritty_terminal::vte::ansi::NamedColor::White => Color::Gray,
-            alacritty_terminal::vte::ansi::NamedColor::BrightBlack => Color::DarkGray,
-            alacritty_terminal::vte::ansi::NamedColor::BrightRed => Color::LightRed,
-            alacritty_terminal::vte::ansi::NamedColor::BrightGreen => Color::LightGreen,
-            alacritty_terminal::vte::ansi::NamedColor::BrightYellow => Color::LightYellow,
-            alacritty_terminal::vte::ansi::NamedColor::BrightBlue => Color::LightBlue,
-            alacritty_terminal::vte::ansi::NamedColor::BrightMagenta => Color::LightMagenta,
-            alacritty_terminal::vte::ansi::NamedColor::BrightCyan => Color::LightCyan,
-            alacritty_terminal::vte::ansi::NamedColor::BrightWhite => Color::White,
-            alacritty_terminal::vte::ansi::NamedColor::DimBlack => Color::Black,
-            alacritty_terminal::vte::ansi::NamedColor::DimRed => Color::Red,
-            alacritty_terminal::vte::ansi::NamedColor::DimGreen => Color::Green,
-            alacritty_terminal::vte::ansi::NamedColor::DimYellow => Color::Yellow,
-            alacritty_terminal::vte::ansi::NamedColor::DimBlue => Color::Blue,
-            alacritty_terminal::vte::ansi::NamedColor::DimMagenta => Color::Magenta,
-            alacritty_terminal::vte::ansi::NamedColor::DimCyan => Color::Cyan,
-            alacritty_terminal::vte::ansi::NamedColor::DimWhite => Color::Gray,
-            alacritty_terminal::vte::ansi::NamedColor::Foreground
-            | alacritty_terminal::vte::ansi::NamedColor::Background
-            | alacritty_terminal::vte::ansi::NamedColor::Cursor => Color::Reset,
-            alacritty_terminal::vte::ansi::NamedColor::BrightForeground => Color::White,
-            alacritty_terminal::vte::ansi::NamedColor::DimForeground => Color::DarkGray,
-        },
-        terminal_emulator::AnsiColor::Indexed(idx) => match idx {
-            0 => Color::Black,
-            1 => Color::Red,
-            2 => Color::Green,
-            3 => Color::Yellow,
-            4 => Color::Blue,
-            5 => Color::Magenta,
-            6 => Color::Cyan,
-            7 => Color::Gray,
-            8 => Color::DarkGray,
-            9 => Color::LightRed,
-            10 => Color::LightGreen,
-            11 => Color::LightYellow,
-            12 => Color::LightBlue,
-            13 => Color::LightMagenta,
-            14 => Color::LightCyan,
-            15 => Color::White,
-            _ => Color::Indexed(idx),
-        },
-        terminal_emulator::AnsiColor::Spec(rgb) => Color::Rgb(rgb.r, rgb.g, rgb.b),
-    }
+    terminal_emulator::to_ratatui_color(color)
 }
 
 fn draw_vertical_rule(frame: &mut Frame, x: u16, y: u16, height: u16, style: Style) {

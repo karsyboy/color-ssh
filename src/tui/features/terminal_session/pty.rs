@@ -1,7 +1,5 @@
 //! SSH session spawning and PTY management
 
-use super::osc52::forward_osc52;
-use super::terminal_queries::respond_to_terminal_queries;
 use crate::ssh_config::SshHost;
 use crate::tui::terminal_emulator::Parser;
 use crate::tui::{HostTab, SessionManager, SshSession, TerminalSearchCache, TerminalSearchState};
@@ -189,23 +187,20 @@ impl SessionManager {
         // Get the master for reading/writing
         let mut reader = pty_pair.master.try_clone_reader().map_err(|err| io::Error::other(err.to_string()))?;
         let writer = pty_pair.master.take_writer().map_err(|err| io::Error::other(err.to_string()))?;
+        let writer = Arc::new(Mutex::new(writer));
 
-        // Create VT100 parser for terminal emulation
-        let parser = Arc::new(Mutex::new(Parser::new(40, 120, history_buffer)));
+        // Create terminal parser/emulator and hook alacritty event callbacks to the PTY writer.
+        let parser = Arc::new(Mutex::new(Parser::new_with_pty_writer(40, 120, history_buffer, writer.clone())));
         let parser_clone = parser.clone();
         let exited = Arc::new(Mutex::new(false));
         let exited_clone = exited.clone();
         let pty_master = Arc::new(Mutex::new(pty_pair.master));
-        let writer = Arc::new(Mutex::new(writer));
-        let writer_clone = writer.clone();
         let render_epoch = Arc::new(AtomicU64::new(0));
         let render_epoch_clone = render_epoch.clone();
 
         // Spawn a thread to read from PTY
         std::thread::spawn(move || {
             let mut buf = [0u8; 8192];
-            // Buffer for accumulating a partial OSC 52 sequence across reads
-            let mut osc_buf: Vec<u8> = Vec::new();
             loop {
                 match reader.read(&mut buf) {
                     Ok(0) => {
@@ -218,16 +213,8 @@ impl SessionManager {
                     Ok(bytes_read) => {
                         let data = &buf[..bytes_read];
 
-                        // Respond to terminal capability queries from PTY
-                        // (fixes fish shell DA query timeout warning)
-                        respond_to_terminal_queries(data, &writer_clone);
-
-                        // Forward any OSC 52 clipboard sequences to the real terminal
-                        // so the inner TUI app's copy reaches the system clipboard.
-                        forward_osc52(data, &mut osc_buf);
-
                         if let Ok(mut parser) = parser_clone.lock() {
-                            // Process the data through VT100 parser
+                            // Process PTY bytes through terminal emulator.
                             parser.process(data);
                             render_epoch_clone.fetch_add(1, Ordering::Relaxed);
                         }
