@@ -62,6 +62,12 @@ pub(crate) fn encode_key_event_bytes(key: KeyEvent) -> Option<Vec<u8>> {
 }
 
 impl SessionManager {
+    fn initial_pty_size(&self) -> (u16, u16) {
+        let rows = self.tab_content_area.height.max(1);
+        let cols = self.tab_content_area.width.max(1);
+        (rows, cols)
+    }
+
     fn resolved_history_buffer_for_host(&self, host: &SshHost) -> usize {
         crate::config::history_buffer_for_profile(host.profile.as_deref()).unwrap_or(self.history_buffer)
     }
@@ -102,9 +108,10 @@ impl SessionManager {
         };
         let history_buffer = self.resolved_history_buffer_for_host(&host);
         log_debug!("Using history buffer {} for tab '{}' (profile: {:?})", history_buffer, tab_title, host.profile);
+        let (initial_rows, initial_cols) = self.initial_pty_size();
 
         // Spawn SSH session
-        let session = match Self::spawn_ssh_session(&host, &tab_title, history_buffer, force_ssh_logging) {
+        let session = match Self::spawn_ssh_session(&host, &tab_title, history_buffer, force_ssh_logging, initial_rows, initial_cols) {
             Ok(session) => Some(session),
             Err(err) => {
                 log_error!("Failed to spawn SSH session: {}", err);
@@ -135,14 +142,24 @@ impl SessionManager {
     }
 
     /// Spawn an SSH session in a PTY
-    fn spawn_ssh_session(host: &SshHost, tab_title: &str, history_buffer: usize, force_ssh_logging: bool) -> io::Result<SshSession> {
+    fn spawn_ssh_session(
+        host: &SshHost,
+        tab_title: &str,
+        history_buffer: usize,
+        force_ssh_logging: bool,
+        initial_rows: u16,
+        initial_cols: u16,
+    ) -> io::Result<SshSession> {
         let pty_system = native_pty_system();
+        let rows = initial_rows.max(1);
+        let cols = initial_cols.max(1);
 
-        // Create a new PTY with initial size (will be resized later)
+        // Create a new PTY with current content area size to avoid startup
+        // geometry mismatches in full-screen terminal apps.
         let pty_pair = pty_system
             .openpty(PtySize {
-                rows: 40,
-                cols: 120,
+                rows,
+                cols,
                 pixel_width: 0,
                 pixel_height: 0,
             })
@@ -195,7 +212,7 @@ impl SessionManager {
         let writer = Arc::new(Mutex::new(writer));
 
         // Create terminal parser/emulator and hook alacritty event callbacks to the PTY writer.
-        let parser = Arc::new(Mutex::new(Parser::new_with_pty_writer(40, 120, history_buffer, writer.clone())));
+        let parser = Arc::new(Mutex::new(Parser::new_with_pty_writer(rows, cols, history_buffer, writer.clone())));
         let parser_clone = parser.clone();
         let exited = Arc::new(Mutex::new(false));
         let exited_clone = exited.clone();
@@ -261,13 +278,14 @@ impl SessionManager {
         let tab_title = tab.title.clone();
         let force_ssh_logging = self.tabs[self.selected_tab].force_ssh_logging;
         let history_buffer = self.resolved_history_buffer_for_host(&host);
+        let (initial_rows, initial_cols) = tab.last_pty_size.unwrap_or_else(|| self.initial_pty_size());
         log_debug!(
             "Using history buffer {} for reconnect tab '{}' (profile: {:?})",
             history_buffer,
             tab_title,
             host.profile
         );
-        match Self::spawn_ssh_session(&host, &tab_title, history_buffer, force_ssh_logging) {
+        match Self::spawn_ssh_session(&host, &tab_title, history_buffer, force_ssh_logging, initial_rows, initial_cols) {
             Ok(session) => {
                 let tab = &mut self.tabs[self.selected_tab];
                 tab.session = Some(session);
