@@ -117,9 +117,9 @@ OUT_DIR="${OUT_ROOT}/${TIMESTAMP}"
 mkdir -p "${OUT_DIR}"
 
 NATIVE_SSH_CMD="ssh ${HOST} \"cat ${TARGET_FILE}\""
-COSSH_LINUX_CMD="${COSSH_BIN}/target/release/cossh -l -P linux ${HOST} \"cat ${TARGET_FILE}\""
-COSSH_NETWORK_CMD="${COSSH_BIN}/target/release/cossh -l -P network ${HOST} \"cat ${TARGET_FILE}\""
-COSSH_DEFAULT_CMD="${COSSH_BIN}/target/release/cossh -l -P default ${HOST} \"cat ${TARGET_FILE}\""
+COSSH_CMD="${COSSH_BIN}/target/release/cossh"
+PROFILES=(linux network default)
+LOGGING_MODES=(off ssh debug both)
 
 cat <<MATRIX
 Running benchmark matrix:
@@ -127,6 +127,8 @@ Running benchmark matrix:
   target file:   ${TARGET_FILE}
   target source: ${TARGET_SOURCE}
   corpus dir:    ${BENCH_CACHE_DIR}
+  profiles:      ${PROFILES[*]}
+  log modes:     ${LOGGING_MODES[*]} (via -t CLI-only logging)
   warmup:        ${WARMUP}
   runs:          ${RUNS}
   output dir:    ${OUT_DIR}
@@ -136,9 +138,35 @@ hyperfine_args=(
   --warmup "${WARMUP}"
   --runs "${RUNS}"
   --command-name "native-ssh" "${NATIVE_SSH_CMD}"
-  --command-name "cossh-linux-log" "${COSSH_LINUX_CMD}"
-  --command-name "cossh-network-log" "${COSSH_NETWORK_CMD}"
-  --command-name "cossh-default-log" "${COSSH_DEFAULT_CMD}"
+)
+
+for profile in "${PROFILES[@]}"; do
+  for mode in "${LOGGING_MODES[@]}"; do
+    case "${mode}" in
+      off)
+        logging_flags="-t"
+        ;;
+      ssh)
+        logging_flags="-t -l"
+        ;;
+      debug)
+        logging_flags="-t -d"
+        ;;
+      both)
+        logging_flags="-t -d -l"
+        ;;
+      *)
+        echo "Unsupported logging mode: ${mode}" >&2
+        exit 1
+        ;;
+    esac
+
+    cmd="${COSSH_CMD} ${logging_flags} -P ${profile} ${HOST} \"cat ${TARGET_FILE}\""
+    hyperfine_args+=(--command-name "cossh-${profile}-${mode}" "${cmd}")
+  done
+done
+
+hyperfine_args+=(
   --export-json "${OUT_DIR}/results.json"
   --export-markdown "${OUT_DIR}/results.md"
 )
