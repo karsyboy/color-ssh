@@ -74,7 +74,7 @@ pub fn config_watcher(profile: Option<String>) -> Option<RecommendedWatcher> {
                     while rx.recv_timeout(Duration::from_millis(500)).is_ok() {}
 
                     log_info!("Configuration change detected, reloading...");
-                    println!("\r\nConfiguration change detected...\r");
+                    eprintln!("\r\nConfiguration change detected...\r");
 
                     let config_loader = match ConfigLoader::new(profile.clone()) {
                         Ok(loader) => loader,
@@ -89,7 +89,7 @@ pub fn config_watcher(profile: Option<String>) -> Option<RecommendedWatcher> {
                         eprintln!("Error reloading config: {}\r", err);
                     } else {
                         log_info!("Configuration reloaded successfully");
-                        println!("Configuration reloaded [Press Enter]:\r");
+                        eprintln!("Configuration reloaded [Press Enter]:\r");
                     }
                 }
                 Err(err) => {
