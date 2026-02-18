@@ -30,13 +30,27 @@ fn extract_ssh_destination(ssh_args: &[String]) -> Option<String> {
     None
 }
 
+fn resolve_logging_settings(args: &args::MainArgs, debug_from_config: bool, ssh_log_from_config: bool) -> (bool, bool) {
+    if args.test_mode {
+        (args.debug, args.ssh_logging)
+    } else {
+        (args.debug || debug_from_config, args.ssh_logging || ssh_log_from_config)
+    }
+}
+
 fn main() -> Result<ExitCode> {
     let args = args::main_args();
 
     let logger = log::Logger::new();
 
     // Enable debug logging initially to capture config load
-    logger.enable_debug();
+    if args.test_mode {
+        if args.debug {
+            logger.enable_debug();
+        }
+    } else {
+        logger.enable_debug();
+    }
     log_info!("color-ssh v0.6.0 starting");
 
     // If interactive mode is requested, launch the session manager
@@ -69,9 +83,8 @@ fn main() -> Result<ExitCode> {
         )
     };
 
-    // Determine final debug mode
-    let final_debug = args.debug || debug_from_config;
-    let final_ssh_log = args.ssh_logging || ssh_log_from_config;
+    // Determine final logging mode
+    let (final_debug, final_ssh_log) = resolve_logging_settings(&args, debug_from_config, ssh_log_from_config);
 
     if final_debug {
         if args.debug {
@@ -145,7 +158,20 @@ fn main() -> Result<ExitCode> {
 
 #[cfg(test)]
 mod tests {
-    use super::extract_ssh_destination;
+    use super::{extract_ssh_destination, resolve_logging_settings};
+    use cossh::args::MainArgs;
+
+    fn base_args(debug: bool, ssh_logging: bool, test_mode: bool) -> MainArgs {
+        MainArgs {
+            debug,
+            ssh_logging,
+            test_mode,
+            ssh_args: vec!["localhost".to_string()],
+            profile: None,
+            is_non_interactive: false,
+            interactive: false,
+        }
+    }
 
     #[test]
     fn extracts_plain_destination_host() {
@@ -175,5 +201,29 @@ mod tests {
     fn returns_none_when_only_value_consuming_flags_are_present() {
         let args = vec!["-W".to_string(), "localhost:22".to_string()];
         assert_eq!(extract_ssh_destination(&args), None);
+    }
+
+    #[test]
+    fn test_mode_uses_only_cli_logging_flags() {
+        let args = base_args(false, false, true);
+        assert_eq!(resolve_logging_settings(&args, true, true), (false, false));
+
+        let args = base_args(true, false, true);
+        assert_eq!(resolve_logging_settings(&args, false, true), (true, false));
+
+        let args = base_args(false, true, true);
+        assert_eq!(resolve_logging_settings(&args, true, false), (false, true));
+    }
+
+    #[test]
+    fn normal_mode_merges_cli_and_config_logging_flags() {
+        let args = base_args(false, false, false);
+        assert_eq!(resolve_logging_settings(&args, true, true), (true, true));
+
+        let args = base_args(true, false, false);
+        assert_eq!(resolve_logging_settings(&args, false, false), (true, false));
+
+        let args = base_args(false, true, false);
+        assert_eq!(resolve_logging_settings(&args, false, false), (false, true));
     }
 }

@@ -65,6 +65,7 @@ Options:
   -d, --debug              Enable debug mode with detailed logging to ~/.color-ssh/logs/cossh.log
   -l, --log                Enable SSH session logging to ~/.color-ssh/logs/ssh_sessions/
   -P, --profile <profile>  Specify a configuration profile to use
+  -t, --test               Ignore config logging settings; only use CLI -d/-l logging flags
   -h, --help               Print help
   -V, --version            Print version
 
@@ -73,6 +74,7 @@ cossh -d user@example.com                          # Debug mode enabled
 cossh -l user@example.com                          # SSH logging enabled
 cossh -l -P network user@firewall.example.com      # Use 'network' config profile
 cossh -l user@host -p 2222 -i ~/.ssh/custom_key    # Both modes with SSH args
+cossh -tld -P network localhost                    # Test mode, logging controlled only by -d/-l
 cossh user@host -G                                 # Non-interactive command
 ```
 

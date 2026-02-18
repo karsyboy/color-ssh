@@ -13,6 +13,8 @@ pub struct MainArgs {
     pub debug: bool,
     /// Enable SSH session logging to file
     pub ssh_logging: bool,
+    /// In test mode, ignore config logging settings and only honor CLI logging flags
+    pub test_mode: bool,
     /// Arguments to pass through to the SSH command
     pub ssh_args: Vec<String>,
     /// Argument to pass for configuration profiles
@@ -51,6 +53,13 @@ fn build_cli_command() -> Command {
                 .num_args(1)
                 .required(false),
         )
+        .arg(
+            Arg::new("test")
+                .short('t')
+                .long("test")
+                .help("Ignore config logging settings; only use CLI -d/-l logging flags")
+                .action(clap::ArgAction::SetTrue),
+        )
         .arg(Arg::new("ssh_args").help("SSH arguments to forward to the SSH command").num_args(1..))
         .after_help(
             r#"
@@ -60,6 +69,7 @@ cossh -d user@example.com                          # Debug mode enabled
 cossh -l user@example.com                          # SSH logging enabled
 cossh -l -P network user@firewall.example.com      # Use 'network' config profile
 cossh -l user@host -p 2222                         # Both modes with SSH args
+cossh -tld -P network localhost                    # Test mode: force logging from CLI flags only
 cossh user@host -G                                 # Non-interactive command
 "#,
         )
@@ -81,6 +91,7 @@ where
     let ssh_args: Vec<String> = matches.get_many::<String>("ssh_args").map(|vals| vals.cloned().collect()).unwrap_or_default();
     let debug = matches.get_flag("debug");
     let ssh_logging = matches.get_flag("log");
+    let test_mode = matches.get_flag("test");
     let profile = matches.get_one::<String>("profile").cloned().filter(|profile_name| !profile_name.is_empty());
     let no_user_args = raw_args.len() <= 1;
     let debug_only = debug && !ssh_logging && profile.is_none() && ssh_args.is_empty();
@@ -89,6 +100,7 @@ where
     MainArgs {
         debug,
         ssh_logging,
+        test_mode,
         interactive,
         profile,
         is_non_interactive: detect_non_interactive_ssh_args(&ssh_args),
@@ -101,6 +113,7 @@ where
 /// # Arguments Supported
 /// - `-d, --debug` - Enable debug mode with detailed logging
 /// - `-l, --log` - Enable SSH session logging
+/// - `-t, --test` - Ignore config logging settings and use only CLI `-d/-l` logging flags
 /// - `ssh_args` - All remaining arguments are passed to SSH
 ///
 /// # Examples
@@ -109,6 +122,7 @@ where
 /// cossh -d                           # Launch interactive session manager with debug enabled
 /// cossh -d user@example.com          # Debug mode enabled
 /// cossh -l user@example.com          # SSH logging enabled
+/// cossh -tld -P network localhost    # Test mode with CLI-controlled logging
 /// cossh -d -l user@example.com -p 22 # Both modes with SSH args
 /// cossh -- -G user@example.com       # Non-interactive command (config dump).
 /// ```
@@ -177,5 +191,17 @@ mod tests {
         }
         let ssh_args = vec!["user@example.com".to_string()];
         assert!(!detect_non_interactive_ssh_args(&ssh_args));
+    }
+
+    #[test]
+    fn parses_test_mode_and_combined_short_flags() {
+        let cmd = build_cli_command();
+        let parsed = parse_main_args_from(&cmd, ["cossh", "-tld", "localhost"]);
+
+        assert!(parsed.test_mode);
+        assert!(parsed.debug);
+        assert!(parsed.ssh_logging);
+        assert!(!parsed.interactive);
+        assert_eq!(parsed.ssh_args, vec!["localhost".to_string()]);
     }
 }
