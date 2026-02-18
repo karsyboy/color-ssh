@@ -293,10 +293,8 @@ fn top_rule_timing_summary(rule_timings_ns: &[u128], limit: usize) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::{HighlightScratch, MAX_RULES_FOR_REGEXSET_PREFILTER, process_chunk_with_scratch};
+    use super::{HighlightScratch, process_chunk_with_scratch};
     use regex::{Regex, RegexSet};
-    use serde_yaml::Value;
-    use std::{fs, path::Path, time::Instant};
 
     fn process_chunk_once(chunk: &str, chunk_id: i32, rules: &[(Regex, String)], rule_set: Option<&RegexSet>, reset_color: &str) -> String {
         let mut scratch = HighlightScratch::default();
@@ -378,104 +376,5 @@ mod tests {
         let from_scratch = process_chunk_with_scratch(&chunk, 6, &rules, None, "</e>", &mut scratch).into_owned();
 
         assert_eq!(single_shot, from_scratch);
-    }
-
-    #[test]
-    #[ignore]
-    fn profile_network_template_hotspots() {
-        let template_path = Path::new("templates/network.cossh-config.yaml");
-        let corpus_path = Path::new("scripts/bench/cache/network-corpus.txt");
-
-        if !template_path.exists() || !corpus_path.exists() {
-            eprintln!(
-                "Skipping hotspot profile: missing template or corpus (template: {:?}, corpus: {:?})",
-                template_path, corpus_path
-            );
-            return;
-        }
-
-        let template_text = fs::read_to_string(template_path).expect("read template");
-        let template_yaml: Value = serde_yaml::from_str(&template_text).expect("parse template yaml");
-        let rules_yaml = template_yaml.get("rules").and_then(Value::as_sequence).expect("rules should exist in template");
-
-        let mut rules: Vec<(String, Regex)> = Vec::new();
-        for rule in rules_yaml {
-            let description = rule.get("description").and_then(Value::as_str).unwrap_or("unknown").to_string();
-            let regex_text = rule
-                .get("regex")
-                .and_then(Value::as_str)
-                .expect("rule regex should be a string")
-                .replace('\n', "")
-                .trim()
-                .to_string();
-            let regex = Regex::new(&regex_text).unwrap_or_else(|err| panic!("regex compile failed for '{}': {}", description, err));
-            rules.push((description, regex));
-        }
-
-        let corpus_text = fs::read_to_string(corpus_path).expect("read corpus");
-        let chunk_size = 8192usize;
-
-        let rule_set = if rules.len() <= MAX_RULES_FOR_REGEXSET_PREFILTER {
-            let pattern_refs: Vec<&str> = rules.iter().map(|(_, regex)| regex.as_str()).collect();
-            Some(RegexSet::new(pattern_refs).expect("compile regex set"))
-        } else {
-            None
-        };
-
-        let mut elapsed_ns: Vec<u128> = vec![0; rules.len()];
-        let mut matches_count: Vec<usize> = vec![0; rules.len()];
-        let mut prefilter_elapsed_ns = 0u128;
-
-        for chunk in corpus_text.as_bytes().chunks(chunk_size) {
-            let chunk = String::from_utf8_lossy(chunk);
-            if let Some(rule_set) = rule_set.as_ref() {
-                let prefilter_started = Instant::now();
-                let matched_rules = rule_set.matches(&chunk);
-                prefilter_elapsed_ns = prefilter_elapsed_ns.saturating_add(prefilter_started.elapsed().as_nanos());
-
-                for rule_idx in matched_rules.iter() {
-                    let (_, regex) = &rules[rule_idx];
-                    let started = Instant::now();
-                    let mut local_count = 0usize;
-                    for _ in regex.find_iter(&chunk) {
-                        local_count = local_count.saturating_add(1);
-                    }
-                    elapsed_ns[rule_idx] = elapsed_ns[rule_idx].saturating_add(started.elapsed().as_nanos());
-                    matches_count[rule_idx] = matches_count[rule_idx].saturating_add(local_count);
-                }
-            } else {
-                for (rule_idx, (_, regex)) in rules.iter().enumerate() {
-                    let started = Instant::now();
-                    let mut local_count = 0usize;
-                    for _ in regex.find_iter(&chunk) {
-                        local_count = local_count.saturating_add(1);
-                    }
-                    elapsed_ns[rule_idx] = elapsed_ns[rule_idx].saturating_add(started.elapsed().as_nanos());
-                    matches_count[rule_idx] = matches_count[rule_idx].saturating_add(local_count);
-                }
-            }
-        }
-
-        let mut ranked: Vec<(usize, u128, usize)> = elapsed_ns
-            .iter()
-            .copied()
-            .enumerate()
-            .map(|(idx, elapsed)| (idx, elapsed, matches_count[idx]))
-            .collect();
-        ranked.sort_unstable_by(|left, right| right.1.cmp(&left.1));
-
-        eprintln!("Prefilter (RegexSet) cumulative time: {:.3} ms", prefilter_elapsed_ns as f64 / 1_000_000.0);
-        eprintln!("Top network template hotspot rules (by cumulative regex time):");
-        for (rank, (rule_idx, elapsed, match_count)) in ranked.iter().take(10).enumerate() {
-            let elapsed_ms = *elapsed as f64 / 1_000_000.0;
-            eprintln!(
-                "#{:02} rule[{}] {:>8.3} ms matches={} description={}",
-                rank + 1,
-                rule_idx,
-                elapsed_ms,
-                match_count,
-                rules[*rule_idx].0
-            );
-        }
     }
 }
