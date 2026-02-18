@@ -18,7 +18,10 @@ pub use errors::ConfigError;
 pub use watcher::config_watcher;
 
 use once_cell::sync::OnceCell;
-use std::sync::{Arc, RwLock};
+use std::sync::{
+    Arc, RwLock,
+    atomic::{AtomicU64, Ordering},
+};
 
 /// Global configuration instance
 ///
@@ -38,6 +41,7 @@ use std::sync::{Arc, RwLock};
 /// config::get_config().write().unwrap().metadata.session_name = "example".to_string();
 /// ```
 pub static SESSION_CONFIG: OnceCell<Arc<RwLock<style::Config>>> = OnceCell::new();
+static CONFIG_VERSION: AtomicU64 = AtomicU64::new(0);
 
 /// Get a reference to the global configuration
 ///
@@ -53,6 +57,15 @@ pub fn get_config() -> &'static Arc<RwLock<style::Config>> {
 pub fn init_session_config(profile: Option<String>) -> Result<(), ConfigError> {
     let config_loader = loader::ConfigLoader::new(profile).map_err(ConfigError::IoError)?;
     let config = config_loader.load_config().map_err(ConfigError::IoError)?;
+    set_config_version(config.metadata.version);
     SESSION_CONFIG.set(Arc::new(RwLock::new(config))).map_err(|_| ConfigError::AlreadyInitialized)?;
     Ok(())
+}
+
+pub(crate) fn current_config_version() -> u64 {
+    CONFIG_VERSION.load(Ordering::Acquire)
+}
+
+pub(crate) fn set_config_version(version: u64) {
+    CONFIG_VERSION.store(version, Ordering::Release);
 }

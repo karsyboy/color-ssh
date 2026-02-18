@@ -12,16 +12,35 @@ use once_cell::sync::Lazy;
 use regex::Regex;
 use std::{
     fs::{File, OpenOptions},
-    io::Write,
+    io::{BufWriter, Write},
     path::PathBuf,
     sync::Mutex,
+    time::{Duration, Instant},
 };
 
-// A global buffer to accumulate output until full lines are available.
-static SSH_LOG_BUFFER: Lazy<Mutex<String>> = Lazy::new(|| Mutex::new(String::new()));
+const SSH_LOG_FLUSH_BYTES: usize = 64 * 1024;
+const SSH_LOG_FLUSH_INTERVAL: Duration = Duration::from_millis(100);
 
-// Global SSH log file handle
-static SSH_LOG_FILE: Lazy<Mutex<Option<File>>> = Lazy::new(|| Mutex::new(None));
+struct SshLogState {
+    line_buffer: String,
+    writer: Option<BufWriter<File>>,
+    pending_bytes: usize,
+    last_flush: Instant,
+}
+
+impl SshLogState {
+    fn new() -> Self {
+        Self {
+            line_buffer: String::new(),
+            writer: None,
+            pending_bytes: 0,
+            last_flush: Instant::now(),
+        }
+    }
+}
+
+// Global SSH logging state shared across all sessions.
+static SSH_LOG_STATE: Lazy<Mutex<SshLogState>> = Lazy::new(|| Mutex::new(SshLogState::new()));
 
 // Compiled regex for removing ANSI escape sequences
 static ANSI_ESCAPE_REGEX: Lazy<Regex> = Lazy::new(|| {
@@ -57,61 +76,60 @@ impl SshLogger {
         Self { formatter }
     }
 
-    fn remove_secrets(&self, message: &str) -> String {
-        let compiled_patterns = crate::config::get_config().read().unwrap().metadata.compiled_secret_patterns.clone();
-        let mut redacted_message = message.to_string();
-
-        for regex in &compiled_patterns {
-            redacted_message = regex.replace_all(&redacted_message, "[REDACTED]").to_string();
-        }
-
-        redacted_message
+    pub fn log(&self, message: &str) -> Result<(), LogError> {
+        self.log_raw(message)
     }
 
-    pub fn log(&self, message: &str) -> Result<(), LogError> {
-        let mut buffer = SSH_LOG_BUFFER.lock().unwrap();
-        buffer.push_str(message);
+    pub fn log_raw(&self, message: &str) -> Result<(), LogError> {
+        let secret_patterns = current_secret_patterns();
+        let mut state = SSH_LOG_STATE.lock().unwrap();
+        state.line_buffer.push_str(message);
+        let lines = extract_complete_lines(&mut state.line_buffer);
 
-        while let Some(newline_pos) = buffer.find('\n') {
-            // Extract one complete line (without the newline).
-            let message = buffer[..newline_pos].trim_end().to_string();
-
-            // Remove the processed line (and the newline) from the buffer.
-            *buffer = buffer[newline_pos + 1..].to_string();
-
-            // Filter out special ASCII characters
-            let cleaned_message = ANSI_ESCAPE_REGEX.replace_all(&message, "").to_string();
-            let message: String = cleaned_message
-                .chars()
-                .filter(|ch| (ch.is_alphanumeric() || ch.is_ascii_punctuation() || ch.is_whitespace()) && *ch != '\n' && *ch != '\r')
-                .collect();
-
-            let message = if !crate::config::get_config().read().unwrap().metadata.compiled_secret_patterns.is_empty() {
-                self.remove_secrets(&message)
-            } else {
-                message
-            };
-
-            // format one line at a time with date and time and write to the log file
-            for msg in message.lines() {
-                if msg.is_empty() {
-                    continue; // Skip empty lines
-                }
-                let formatted = self.formatter.format(None, msg);
-
-                // Get or create log file with caching
-                let mut file_guard = SSH_LOG_FILE.lock().unwrap();
-                if file_guard.is_none() {
-                    *file_guard = Some(self.create_log_file()?);
-                }
-
-                if let Some(file) = file_guard.as_mut() {
-                    writeln!(file, "{}", formatted)?;
-                    file.flush()?; // Ensure logs are written immediately
-                }
-            }
+        if lines.is_empty() {
+            return Ok(());
         }
 
+        if state.writer.is_none() {
+            state.writer = Some(BufWriter::new(self.create_log_file()?));
+        }
+
+        for line in lines {
+            if line.is_empty() {
+                continue;
+            }
+
+            let sanitized = sanitize_line(&line, &secret_patterns);
+            if sanitized.is_empty() {
+                continue;
+            }
+
+            let formatted = self.formatter.format(None, &sanitized);
+            if let Some(writer) = state.writer.as_mut() {
+                writer.write_all(formatted.as_bytes())?;
+                writer.write_all(b"\n")?;
+            }
+            state.pending_bytes += formatted.len() + 1;
+        }
+
+        if should_flush(state.pending_bytes, state.last_flush.elapsed()) {
+            if let Some(writer) = state.writer.as_mut() {
+                writer.flush()?;
+            }
+            state.pending_bytes = 0;
+            state.last_flush = Instant::now();
+        }
+
+        Ok(())
+    }
+
+    pub fn flush(&self) -> Result<(), LogError> {
+        let mut state = SSH_LOG_STATE.lock().unwrap();
+        if let Some(writer) = state.writer.as_mut() {
+            writer.flush()?;
+            state.pending_bytes = 0;
+            state.last_flush = Instant::now();
+        }
         Ok(())
     }
 
@@ -133,5 +151,80 @@ impl SshLogger {
             "{}.log",
             crate::config::get_config().read().unwrap().metadata.session_name.replace(".", "_")
         )))
+    }
+}
+
+fn current_secret_patterns() -> Vec<Regex> {
+    crate::config::SESSION_CONFIG
+        .get()
+        .and_then(|config| config.read().ok().map(|config_guard| config_guard.metadata.compiled_secret_patterns.clone()))
+        .unwrap_or_default()
+}
+
+fn sanitize_line(line: &str, secret_patterns: &[Regex]) -> String {
+    let cleaned = ANSI_ESCAPE_REGEX.replace_all(line, "");
+    let mut sanitized: String = cleaned
+        .chars()
+        .filter(|ch| (ch.is_alphanumeric() || ch.is_ascii_punctuation() || ch.is_whitespace()) && *ch != '\n' && *ch != '\r')
+        .collect();
+
+    for regex in secret_patterns {
+        if regex.is_match(&sanitized) {
+            sanitized = regex.replace_all(&sanitized, "[REDACTED]").into_owned();
+        }
+    }
+
+    sanitized
+}
+
+fn extract_complete_lines(buffer: &mut String) -> Vec<String> {
+    let mut lines = Vec::new();
+    let mut start = 0usize;
+
+    while let Some(relative_newline) = buffer[start..].find('\n') {
+        let end = start + relative_newline;
+        lines.push(buffer[start..end].trim_end_matches('\r').to_string());
+        start = end + 1;
+    }
+
+    if start > 0 {
+        buffer.drain(..start);
+    }
+
+    lines
+}
+
+fn should_flush(pending_bytes: usize, elapsed_since_flush: Duration) -> bool {
+    pending_bytes >= SSH_LOG_FLUSH_BYTES || elapsed_since_flush >= SSH_LOG_FLUSH_INTERVAL
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{extract_complete_lines, sanitize_line, should_flush};
+    use regex::Regex;
+    use std::time::Duration;
+
+    #[test]
+    fn extract_complete_lines_keeps_partial_tail() {
+        let mut buffer = "one\ntwo\npartial".to_string();
+        let lines = extract_complete_lines(&mut buffer);
+
+        assert_eq!(lines, vec!["one".to_string(), "two".to_string()]);
+        assert_eq!(buffer, "partial");
+    }
+
+    #[test]
+    fn sanitize_line_strips_ansi_and_redacts_patterns() {
+        let secrets = vec![Regex::new("token=\\w+").expect("regex compiles")];
+        let line = "\x1b[31mtoken=abc123\x1b[0m ok";
+        let sanitized = sanitize_line(line, &secrets);
+        assert_eq!(sanitized, "[REDACTED] ok");
+    }
+
+    #[test]
+    fn should_flush_on_size_or_interval() {
+        assert!(!should_flush(1024, Duration::from_millis(20)));
+        assert!(should_flush(64 * 1024, Duration::from_millis(20)));
+        assert!(should_flush(1, Duration::from_millis(100)));
     }
 }

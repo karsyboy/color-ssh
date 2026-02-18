@@ -6,7 +6,7 @@
 //! - Highlight rules with regex patterns
 //! - Runtime metadata
 
-use regex::Regex;
+use regex::{Regex, RegexSet};
 use serde::{Deserialize, Deserializer};
 use std::{collections::HashMap, path::PathBuf};
 
@@ -151,6 +151,9 @@ pub struct Metadata {
     /// Compiled regex rules (regex + ANSI color code)
     #[serde(skip)]
     pub compiled_rules: Vec<(Regex, String)>,
+    /// Regex-set prefilter used to cheaply identify rules that might match a chunk.
+    #[serde(skip)]
+    pub compiled_rule_set: Option<RegexSet>,
     /// Pre-compiled secret redaction patterns
     #[serde(skip)]
     pub compiled_secret_patterns: Vec<Regex>,

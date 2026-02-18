@@ -104,4 +104,18 @@ impl Logger {
         }
         Ok(())
     }
+
+    pub fn log_ssh_raw(&self, message: &str) -> Result<(), LogError> {
+        if self.is_ssh_logging_enabled() {
+            self.ssh_logger.log_raw(message)?;
+        }
+        Ok(())
+    }
+
+    pub fn flush_ssh(&self) -> Result<(), LogError> {
+        if self.is_ssh_logging_enabled() {
+            self.ssh_logger.flush()?;
+        }
+        Ok(())
+    }
 }

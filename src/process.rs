@@ -1,10 +1,14 @@
-use crate::{Result, config, highlighter, log_debug, log_error, log_info, log_ssh};
+use crate::{Result, config, highlighter, log, log_debug, log_error, log_info};
 use std::{
     io::{self, Read, Write},
     process::{Command, ExitCode, Stdio},
     sync::mpsc::{self, Receiver, Sender},
     thread,
+    time::{Duration, Instant},
 };
+
+const STDOUT_FLUSH_BYTES: usize = 32 * 1024;
+const STDOUT_FLUSH_INTERVAL: Duration = Duration::from_millis(50);
 
 fn map_exit_code(success: bool, code: Option<i32>) -> ExitCode {
     if success {
@@ -52,25 +56,51 @@ pub fn process_handler(process_args: Vec<String>, is_non_interactive: bool) -> R
             log_debug!("Output processing thread started");
             let mut chunk_id = 0;
 
-            // Cache rules and track config version for hot-reload support
-            let mut cached_rules = config::get_config().read().unwrap().metadata.compiled_rules.clone();
-            let mut cached_version = config::get_config().read().unwrap().metadata.version;
+            // Cache rules and track config version for hot-reload support.
+            let (mut cached_rules, mut cached_rule_set, mut cached_version) = {
+                let config_guard = config::get_config().read().unwrap();
+                (
+                    config_guard.metadata.compiled_rules.clone(),
+                    config_guard.metadata.compiled_rule_set.clone(),
+                    config::current_config_version(),
+                )
+            };
+            let stdout = io::stdout();
+            let mut stdout = stdout.lock();
+            let mut pending_stdout_bytes = 0usize;
+            let mut last_stdout_flush = Instant::now();
 
             while let Ok(chunk) = rx.recv() {
-                // Check if config has been reloaded and update rules if needed
-                let current_version = config::get_config().read().unwrap().metadata.version;
+                // Check if config has been reloaded and update rules if needed.
+                let current_version = config::current_config_version();
                 if current_version != cached_version {
-                    cached_rules = config::get_config().read().unwrap().metadata.compiled_rules.clone();
+                    let config_guard = config::get_config().read().unwrap();
+                    cached_rules = config_guard.metadata.compiled_rules.clone();
+                    cached_rule_set = config_guard.metadata.compiled_rule_set.clone();
                     cached_version = current_version;
                     log_debug!("Rules updated due to config reload (version {})", cached_version);
                 }
 
-                let processed_chunk = highlighter::process_chunk(chunk, chunk_id, &cached_rules, reset_color);
+                let processed_chunk = highlighter::process_chunk(chunk, chunk_id, &cached_rules, cached_rule_set.as_ref(), reset_color);
                 chunk_id += 1;
-                print!("{}", processed_chunk);
-                if let Err(err) = io::stdout().flush() {
-                    log_error!("Failed to flush stdout: {}", err);
+                if let Err(err) = stdout.write_all(processed_chunk.as_bytes()) {
+                    log_error!("Failed to write processed output to stdout: {}", err);
+                    break;
                 }
+
+                pending_stdout_bytes = pending_stdout_bytes.saturating_add(processed_chunk.len());
+                if pending_stdout_bytes >= STDOUT_FLUSH_BYTES || last_stdout_flush.elapsed() >= STDOUT_FLUSH_INTERVAL {
+                    if let Err(err) = stdout.flush() {
+                        log_error!("Failed to flush stdout: {}", err);
+                        break;
+                    }
+                    pending_stdout_bytes = 0;
+                    last_stdout_flush = Instant::now();
+                }
+            }
+
+            if let Err(err) = stdout.flush() {
+                log_error!("Failed to flush stdout at thread end: {}", err);
             }
             log_debug!("Output processing thread finished (processed {} chunks)", chunk_id);
         })
@@ -96,7 +126,9 @@ pub fn process_handler(process_args: Vec<String>, is_non_interactive: bool) -> R
 
                 // Convert the read data to a String and send it to the processing thread
                 let chunk = String::from_utf8_lossy(&buffer[..bytes_read]).to_string();
-                log_ssh!("{}", chunk);
+                if let Err(err) = log::LOGGER.log_ssh_raw(&chunk) {
+                    log_error!("Failed to write SSH log data: {}", err);
+                }
 
                 if let Err(err) = tx.send(chunk) {
                     log_error!("Failed to send data to processing thread: {}", err);
@@ -105,6 +137,7 @@ pub fn process_handler(process_args: Vec<String>, is_non_interactive: bool) -> R
             }
             Err(err) => {
                 log_error!("Error reading from SSH process: {}", err);
+                let _ = log::LOGGER.flush_ssh();
                 return Err(err.into());
             }
         }
@@ -121,6 +154,9 @@ pub fn process_handler(process_args: Vec<String>, is_non_interactive: bool) -> R
     // Ensure all output is flushed to terminal
     if let Err(err) = io::stdout().flush() {
         log_error!("Failed to flush stdout after processing: {}", err);
+    }
+    if let Err(err) = log::LOGGER.flush_ssh() {
+        log_error!("Failed to flush SSH logs: {}", err);
     }
 
     // Wait for the SSH process to finish and use its status code

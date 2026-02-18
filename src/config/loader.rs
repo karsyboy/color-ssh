@@ -9,7 +9,7 @@
 
 use super::style::Config;
 use crate::{debug_enabled, log_debug, log_info, log_warn};
-use regex::Regex;
+use regex::{Regex, RegexSet};
 use std::{
     path::PathBuf,
     {env, fs, io},
@@ -139,6 +139,7 @@ impl ConfigLoader {
                 // Compile the rules
                 let compiled_rules = compile_rules(&config);
                 log_info!("Compiled {} highlight rules", compiled_rules.len());
+                config.metadata.compiled_rule_set = compile_rule_set(&compiled_rules);
                 config.metadata.compiled_rules = compiled_rules;
 
                 // Compile secret redaction patterns
@@ -180,6 +181,7 @@ impl ConfigLoader {
         let new_rules = compile_rules(&current_config);
         log_info!("Recompiled {} highlight rules", new_rules.len());
 
+        current_config.metadata.compiled_rule_set = compile_rule_set(&new_rules);
         current_config.metadata.compiled_rules = new_rules;
 
         // Recompile secret patterns
@@ -189,6 +191,7 @@ impl ConfigLoader {
         }
         current_config.metadata.compiled_secret_patterns = new_secrets;
 
+        super::set_config_version(current_config.metadata.version);
         log_info!("Configuration reloaded successfully (version {})", current_config.metadata.version);
 
         Ok(())
@@ -287,6 +290,21 @@ fn compile_rules(config: &Config) -> Vec<(Regex, String)> {
     rules
 }
 
+fn compile_rule_set(rules: &[(Regex, String)]) -> Option<RegexSet> {
+    if rules.is_empty() {
+        return None;
+    }
+
+    let patterns: Vec<&str> = rules.iter().map(|(regex, _)| regex.as_str()).collect();
+    match RegexSet::new(patterns) {
+        Ok(regex_set) => Some(regex_set),
+        Err(err) => {
+            log_warn!("Failed to compile regex prefilter set: {}", err);
+            None
+        }
+    }
+}
+
 /// Type of color to convert (foreground or background)
 #[derive(Debug, Clone, Copy)]
 enum ColorType {
@@ -347,7 +365,7 @@ fn compile_secret_patterns(config: &Config) -> Vec<Regex> {
 
 #[cfg(test)]
 mod tests {
-    use super::{ColorType, compile_rules, compile_secret_patterns, hex_to_ansi, is_valid_hex_color};
+    use super::{ColorType, compile_rule_set, compile_rules, compile_secret_patterns, hex_to_ansi, is_valid_hex_color};
     use crate::config::style::{Config, HighlightRule, Metadata, Settings};
     use std::collections::HashMap;
 
@@ -409,6 +427,31 @@ mod tests {
         assert_eq!(compiled[0].1, "\x1b[38;2;0;255;0m");
         assert_eq!(compiled[1].1, "\x1b[38;2;0;255;0;48;2;0;0;255m");
         assert_eq!(compiled[2].1, "\x1b[0m", "missing palette entry should fall back to reset");
+    }
+
+    #[test]
+    fn compiles_rule_set_for_prefiltering() {
+        let mut config = base_config();
+        config.palette.insert("ok_fg".to_string(), "#00ff00".to_string());
+        config.rules = vec![
+            HighlightRule {
+                regex: "error".to_string(),
+                color: "ok_fg".to_string(),
+                bg_color: None,
+            },
+            HighlightRule {
+                regex: "warn".to_string(),
+                color: "ok_fg".to_string(),
+                bg_color: None,
+            },
+        ];
+
+        let compiled_rules = compile_rules(&config);
+        let rule_set = compile_rule_set(&compiled_rules).expect("rule set should compile");
+        let matches = rule_set.matches("warn only");
+
+        assert!(matches.matched(1));
+        assert!(!matches.matched(0));
     }
 
     #[test]
