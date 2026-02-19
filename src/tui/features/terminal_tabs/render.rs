@@ -349,7 +349,7 @@ impl SessionManager {
                             s
                         } else {
                             let mut fg_color = terminal_emulator::to_ratatui_color(cell.fgcolor());
-                            let mut bg_color = terminal_emulator::to_ratatui_color(cell.bgcolor());
+                            let mut bg_color = terminal_emulator::to_ratatui_background_color(cell.bgcolor());
 
                             if cell.inverse() {
                                 std::mem::swap(&mut fg_color, &mut bg_color);

@@ -8,41 +8,41 @@
 #
 # Supported keys:
 # - [colors.primary] foreground/background
-# - [colors.selection] background
+# - [colors.selection] foreground/background
 # - [colors.normal] black..white
 # - [colors.bright] black..white
 #
 # Extra sections/keys are ignored.
 
 [colors.primary]
-foreground = "#bcbcbc"
-background = "#262626"
+foreground = "#bfbdb6"
+background = "#0b0e14"
 
 [colors.cursor]
-text = "#262626"
-cursor = "#bcbcbc"
+text = "#0b0e14"
+cursor = "#bfbdb6"
 
 [colors.selection]
-text = "#262626"
-background = "#87afd7"
+text = "#bfbdb6"
+background = "#1b3a5b"
 
 [colors.normal]
-black = "#1c1c1c"
-red = "#af5f5f"
-green = "#5f875f"
-yellow = "#87875f"
-blue = "#5f87af"
-magenta = "#5f5f87"
-cyan = "#5f8787"
-white = "#6c6c6c"
+black = "#1e232b"
+red = "#ea6c73"
+green = "#7fd962"
+yellow = "#f9af4f"
+blue = "#53bdfa"
+magenta = "#cda1fa"
+cyan = "#90e1c6"
+white = "#c7c7c7"
 
 [colors.bright]
-black = "#444444"
-red = "#ff8700"
-green = "#87af87"
-yellow = "#ffffaf"
-blue = "#87afd7"
-magenta = "#8787af"
-cyan = "#5fafaf"
+black = "#686868"
+red = "#f07178"
+green = "#aad94c"
+yellow = "#ffb454"
+blue = "#59c2ff"
+magenta = "#d2a6ff"
+cyan = "#95e6cb"
 white = "#ffffff"
 

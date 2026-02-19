@@ -1,5 +1,6 @@
 //! Lightweight terminal-emulator wrapper backed by `alacritty_terminal`.
 
+use crate::tui::ui::theme;
 use alacritty_terminal::event::{Event, EventListener, WindowSize};
 use alacritty_terminal::grid::{Dimensions, Scroll};
 use alacritty_terminal::index::{Boundary, Column, Line, Point};
@@ -90,24 +91,12 @@ impl ParserEventListener {
 
     // ANSI 16-color lookup for color queries.
     fn color_index_rgb(index: usize) -> Rgb {
-        match index {
-            0 => Rgb { r: 0, g: 0, b: 0 },
-            1 => Rgb { r: 205, g: 49, b: 49 },
-            2 => Rgb { r: 13, g: 188, b: 121 },
-            3 => Rgb { r: 229, g: 229, b: 16 },
-            4 => Rgb { r: 36, g: 114, b: 200 },
-            5 => Rgb { r: 188, g: 63, b: 188 },
-            6 => Rgb { r: 17, g: 168, b: 205 },
-            7 => Rgb { r: 229, g: 229, b: 229 },
-            8 => Rgb { r: 102, g: 102, b: 102 },
-            9 => Rgb { r: 241, g: 76, b: 76 },
-            10 => Rgb { r: 35, g: 209, b: 139 },
-            11 => Rgb { r: 245, g: 245, b: 67 },
-            12 => Rgb { r: 59, g: 142, b: 234 },
-            13 => Rgb { r: 214, g: 112, b: 214 },
-            14 => Rgb { r: 41, g: 184, b: 219 },
-            _ => Rgb { r: 229, g: 229, b: 229 },
-        }
+        let color = if index <= 15 {
+            ansi_index_to_theme_color(index as u8)
+        } else {
+            ansi_index_to_theme_color(7)
+        };
+        ui_color_to_rgb(color).unwrap_or(Rgb { r: 229, g: 229, b: 229 })
     }
 }
 
@@ -407,6 +396,38 @@ impl<'a> CellRef<'a> {
 }
 
 pub(crate) fn to_ratatui_color(color: AnsiColor) -> UiColor {
+    // Foreground path: honor theme palette.
+    match color {
+        AnsiColor::Named(named) => match named {
+            NamedColor::Black | NamedColor::DimBlack => ansi_index_to_theme_color(0),
+            NamedColor::Red | NamedColor::DimRed => ansi_index_to_theme_color(1),
+            NamedColor::Green | NamedColor::DimGreen => ansi_index_to_theme_color(2),
+            NamedColor::Yellow | NamedColor::DimYellow => ansi_index_to_theme_color(3),
+            NamedColor::Blue | NamedColor::DimBlue => ansi_index_to_theme_color(4),
+            NamedColor::Magenta | NamedColor::DimMagenta => ansi_index_to_theme_color(5),
+            NamedColor::Cyan | NamedColor::DimCyan => ansi_index_to_theme_color(6),
+            NamedColor::White | NamedColor::DimWhite => ansi_index_to_theme_color(7),
+            NamedColor::BrightBlack | NamedColor::DimForeground => ansi_index_to_theme_color(8),
+            NamedColor::BrightRed => ansi_index_to_theme_color(9),
+            NamedColor::BrightGreen => ansi_index_to_theme_color(10),
+            NamedColor::BrightYellow => ansi_index_to_theme_color(11),
+            NamedColor::BrightBlue => ansi_index_to_theme_color(12),
+            NamedColor::BrightMagenta => ansi_index_to_theme_color(13),
+            NamedColor::BrightCyan => ansi_index_to_theme_color(14),
+            NamedColor::BrightWhite | NamedColor::BrightForeground => ansi_index_to_theme_color(15),
+            NamedColor::Foreground => theme::ansi_white(),
+            NamedColor::Background | NamedColor::Cursor => UiColor::Reset,
+        },
+        AnsiColor::Indexed(idx) => match idx {
+            0..=15 => ansi_index_to_theme_color(idx),
+            _ => UiColor::Indexed(idx),
+        },
+        AnsiColor::Spec(rgb) => UiColor::Rgb(rgb.r, rgb.g, rgb.b),
+    }
+}
+
+pub(crate) fn to_ratatui_background_color(color: AnsiColor) -> UiColor {
+    // Background path: keep legacy/default ANSI mapping.
     match color {
         AnsiColor::Named(named) => match named {
             NamedColor::Black | NamedColor::DimBlack => UiColor::Black,
@@ -448,4 +469,30 @@ pub(crate) fn to_ratatui_color(color: AnsiColor) -> UiColor {
         },
         AnsiColor::Spec(rgb) => UiColor::Rgb(rgb.r, rgb.g, rgb.b),
     }
+}
+
+fn ansi_index_to_theme_color(index: u8) -> UiColor {
+    let palette = theme::session_theme().ansi;
+    match index {
+        0 => palette.black,
+        1 => palette.red,
+        2 => palette.green,
+        3 => palette.yellow,
+        4 => palette.blue,
+        5 => palette.magenta,
+        6 => palette.cyan,
+        7 => palette.white,
+        8 => palette.bright_black,
+        9 => palette.bright_red,
+        10 => palette.bright_green,
+        11 => palette.bright_yellow,
+        12 => palette.bright_blue,
+        13 => palette.bright_magenta,
+        14 => palette.bright_cyan,
+        _ => palette.bright_white,
+    }
+}
+
+fn ui_color_to_rgb(color: UiColor) -> Option<Rgb> {
+    if let UiColor::Rgb(r, g, b) = color { Some(Rgb { r, g, b }) } else { None }
 }
