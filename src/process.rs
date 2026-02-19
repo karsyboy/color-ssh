@@ -11,7 +11,7 @@ use std::{
 };
 
 const STDOUT_FLUSH_BYTES: usize = 32 * 1024;
-const STDOUT_FLUSH_INTERVAL: Duration = Duration::from_millis(50);
+const STDOUT_FLUSH_INTERVAL: Duration = Duration::from_millis(25);
 const HIGHLIGHT_FLUSH_HINT_BYTES: usize = 256;
 
 enum OutputChunk {
