@@ -192,6 +192,8 @@ impl SessionManager {
             right.push(Span::styled(":host | ", Style::default().fg(Color::DarkGray)));
             right.push(Span::styled("A-←/→", Style::default().fg(Color::Cyan)));
             right.push(Span::styled(":tab | ", Style::default().fg(Color::DarkGray)));
+            right.push(Span::styled("^←/^→", Style::default().fg(Color::Cyan)));
+            right.push(Span::styled(":move | ", Style::default().fg(Color::DarkGray)));
             right.push(Span::styled("^B", Style::default().fg(Color::Cyan)));
             right.push(Span::styled(":panel | ", Style::default().fg(Color::DarkGray)));
             right.push(Span::styled("^F", Style::default().fg(Color::Cyan)));
@@ -210,6 +212,8 @@ impl SessionManager {
             Span::styled(":host | ", Style::default().fg(Color::DarkGray)),
             Span::styled("A-←/→", Style::default().fg(Color::Cyan)),
             Span::styled(":tab | ", Style::default().fg(Color::DarkGray)),
+            Span::styled("^←/^→", Style::default().fg(Color::Cyan)),
+            Span::styled(":move | ", Style::default().fg(Color::DarkGray)),
             Span::styled("^B", Style::default().fg(Color::Cyan)),
             Span::styled(":panel | ", Style::default().fg(Color::DarkGray)),
             Span::styled("^F", Style::default().fg(Color::Cyan)),

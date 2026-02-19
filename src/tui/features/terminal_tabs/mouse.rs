@@ -7,6 +7,14 @@ use crossterm::event::{self, KeyModifiers, MouseButton, MouseEventKind};
 use std::io;
 use std::time::Instant;
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum TabBarHit {
+    LeftOverflow,
+    RightOverflow,
+    TabTitle(usize),
+    TabClose(usize),
+}
+
 impl SessionManager {
     // Top-level mouse routing for host panel, tab bar, and terminal area.
     /// Handle mouse events.
@@ -30,6 +38,7 @@ impl SessionManager {
             MouseEventKind::Down(MouseButton::Left) => {
                 self.is_dragging_host_scrollbar = false;
                 self.is_dragging_host_info_divider = false;
+                self.dragging_tab = None;
 
                 let divider_col = self.host_panel_area.x + self.host_panel_area.width.saturating_sub(1);
                 if self.host_panel_visible && self.host_panel_area.width > 0 && mouse.column == divider_col {
@@ -126,69 +135,39 @@ impl SessionManager {
                     && mouse.row >= tab_area.y
                     && mouse.row < tab_area.y + tab_area.height
                 {
-                    let visual_col = (mouse.column - tab_area.x) as usize;
-                    let tab_widths: Vec<usize> = self.tabs.iter().enumerate().map(|(idx, _)| self.tab_display_width(idx)).collect();
-                    let available_width = tab_area.width as usize;
-                    self.tab_scroll_offset = self.normalize_tab_scroll_offset(self.tab_scroll_offset, available_width);
-                    let has_left_overflow = self.prev_tab_scroll_offset(self.tab_scroll_offset, available_width).is_some();
-                    let left_slot = if has_left_overflow { 1 } else { 0 };
-                    let has_right_overflow = self.next_tab_scroll_offset(self.tab_scroll_offset, available_width).is_some();
-                    let right_slot = if has_right_overflow { 1 } else { 0 };
-                    let visible_tab_width = available_width.saturating_sub(left_slot + right_slot);
-
-                    if has_left_overflow && visual_col == 0 {
-                        if let Some(prev_offset) = self.prev_tab_scroll_offset(self.tab_scroll_offset, available_width) {
-                            self.tab_scroll_offset = prev_offset;
-                        }
-                        return Ok(());
-                    }
-                    if has_right_overflow && visual_col == available_width.saturating_sub(1) {
-                        if let Some(next_offset) = self.next_tab_scroll_offset(self.tab_scroll_offset, available_width) {
-                            self.tab_scroll_offset = next_offset;
-                        }
-                        return Ok(());
-                    }
-
-                    if visual_col < left_slot || visual_col >= left_slot + visible_tab_width {
-                        self.focus_on_manager = false;
-                        self.clear_selection_state();
-                        return Ok(());
-                    }
-                    let local_col = visual_col - left_slot;
-
-                    let mut running_start = 0usize;
-                    let mut first_visible_idx = 0usize;
-                    while first_visible_idx < self.tabs.len() && running_start + tab_widths[first_visible_idx] <= self.tab_scroll_offset {
-                        running_start += tab_widths[first_visible_idx];
-                        first_visible_idx += 1;
-                    }
-
-                    let mut used = 0usize;
-                    let mut idx = first_visible_idx;
-                    while idx < self.tabs.len() && used < visible_tab_width {
-                        let tab_width = tab_widths[idx];
-                        let visible_end = (used + tab_width).min(visible_tab_width);
-                        if local_col < visible_end {
-                            let close_pos = used + self.tab_title_display_width(idx) + 1;
-                            if close_pos < visible_end && local_col == close_pos {
-                                self.selected_tab = idx;
-                                self.close_current_tab();
-                                if self.tabs.is_empty() {
-                                    self.selected_tab = 0;
-                                }
-                            } else {
-                                self.selected_tab = idx;
-                                self.focus_on_manager = false;
+                    match self.tab_bar_hit_test(mouse.column) {
+                        Some(TabBarHit::LeftOverflow) => {
+                            let available_width = tab_area.width as usize;
+                            if let Some(prev_offset) = self.prev_tab_scroll_offset(self.tab_scroll_offset, available_width) {
+                                self.tab_scroll_offset = prev_offset;
                             }
-                            self.ensure_tab_visible();
-                            self.clear_selection_state();
                             return Ok(());
                         }
-                        used += tab_width;
-                        idx += 1;
+                        Some(TabBarHit::RightOverflow) => {
+                            let available_width = tab_area.width as usize;
+                            if let Some(next_offset) = self.next_tab_scroll_offset(self.tab_scroll_offset, available_width) {
+                                self.tab_scroll_offset = next_offset;
+                            }
+                            return Ok(());
+                        }
+                        Some(TabBarHit::TabClose(idx)) => {
+                            self.selected_tab = idx;
+                            self.close_current_tab();
+                            if self.tabs.is_empty() {
+                                self.selected_tab = 0;
+                            }
+                        }
+                        Some(TabBarHit::TabTitle(idx)) => {
+                            self.selected_tab = idx;
+                            self.focus_on_manager = false;
+                            self.dragging_tab = Some(idx);
+                        }
+                        None => {
+                            self.focus_on_manager = false;
+                        }
                     }
 
-                    self.focus_on_manager = false;
+                    self.ensure_tab_visible();
                     self.clear_selection_state();
                     return Ok(());
                 }
@@ -249,6 +228,38 @@ impl SessionManager {
                     }
                 } else if self.is_dragging_host_scrollbar {
                     self.set_host_scroll_from_scrollbar_row(mouse.row);
+                } else if let Some(drag_idx) = self.dragging_tab {
+                    let tab_area = self.tab_bar_area;
+                    if !self.tabs.is_empty()
+                        && tab_area.width > 0
+                        && tab_area.height > 0
+                        && mouse.column >= tab_area.x
+                        && mouse.column < tab_area.x + tab_area.width
+                        && mouse.row >= tab_area.y
+                        && mouse.row < tab_area.y + tab_area.height
+                    {
+                        match self.tab_bar_hit_test(mouse.column) {
+                            Some(TabBarHit::LeftOverflow) => {
+                                let available_width = tab_area.width as usize;
+                                if let Some(prev_offset) = self.prev_tab_scroll_offset(self.tab_scroll_offset, available_width) {
+                                    self.tab_scroll_offset = prev_offset;
+                                }
+                            }
+                            Some(TabBarHit::RightOverflow) => {
+                                let available_width = tab_area.width as usize;
+                                if let Some(next_offset) = self.next_tab_scroll_offset(self.tab_scroll_offset, available_width) {
+                                    self.tab_scroll_offset = next_offset;
+                                }
+                            }
+                            Some(TabBarHit::TabTitle(target_idx)) | Some(TabBarHit::TabClose(target_idx)) => {
+                                if drag_idx != target_idx && self.move_tab(drag_idx, target_idx) {
+                                    self.dragging_tab = Some(target_idx);
+                                    self.focus_on_manager = false;
+                                }
+                            }
+                            None => {}
+                        }
+                    }
                 } else if self.is_pty_mouse_mode_active() {
                     let mode = self.pty_mouse_mode();
                     if (mode == terminal_emulator::MouseProtocolMode::AnyMotion || mode == terminal_emulator::MouseProtocolMode::ButtonMotion)
@@ -301,6 +312,8 @@ impl SessionManager {
                     self.is_dragging_host_info_divider = false;
                 } else if self.is_dragging_host_scrollbar {
                     self.is_dragging_host_scrollbar = false;
+                } else if self.dragging_tab.take().is_some() {
+                    self.ensure_tab_visible();
                 } else if self.is_selecting {
                     self.is_selecting = false;
                     if self.selection_dragged {
@@ -431,6 +444,60 @@ impl SessionManager {
             _ => {}
         }
         Ok(())
+    }
+
+    fn tab_bar_hit_test(&mut self, column: u16) -> Option<TabBarHit> {
+        if self.tabs.is_empty() || self.tab_bar_area.width == 0 {
+            return None;
+        }
+
+        let visual_col = (column.saturating_sub(self.tab_bar_area.x)) as usize;
+        let tab_widths: Vec<usize> = self.tabs.iter().enumerate().map(|(idx, _)| self.tab_display_width(idx)).collect();
+        let available_width = self.tab_bar_area.width as usize;
+        self.tab_scroll_offset = self.normalize_tab_scroll_offset(self.tab_scroll_offset, available_width);
+
+        let has_left_overflow = self.prev_tab_scroll_offset(self.tab_scroll_offset, available_width).is_some();
+        let left_slot = if has_left_overflow { 1 } else { 0 };
+        let has_right_overflow = self.next_tab_scroll_offset(self.tab_scroll_offset, available_width).is_some();
+        let right_slot = if has_right_overflow { 1 } else { 0 };
+        let visible_tab_width = available_width.saturating_sub(left_slot + right_slot);
+
+        if has_left_overflow && visual_col == 0 {
+            return Some(TabBarHit::LeftOverflow);
+        }
+        if has_right_overflow && visual_col == available_width.saturating_sub(1) {
+            return Some(TabBarHit::RightOverflow);
+        }
+
+        if visual_col < left_slot || visual_col >= left_slot + visible_tab_width {
+            return None;
+        }
+        let local_col = visual_col - left_slot;
+
+        let mut running_start = 0usize;
+        let mut first_visible_idx = 0usize;
+        while first_visible_idx < self.tabs.len() && running_start + tab_widths[first_visible_idx] <= self.tab_scroll_offset {
+            running_start += tab_widths[first_visible_idx];
+            first_visible_idx += 1;
+        }
+
+        let mut used = 0usize;
+        let mut idx = first_visible_idx;
+        while idx < self.tabs.len() && used < visible_tab_width {
+            let tab_width = tab_widths[idx];
+            let visible_end = (used + tab_width).min(visible_tab_width);
+            if local_col < visible_end {
+                let close_pos = used + self.tab_title_display_width(idx) + 1;
+                if close_pos < visible_end && local_col == close_pos {
+                    return Some(TabBarHit::TabClose(idx));
+                }
+                return Some(TabBarHit::TabTitle(idx));
+            }
+            used += tab_width;
+            idx += 1;
+        }
+
+        None
     }
 
     // Scrollback helpers.
@@ -584,6 +651,39 @@ mod tests {
         app.handle_mouse(select_second_tab).expect("mouse handling");
         assert_eq!(app.selected_tab, 1);
         assert_eq!(app.tabs.len(), 2);
+    }
+
+    #[test]
+    fn drags_tab_title_to_reorder_tabs() {
+        let mut app = app_with_tabs(&["one", "two", "three"]);
+
+        let down_first_tab = MouseEvent {
+            kind: MouseEventKind::Down(MouseButton::Left),
+            column: 0,
+            row: 0,
+            modifiers: KeyModifiers::NONE,
+        };
+        app.handle_mouse(down_first_tab).expect("mouse down");
+
+        let drag_to_second_tab = MouseEvent {
+            kind: MouseEventKind::Drag(MouseButton::Left),
+            column: 7,
+            row: 0,
+            modifiers: KeyModifiers::NONE,
+        };
+        app.handle_mouse(drag_to_second_tab).expect("mouse drag");
+
+        let up_on_second_tab = MouseEvent {
+            kind: MouseEventKind::Up(MouseButton::Left),
+            column: 7,
+            row: 0,
+            modifiers: KeyModifiers::NONE,
+        };
+        app.handle_mouse(up_on_second_tab).expect("mouse up");
+
+        let titles: Vec<&str> = app.tabs.iter().map(|tab| tab.title.as_str()).collect();
+        assert_eq!(titles, vec!["two", "one", "three"]);
+        assert_eq!(app.selected_tab, 1);
     }
 
     #[test]

@@ -27,6 +27,46 @@ impl SessionManager {
     }
 
     // Tab lifecycle.
+    pub(crate) fn move_tab(&mut self, from_idx: usize, to_idx: usize) -> bool {
+        if from_idx >= self.tabs.len() || to_idx >= self.tabs.len() || from_idx == to_idx {
+            return false;
+        }
+
+        let selected_before = self.selected_tab.min(self.tabs.len().saturating_sub(1));
+        let moved_tab = self.tabs.remove(from_idx);
+        self.tabs.insert(to_idx, moved_tab);
+
+        self.selected_tab = if selected_before == from_idx {
+            to_idx
+        } else if from_idx < selected_before && to_idx >= selected_before {
+            selected_before.saturating_sub(1)
+        } else if from_idx > selected_before && to_idx <= selected_before {
+            (selected_before + 1).min(self.tabs.len().saturating_sub(1))
+        } else {
+            selected_before
+        };
+
+        self.clear_selection_state();
+        self.ensure_tab_visible();
+        true
+    }
+
+    pub(crate) fn move_selected_tab_left(&mut self) {
+        if self.selected_tab > 0 {
+            let from_idx = self.selected_tab;
+            let to_idx = from_idx - 1;
+            let _ = self.move_tab(from_idx, to_idx);
+        }
+    }
+
+    pub(crate) fn move_selected_tab_right(&mut self) {
+        if self.selected_tab + 1 < self.tabs.len() {
+            let from_idx = self.selected_tab;
+            let to_idx = from_idx + 1;
+            let _ = self.move_tab(from_idx, to_idx);
+        }
+    }
+
     pub(crate) fn close_current_tab(&mut self) {
         if self.tabs.is_empty() || self.selected_tab >= self.tabs.len() {
             return;
@@ -42,6 +82,7 @@ impl SessionManager {
         if self.selected_tab >= self.tabs.len() && self.selected_tab > 0 {
             self.selected_tab -= 1;
         }
+        self.dragging_tab = None;
 
         if self.tabs.is_empty() {
             self.focus_manager_panel();
@@ -100,6 +141,12 @@ impl SessionManager {
             }
             KeyCode::BackTab => {
                 self.focus_manager_panel();
+            }
+            KeyCode::Left if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                self.move_selected_tab_left();
+            }
+            KeyCode::Right if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                self.move_selected_tab_right();
             }
             KeyCode::Left if key.modifiers.contains(KeyModifiers::ALT) => {
                 if self.selected_tab > 0 {
@@ -240,6 +287,20 @@ impl SessionManager {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::ssh_config::SshHost;
+    use crate::tui::{HostTab, TerminalSearchState};
+
+    fn host_tab(title: &str) -> HostTab {
+        HostTab {
+            host: SshHost::new(title.to_string()),
+            title: title.to_string(),
+            session: None,
+            scroll_offset: 0,
+            terminal_search: TerminalSearchState::default(),
+            force_ssh_logging: false,
+            last_pty_size: None,
+        }
+    }
 
     #[test]
     fn handle_key_ctrl_q_sets_should_exit() {
@@ -252,20 +313,46 @@ mod tests {
     #[test]
     fn handle_key_ctrl_q_does_not_exit_in_terminal_view() {
         let mut app = SessionManager::new_for_tests();
-        app.tabs.push(crate::tui::HostTab {
-            host: crate::ssh_config::SshHost::new("test-host".to_string()),
-            title: "test-host".to_string(),
-            session: None,
-            scroll_offset: 0,
-            terminal_search: crate::tui::TerminalSearchState::default(),
-            force_ssh_logging: false,
-            last_pty_size: None,
-        });
+        app.tabs.push(host_tab("test-host"));
         app.selected_tab = 0;
         app.focus_on_manager = false;
 
         let key = KeyEvent::new(KeyCode::Char('q'), KeyModifiers::CONTROL);
         app.handle_key(key).expect("handle_key should succeed");
         assert!(!app.should_exit);
+    }
+
+    #[test]
+    fn handle_key_ctrl_left_reorders_selected_tab_left() {
+        let mut app = SessionManager::new_for_tests();
+        app.tabs.push(host_tab("one"));
+        app.tabs.push(host_tab("two"));
+        app.tabs.push(host_tab("three"));
+        app.selected_tab = 1;
+        app.focus_on_manager = false;
+
+        let key = KeyEvent::new(KeyCode::Left, KeyModifiers::CONTROL);
+        app.handle_key(key).expect("handle_key should succeed");
+
+        let titles: Vec<&str> = app.tabs.iter().map(|tab| tab.title.as_str()).collect();
+        assert_eq!(titles, vec!["two", "one", "three"]);
+        assert_eq!(app.selected_tab, 0);
+    }
+
+    #[test]
+    fn handle_key_ctrl_right_reorders_selected_tab_right() {
+        let mut app = SessionManager::new_for_tests();
+        app.tabs.push(host_tab("one"));
+        app.tabs.push(host_tab("two"));
+        app.tabs.push(host_tab("three"));
+        app.selected_tab = 1;
+        app.focus_on_manager = false;
+
+        let key = KeyEvent::new(KeyCode::Right, KeyModifiers::CONTROL);
+        app.handle_key(key).expect("handle_key should succeed");
+
+        let titles: Vec<&str> = app.tabs.iter().map(|tab| tab.title.as_str()).collect();
+        assert_eq!(titles, vec!["one", "three", "two"]);
+        assert_eq!(app.selected_tab, 2);
     }
 }
