@@ -1,8 +1,8 @@
 //! Per-tab and PTY session state.
 
+use crate::log_error;
 use crate::ssh_config::SshHost;
 use crate::tui::terminal_emulator::Parser;
-use crate::log_error;
 use portable_pty::{Child, MasterPty};
 use std::io::Write;
 use std::sync::{Arc, Mutex, atomic::AtomicU64};
