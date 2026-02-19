@@ -116,21 +116,6 @@ rm -rf ~/.color-ssh/
 rm -rf ~/.config/color-ssh/
 ```
 
-### Windows
-```powershell
-# 1. Remove the main binary
-Remove-Item "$env:USERPROFILE\.cargo\bin\cossh.exe" -Force
-
-# 2. Remove the updater binary
-Remove-Item "$env:USERPROFILE\.cargo\bin\color-ssh-update.exe" -Force
-
-# 3. (Optional) Remove configuration and logs
-Remove-Item "$env:USERPROFILE\.color-ssh" -Recurse -Force
-
-# 4. Remove the installation receipt
-Remove-Item "$env:LOCALAPPDATA\color-ssh" -Recurse -Force
-```
-
 ### Shell Completion Cleanup
 For instructions see the [Shell Completion README](shell-completion/README.md).
 
