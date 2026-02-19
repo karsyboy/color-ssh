@@ -130,12 +130,9 @@ pub fn process_chunk_with_scratch<'a>(
     // 1) earliest start wins
     // 2) when starts are equal, lower rule index (config order) wins
     // 3) final end tie-break keeps ordering total for unstable sort
-    scratch.matches.sort_unstable_by(|left, right| {
-        left.0
-            .cmp(&right.0)
-            .then(left.2.cmp(&right.2))
-            .then(left.1.cmp(&right.1))
-    });
+    scratch
+        .matches
+        .sort_unstable_by(|left, right| left.0.cmp(&right.0).then(left.2.cmp(&right.2)).then(left.1.cmp(&right.1)));
 
     let format_started_at = debug_logging.then(Instant::now);
     let estimated_capacity = chunk
@@ -244,6 +241,20 @@ fn map_clean_range_to_raw(
 fn build_clean_chunk_no_ansi(raw: &str, clean_chunk: &mut String) {
     clean_chunk.clear();
     clean_chunk.reserve(raw.len());
+
+    if raw.is_ascii() {
+        clean_chunk.push_str(raw);
+        // SAFETY: `clean_chunk` contains ASCII bytes only at this point. Replacing
+        // `\n`/`\r` with ASCII space preserves UTF-8 validity.
+        unsafe {
+            for byte in clean_chunk.as_bytes_mut() {
+                if matches!(*byte, b'\n' | b'\r') {
+                    *byte = b' ';
+                }
+            }
+        }
+        return;
+    }
 
     for ch in raw.chars() {
         // Keep byte count stable enough for non-ANSI path by replacing line breaks

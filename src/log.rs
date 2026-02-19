@@ -7,7 +7,10 @@ mod ssh;
 pub use errors::LogError;
 
 use once_cell::sync::Lazy;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{
+    Arc,
+    atomic::{AtomicBool, Ordering},
+};
 
 /// Sanitize session name for use in log filenames.
 pub fn sanitize_session_name(raw: &str) -> String {
@@ -141,6 +144,13 @@ impl Logger {
     pub fn log_ssh_raw(&self, message: &str) -> Result<(), LogError> {
         if self.is_ssh_logging_enabled() {
             self.ssh_logger.log_raw(message)?;
+        }
+        Ok(())
+    }
+
+    pub fn log_ssh_raw_shared(&self, message: Arc<String>) -> Result<(), LogError> {
+        if self.is_ssh_logging_enabled() {
+            self.ssh_logger.log_raw_shared(message)?;
         }
         Ok(())
     }

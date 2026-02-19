@@ -35,7 +35,12 @@ serde_yaml = "0.9.34"
 unicode-width = "0.1.14"
 alacritty_terminal = "0.25.1"
 
+[profile.release]
+lto = "thin"
+codegen-units = 1
+
 # The profile that 'cargo dist' will build with
 [profile.dist]
 inherits = "release"
 lto = "thin"
+codegen-units = 1

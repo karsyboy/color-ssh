@@ -2,16 +2,46 @@ use crate::{Result, config, highlighter, log, log_debug, log_error, log_info};
 use std::{
     io::{self, Read, Write},
     process::{Command, ExitCode, Stdio},
-    sync::mpsc::{self, Receiver, Sender},
+    sync::{
+        Arc,
+        mpsc::{self, Receiver, RecvTimeoutError, Sender},
+    },
     thread,
     time::{Duration, Instant},
 };
 
 const STDOUT_FLUSH_BYTES: usize = 32 * 1024;
 const STDOUT_FLUSH_INTERVAL: Duration = Duration::from_millis(50);
+const HIGHLIGHT_FLUSH_HINT_BYTES: usize = 256;
+
+enum OutputChunk {
+    Owned(String),
+    Shared(Arc<String>),
+}
+
+impl OutputChunk {
+    fn as_str(&self) -> &str {
+        match self {
+            Self::Owned(chunk) => chunk.as_str(),
+            Self::Shared(chunk) => chunk.as_str(),
+        }
+    }
+}
 
 fn requires_immediate_terminal_flush(output: &str) -> bool {
     output.as_bytes().iter().any(|byte| matches!(*byte, b'\r' | 0x1b | 0x08))
+}
+
+fn should_flush_immediately(raw_chunk: &str, processed_chunk: &str) -> bool {
+    if requires_immediate_terminal_flush(raw_chunk) {
+        return true;
+    }
+
+    let highlight_changed_chunk = !(raw_chunk.len() == processed_chunk.len() && raw_chunk.as_ptr() == processed_chunk.as_ptr());
+    // Prompt-like chunks are short and commonly have no newline. Flush them
+    // immediately when highlighting changed the visible output to keep cursor
+    // placement responsive.
+    highlight_changed_chunk && raw_chunk.len() <= HIGHLIGHT_FLUSH_HINT_BYTES && !raw_chunk.as_bytes().contains(&b'\n')
 }
 
 fn map_exit_code(success: bool, code: Option<i32>) -> ExitCode {
@@ -48,7 +78,7 @@ pub fn process_handler(process_args: Vec<String>, is_non_interactive: bool) -> R
     })?;
 
     // Create a channel for sending and receiving chunks from SSH
-    let (tx, rx): (Sender<String>, Receiver<String>) = mpsc::channel();
+    let (tx, rx): (Sender<OutputChunk>, Receiver<OutputChunk>) = mpsc::channel();
 
     let reset_color = "\x1b[0m";
 
@@ -80,40 +110,63 @@ pub fn process_handler(process_args: Vec<String>, is_non_interactive: bool) -> R
             let mut stdout = stdout.lock();
             let mut pending_stdout_bytes = 0usize;
             let mut last_stdout_flush = Instant::now();
-            while let Ok(chunk) = rx.recv() {
-                // Check if config has been reloaded and update rules if needed.
-                let current_version = config::current_config_version();
-                if current_version != cached_version {
-                    let config_guard = match config::get_config().read() {
-                        Ok(config_guard) => config_guard,
-                        Err(poisoned) => {
-                            log_error!("Configuration lock poisoned while reloading highlight rules; continuing with recovered state");
-                            poisoned.into_inner()
+            loop {
+                match rx.recv_timeout(STDOUT_FLUSH_INTERVAL) {
+                    Ok(chunk) => {
+                        // Check if config has been reloaded and update rules if needed.
+                        let current_version = config::current_config_version();
+                        if current_version != cached_version {
+                            let config_guard = match config::get_config().read() {
+                                Ok(config_guard) => config_guard,
+                                Err(poisoned) => {
+                                    log_error!("Configuration lock poisoned while reloading highlight rules; continuing with recovered state");
+                                    poisoned.into_inner()
+                                }
+                            };
+                            cached_rules = config_guard.metadata.compiled_rules.clone();
+                            cached_rule_set = config_guard.metadata.compiled_rule_set.clone();
+                            cached_version = current_version;
+                            log_debug!("Rules updated due to config reload (version {})", cached_version);
                         }
-                    };
-                    cached_rules = config_guard.metadata.compiled_rules.clone();
-                    cached_rule_set = config_guard.metadata.compiled_rule_set.clone();
-                    cached_version = current_version;
-                    log_debug!("Rules updated due to config reload (version {})", cached_version);
-                }
 
-                let processed_chunk =
-                    highlighter::process_chunk_with_scratch(&chunk, chunk_id, &cached_rules, cached_rule_set.as_ref(), reset_color, &mut highlight_scratch);
-                chunk_id += 1;
-                if let Err(err) = stdout.write_all(processed_chunk.as_bytes()) {
-                    log_error!("Failed to write processed output to stdout: {}", err);
-                    break;
-                }
+                        let raw_chunk = chunk.as_str();
+                        let processed_chunk = highlighter::process_chunk_with_scratch(
+                            raw_chunk,
+                            chunk_id,
+                            &cached_rules,
+                            cached_rule_set.as_ref(),
+                            reset_color,
+                            &mut highlight_scratch,
+                        );
+                        chunk_id += 1;
+                        if let Err(err) = stdout.write_all(processed_chunk.as_bytes()) {
+                            log_error!("Failed to write processed output to stdout: {}", err);
+                            break;
+                        }
 
-                pending_stdout_bytes = pending_stdout_bytes.saturating_add(processed_chunk.len());
-                let immediate_flush = requires_immediate_terminal_flush(&processed_chunk);
-                if immediate_flush || pending_stdout_bytes >= STDOUT_FLUSH_BYTES || last_stdout_flush.elapsed() >= STDOUT_FLUSH_INTERVAL {
-                    if let Err(err) = stdout.flush() {
-                        log_error!("Failed to flush stdout: {}", err);
-                        break;
+                        pending_stdout_bytes = pending_stdout_bytes.saturating_add(processed_chunk.len());
+                        let immediate_flush = should_flush_immediately(raw_chunk, &processed_chunk);
+                        if immediate_flush || pending_stdout_bytes >= STDOUT_FLUSH_BYTES || last_stdout_flush.elapsed() >= STDOUT_FLUSH_INTERVAL {
+                            if let Err(err) = stdout.flush() {
+                                log_error!("Failed to flush stdout: {}", err);
+                                break;
+                            }
+                            pending_stdout_bytes = 0;
+                            last_stdout_flush = Instant::now();
+                        }
                     }
-                    pending_stdout_bytes = 0;
-                    last_stdout_flush = Instant::now();
+                    Err(RecvTimeoutError::Timeout) => {
+                        // Flush idle prompt/output fragments (e.g. sudo password prompts).
+                        if pending_stdout_bytes > 0 && last_stdout_flush.elapsed() >= STDOUT_FLUSH_INTERVAL {
+                            if let Err(err) = stdout.flush() {
+                                log_error!("Failed to flush stdout on idle timeout: {}", err);
+                                break;
+                            }
+                            pending_stdout_bytes = 0;
+                            last_stdout_flush = Instant::now();
+                        }
+                    }
+                    Err(RecvTimeoutError::Disconnected) => break,
                 }
             }
 
@@ -129,10 +182,33 @@ pub fn process_handler(process_args: Vec<String>, is_non_interactive: bool) -> R
 
     // Buffer for reading data from SSH output
     let mut buffer = [0; 8192];
-    let mut pending_utf8: Vec<u8> = Vec::new();
+    let mut pending_utf8: Vec<u8> = Vec::with_capacity(buffer.len());
     let mut total_bytes = 0;
 
     log_debug!("Starting to read SSH output...");
+
+    let emit_chunk = |tx: &Sender<OutputChunk>, chunk: String| -> bool {
+        if chunk.is_empty() {
+            return true;
+        }
+
+        if log::LOGGER.is_ssh_logging_enabled() {
+            let shared_chunk = Arc::new(chunk);
+            if let Err(err) = log::LOGGER.log_ssh_raw_shared(shared_chunk.clone()) {
+                log_error!("Failed to write SSH log data: {}", err);
+            }
+
+            if let Err(err) = tx.send(OutputChunk::Shared(shared_chunk)) {
+                log_error!("Failed to send data to processing thread: {}", err);
+                return false;
+            }
+        } else if let Err(err) = tx.send(OutputChunk::Owned(chunk)) {
+            log_error!("Failed to send data to processing thread: {}", err);
+            return false;
+        }
+
+        true
+    };
 
     loop {
         match stdout.read(&mut buffer) {
@@ -140,21 +216,24 @@ pub fn process_handler(process_args: Vec<String>, is_non_interactive: bool) -> R
                 if !pending_utf8.is_empty() {
                     let chunk = String::from_utf8_lossy(&pending_utf8).to_string();
                     pending_utf8.clear();
-                    if !chunk.is_empty() {
-                        if let Err(err) = log::LOGGER.log_ssh_raw(&chunk) {
-                            log_error!("Failed to write SSH log data: {}", err);
-                        }
-
-                        if let Err(err) = tx.send(chunk) {
-                            log_error!("Failed to send data to processing thread: {}", err);
-                        }
-                    }
+                    let _ = emit_chunk(&tx, chunk);
                 }
                 log_debug!("EOF reached (total bytes read: {})", total_bytes);
                 break;
             }
             Ok(bytes_read) => {
                 total_bytes += bytes_read;
+
+                // Fast path: the common case where this read chunk is complete UTF-8
+                // and there are no carry-over bytes from a prior partial sequence.
+                if pending_utf8.is_empty() {
+                    if let Ok(valid_chunk) = std::str::from_utf8(&buffer[..bytes_read]) {
+                        if !emit_chunk(&tx, valid_chunk.to_string()) {
+                            break;
+                        }
+                        continue;
+                    }
+                }
 
                 pending_utf8.extend_from_slice(&buffer[..bytes_read]);
 
@@ -189,12 +268,7 @@ pub fn process_handler(process_args: Vec<String>, is_non_interactive: bool) -> R
                     continue;
                 }
 
-                if let Err(err) = log::LOGGER.log_ssh_raw(&chunk) {
-                    log_error!("Failed to write SSH log data: {}", err);
-                }
-
-                if let Err(err) = tx.send(chunk) {
-                    log_error!("Failed to send data to processing thread: {}", err);
+                if !emit_chunk(&tx, chunk) {
                     break;
                 }
             }
@@ -276,7 +350,7 @@ fn spawn_ssh_passthrough(args: &[String]) -> Result<ExitCode> {
 
 #[cfg(test)]
 mod tests {
-    use super::{map_exit_code, requires_immediate_terminal_flush};
+    use super::{map_exit_code, requires_immediate_terminal_flush, should_flush_immediately};
     use std::process::ExitCode;
 
     #[test]
@@ -302,5 +376,19 @@ mod tests {
         assert!(requires_immediate_terminal_flush("\x1b[2J"));
         assert!(requires_immediate_terminal_flush("abc\x08"));
         assert!(!requires_immediate_terminal_flush("plain text\nnext line"));
+    }
+
+    #[test]
+    fn immediate_flush_for_short_highlighted_prompt_chunks() {
+        let raw = "router# ";
+        let processed = "\x1b[38;2;255;0;0mrouter\x1b[0m# ";
+        assert!(should_flush_immediately(raw, processed));
+    }
+
+    #[test]
+    fn does_not_force_immediate_flush_for_large_highlighted_chunks() {
+        let raw = "x".repeat(1024);
+        let processed = format!("\x1b[31m{}\x1b[0m", raw);
+        assert!(!should_flush_immediately(&raw, &processed));
     }
 }

@@ -29,7 +29,7 @@ const SSH_LOG_FLUSH_INTERVAL: Duration = Duration::from_millis(100);
 const SSH_LOG_QUEUE_CAPACITY: usize = 1024;
 
 enum SshLogCommand {
-    Chunk(String),
+    Chunk(Arc<String>),
     Flush(SyncSender<Result<(), String>>),
 }
 
@@ -109,8 +109,12 @@ impl SshLogger {
     }
 
     pub(super) fn log_raw(&self, message: &str) -> Result<(), LogError> {
+        self.log_raw_shared(Arc::new(message.to_string()))
+    }
+
+    pub(super) fn log_raw_shared(&self, message: Arc<String>) -> Result<(), LogError> {
         let tx = self.ensure_worker()?;
-        tx.send(SshLogCommand::Chunk(message.to_string()))
+        tx.send(SshLogCommand::Chunk(message))
             .map_err(|err| LogError::FormattingError(format!("failed to enqueue ssh log chunk: {}", err)))
     }
 
@@ -168,7 +172,7 @@ fn run_worker(receiver: Receiver<SshLogCommand>, formatter: LogFormatter, file_f
     loop {
         match receiver.recv_timeout(SSH_LOG_FLUSH_INTERVAL) {
             Ok(SshLogCommand::Chunk(message)) => {
-                if let Err(err) = process_chunk_message(&mut state, &formatter, &message, file_factory.as_ref()) {
+                if let Err(err) = process_chunk_message(&mut state, &formatter, message.as_ref(), file_factory.as_ref()) {
                     state.last_error = Some(err.to_string());
                 }
             }
@@ -495,8 +499,8 @@ mod tests {
             run_worker(rx, formatter, file_factory);
         });
 
-        tx.send(SshLogCommand::Chunk("line-one\n".to_string())).expect("send line one");
-        tx.send(SshLogCommand::Chunk("line-two\n".to_string())).expect("send line two");
+        tx.send(SshLogCommand::Chunk(Arc::new("line-one\n".to_string()))).expect("send line one");
+        tx.send(SshLogCommand::Chunk(Arc::new("line-two\n".to_string()))).expect("send line two");
 
         let (ack_tx, ack_rx) = mpsc::sync_channel(0);
         tx.send(SshLogCommand::Flush(ack_tx)).expect("send flush");
@@ -532,7 +536,7 @@ mod tests {
             run_worker(rx, formatter, file_factory);
         });
 
-        tx.send(SshLogCommand::Chunk("partial-tail".to_string())).expect("send partial tail");
+        tx.send(SshLogCommand::Chunk(Arc::new("partial-tail".to_string()))).expect("send partial tail");
 
         let (ack_tx, ack_rx) = mpsc::sync_channel(0);
         tx.send(SshLogCommand::Flush(ack_tx)).expect("send flush");
