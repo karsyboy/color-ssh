@@ -3,6 +3,7 @@
 use crate::tui::SessionManager;
 
 impl SessionManager {
+    // Scrollbar geometry.
     pub(crate) fn host_scrollbar_x(&self) -> Option<u16> {
         let area = self.host_list_area;
         if !self.host_panel_visible || area.width == 0 || area.height == 0 {
@@ -18,6 +19,7 @@ impl SessionManager {
         Some(area.x + area.width.saturating_sub(1))
     }
 
+    // Scroll offset updates from drag/click position.
     pub(crate) fn set_host_scroll_from_scrollbar_row(&mut self, mouse_row: u16) {
         let area = self.host_list_area;
         let total_rows = self.visible_host_row_count();

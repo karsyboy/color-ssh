@@ -17,12 +17,13 @@ use std::{
 
 const DEFAULT_CONFIG_FILENAME: &str = "cossh-config.yaml";
 
-pub struct ConfigLoader {
+pub(crate) struct ConfigLoader {
     config_path: PathBuf,
 }
 
 impl ConfigLoader {
-    pub fn new(profile: Option<String>) -> Result<Self, io::Error> {
+    // Construction / path discovery.
+    pub(crate) fn new(profile: Option<String>) -> Result<Self, io::Error> {
         let config_path = Self::find_config_path(&profile)?;
         Ok(Self { config_path })
     }
@@ -108,8 +109,9 @@ impl ConfigLoader {
         Ok(config_path)
     }
 
+    // Initial load and compile pipeline.
     /// Load the configuration from the config file
-    pub fn load_config(self) -> io::Result<Config> {
+    pub(crate) fn load_config(self) -> io::Result<Config> {
         log_info!("Loading configuration from: {:?}", self.config_path);
 
         // Read the configuration file
@@ -162,8 +164,9 @@ impl ConfigLoader {
         }
     }
 
+    // Reload pipeline for live config updates.
     /// Loads and applies new configuration.
-    pub fn reload_config(self) -> Result<(), String> {
+    pub(crate) fn reload_config(self) -> Result<(), String> {
         log_info!("Reloading configuration...");
         let mut current_config = super::get_config().write().unwrap();
 

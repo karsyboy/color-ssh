@@ -1,7 +1,3 @@
-mod errors;
-
-pub use errors::HighlightError;
-
 use crate::{debug_enabled, log_debug};
 use once_cell::sync::Lazy;
 use regex::{Regex, RegexSet};

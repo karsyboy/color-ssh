@@ -23,6 +23,7 @@ struct DebugLogState {
 }
 
 impl DebugLogState {
+    // State construction.
     fn new() -> Self {
         Self {
             writer: None,
@@ -37,7 +38,7 @@ static DEBUG_LOG_STATE: Lazy<Mutex<DebugLogState>> = Lazy::new(|| Mutex::new(Deb
 
 /// Debug logger that writes formatted log messages to a file
 #[derive(Clone)]
-pub struct DebugLogger {
+pub(super) struct DebugLogger {
     /// Formatter for log messages (includes timestamp and level)
     formatter: LogFormatter,
 }
@@ -49,8 +50,8 @@ impl Default for DebugLogger {
 }
 
 impl DebugLogger {
-    // Create a new debug logger
-    pub fn new() -> Self {
+    // Construction.
+    pub(super) fn new() -> Self {
         let mut formatter = LogFormatter::new();
         formatter.set_include_timestamp(true);
         formatter.set_include_level(true);
@@ -58,8 +59,8 @@ impl DebugLogger {
         Self { formatter }
     }
 
-    // Write a log message to the debug log file
-    pub fn log(&self, level: LogLevel, message: &str) -> Result<(), LogError> {
+    // Log writing.
+    pub(super) fn log(&self, level: LogLevel, message: &str) -> Result<(), LogError> {
         let formatted = self.formatter.format(Some(level), message);
         let mut state = DEBUG_LOG_STATE.lock().unwrap();
 
@@ -85,7 +86,8 @@ impl DebugLogger {
         Ok(())
     }
 
-    pub fn flush(&self) -> Result<(), LogError> {
+    // Force-flush buffered log output.
+    pub(super) fn flush(&self) -> Result<(), LogError> {
         let mut state = DEBUG_LOG_STATE.lock().unwrap();
         if let Some(writer) = state.writer.as_mut() {
             writer.flush()?;
@@ -95,7 +97,7 @@ impl DebugLogger {
         Ok(())
     }
 
-    // Create or open the debug log file for appending
+    // File path and file creation helpers.
     fn create_log_file(&self) -> Result<File, LogError> {
         let log_path = self.get_debug_log_path()?;
 
@@ -106,7 +108,6 @@ impl DebugLogger {
             .map_err(LogError::from)
     }
 
-    // Get the path to the debug log file
     fn get_debug_log_path(&self) -> Result<PathBuf, LogError> {
         let home_dir = dirs::home_dir().ok_or_else(|| LogError::DirectoryCreationError("Home directory not found".to_string()))?;
 

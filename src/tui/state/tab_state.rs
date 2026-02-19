@@ -8,7 +8,7 @@ use std::io::Write;
 use std::sync::{Arc, Mutex, atomic::AtomicU64};
 
 /// Represents an SSH session output buffer.
-pub struct SshSession {
+pub(crate) struct SshSession {
     pub(crate) pty_master: Arc<Mutex<Box<dyn MasterPty + Send>>>,
     pub(crate) writer: Arc<Mutex<Box<dyn Write + Send>>>,
     pub(crate) _child: Box<dyn Child + Send>,
@@ -18,6 +18,8 @@ pub struct SshSession {
 }
 
 impl SshSession {
+    // Lifecycle management.
+    // Closing a tab should always terminate the underlying SSH process tree.
     pub(crate) fn terminate(&mut self) {
         if let Err(err) = self._child.kill() {
             log_error!("Failed to terminate SSH session: {}", err);
@@ -30,7 +32,7 @@ impl SshSession {
 }
 
 #[derive(Debug, Clone, Default)]
-pub struct TerminalSearchState {
+pub(crate) struct TerminalSearchState {
     pub(crate) active: bool,
     pub(crate) query: String,
     pub(crate) matches: Vec<(i64, u16, usize)>,
@@ -38,7 +40,7 @@ pub struct TerminalSearchState {
 }
 
 /// Represents an open host tab.
-pub struct HostTab {
+pub(crate) struct HostTab {
     pub(crate) host: SshHost,
     pub(crate) title: String,
     pub(crate) session: Option<SshSession>,

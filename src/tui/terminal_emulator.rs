@@ -44,6 +44,7 @@ struct ParserEventListener {
 }
 
 impl ParserEventListener {
+    // Construction / shared state access.
     fn new(rows: u16, cols: u16, pty_writer: Option<PtyWriter>) -> Self {
         let state = ParserEventState {
             pty_writer,
@@ -70,6 +71,7 @@ impl ParserEventListener {
         }
     }
 
+    // PTY + clipboard side effects requested by terminal events.
     fn write_pty(&self, bytes: &[u8]) {
         if let Ok(state) = self.state.lock()
             && let Some(pty_writer) = &state.pty_writer
@@ -86,6 +88,7 @@ impl ParserEventListener {
         let _ = out.flush();
     }
 
+    // ANSI 16-color lookup for color queries.
     fn color_index_rgb(index: usize) -> Rgb {
         match index {
             0 => Rgb { r: 0, g: 0, b: 0 },
@@ -144,6 +147,7 @@ struct TermDimensions {
 }
 
 impl TermDimensions {
+    // Construction.
     fn new(rows: u16, cols: u16, history: usize) -> Self {
         Self {
             rows: rows.max(1) as usize,
@@ -175,6 +179,7 @@ pub(crate) struct Parser {
 }
 
 impl Parser {
+    // Construction.
     #[cfg(test)]
     pub(crate) fn new(rows: u16, cols: u16, history: usize) -> Self {
         Self::new_with_listener(rows, cols, history, ParserEventListener::new(rows, cols, None))
@@ -199,6 +204,7 @@ impl Parser {
         }
     }
 
+    // Input + viewport updates.
     pub(crate) fn process(&mut self, bytes: &[u8]) {
         self.processor.advance(&mut self.term, bytes);
     }
@@ -219,6 +225,7 @@ impl Parser {
         }
     }
 
+    // Read-only screen access.
     pub(crate) fn screen(&self) -> Screen<'_> {
         Screen { parser: self }
     }
@@ -227,6 +234,7 @@ impl Parser {
         self.term.grid().history_size()
     }
 
+    // Selection + search helpers.
     pub(crate) fn selection_text(&self, start: (i64, u16), end: (i64, u16)) -> String {
         let mut start_point = Point::new(Line(start.0 as i32), Column(start.1 as usize)).grid_clamp(&self.term, Boundary::Grid);
         let mut end_point = Point::new(Line(end.0 as i32), Column(end.1 as usize)).grid_clamp(&self.term, Boundary::Grid);
@@ -289,6 +297,7 @@ pub(crate) struct Screen<'a> {
 }
 
 impl<'a> Screen<'a> {
+    // Basic screen metadata.
     pub(crate) fn size(&self) -> (u16, u16) {
         let grid = self.parser.term.grid();
         (grid.screen_lines() as u16, grid.columns() as u16)
@@ -307,6 +316,7 @@ impl<'a> Screen<'a> {
         !self.parser.term.mode().contains(TermMode::SHOW_CURSOR)
     }
 
+    // Cell lookups.
     pub(crate) fn cell(&self, row: u16, col: u16) -> Option<CellRef<'_>> {
         let grid = self.parser.term.grid();
         if row as usize >= grid.screen_lines() || col as usize >= grid.columns() {
@@ -322,6 +332,7 @@ impl<'a> Screen<'a> {
         Some(CellRef { cell: &grid[line][column] })
     }
 
+    // Active mouse-reporting mode from terminal state.
     pub(crate) fn mouse_protocol(&self) -> (MouseProtocolMode, MouseProtocolEncoding) {
         let mode = self.parser.term.mode();
         let mouse_mode = if mode.contains(TermMode::MOUSE_MOTION) {
@@ -349,6 +360,7 @@ pub(crate) struct CellRef<'a> {
 }
 
 impl<'a> CellRef<'a> {
+    // Text content.
     pub(crate) fn has_contents(&self) -> bool {
         !self.cell.flags.intersects(Flags::WIDE_CHAR_SPACER | Flags::LEADING_WIDE_CHAR_SPACER) && self.cell.c != ' '
     }
@@ -368,6 +380,7 @@ impl<'a> CellRef<'a> {
         out
     }
 
+    // Style accessors.
     pub(crate) fn fgcolor(&self) -> AnsiColor {
         self.cell.fg
     }

@@ -13,6 +13,7 @@ const CONNECT_ROW: u16 = 6;
 const PROFILE_LIST_PREFIX: &str = "Profiles: ";
 
 impl SessionManager {
+    // Modal mouse event entry point.
     pub(crate) fn handle_quick_connect_mouse(&mut self, mouse: event::MouseEvent) {
         let Some((modal_area, inner_area)) = self.quick_connect_modal_layout() else {
             return;
@@ -44,6 +45,7 @@ impl SessionManager {
         }
     }
 
+    // Left-click routing by form row.
     fn handle_quick_connect_left_click(&mut self, mouse_col: u16, mouse_row: u16, inner_area: Rect) {
         let local_row = mouse_row.saturating_sub(inner_area.y);
         let mut should_submit = false;
@@ -85,6 +87,7 @@ impl SessionManager {
         }
     }
 
+    // Layout + hit testing helpers.
     fn quick_connect_modal_layout(&self) -> Option<(Rect, Rect)> {
         let form = self.quick_connect.as_ref()?;
         let full_area = Rect::new(0, 0, self.last_terminal_size.0, self.last_terminal_size.1);
@@ -112,6 +115,7 @@ impl SessionManager {
         local_row == PROFILE_ROW || local_row == PROFILE_OPTIONS_ROW
     }
 
+    // Profile selection updates.
     fn select_prev_quick_connect_profile(&mut self) {
         if let Some(form) = self.quick_connect.as_mut() {
             form.selected = QuickConnectField::Profile;
@@ -128,6 +132,7 @@ impl SessionManager {
         }
     }
 
+    // Horizontal hit test for the profile list line.
     fn quick_connect_profile_index_at_column(profile_options: &[String], start_col: u16, mouse_col: u16) -> Option<usize> {
         if mouse_col < start_col {
             return None;

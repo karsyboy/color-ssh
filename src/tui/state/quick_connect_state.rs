@@ -10,6 +10,7 @@ pub(crate) enum QuickConnectField {
 }
 
 impl QuickConnectField {
+    // Focus traversal helpers.
     pub(crate) fn next(self) -> Self {
         match self {
             Self::User => Self::Host,
@@ -43,6 +44,7 @@ pub(crate) struct QuickConnectState {
 }
 
 impl QuickConnectState {
+    // Construction.
     pub(crate) fn new(default_ssh_logging: bool, mut profile_options: Vec<String>) -> Self {
         if profile_options.is_empty() {
             profile_options.push("default".to_string());
@@ -60,6 +62,7 @@ impl QuickConnectState {
         }
     }
 
+    // Profile accessors.
     pub(crate) fn selected_profile_label(&self) -> &str {
         self.profile_options.get(self.profile_index).map(String::as_str).unwrap_or("default")
     }
@@ -73,6 +76,7 @@ impl QuickConnectState {
         }
     }
 
+    // Profile selection changes.
     pub(crate) fn select_next_profile(&mut self) {
         if self.profile_options.is_empty() {
             return;

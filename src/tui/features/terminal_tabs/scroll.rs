@@ -3,6 +3,7 @@
 use crate::tui::SessionManager;
 
 impl SessionManager {
+    // Right-most snap point when tabs overflow.
     pub(crate) fn final_right_tab_scroll_offset(&self, available_width: usize) -> usize {
         if self.tabs.is_empty() || available_width == 0 {
             return 0;
@@ -28,6 +29,7 @@ impl SessionManager {
         last_start
     }
 
+    // Clamp and snap arbitrary scroll offsets to tab boundaries.
     pub(crate) fn normalize_tab_scroll_offset(&self, raw_offset: usize, available_width: usize) -> usize {
         if self.tabs.is_empty() || available_width == 0 {
             return 0;
@@ -47,10 +49,12 @@ impl SessionManager {
         snapped
     }
 
+    // Aggregate tab strip width.
     pub(crate) fn total_tab_width(&self) -> usize {
         (0..self.tabs.len()).map(|idx| self.tab_display_width(idx)).sum()
     }
 
+    // Adjacent scroll positions for marker clicks.
     pub(crate) fn prev_tab_scroll_offset(&self, raw_offset: usize, available_width: usize) -> Option<usize> {
         if self.tabs.is_empty() || available_width == 0 {
             return None;

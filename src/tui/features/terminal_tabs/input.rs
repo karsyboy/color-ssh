@@ -12,6 +12,7 @@ fn tab_title_display_width(title: &str) -> usize {
 }
 
 impl SessionManager {
+    // Selection/focus helpers.
     pub(crate) fn clear_selection_state(&mut self) {
         self.selection_start = None;
         self.selection_end = None;
@@ -25,6 +26,7 @@ impl SessionManager {
         }
     }
 
+    // Tab lifecycle.
     pub(crate) fn close_current_tab(&mut self) {
         if self.tabs.is_empty() || self.selected_tab >= self.tabs.len() {
             return;
@@ -46,6 +48,7 @@ impl SessionManager {
         }
     }
 
+    // Top-level key routing.
     /// Handle keyboard input.
     pub(crate) fn handle_key(&mut self, key: KeyEvent) -> io::Result<()> {
         if key.kind != KeyEventKind::Press {
@@ -74,6 +77,7 @@ impl SessionManager {
         self.handle_manager_key(key)
     }
 
+    // Terminal-tab key handling.
     pub(crate) fn handle_tab_key(&mut self, key: KeyEvent) -> io::Result<()> {
         if self.current_tab_search().map(|search_state| search_state.active).unwrap_or(false) {
             return self.handle_terminal_search_key(key);
@@ -155,6 +159,7 @@ impl SessionManager {
         Ok(())
     }
 
+    // PTY write helpers.
     pub(crate) fn write_bytes_to_active_pty(&mut self, bytes: &[u8]) -> io::Result<()> {
         if self.selected_tab >= self.tabs.len() {
             return Ok(());
@@ -184,6 +189,7 @@ impl SessionManager {
         Ok(())
     }
 
+    // Key-event encoding dispatch.
     pub(crate) fn send_key_to_pty(&mut self, key: KeyEvent) -> io::Result<()> {
         let Some(bytes) = encode_key_event_bytes(key) else {
             return Ok(());
@@ -192,6 +198,7 @@ impl SessionManager {
         self.write_bytes_to_active_pty(&bytes)
     }
 
+    // Tab strip geometry helpers.
     pub(crate) fn tab_display_width(&self, idx: usize) -> usize {
         if idx >= self.tabs.len() {
             return 0;
@@ -206,6 +213,7 @@ impl SessionManager {
         tab_title_display_width(&self.tabs[idx].title)
     }
 
+    // Keep selected tab visible after focus/selection moves.
     pub(crate) fn ensure_tab_visible(&mut self) {
         if self.tabs.is_empty() {
             self.tab_scroll_offset = 0;

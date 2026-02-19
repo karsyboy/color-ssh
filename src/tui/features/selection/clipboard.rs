@@ -16,6 +16,7 @@ fn copy_to_clipboard(text: &str) {
 }
 
 impl SessionManager {
+    // Selection export.
     /// Copy the current text selection to clipboard
     pub(crate) fn copy_selection_to_clipboard(&self) {
         let (start, end) = match (self.selection_start, self.selection_end) {

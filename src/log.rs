@@ -46,6 +46,7 @@ pub enum LogLevel {
 }
 
 impl LogLevel {
+    // Display helpers.
     fn as_str(&self) -> &'static str {
         match self {
             LogLevel::Debug => "DEBUG",
@@ -63,10 +64,12 @@ pub struct Logger {
 }
 
 impl Logger {
+    // Construction.
     pub fn new() -> Self {
         Self::default()
     }
 
+    // Feature toggles.
     pub fn enable_debug(&self) {
         DEBUG_MODE.store(true, Ordering::SeqCst);
     }
@@ -85,6 +88,7 @@ impl Logger {
         SSH_LOGGING.store(false, Ordering::SeqCst);
     }
 
+    // State checks.
     pub fn is_debug_enabled(&self) -> bool {
         DEBUG_MODE.load(Ordering::SeqCst)
     }
@@ -93,6 +97,7 @@ impl Logger {
         SSH_LOGGING.load(Ordering::SeqCst)
     }
 
+    // Debug log writing.
     pub fn log_debug(&self, message: &str) -> Result<(), LogError> {
         if self.is_debug_enabled() {
             self.debug_logger.log(LogLevel::Debug, message)?;
@@ -125,6 +130,7 @@ impl Logger {
         self.debug_logger.flush()
     }
 
+    // SSH session log writing.
     pub fn log_ssh(&self, message: &str) -> Result<(), LogError> {
         if self.is_ssh_logging_enabled() {
             self.ssh_logger.log(message)?;

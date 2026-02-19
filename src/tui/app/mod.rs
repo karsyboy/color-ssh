@@ -1,4 +1,4 @@
-//! App orchestration, event loop, and legacy transitional modules.
+//! App orchestration and event loop modules.
 
 mod events;
 mod run;

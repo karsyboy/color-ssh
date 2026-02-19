@@ -5,6 +5,7 @@ use crate::{debug_enabled, log_debug};
 use std::time::Instant;
 
 impl SessionManager {
+    // Rebuild match list from current query.
     pub(crate) fn update_terminal_search(&mut self) {
         if self.tabs.is_empty() || self.selected_tab >= self.tabs.len() {
             return;
@@ -49,6 +50,7 @@ impl SessionManager {
         }
     }
 
+    // Keep active match visible in viewport.
     pub(crate) fn scroll_to_search_match(&mut self) {
         if self.tabs.is_empty() || self.selected_tab >= self.tabs.len() {
             return;

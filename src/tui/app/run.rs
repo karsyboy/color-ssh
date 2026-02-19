@@ -17,6 +17,7 @@ struct TerminalModeGuard {
 }
 
 impl TerminalModeGuard {
+    // Terminal mode lifecycle.
     fn enter() -> io::Result<Self> {
         enable_raw_mode()?;
         let mut stdout = io::stdout();

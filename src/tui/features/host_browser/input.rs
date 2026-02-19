@@ -5,6 +5,7 @@ use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use std::io;
 
 impl SessionManager {
+    // Search-mode input.
     pub(crate) fn handle_search_key(&mut self, key: KeyEvent) -> io::Result<()> {
         match key.code {
             KeyCode::Char('c') if key.modifiers.contains(KeyModifiers::CONTROL) => {
@@ -33,6 +34,7 @@ impl SessionManager {
         Ok(())
     }
 
+    // Host-browser / manager input.
     pub(crate) fn handle_manager_key(&mut self, key: KeyEvent) -> io::Result<()> {
         match key.code {
             KeyCode::Esc => {

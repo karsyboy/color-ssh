@@ -48,6 +48,7 @@ fn draw_horizontal_rule(frame: &mut Frame, y: u16, x: u16, width: u16, style: St
 }
 
 impl SessionManager {
+    // Root frame composition.
     /// Render the full UI.
     pub(crate) fn draw(&mut self, frame: &mut Frame) {
         let size = frame.area();
@@ -170,6 +171,7 @@ impl SessionManager {
         self.render_quick_connect_modal(frame, size);
     }
 
+    // Terminal-pane composition.
     /// Render tab bar + active tab content.
     fn render_tabs(&mut self, frame: &mut Frame, area: Rect) {
         let chunks = Layout::default()
@@ -185,6 +187,7 @@ impl SessionManager {
         }
     }
 
+    // Tab-strip rendering.
     /// Render the tab strip.
     fn render_tab_bar(&mut self, frame: &mut Frame, area: Rect) {
         if area.width == 0 || area.height == 0 {
@@ -259,6 +262,7 @@ impl SessionManager {
         frame.render_widget(Paragraph::new(Line::from(spans)), area);
     }
 
+    // Active terminal surface rendering.
     /// Render active tab terminal content.
     fn render_tab_content(&mut self, frame: &mut Frame, area: Rect, tab_idx: usize) {
         if tab_idx >= self.tabs.len() {

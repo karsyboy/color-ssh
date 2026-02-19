@@ -5,6 +5,7 @@ use crossterm::event::{KeyCode, KeyEvent};
 use std::io;
 
 impl SessionManager {
+    // Search state lifecycle.
     pub(crate) fn clear_terminal_search(&mut self) {
         if let Some(search) = self.current_tab_search_mut() {
             search.active = false;
@@ -14,6 +15,7 @@ impl SessionManager {
         }
     }
 
+    // Keyboard handling for search mode.
     pub(crate) fn handle_terminal_search_key(&mut self, key: KeyEvent) -> io::Result<()> {
         match key.code {
             KeyCode::Esc => {

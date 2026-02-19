@@ -62,6 +62,7 @@ pub(crate) fn encode_key_event_bytes(key: KeyEvent) -> Option<Vec<u8>> {
 }
 
 impl SessionManager {
+    // PTY sizing / config helpers.
     fn initial_pty_size(&self) -> (u16, u16) {
         let rows = self.tab_content_area.height.max(1);
         let cols = self.tab_content_area.width.max(1);
@@ -72,6 +73,7 @@ impl SessionManager {
         crate::config::history_buffer_for_profile(host.profile.as_deref()).unwrap_or(self.history_buffer)
     }
 
+    // Host selection -> tab opening.
     /// Select a host to open in a new tab
     pub(crate) fn select_host_to_connect(&mut self) {
         let Some(host_idx) = self.selected_host_idx() else {
@@ -96,6 +98,7 @@ impl SessionManager {
         self.open_host_tab(host, force_ssh_logging);
     }
 
+    // Tab/session creation.
     fn open_host_tab(&mut self, host: SshHost, force_ssh_logging: bool) {
         log_debug!("Opening tab for host: {}", host.name);
 
@@ -141,6 +144,7 @@ impl SessionManager {
         log_debug!("Created new tab at index {}", self.selected_tab);
     }
 
+    // Spawn and wire a PTY-backed cossh process.
     /// Spawn an SSH session in a PTY
     fn spawn_ssh_session(
         host: &SshHost,
@@ -263,6 +267,7 @@ impl SessionManager {
         })
     }
 
+    // Session recovery.
     /// Reconnect a disconnected session in the current tab
     pub(crate) fn reconnect_session(&mut self) {
         if self.tabs.is_empty() || self.selected_tab >= self.tabs.len() {
@@ -301,6 +306,7 @@ impl SessionManager {
         }
     }
 
+    // Live PTY resize from current viewport.
     /// Resize PTY for the current tab based on available area
     pub(crate) fn resize_current_pty(&mut self, area: ratatui::layout::Rect) {
         if !self.tabs.is_empty()

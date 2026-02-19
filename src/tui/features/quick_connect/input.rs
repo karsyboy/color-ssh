@@ -4,11 +4,13 @@ use crate::tui::{QuickConnectField, QuickConnectState, SessionManager};
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
 impl SessionManager {
+    // Modal lifecycle.
     pub(crate) fn open_quick_connect_modal(&mut self) {
         let profiles = self.discover_quick_connect_profiles();
         self.quick_connect = Some(QuickConnectState::new(self.quick_connect_default_ssh_logging, profiles));
     }
 
+    // Keyboard handling inside quick-connect modal.
     pub(crate) fn handle_quick_connect_key(&mut self, key: KeyEvent) {
         let mut should_submit = false;
         let mut should_close = false;
@@ -87,6 +89,7 @@ impl SessionManager {
         }
     }
 
+    // Form submit validation + action.
     pub(crate) fn submit_quick_connect_modal(&mut self) {
         let Some(form) = self.quick_connect.as_mut() else {
             return;

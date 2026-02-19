@@ -17,7 +17,7 @@ pub struct Config {
     #[serde(default)]
     pub settings: Settings,
     /// Interactive session-manager settings (optional block)
-    #[serde(default, alias = "setting_interactive")]
+    #[serde(default)]
     pub interactive_settings: Option<InteractiveSettings>,
     /// Color palette mapping names to hex codes (converted to ANSI at runtime)
     pub palette: HashMap<String, String>,
@@ -46,6 +46,7 @@ pub struct Settings {
 }
 
 impl Default for Settings {
+    // Default settings used when keys are missing in config files.
     fn default() -> Self {
         Self {
             remove_secrets: None,
@@ -66,10 +67,6 @@ pub struct InteractiveSettings {
     /// `false` (default) means the tree starts collapsed.
     #[serde(default = "default_host_tree_uncollapsed")]
     pub host_tree_uncollapsed: bool,
-    /// Backward-compatibility key for older configs.
-    /// If present, this overrides `host_tree_uncollapsed`.
-    #[serde(default, rename = "host_tree_start_collapsed")]
-    legacy_host_tree_start_collapsed: Option<bool>,
     /// Whether the host info pane is shown by default
     #[serde(default = "default_info_view")]
     pub info_view: bool,
@@ -91,13 +88,6 @@ fn default_history_buffer() -> usize {
 
 fn default_host_tree_uncollapsed() -> bool {
     false
-}
-
-impl InteractiveSettings {
-    /// Resolve final startup behavior for host tree collapse state.
-    pub fn host_tree_starts_collapsed(&self) -> bool {
-        self.legacy_host_tree_start_collapsed.unwrap_or(!self.host_tree_uncollapsed)
-    }
 }
 
 fn default_info_view() -> bool {

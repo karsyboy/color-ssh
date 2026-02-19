@@ -48,6 +48,7 @@ struct SshLogWorkerState {
 }
 
 impl SshLogWorkerState {
+    // Worker state construction.
     fn new() -> Self {
         Self {
             line_buffer: String::new(),
@@ -78,7 +79,7 @@ static ANSI_ESCAPE_REGEX: Lazy<Regex> = Lazy::new(|| {
 });
 
 #[derive(Clone)]
-pub struct SshLogger {
+pub(super) struct SshLogger {
     formatter: LogFormatter,
     worker_tx: Arc<Mutex<Option<SyncSender<SshLogCommand>>>>,
 }
@@ -90,7 +91,8 @@ impl Default for SshLogger {
 }
 
 impl SshLogger {
-    pub fn new() -> Self {
+    // Construction.
+    pub(super) fn new() -> Self {
         let mut formatter = LogFormatter::new();
         formatter.set_include_timestamp(true);
         formatter.set_include_break(true);
@@ -101,17 +103,18 @@ impl SshLogger {
         }
     }
 
-    pub fn log(&self, message: &str) -> Result<(), LogError> {
+    // Public write/flush entry points.
+    pub(super) fn log(&self, message: &str) -> Result<(), LogError> {
         self.log_raw(message)
     }
 
-    pub fn log_raw(&self, message: &str) -> Result<(), LogError> {
+    pub(super) fn log_raw(&self, message: &str) -> Result<(), LogError> {
         let tx = self.ensure_worker()?;
         tx.send(SshLogCommand::Chunk(message.to_string()))
             .map_err(|err| LogError::FormattingError(format!("failed to enqueue ssh log chunk: {}", err)))
     }
 
-    pub fn flush(&self) -> Result<(), LogError> {
+    pub(super) fn flush(&self) -> Result<(), LogError> {
         let tx = self.ensure_worker()?;
         let (ack_tx, ack_rx) = mpsc::sync_channel(0);
 
@@ -125,6 +128,7 @@ impl SshLogger {
         }
     }
 
+    // Worker lifecycle.
     fn ensure_worker(&self) -> Result<SyncSender<SshLogCommand>, LogError> {
         let mut worker_tx_guard = self.worker_tx.lock().unwrap();
         if let Some(existing_tx) = worker_tx_guard.as_ref() {
@@ -144,6 +148,7 @@ impl SshLogger {
         Ok(tx)
     }
 
+    // File creation helper.
     fn create_log_file() -> Result<File, LogError> {
         let log_path = get_ssh_log_path()?;
 

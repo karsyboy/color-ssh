@@ -8,6 +8,7 @@ use std::io;
 use std::time::Instant;
 
 impl SessionManager {
+    // Top-level mouse routing for host panel, tab bar, and terminal area.
     /// Handle mouse events.
     pub(crate) fn handle_mouse(&mut self, mouse: event::MouseEvent) -> io::Result<()> {
         if self.quick_connect.is_some() {
@@ -432,6 +433,7 @@ impl SessionManager {
         Ok(())
     }
 
+    // Scrollback helpers.
     pub(crate) fn max_scrollback_for_tab(&self, tab_idx: usize) -> usize {
         if tab_idx >= self.tabs.len() {
             return 0;
@@ -447,6 +449,7 @@ impl SessionManager {
         }
     }
 
+    // PTY mouse mode helpers.
     pub(crate) fn is_pty_mouse_mode_active(&self) -> bool {
         self.pty_mouse_mode() != terminal_emulator::MouseProtocolMode::None
     }
@@ -467,6 +470,7 @@ impl SessionManager {
         self.pty_mouse_protocol().0
     }
 
+    // Convert screen coords to VT (1-based) coordinates.
     fn mouse_to_vt_coords(&self, column: u16, row: u16) -> Option<(u16, u16)> {
         let area = self.tab_content_area;
         if area.width > 0 && area.height > 0 && column >= area.x && column < area.x + area.width && row >= area.y && row < area.y + area.height {
@@ -478,6 +482,7 @@ impl SessionManager {
         }
     }
 
+    // Encode mouse reporting bytes for default and SGR modes.
     fn encode_mouse_event_bytes(encoding: terminal_emulator::MouseProtocolEncoding, button: u8, col: u16, row: u16, is_release: bool) -> Vec<u8> {
         match encoding {
             terminal_emulator::MouseProtocolEncoding::Sgr => {
@@ -496,6 +501,7 @@ impl SessionManager {
         }
     }
 
+    // Send encoded mouse bytes to active PTY.
     fn send_mouse_to_pty(&mut self, button: u8, col: u16, row: u16, is_release: bool) -> io::Result<()> {
         if self.selected_tab >= self.tabs.len() {
             return Ok(());

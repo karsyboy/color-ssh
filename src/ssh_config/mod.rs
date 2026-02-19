@@ -21,8 +21,3 @@ pub(crate) fn load_ssh_host_tree() -> io::Result<SshHostTreeModel> {
 
     parser::build_ssh_host_tree(&config_path)
 }
-
-/// Load all SSH hosts from the default config.
-pub fn load_ssh_hosts() -> io::Result<Vec<SshHost>> {
-    Ok(load_ssh_host_tree()?.hosts)
-}

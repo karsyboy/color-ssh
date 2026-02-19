@@ -19,6 +19,7 @@ enum StatusContext {
 }
 
 impl SessionManager {
+    // Entry point.
     pub(crate) fn render_global_status_bar(&self, frame: &mut Frame, area: Rect) {
         if area.width == 0 || area.height == 0 {
             return;
@@ -45,6 +46,7 @@ impl SessionManager {
         frame.render_widget(right, chunks[1]);
     }
 
+    // Context dispatch.
     fn build_status_line_sections(&self) -> (Vec<Span<'static>>, Vec<Span<'static>>) {
         match self.resolve_status_context() {
             StatusContext::HostSearch => self.build_search_mode_status_spans(),
@@ -54,6 +56,7 @@ impl SessionManager {
         }
     }
 
+    // Shared helpers.
     fn spans_display_width(spans: &[Span<'static>]) -> usize {
         spans.iter().map(|span| display_width(span.content.as_ref())).sum()
     }
@@ -75,6 +78,7 @@ impl SessionManager {
         !self.focus_on_manager && !self.tabs.is_empty() && self.selected_tab < self.tabs.len()
     }
 
+    // Context snippets.
     fn context_split_indicator() -> Span<'static> {
         Span::styled(" || ", Style::default().fg(Color::DarkGray))
     }
@@ -89,6 +93,7 @@ impl SessionManager {
         None
     }
 
+    // Host browser context.
     fn build_manager_status_spans(&self) -> (Vec<Span<'static>>, Vec<Span<'static>>) {
         let host_name = self.selected_host_name().unwrap_or_else(|| "none".to_string());
         let mut left = vec![
@@ -138,6 +143,7 @@ impl SessionManager {
         (left, right)
     }
 
+    // Terminal context.
     fn build_terminal_status_spans(&self) -> (Vec<Span<'static>>, Vec<Span<'static>>) {
         if self.tabs.is_empty() || self.selected_tab >= self.tabs.len() {
             return (
@@ -219,6 +225,7 @@ impl SessionManager {
         (left, right)
     }
 
+    // Host search context.
     fn build_search_mode_status_spans(&self) -> (Vec<Span<'static>>, Vec<Span<'static>>) {
         let left = vec![
             Span::styled("Host Search", Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD)),
@@ -237,6 +244,7 @@ impl SessionManager {
         (left, right)
     }
 
+    // Terminal search context.
     fn build_terminal_search_status_spans(&self) -> (Vec<Span<'static>>, Vec<Span<'static>>) {
         let (query, matches_len, current_idx) = self
             .current_tab_search()

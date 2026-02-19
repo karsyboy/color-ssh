@@ -38,6 +38,7 @@ pub struct SshHost {
 }
 
 impl SshHost {
+    // Construction.
     /// Create a new `SshHost` with just a name.
     pub fn new(name: String) -> Self {
         Self {
@@ -55,52 +56,6 @@ impl SshHost {
             remote_forward: Vec::new(),
             other_options: HashMap::new(),
         }
-    }
-
-    /// Get a formatted display string for host details.
-    pub fn get_details(&self) -> String {
-        let mut details = Vec::new();
-
-        details.push(format!("Host: {}", self.name));
-
-        if let Some(hostname) = &self.hostname {
-            details.push(format!("  Hostname: {}", hostname));
-        }
-        if let Some(user) = &self.user {
-            details.push(format!("  User: {}", user));
-        }
-        if let Some(port) = &self.port {
-            details.push(format!("  Port: {}", port));
-        }
-        if let Some(identity) = &self.identity_file {
-            details.push(format!("  IdentityFile: {}", identity));
-        }
-        if let Some(proxy) = &self.proxy_jump {
-            details.push(format!("  ProxyJump: {}", proxy));
-        }
-        if let Some(desc) = &self.description {
-            details.push(format!("  Description: {}", desc));
-        }
-        if let Some(profile) = &self.profile {
-            details.push(format!("  Profile: {}", profile));
-        }
-
-        if self.use_sshpass {
-            details.push("  SSHPass: enabled".to_string());
-        }
-
-        for fwd in &self.local_forward {
-            details.push(format!("  LocalForward: {}", fwd));
-        }
-        for fwd in &self.remote_forward {
-            details.push(format!("  RemoteForward: {}", fwd));
-        }
-
-        for (key, value) in &self.other_options {
-            details.push(format!("  {}: {}", key, value));
-        }
-
-        details.join("\n")
     }
 }
 
@@ -129,6 +84,7 @@ pub struct SshHostTreeModel {
 }
 
 impl SshHostTreeModel {
+    // Construction helpers.
     pub(super) fn empty(root_path: PathBuf) -> Self {
         let root_name = root_path.file_name().and_then(|segment| segment.to_str()).unwrap_or("config").to_string();
         Self {

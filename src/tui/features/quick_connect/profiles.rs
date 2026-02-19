@@ -7,6 +7,7 @@ use std::collections::HashSet;
 use std::fs;
 
 impl SessionManager {
+    // Scan config directory for profile-specific config filenames.
     pub(crate) fn discover_quick_connect_profiles(&self) -> Vec<String> {
         let mut profiles: HashSet<String> = HashSet::new();
         profiles.insert("default".to_string());

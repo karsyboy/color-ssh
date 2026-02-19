@@ -10,6 +10,7 @@ use ratatui::{
 };
 
 impl SessionManager {
+    // Modal rendering.
     pub(crate) fn render_quick_connect_modal(&self, frame: &mut Frame, full_area: Rect) {
         let Some(form) = &self.quick_connect else {
             return;
@@ -111,6 +112,7 @@ impl SessionManager {
         frame.render_widget(Paragraph::new(lines), inner);
     }
 
+    // Shared centered popup helper.
     pub(crate) fn centered_rect(width: u16, height: u16, area: Rect) -> Rect {
         let popup_width = width.min(area.width);
         let popup_height = height.min(area.height);

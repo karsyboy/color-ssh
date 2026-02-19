@@ -121,6 +121,7 @@ fn compute_match_scores(search_entries: &[HostSearchEntry], query_lower: &str) -
 }
 
 impl SessionManager {
+    // Row identity helpers.
     fn row_key_from_kind(kind: HostTreeRowKind) -> HostRowKey {
         match kind {
             HostTreeRowKind::Folder(id) => HostRowKey::Folder(id),
@@ -132,6 +133,7 @@ impl SessionManager {
         self.visible_host_rows.get(self.selected_host_row).map(|row| Self::row_key_from_kind(row.kind))
     }
 
+    // Visible row rebuild pipeline.
     fn rebuild_visible_host_rows(&mut self) {
         let mut rows = Vec::new();
         if self.search_query.is_empty() {
@@ -142,6 +144,7 @@ impl SessionManager {
         self.visible_host_rows = rows;
     }
 
+    // Tree walk in normal mode.
     /// Build visible rows in normal mode while keeping the synthetic root hidden.
     fn collect_root_visible_rows_normal(&self, rows: &mut Vec<HostTreeRow>) {
         for &host_idx in &self.host_tree_root.host_indices {
@@ -160,6 +163,7 @@ impl SessionManager {
         }
     }
 
+    // Tree walk in search mode.
     /// Build visible rows in search mode while keeping the synthetic root hidden.
     fn collect_root_visible_rows_search(&self, rows: &mut Vec<HostTreeRow>) {
         for &host_idx in &self.host_tree_root.host_indices {
@@ -254,6 +258,7 @@ impl SessionManager {
         has_match
     }
 
+    // Selection stabilization after list rebuilds.
     fn sync_host_row_selection_state(&mut self) {
         if self.visible_host_rows.is_empty() {
             self.selected_host_row = 0;
@@ -284,6 +289,7 @@ impl SessionManager {
         self.sync_host_row_selection_state();
     }
 
+    // Public filter entry point.
     /// Update the filtered hosts based on search query with fuzzy matching.
     pub(crate) fn update_filtered_hosts(&mut self) {
         let previous = self.selected_row_key();
@@ -299,6 +305,7 @@ impl SessionManager {
         self.repair_selection_after_rebuild(previous);
     }
 
+    // Selection accessors.
     pub(crate) fn selected_host_idx(&self) -> Option<usize> {
         match self.visible_host_rows.get(self.selected_host_row) {
             Some(HostTreeRow {
@@ -328,10 +335,12 @@ impl SessionManager {
         self.visible_host_rows.len()
     }
 
+    // Match summary.
     pub(crate) fn matched_host_count(&self) -> usize {
         self.host_match_scores.len()
     }
 
+    // Folder expansion controls.
     pub(crate) fn is_folder_expanded(&self, folder_id: FolderId) -> bool {
         if !self.search_query.is_empty() {
             return true;
@@ -359,6 +368,7 @@ impl SessionManager {
         self.set_folder_expanded(folder_id, !expanded);
     }
 
+    // Folder lookup/count helpers.
     fn folder_by_id_recursive(folder: &TreeFolder, folder_id: FolderId) -> Option<&TreeFolder> {
         if folder.id == folder_id {
             return Some(folder);
@@ -387,6 +397,7 @@ impl SessionManager {
         self.folder_by_id(folder_id).map(Self::count_hosts_recursive).unwrap_or(0)
     }
 
+    // Viewport scroll alignment.
     /// Update host list scroll to keep selection visible.
     pub(crate) fn update_host_scroll(&mut self, viewport_height: usize) {
         if self.visible_host_rows.is_empty() || viewport_height == 0 {

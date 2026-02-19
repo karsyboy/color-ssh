@@ -25,7 +25,7 @@ pub(crate) struct ConnectRequest {
 }
 
 /// Main application state.
-pub struct AppState {
+pub(crate) struct AppState {
     pub(crate) hosts: Vec<SshHost>,
     pub(crate) host_search_index: Vec<HostSearchEntry>,
     pub(crate) host_tree_root: TreeFolder,
@@ -70,6 +70,7 @@ pub struct AppState {
 }
 
 impl AppState {
+    // Layout sizing helpers.
     fn clamp_host_panel_width_for_terminal(width: u16, term_width: u16) -> u16 {
         let max_for_terminal = term_width.saturating_sub(1).max(1);
         let upper = HOST_PANEL_MAX_WIDTH.min(max_for_terminal);
@@ -77,6 +78,7 @@ impl AppState {
         width.clamp(lower, upper)
     }
 
+    // Search indexing helpers.
     fn build_host_search_index(hosts: &[SshHost]) -> Vec<HostSearchEntry> {
         hosts
             .iter()
@@ -88,6 +90,7 @@ impl AppState {
             .collect()
     }
 
+    // Render invalidation / draw throttling.
     fn current_render_epoch(&self) -> u64 {
         self.tabs
             .iter()
@@ -109,6 +112,7 @@ impl AppState {
         self.ui_dirty = false;
     }
 
+    // Terminal resize handling.
     pub(crate) fn handle_terminal_resize(&mut self, term_width: u16, term_height: u16) {
         if term_width == 0 || term_height == 0 {
             return;
@@ -134,6 +138,7 @@ impl AppState {
         self.last_terminal_size = (term_width, term_height);
     }
 
+    // Folder tree helpers.
     pub(crate) fn collect_descendant_folder_ids(folder: &TreeFolder, out: &mut HashSet<FolderId>) {
         for child in &folder.children {
             out.insert(child.id);
@@ -141,6 +146,7 @@ impl AppState {
         }
     }
 
+    // Current-tab search accessors.
     pub(crate) fn current_tab_search(&self) -> Option<&TerminalSearchState> {
         self.tabs.get(self.selected_tab).map(|tab| &tab.terminal_search)
     }
@@ -149,8 +155,9 @@ impl AppState {
         self.tabs.get_mut(self.selected_tab).map(|tab| &mut tab.terminal_search)
     }
 
+    // Construction.
     /// Create a new AppState instance.
-    pub fn new() -> io::Result<Self> {
+    pub(crate) fn new() -> io::Result<Self> {
         log_debug!("Initializing session manager");
 
         let tree_model = load_ssh_host_tree().unwrap_or_else(|err| {
@@ -170,14 +177,14 @@ impl AppState {
         let hosts = tree_model.hosts;
         let host_search_index = Self::build_host_search_index(&hosts);
         let host_tree_root = tree_model.root;
-        let (history_buffer, host_tree_start_collapsed, host_info_visible, host_view_size_percent, info_view_size_percent) = config::SESSION_CONFIG
+        let (history_buffer, host_tree_uncollapsed, host_info_visible, host_view_size_percent, info_view_size_percent) = config::SESSION_CONFIG
             .get()
             .and_then(|config_lock| {
                 config_lock.read().ok().and_then(|cfg| {
                     cfg.interactive_settings.as_ref().map(|interactive| {
                         (
                             interactive.history_buffer,
-                            interactive.host_tree_starts_collapsed(),
+                            interactive.host_tree_uncollapsed,
                             interactive.info_view,
                             interactive.host_view_size,
                             interactive.info_view_size,
@@ -185,7 +192,7 @@ impl AppState {
                     })
                 })
             })
-            .unwrap_or((1000, true, true, 25, 40));
+            .unwrap_or((1000, false, true, 25, 40));
 
         let quick_connect_default_ssh_logging = config::SESSION_CONFIG
             .get()
@@ -202,7 +209,7 @@ impl AppState {
         }
 
         let mut collapsed_folders = HashSet::new();
-        if host_tree_start_collapsed {
+        if !host_tree_uncollapsed {
             Self::collect_descendant_folder_ids(&host_tree_root, &mut collapsed_folders);
         }
 
@@ -256,6 +263,7 @@ impl AppState {
         Ok(app)
     }
 
+    // Test scaffolding.
     #[cfg(test)]
     pub(crate) fn new_for_tests() -> Self {
         let host_tree_root = TreeFolder {

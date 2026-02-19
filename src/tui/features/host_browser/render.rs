@@ -10,6 +10,7 @@ use ratatui::{
 };
 
 impl SessionManager {
+    // Host list panel.
     pub(crate) fn render_host_list(&mut self, frame: &mut Frame, area: Rect) {
         if area.height == 0 {
             self.host_list_area = Rect::default();
@@ -100,6 +101,7 @@ impl SessionManager {
         }
     }
 
+    // Compact info panel.
     pub(crate) fn render_host_info(&self, frame: &mut Frame, area: Rect) {
         if area.height == 0 {
             return;
@@ -239,6 +241,7 @@ impl SessionManager {
         frame.render_widget(Paragraph::new("No selection").style(Style::default().fg(Color::DarkGray)), body_area);
     }
 
+    // Detailed host/folder panel (shown when no tabs are open).
     pub(crate) fn render_host_details(&self, frame: &mut Frame, area: Rect) {
         if area.height == 0 {
             return;

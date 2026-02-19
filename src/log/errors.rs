@@ -14,6 +14,7 @@ pub enum LogError {
 }
 
 impl fmt::Display for LogError {
+    // User-facing error formatting.
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             LogError::IoError(err) => write!(f, "I/O error: {}", err),
@@ -25,8 +26,10 @@ impl fmt::Display for LogError {
     }
 }
 
+// Marker trait for `std::error::Error` compatibility.
 impl Error for LogError {}
 
+// Convert I/O errors into logging errors.
 impl From<io::Error> for LogError {
     fn from(err: io::Error) -> Self {
         LogError::IoError(err)
