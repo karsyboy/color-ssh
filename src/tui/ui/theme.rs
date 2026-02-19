@@ -394,7 +394,7 @@ fn ensure_theme_file_exists(path: &Path) -> io::Result<()> {
         .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "Theme path does not have a parent directory"))?;
 
     fs::create_dir_all(parent)?;
-    let template = include_str!("../../../templates/default.cossh-theme.toml");
+    let template = include_str!("../../../templates/cossh-theme.toml");
     fs::write(path, template)?;
     log_info!("Created default TUI theme file at {:?}", path);
     Ok(())
