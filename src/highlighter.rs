@@ -17,6 +17,8 @@ static ANSI_ESCAPE_REGEX: Lazy<Option<Regex>> = Lazy::new(|| {
     .ok()
 });
 
+// Heuristic: regex-set prefiltering tends to help with smaller rule sets, but
+// can become net overhead once the rule list grows.
 const MAX_RULES_FOR_REGEXSET_PREFILTER: usize = 24;
 
 #[derive(Default)]
@@ -36,6 +38,7 @@ pub fn process_chunk_with_scratch<'a>(
     reset_color: &str,
     scratch: &'a mut HighlightScratch,
 ) -> Cow<'a, str> {
+    // Fast path: nothing to do, so return original chunk without allocating.
     if chunk.is_empty() || rules.is_empty() {
         return Cow::Borrowed(chunk);
     }
@@ -43,22 +46,27 @@ pub fn process_chunk_with_scratch<'a>(
     let debug_logging = debug_enabled!();
     let thread_id = debug_logging.then(|| thread::current().id());
 
+    // Timers are created only in debug mode so production hot path stays lean.
     let build_started_at = debug_logging.then(Instant::now);
     let has_ansi = chunk.as_bytes().contains(&0x1b);
     let has_newline_or_cr = chunk.as_bytes().iter().any(|byte| matches!(*byte, b'\n' | b'\r'));
 
     let (clean_chunk, use_mapping) = if has_ansi {
+        // ANSI path: strip escape bytes for matching while tracking clean->raw offsets.
         build_index_mapping(chunk, &mut scratch.clean_chunk, &mut scratch.mapping);
         (scratch.clean_chunk.as_str(), true)
     } else if has_newline_or_cr {
+        // Newline path: map line breaks to spaces so cross-line patterns can match.
         build_clean_chunk_no_ansi(chunk, &mut scratch.clean_chunk);
         scratch.mapping.clear();
         (scratch.clean_chunk.as_str(), false)
     } else {
+        // Plain path: match directly on the original bytes.
         scratch.mapping.clear();
         (chunk, false)
     };
 
+    // All-visible-bytes could be removed after ANSI stripping.
     if clean_chunk.is_empty() {
         return Cow::Borrowed(chunk);
     }
@@ -69,6 +77,7 @@ pub fn process_chunk_with_scratch<'a>(
     let mut rule_timings_ns = debug_logging.then(|| vec![0u128; rules.len()]);
     let mut prefilter_elapsed_us = 0u128;
 
+    // Applies one rule and stores all discovered raw byte ranges.
     let mut push_matches = |rule_idx: usize, regex: &Regex| {
         let rule_started_at = debug_logging.then(Instant::now);
 
@@ -77,6 +86,7 @@ pub fn process_chunk_with_scratch<'a>(
             let clean_end = mat.end();
 
             let (raw_start, raw_end) = if use_mapping {
+                // For ANSI-cleaned chunks, remap match offsets back to original raw chunk.
                 map_clean_range_to_raw(clean_start, clean_end, &scratch.mapping, chunk.len(), thread_id, chunk_id)
             } else {
                 (clean_start, clean_end)
@@ -90,6 +100,7 @@ pub fn process_chunk_with_scratch<'a>(
         }
     };
 
+    // Prefilter is optional and capped by a rule-count heuristic.
     let use_regexset_prefilter = rule_set.is_some() && rules.len() <= MAX_RULES_FOR_REGEXSET_PREFILTER;
 
     if use_regexset_prefilter {
@@ -115,8 +126,16 @@ pub fn process_chunk_with_scratch<'a>(
         return Cow::Borrowed(chunk);
     }
 
-    // Sort matches by starting position to handle overlaps.
-    scratch.matches.sort_unstable_by_key(|&(start, _, _)| start);
+    // Deterministic conflict ordering:
+    // 1) earliest start wins
+    // 2) when starts are equal, lower rule index (config order) wins
+    // 3) final end tie-break keeps ordering total for unstable sort
+    scratch.matches.sort_unstable_by(|left, right| {
+        left.0
+            .cmp(&right.0)
+            .then(left.2.cmp(&right.2))
+            .then(left.1.cmp(&right.1))
+    });
 
     let format_started_at = debug_logging.then(Instant::now);
     let estimated_capacity = chunk
@@ -129,6 +148,7 @@ pub fn process_chunk_with_scratch<'a>(
     let mut accepted_match_count = 0usize;
 
     for (start, end, rule_idx) in scratch.matches.iter().copied() {
+        // First accepted range wins; later overlapping ranges are discarded.
         if last_index > start {
             continue;
         }
@@ -176,6 +196,7 @@ pub fn process_chunk_with_scratch<'a>(
         );
     }
 
+    // Return borrowed output from scratch to avoid cloning the highlighted chunk.
     Cow::Borrowed(&scratch.highlighted)
 }
 
@@ -225,6 +246,8 @@ fn build_clean_chunk_no_ansi(raw: &str, clean_chunk: &mut String) {
     clean_chunk.reserve(raw.len());
 
     for ch in raw.chars() {
+        // Keep byte count stable enough for non-ANSI path by replacing line breaks
+        // with one visible separator for regex matching.
         if ch == '\n' || ch == '\r' {
             clean_chunk.push(' ');
         } else {
@@ -237,6 +260,7 @@ fn build_clean_chunk_no_ansi(raw: &str, clean_chunk: &mut String) {
 /// sequences and newlines removed and return both in reusable buffers.
 fn build_index_mapping(raw: &str, clean_chunk: &mut String, mapping: &mut Vec<usize>) {
     let Some(ansi_escape_regex) = ANSI_ESCAPE_REGEX.as_ref() else {
+        // Regex compile failure fallback: keep semantics without ANSI stripping.
         build_clean_chunk_no_ansi(raw, clean_chunk);
         mapping.clear();
         mapping.reserve(raw.len().saturating_add(1));
@@ -284,6 +308,7 @@ fn build_index_mapping(raw: &str, clean_chunk: &mut String, mapping: &mut Vec<us
                 clean_chunk.push(ch);
             }
 
+            // Each clean byte points to the raw byte where the source char starts.
             let clean_char_len = clean_chunk.len().saturating_sub(clean_byte_pos);
             for _ in 0..clean_char_len {
                 mapping.push(raw_idx);
@@ -337,6 +362,17 @@ mod tests {
 
         let output = process_chunk_once("abc", 1, &rules, None, "</>");
         assert_eq!(output, "<a>ab</>c");
+    }
+
+    #[test]
+    fn keeps_rule_order_for_equal_start_overlaps() {
+        let rules = vec![
+            (Regex::new("abc").expect("regex"), "<first>".to_string()),
+            (Regex::new("ab").expect("regex"), "<second>".to_string()),
+        ];
+
+        let output = process_chunk_once("abc", 7, &rules, None, "</>");
+        assert_eq!(output, "<first>abc</>");
     }
 
     #[test]
