@@ -1,11 +1,11 @@
 //! Global status bar rendering.
 
 use crate::tui::SessionManager;
-use crate::tui::ui::theme::display_width;
+use crate::tui::ui::theme::{self, display_width};
 use ratatui::{
     Frame,
     layout::{Alignment, Constraint, Direction, Layout, Rect},
-    style::{Color, Modifier, Style},
+    style::{Modifier, Style},
     text::{Line, Span},
     widgets::Paragraph,
 };
@@ -26,7 +26,7 @@ impl SessionManager {
         }
 
         let (left_spans, right_spans) = self.build_status_line_sections();
-        let base_style = Style::default().fg(Color::Gray);
+        let base_style = Style::default().fg(theme::ansi_white());
 
         if right_spans.is_empty() {
             let status = Paragraph::new(Line::from(left_spans)).style(base_style);
@@ -80,7 +80,7 @@ impl SessionManager {
 
     // Context snippets.
     fn context_split_indicator() -> Span<'static> {
-        Span::styled(" || ", Style::default().fg(Color::DarkGray))
+        Span::styled(" || ", Style::default().fg(theme::ansi_bright_black()))
     }
 
     fn selected_host_name(&self) -> Option<String> {
@@ -97,49 +97,49 @@ impl SessionManager {
     fn build_manager_status_spans(&self) -> (Vec<Span<'static>>, Vec<Span<'static>>) {
         let host_name = self.selected_host_name().unwrap_or_else(|| "none".to_string());
         let mut left = vec![
-            Span::styled("Host", Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD)),
+            Span::styled("Host", Style::default().fg(theme::ansi_cyan()).add_modifier(Modifier::BOLD)),
             Self::context_split_indicator(),
-            Span::styled(host_name, Style::default().fg(Color::White)),
+            Span::styled(host_name, Style::default().fg(theme::ansi_bright_white())),
         ];
         if !self.search_query.is_empty() {
             left.push(Self::context_split_indicator());
-            left.push(Span::styled("filter:", Style::default().fg(Color::DarkGray)));
+            left.push(Span::styled("filter:", Style::default().fg(theme::ansi_bright_black())));
             left.push(Span::styled(" ", Style::default()));
-            left.push(Span::styled(self.search_query.clone(), Style::default().fg(Color::Yellow)));
+            left.push(Span::styled(self.search_query.clone(), Style::default().fg(theme::ansi_yellow())));
             left.push(Span::styled(" ", Style::default()));
-            left.push(Span::styled("(", Style::default().fg(Color::DarkGray)));
-            left.push(Span::styled("^C", Style::default().fg(Color::Red)));
-            left.push(Span::styled(" clear)", Style::default().fg(Color::DarkGray)));
+            left.push(Span::styled("(", Style::default().fg(theme::ansi_bright_black())));
+            left.push(Span::styled("^C", Style::default().fg(theme::ansi_red())));
+            left.push(Span::styled(" clear)", Style::default().fg(theme::ansi_bright_black())));
         }
 
         let mut right = vec![
-            Span::styled("↑/↓", Style::default().fg(Color::Cyan)),
-            Span::styled(":move | ", Style::default().fg(Color::DarkGray)),
-            Span::styled("PgUp/Dn", Style::default().fg(Color::Cyan)),
-            Span::styled(":page | ", Style::default().fg(Color::DarkGray)),
-            Span::styled("Home/End", Style::default().fg(Color::Cyan)),
-            Span::styled(":edge | ", Style::default().fg(Color::DarkGray)),
-            Span::styled("^F", Style::default().fg(Color::Yellow)),
-            Span::styled(":find | ", Style::default().fg(Color::DarkGray)),
-            Span::styled("Enter", Style::default().fg(Color::Green)),
-            Span::styled(":open | ", Style::default().fg(Color::DarkGray)),
-            Span::styled("c", Style::default().fg(Color::Cyan)),
-            Span::styled(":collapse | ", Style::default().fg(Color::DarkGray)),
-            Span::styled("i", Style::default().fg(Color::Cyan)),
-            Span::styled(":info | ", Style::default().fg(Color::DarkGray)),
-            Span::styled("^←/^→", Style::default().fg(Color::Cyan)),
-            Span::styled(":resize | ", Style::default().fg(Color::DarkGray)),
-            Span::styled("q", Style::default().fg(Color::Yellow)),
-            Span::styled(":quick | ", Style::default().fg(Color::DarkGray)),
+            Span::styled("↑/↓", Style::default().fg(theme::ansi_cyan())),
+            Span::styled(":move | ", Style::default().fg(theme::ansi_bright_black())),
+            Span::styled("PgUp/Dn", Style::default().fg(theme::ansi_cyan())),
+            Span::styled(":page | ", Style::default().fg(theme::ansi_bright_black())),
+            Span::styled("Home/End", Style::default().fg(theme::ansi_cyan())),
+            Span::styled(":edge | ", Style::default().fg(theme::ansi_bright_black())),
+            Span::styled("^F", Style::default().fg(theme::ansi_yellow())),
+            Span::styled(":find | ", Style::default().fg(theme::ansi_bright_black())),
+            Span::styled("Enter", Style::default().fg(theme::ansi_green())),
+            Span::styled(":open | ", Style::default().fg(theme::ansi_bright_black())),
+            Span::styled("c", Style::default().fg(theme::ansi_cyan())),
+            Span::styled(":collapse | ", Style::default().fg(theme::ansi_bright_black())),
+            Span::styled("i", Style::default().fg(theme::ansi_cyan())),
+            Span::styled(":info | ", Style::default().fg(theme::ansi_bright_black())),
+            Span::styled("^←/^→", Style::default().fg(theme::ansi_cyan())),
+            Span::styled(":resize | ", Style::default().fg(theme::ansi_bright_black())),
+            Span::styled("q", Style::default().fg(theme::ansi_yellow())),
+            Span::styled(":quick | ", Style::default().fg(theme::ansi_bright_black())),
         ];
 
         if !self.tabs.is_empty() {
-            right.push(Span::styled("S-Tab", Style::default().fg(Color::Cyan)));
-            right.push(Span::styled(":tabs | ", Style::default().fg(Color::DarkGray)));
+            right.push(Span::styled("S-Tab", Style::default().fg(theme::ansi_cyan())));
+            right.push(Span::styled(":tabs | ", Style::default().fg(theme::ansi_bright_black())));
         }
 
-        right.push(Span::styled("^Q", Style::default().fg(Color::Red)));
-        right.push(Span::styled(":quit", Style::default().fg(Color::DarkGray)));
+        right.push(Span::styled("^Q", Style::default().fg(theme::ansi_red())));
+        right.push(Span::styled(":quit", Style::default().fg(theme::ansi_bright_black())));
         (left, right)
     }
 
@@ -148,9 +148,9 @@ impl SessionManager {
         if self.tabs.is_empty() || self.selected_tab >= self.tabs.len() {
             return (
                 vec![
-                    Span::styled("Terminal", Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)),
-                    Span::styled(" | ", Style::default().fg(Color::DarkGray)),
-                    Span::styled("No active terminal", Style::default().fg(Color::DarkGray)),
+                    Span::styled("Terminal", Style::default().fg(theme::ansi_yellow()).add_modifier(Modifier::BOLD)),
+                    Span::styled(" | ", Style::default().fg(theme::ansi_bright_black())),
+                    Span::styled("No active terminal", Style::default().fg(theme::ansi_bright_black())),
                 ],
                 Vec::new(),
             );
@@ -163,7 +163,7 @@ impl SessionManager {
             .and_then(|session| session.exited.lock().ok().map(|exited| *exited))
             .unwrap_or(true);
 
-        let status_icon_color = if is_exited { Color::Red } else { Color::Green };
+        let status_icon_color = if is_exited { theme::ansi_red() } else { theme::ansi_green() };
         let scroll_info = if tab.scroll_offset > 0 {
             format!(" +{}", tab.scroll_offset)
         } else {
@@ -171,59 +171,59 @@ impl SessionManager {
         };
 
         let mut left = vec![
-            Span::styled("Terminal", Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)),
+            Span::styled("Terminal", Style::default().fg(theme::ansi_yellow()).add_modifier(Modifier::BOLD)),
             Self::context_split_indicator(),
             Span::styled("●", Style::default().fg(status_icon_color).add_modifier(Modifier::BOLD)),
             Span::styled(" ", Style::default()),
-            Span::styled(tab.host.name.clone(), Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD)),
+            Span::styled(tab.host.name.clone(), Style::default().fg(theme::ansi_cyan()).add_modifier(Modifier::BOLD)),
         ];
 
         if !scroll_info.is_empty() {
-            left.push(Span::styled(" sb:", Style::default().fg(Color::DarkGray)));
-            left.push(Span::styled(scroll_info, Style::default().fg(Color::Yellow)));
+            left.push(Span::styled(" sb:", Style::default().fg(theme::ansi_bright_black())));
+            left.push(Span::styled(scroll_info, Style::default().fg(theme::ansi_yellow())));
         }
 
         let mut right = Vec::new();
 
         if is_exited {
-            right.push(Span::styled("Enter", Style::default().fg(Color::Green)));
-            right.push(Span::styled(":reconnect | ", Style::default().fg(Color::DarkGray)));
-            right.push(Span::styled("S-Tab", Style::default().fg(Color::Cyan)));
-            right.push(Span::styled(":host | ", Style::default().fg(Color::DarkGray)));
-            right.push(Span::styled("A-←/→", Style::default().fg(Color::Cyan)));
-            right.push(Span::styled(":tab | ", Style::default().fg(Color::DarkGray)));
-            right.push(Span::styled("^←/^→", Style::default().fg(Color::Cyan)));
-            right.push(Span::styled(":move | ", Style::default().fg(Color::DarkGray)));
-            right.push(Span::styled("^B", Style::default().fg(Color::Cyan)));
-            right.push(Span::styled(":panel | ", Style::default().fg(Color::DarkGray)));
-            right.push(Span::styled("^F", Style::default().fg(Color::Cyan)));
-            right.push(Span::styled(":find | ", Style::default().fg(Color::DarkGray)));
-            right.push(Span::styled("A-c", Style::default().fg(Color::Yellow)));
-            right.push(Span::styled(":copy | ", Style::default().fg(Color::DarkGray)));
-            right.push(Span::styled("S-PgUp/Dn", Style::default().fg(Color::Yellow)));
-            right.push(Span::styled(":scroll | ", Style::default().fg(Color::DarkGray)));
-            right.push(Span::styled("^W", Style::default().fg(Color::Red)));
-            right.push(Span::styled(":close", Style::default().fg(Color::DarkGray)));
+            right.push(Span::styled("Enter", Style::default().fg(theme::ansi_green())));
+            right.push(Span::styled(":reconnect | ", Style::default().fg(theme::ansi_bright_black())));
+            right.push(Span::styled("S-Tab", Style::default().fg(theme::ansi_cyan())));
+            right.push(Span::styled(":host | ", Style::default().fg(theme::ansi_bright_black())));
+            right.push(Span::styled("A-←/→", Style::default().fg(theme::ansi_cyan())));
+            right.push(Span::styled(":tab | ", Style::default().fg(theme::ansi_bright_black())));
+            right.push(Span::styled("^←/^→", Style::default().fg(theme::ansi_cyan())));
+            right.push(Span::styled(":move | ", Style::default().fg(theme::ansi_bright_black())));
+            right.push(Span::styled("^B", Style::default().fg(theme::ansi_cyan())));
+            right.push(Span::styled(":panel | ", Style::default().fg(theme::ansi_bright_black())));
+            right.push(Span::styled("^F", Style::default().fg(theme::ansi_cyan())));
+            right.push(Span::styled(":find | ", Style::default().fg(theme::ansi_bright_black())));
+            right.push(Span::styled("A-c", Style::default().fg(theme::ansi_yellow())));
+            right.push(Span::styled(":copy | ", Style::default().fg(theme::ansi_bright_black())));
+            right.push(Span::styled("S-PgUp/Dn", Style::default().fg(theme::ansi_yellow())));
+            right.push(Span::styled(":scroll | ", Style::default().fg(theme::ansi_bright_black())));
+            right.push(Span::styled("^W", Style::default().fg(theme::ansi_red())));
+            right.push(Span::styled(":close", Style::default().fg(theme::ansi_bright_black())));
             return (left, right);
         }
 
         right.extend([
-            Span::styled("S-Tab", Style::default().fg(Color::Cyan)),
-            Span::styled(":host | ", Style::default().fg(Color::DarkGray)),
-            Span::styled("A-←/→", Style::default().fg(Color::Cyan)),
-            Span::styled(":tab | ", Style::default().fg(Color::DarkGray)),
-            Span::styled("^←/^→", Style::default().fg(Color::Cyan)),
-            Span::styled(":move | ", Style::default().fg(Color::DarkGray)),
-            Span::styled("^B", Style::default().fg(Color::Cyan)),
-            Span::styled(":panel | ", Style::default().fg(Color::DarkGray)),
-            Span::styled("^F", Style::default().fg(Color::Cyan)),
-            Span::styled(":find | ", Style::default().fg(Color::DarkGray)),
-            Span::styled("A-c", Style::default().fg(Color::Yellow)),
-            Span::styled(":copy | ", Style::default().fg(Color::DarkGray)),
-            Span::styled("S-PgUp/Dn", Style::default().fg(Color::Yellow)),
-            Span::styled(":scroll | ", Style::default().fg(Color::DarkGray)),
-            Span::styled("^W", Style::default().fg(Color::Red)),
-            Span::styled(":close", Style::default().fg(Color::DarkGray)),
+            Span::styled("S-Tab", Style::default().fg(theme::ansi_cyan())),
+            Span::styled(":host | ", Style::default().fg(theme::ansi_bright_black())),
+            Span::styled("A-←/→", Style::default().fg(theme::ansi_cyan())),
+            Span::styled(":tab | ", Style::default().fg(theme::ansi_bright_black())),
+            Span::styled("^←/^→", Style::default().fg(theme::ansi_cyan())),
+            Span::styled(":move | ", Style::default().fg(theme::ansi_bright_black())),
+            Span::styled("^B", Style::default().fg(theme::ansi_cyan())),
+            Span::styled(":panel | ", Style::default().fg(theme::ansi_bright_black())),
+            Span::styled("^F", Style::default().fg(theme::ansi_cyan())),
+            Span::styled(":find | ", Style::default().fg(theme::ansi_bright_black())),
+            Span::styled("A-c", Style::default().fg(theme::ansi_yellow())),
+            Span::styled(":copy | ", Style::default().fg(theme::ansi_bright_black())),
+            Span::styled("S-PgUp/Dn", Style::default().fg(theme::ansi_yellow())),
+            Span::styled(":scroll | ", Style::default().fg(theme::ansi_bright_black())),
+            Span::styled("^W", Style::default().fg(theme::ansi_red())),
+            Span::styled(":close", Style::default().fg(theme::ansi_bright_black())),
         ]);
 
         (left, right)
@@ -232,18 +232,18 @@ impl SessionManager {
     // Host search context.
     fn build_search_mode_status_spans(&self) -> (Vec<Span<'static>>, Vec<Span<'static>>) {
         let left = vec![
-            Span::styled("Host Search", Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD)),
+            Span::styled("Host Search", Style::default().fg(theme::ansi_cyan()).add_modifier(Modifier::BOLD)),
             Self::context_split_indicator(),
-            Span::styled(self.search_query.clone(), Style::default().fg(Color::White)),
-            Span::styled("_", Style::default().fg(Color::White)),
+            Span::styled(self.search_query.clone(), Style::default().fg(theme::ansi_bright_white())),
+            Span::styled("_", Style::default().fg(theme::ansi_bright_white())),
         ];
         let right = vec![
-            Span::styled("Enter", Style::default().fg(Color::Green)),
-            Span::styled(" | ", Style::default().fg(Color::DarkGray)),
-            Span::styled("Esc", Style::default().fg(Color::Red)),
-            Span::styled("/", Style::default().fg(Color::DarkGray)),
-            Span::styled("^C", Style::default().fg(Color::Red)),
-            Span::styled(":clear", Style::default().fg(Color::DarkGray)),
+            Span::styled("Enter", Style::default().fg(theme::ansi_green())),
+            Span::styled(" | ", Style::default().fg(theme::ansi_bright_black())),
+            Span::styled("Esc", Style::default().fg(theme::ansi_red())),
+            Span::styled("/", Style::default().fg(theme::ansi_bright_black())),
+            Span::styled("^C", Style::default().fg(theme::ansi_red())),
+            Span::styled(":clear", Style::default().fg(theme::ansi_bright_black())),
         ];
         (left, right)
     }
@@ -261,20 +261,20 @@ impl SessionManager {
         };
 
         let left = vec![
-            Span::styled("Terminal Search", Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD)),
+            Span::styled("Terminal Search", Style::default().fg(theme::ansi_cyan()).add_modifier(Modifier::BOLD)),
             Self::context_split_indicator(),
-            Span::styled(query, Style::default().fg(Color::White)),
-            Span::styled("_", Style::default().fg(Color::White)),
+            Span::styled(query, Style::default().fg(theme::ansi_bright_white())),
+            Span::styled("_", Style::default().fg(theme::ansi_bright_white())),
             Span::styled(" ", Style::default()),
-            Span::styled(format!("({match_info})"), Style::default().fg(Color::Yellow)),
+            Span::styled(format!("({match_info})"), Style::default().fg(theme::ansi_yellow())),
         ];
         let right = vec![
-            Span::styled("Enter", Style::default().fg(Color::Green)),
-            Span::styled(" | ", Style::default().fg(Color::DarkGray)),
-            Span::styled("Esc", Style::default().fg(Color::Red)),
-            Span::styled(":clear | ", Style::default().fg(Color::DarkGray)),
-            Span::styled("↑/↓", Style::default().fg(Color::Cyan)),
-            Span::styled(":next/prev", Style::default().fg(Color::DarkGray)),
+            Span::styled("Enter", Style::default().fg(theme::ansi_green())),
+            Span::styled(" | ", Style::default().fg(theme::ansi_bright_black())),
+            Span::styled("Esc", Style::default().fg(theme::ansi_red())),
+            Span::styled(":clear | ", Style::default().fg(theme::ansi_bright_black())),
+            Span::styled("↑/↓", Style::default().fg(theme::ansi_cyan())),
+            Span::styled(":next/prev", Style::default().fg(theme::ansi_bright_black())),
         ];
         (left, right)
     }

@@ -4,7 +4,7 @@ use crate::tui::SessionManager;
 use crate::tui::features::selection::extract::is_cell_in_selection;
 use crate::tui::features::terminal_search::render_highlight::build_search_row_ranges;
 use crate::tui::terminal_emulator;
-use crate::tui::ui::theme::{display_width, truncate_to_display_width};
+use crate::tui::ui::theme::{self, display_width, truncate_to_display_width};
 use ratatui::{
     Frame,
     layout::{Constraint, Direction, Layout, Rect},
@@ -123,9 +123,9 @@ impl SessionManager {
                         self.host_info_area.x,
                         self.host_info_area.width,
                         if self.is_dragging_host_info_divider {
-                            Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD)
+                            Style::default().fg(theme::ansi_cyan()).add_modifier(Modifier::BOLD)
                         } else {
-                            Style::default().fg(Color::DarkGray)
+                            Style::default().fg(theme::ansi_bright_black())
                         },
                     );
                     self.render_host_info(frame, self.host_info_area);
@@ -146,9 +146,9 @@ impl SessionManager {
 
         if show_host_panel && main_chunks[1].width > 0 {
             let divider_style = if self.is_dragging_divider {
-                Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD)
+                Style::default().fg(theme::ansi_cyan()).add_modifier(Modifier::BOLD)
             } else {
-                Style::default().fg(Color::DarkGray)
+                Style::default().fg(theme::ansi_bright_black())
             };
             draw_vertical_rule(
                 frame,
@@ -164,7 +164,7 @@ impl SessionManager {
             separator_area.y,
             separator_area.x,
             separator_area.width,
-            Style::default().fg(Color::DarkGray),
+            Style::default().fg(theme::ansi_bright_black()),
         );
 
         self.render_global_status_bar(frame, status_area);
@@ -205,7 +205,7 @@ impl SessionManager {
 
         let mut spans: Vec<Span> = Vec::new();
         if has_left_overflow {
-            spans.push(Span::styled("◀", Style::default().fg(Color::Cyan)));
+            spans.push(Span::styled("◀", Style::default().fg(theme::ansi_cyan())));
         }
 
         let mut running_start = 0usize;
@@ -221,14 +221,20 @@ impl SessionManager {
             let tab = &self.tabs[idx];
             let is_selected = idx == self.selected_tab && !self.focus_on_manager;
             let style = if is_selected {
-                Style::default().fg(Color::Yellow).bg(Color::Indexed(238)).add_modifier(Modifier::BOLD)
+                Style::default()
+                    .fg(theme::ansi_yellow())
+                    .bg(theme::tab_active_bg())
+                    .add_modifier(Modifier::BOLD)
             } else {
-                Style::default().fg(Color::Gray).bg(Color::Indexed(236))
+                Style::default().fg(theme::ansi_white()).bg(theme::tab_inactive_bg())
             };
             let close_style = if is_selected {
-                Style::default().fg(Color::LightRed).bg(Color::Indexed(238)).add_modifier(Modifier::BOLD)
+                Style::default()
+                    .fg(theme::ansi_bright_red())
+                    .bg(theme::tab_active_bg())
+                    .add_modifier(Modifier::BOLD)
             } else {
-                Style::default().fg(Color::Red).bg(Color::Indexed(236)).add_modifier(Modifier::BOLD)
+                Style::default().fg(theme::ansi_red()).bg(theme::tab_inactive_bg()).add_modifier(Modifier::BOLD)
             };
 
             let mut push_clipped = |text: &str, text_style: Style| {
@@ -246,7 +252,7 @@ impl SessionManager {
 
             push_clipped(&format!("{} ", tab.title), style);
             push_clipped("×", close_style);
-            push_clipped(" ", Style::default().fg(Color::DarkGray));
+            push_clipped(" ", Style::default().fg(theme::ansi_bright_black()));
             idx += 1;
         }
 
@@ -256,7 +262,7 @@ impl SessionManager {
         }
 
         if has_right_overflow {
-            spans.push(Span::styled("▶", Style::default().fg(Color::Cyan)));
+            spans.push(Span::styled("▶", Style::default().fg(theme::ansi_cyan())));
         }
 
         frame.render_widget(Paragraph::new(Line::from(spans)), area);
@@ -318,25 +324,25 @@ impl SessionManager {
                             .is_some_and(|(match_row, start_col, end_col)| abs_row == *match_row && col >= *start_col && col < *end_col);
 
                         let style = if is_current_search_match {
-                            let mut s = Style::default().bg(Color::Yellow).fg(Color::Black);
+                            let mut s = Style::default().bg(theme::ansi_yellow()).fg(theme::ansi_black());
                             if cell.bold() {
                                 s = s.add_modifier(Modifier::BOLD);
                             }
                             s
                         } else if is_search_match {
-                            let mut s = Style::default().bg(Color::DarkGray).fg(Color::Yellow);
+                            let mut s = Style::default().bg(theme::ansi_bright_black()).fg(theme::ansi_yellow());
                             if cell.bold() {
                                 s = s.add_modifier(Modifier::BOLD);
                             }
                             s
                         } else if is_selected {
-                            let mut s = Style::default().bg(Color::Blue).fg(Color::White);
+                            let mut s = Style::default().bg(theme::selection_bg()).fg(theme::selection_fg());
                             if cell.bold() {
                                 s = s.add_modifier(Modifier::BOLD);
                             }
                             s
                         } else if is_cursor {
-                            let mut s = Style::default().bg(Color::White).fg(Color::Black);
+                            let mut s = Style::default().bg(theme::ansi_bright_white()).fg(theme::ansi_black());
                             if cell.bold() {
                                 s = s.add_modifier(Modifier::BOLD);
                             }
@@ -348,10 +354,10 @@ impl SessionManager {
                             if cell.inverse() {
                                 std::mem::swap(&mut fg_color, &mut bg_color);
                                 if fg_color == Color::Reset {
-                                    fg_color = Color::Black;
+                                    fg_color = theme::ansi_black();
                                 }
                                 if bg_color == Color::Reset {
-                                    bg_color = Color::White;
+                                    bg_color = theme::ansi_bright_white();
                                 }
                             }
 
@@ -390,18 +396,18 @@ impl SessionManager {
             let error_lines = vec![
                 Line::from(""),
                 Line::from(vec![
-                    Span::styled("Failed to start SSH session for ", Style::default().fg(Color::Red)),
-                    Span::styled(&host.name, Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)),
+                    Span::styled("Failed to start SSH session for ", Style::default().fg(theme::ansi_red())),
+                    Span::styled(&host.name, Style::default().fg(theme::ansi_yellow()).add_modifier(Modifier::BOLD)),
                 ]),
                 Line::from(""),
                 Line::from(vec![
-                    Span::styled("Press ", Style::default().fg(Color::Gray)),
-                    Span::styled("Ctrl+W", Style::default().fg(Color::Red).add_modifier(Modifier::BOLD)),
-                    Span::styled(" to close this tab", Style::default().fg(Color::Gray)),
+                    Span::styled("Press ", Style::default().fg(theme::ansi_white())),
+                    Span::styled("Ctrl+W", Style::default().fg(theme::ansi_red()).add_modifier(Modifier::BOLD)),
+                    Span::styled(" to close this tab", Style::default().fg(theme::ansi_white())),
                 ]),
             ];
 
-            let paragraph = Paragraph::new(error_lines).style(Style::default().fg(Color::Red));
+            let paragraph = Paragraph::new(error_lines).style(Style::default().fg(theme::ansi_red()));
             frame.render_widget(paragraph, area);
         }
     }

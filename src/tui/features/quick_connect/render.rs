@@ -1,10 +1,11 @@
 //! Quick-connect modal rendering.
 
+use crate::tui::ui::theme;
 use crate::tui::{QuickConnectField, SessionManager};
 use ratatui::{
     Frame,
     layout::Rect,
-    style::{Color, Modifier, Style},
+    style::{Modifier, Style},
     text::{Line, Span},
     widgets::{Block, Borders, Clear, Paragraph},
 };
@@ -23,15 +24,15 @@ impl SessionManager {
         frame.render_widget(Clear, area);
         let block = Block::default()
             .borders(Borders::ALL)
-            .border_style(Style::default().fg(Color::Cyan))
+            .border_style(Style::default().fg(theme::ansi_cyan()))
             .title(" Quick Connect ");
         let inner = block.inner(area);
         frame.render_widget(block, area);
 
-        let selected_label = Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD);
-        let normal_label = Style::default().fg(Color::DarkGray);
-        let selected_value = Style::default().fg(Color::White).add_modifier(Modifier::BOLD);
-        let normal_value = Style::default().fg(Color::White);
+        let selected_label = Style::default().fg(theme::ansi_yellow()).add_modifier(Modifier::BOLD);
+        let normal_label = Style::default().fg(theme::ansi_bright_black());
+        let selected_value = Style::default().fg(theme::ansi_bright_white()).add_modifier(Modifier::BOLD);
+        let normal_value = Style::default().fg(theme::ansi_bright_white());
 
         let field_style = |field, selected: QuickConnectField| {
             if field == selected { selected_label } else { normal_label }
@@ -56,24 +57,24 @@ impl SessionManager {
         } else {
             profile_text
         };
-        let mut profile_list_spans = vec![Span::styled("Profiles: ", Style::default().fg(Color::DarkGray))];
+        let mut profile_list_spans = vec![Span::styled("Profiles: ", Style::default().fg(theme::ansi_bright_black()))];
         for (idx, profile_name) in form.profile_options.iter().enumerate() {
             if idx > 0 {
-                profile_list_spans.push(Span::styled(" | ", Style::default().fg(Color::DarkGray)));
+                profile_list_spans.push(Span::styled(" | ", Style::default().fg(theme::ansi_bright_black())));
             }
             let style = if idx == form.profile_index {
-                Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD)
+                Style::default().fg(theme::ansi_cyan()).add_modifier(Modifier::BOLD)
             } else {
-                Style::default().fg(Color::Gray)
+                Style::default().fg(theme::ansi_white())
             };
             profile_list_spans.push(Span::styled(profile_name.clone(), style));
         }
 
         let logging_mark = if form.ssh_logging { "[x]" } else { "[ ]" };
         let connect_style = if form.selected == QuickConnectField::Connect {
-            Style::default().fg(Color::Green).add_modifier(Modifier::BOLD)
+            Style::default().fg(theme::ansi_green()).add_modifier(Modifier::BOLD)
         } else {
-            Style::default().fg(Color::DarkGray)
+            Style::default().fg(theme::ansi_bright_black())
         };
 
         let mut lines = vec![
@@ -101,12 +102,12 @@ impl SessionManager {
             Line::from(vec![Span::styled("[ Enter ] Connect", connect_style)]),
             Line::from(vec![Span::styled(
                 "Esc: cancel | Tab/Shift+Tab: field | ←/→: profile",
-                Style::default().fg(Color::DarkGray),
+                Style::default().fg(theme::ansi_bright_black()),
             )]),
         ];
 
         if let Some(error) = &form.error {
-            lines.push(Line::from(vec![Span::styled(error.clone(), Style::default().fg(Color::Red))]));
+            lines.push(Line::from(vec![Span::styled(error.clone(), Style::default().fg(theme::ansi_red()))]));
         }
 
         frame.render_widget(Paragraph::new(lines), inner);

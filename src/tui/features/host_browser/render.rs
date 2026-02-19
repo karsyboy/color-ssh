@@ -1,10 +1,11 @@
 //! Host browser rendering.
 
+use crate::tui::ui::theme;
 use crate::tui::{HostTreeRowKind, SessionManager};
 use ratatui::{
     Frame,
     layout::Rect,
-    style::{Color, Modifier, Style},
+    style::{Modifier, Style},
     text::{Line, Span},
     widgets::{List, ListItem, ListState, Paragraph, Wrap},
 };
@@ -34,9 +35,9 @@ impl SessionManager {
         };
 
         let title_style = if self.focus_on_manager {
-            Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD)
+            Style::default().fg(theme::ansi_cyan()).add_modifier(Modifier::BOLD)
         } else {
-            Style::default().fg(Color::DarkGray)
+            Style::default().fg(theme::ansi_bright_black())
         };
         frame.render_widget(Paragraph::new(Line::from(Span::styled(title, title_style))), header_area);
 
@@ -55,22 +56,22 @@ impl SessionManager {
                     let indent = "  ".repeat(row.depth);
                     ListItem::new(Line::from(vec![
                         Span::raw(indent),
-                        Span::styled(glyph, Style::default().fg(Color::Cyan)),
+                        Span::styled(glyph, Style::default().fg(theme::ansi_cyan())),
                         Span::raw(" "),
-                        Span::styled(row.display_name.clone(), Style::default().fg(Color::LightCyan)),
+                        Span::styled(row.display_name.clone(), Style::default().fg(theme::ansi_bright_cyan())),
                     ]))
                 }
                 HostTreeRowKind::Host(_) => {
                     let indent = "  ".repeat(row.depth);
                     ListItem::new(Line::from(vec![
                         Span::raw(indent),
-                        Span::styled(row.display_name.clone(), Style::default().fg(Color::White)),
+                        Span::styled(row.display_name.clone(), Style::default().fg(theme::ansi_bright_white())),
                     ]))
                 }
             })
             .collect();
 
-        let list = List::new(visible_hosts).highlight_style(Style::default().bg(Color::DarkGray).add_modifier(Modifier::BOLD));
+        let list = List::new(visible_hosts).highlight_style(Style::default().bg(theme::ansi_bright_black()).add_modifier(Modifier::BOLD));
 
         let adjusted_selection = self.selected_host_row.saturating_sub(self.host_scroll_offset);
         let mut adjusted_state = ListState::default();
@@ -90,11 +91,11 @@ impl SessionManager {
                     if scrollbar_row_idx >= thumb_position && scrollbar_row_idx < thumb_position + thumb_size {
                         let cell = &mut frame.buffer_mut()[(scrollbar_x, row_y)];
                         cell.set_symbol("█");
-                        cell.set_style(Style::default().fg(Color::Cyan));
+                        cell.set_style(Style::default().fg(theme::ansi_cyan()));
                     } else {
                         let cell = &mut frame.buffer_mut()[(scrollbar_x, row_y)];
                         cell.set_symbol("│");
-                        cell.set_style(Style::default().fg(Color::DarkGray));
+                        cell.set_style(Style::default().fg(theme::ansi_bright_black()));
                     }
                 }
             }
@@ -111,14 +112,14 @@ impl SessionManager {
         let body_area = Rect::new(area.x, area.y.saturating_add(1), area.width, area.height.saturating_sub(1));
 
         let header_style = if self.focus_on_manager {
-            Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD)
+            Style::default().fg(theme::ansi_cyan()).add_modifier(Modifier::BOLD)
         } else {
-            Style::default().fg(Color::DarkGray)
+            Style::default().fg(theme::ansi_bright_black())
         };
 
         if self.visible_host_rows.is_empty() {
             frame.render_widget(Paragraph::new(Line::from(Span::styled("Info", header_style))), header_area);
-            frame.render_widget(Paragraph::new("No selection").style(Style::default().fg(Color::DarkGray)), body_area);
+            frame.render_widget(Paragraph::new("No selection").style(Style::default().fg(theme::ansi_bright_black())), body_area);
             return;
         }
 
@@ -135,71 +136,71 @@ impl SessionManager {
             if let Some(desc) = &host.description {
                 lines.push(Line::from(vec![Span::styled(
                     desc,
-                    Style::default().fg(Color::Cyan).add_modifier(Modifier::ITALIC),
+                    Style::default().fg(theme::ansi_cyan()).add_modifier(Modifier::ITALIC),
                 )]));
                 lines.push(Line::from(""));
             }
 
             if let Some(hostname) = &host.hostname {
                 lines.push(Line::from(vec![
-                    Span::styled("Host: ", Style::default().fg(Color::DarkGray)),
-                    Span::styled(hostname, Style::default().fg(Color::White)),
+                    Span::styled("Host: ", Style::default().fg(theme::ansi_bright_black())),
+                    Span::styled(hostname, Style::default().fg(theme::ansi_bright_white())),
                 ]));
             }
 
             if let Some(user) = &host.user {
                 lines.push(Line::from(vec![
-                    Span::styled("User: ", Style::default().fg(Color::DarkGray)),
-                    Span::styled(user, Style::default().fg(Color::White)),
+                    Span::styled("User: ", Style::default().fg(theme::ansi_bright_black())),
+                    Span::styled(user, Style::default().fg(theme::ansi_bright_white())),
                 ]));
             }
 
             if let Some(port) = &host.port {
                 lines.push(Line::from(vec![
-                    Span::styled("Port: ", Style::default().fg(Color::DarkGray)),
-                    Span::styled(port.to_string(), Style::default().fg(Color::White)),
+                    Span::styled("Port: ", Style::default().fg(theme::ansi_bright_black())),
+                    Span::styled(port.to_string(), Style::default().fg(theme::ansi_bright_white())),
                 ]));
             }
 
             if let Some(identity) = &host.identity_file {
                 let display = identity.rsplit('/').next().unwrap_or(identity);
                 lines.push(Line::from(vec![
-                    Span::styled("Key:  ", Style::default().fg(Color::DarkGray)),
-                    Span::styled(display, Style::default().fg(Color::DarkGray)),
+                    Span::styled("Key:  ", Style::default().fg(theme::ansi_bright_black())),
+                    Span::styled(display, Style::default().fg(theme::ansi_bright_black())),
                 ]));
             }
 
             if let Some(proxy) = &host.proxy_jump {
                 lines.push(Line::from(vec![
-                    Span::styled("Jump: ", Style::default().fg(Color::DarkGray)),
-                    Span::styled(proxy, Style::default().fg(Color::White)),
+                    Span::styled("Jump: ", Style::default().fg(theme::ansi_bright_black())),
+                    Span::styled(proxy, Style::default().fg(theme::ansi_bright_white())),
                 ]));
             }
 
             for fwd in &host.local_forward {
                 lines.push(Line::from(vec![
-                    Span::styled("LFwd: ", Style::default().fg(Color::DarkGray)),
-                    Span::styled(fwd, Style::default().fg(Color::White)),
+                    Span::styled("LFwd: ", Style::default().fg(theme::ansi_bright_black())),
+                    Span::styled(fwd, Style::default().fg(theme::ansi_bright_white())),
                 ]));
             }
             for fwd in &host.remote_forward {
                 lines.push(Line::from(vec![
-                    Span::styled("RFwd: ", Style::default().fg(Color::DarkGray)),
-                    Span::styled(fwd, Style::default().fg(Color::White)),
+                    Span::styled("RFwd: ", Style::default().fg(theme::ansi_bright_black())),
+                    Span::styled(fwd, Style::default().fg(theme::ansi_bright_white())),
                 ]));
             }
 
             if let Some(profile) = &host.profile {
                 lines.push(Line::from(vec![
-                    Span::styled("Prof: ", Style::default().fg(Color::DarkGray)),
-                    Span::styled(profile, Style::default().fg(Color::Magenta)),
+                    Span::styled("Prof: ", Style::default().fg(theme::ansi_bright_black())),
+                    Span::styled(profile, Style::default().fg(theme::ansi_magenta())),
                 ]));
             }
 
             if host.use_sshpass {
                 lines.push(Line::from(vec![
-                    Span::styled("Pass: ", Style::default().fg(Color::DarkGray)),
-                    Span::styled("sshpass", Style::default().fg(Color::Yellow)),
+                    Span::styled("Pass: ", Style::default().fg(theme::ansi_bright_black())),
+                    Span::styled("sshpass", Style::default().fg(theme::ansi_yellow())),
                 ]));
             }
 
@@ -218,18 +219,18 @@ impl SessionManager {
             let total_hosts = self.folder_descendant_host_count(folder_id);
             let lines = vec![
                 Line::from(vec![
-                    Span::styled("Path: ", Style::default().fg(Color::DarkGray)),
-                    Span::styled(folder.path.display().to_string(), Style::default().fg(Color::White)),
+                    Span::styled("Path: ", Style::default().fg(theme::ansi_bright_black())),
+                    Span::styled(folder.path.display().to_string(), Style::default().fg(theme::ansi_bright_white())),
                 ]),
                 Line::from(vec![
-                    Span::styled("Folders: ", Style::default().fg(Color::DarkGray)),
-                    Span::styled(folder.children.len().to_string(), Style::default().fg(Color::White)),
+                    Span::styled("Folders: ", Style::default().fg(theme::ansi_bright_black())),
+                    Span::styled(folder.children.len().to_string(), Style::default().fg(theme::ansi_bright_white())),
                 ]),
                 Line::from(vec![
-                    Span::styled("Hosts: ", Style::default().fg(Color::DarkGray)),
+                    Span::styled("Hosts: ", Style::default().fg(theme::ansi_bright_black())),
                     Span::styled(
                         format!("{} direct / {} total", folder.host_indices.len(), total_hosts),
-                        Style::default().fg(Color::White),
+                        Style::default().fg(theme::ansi_bright_white()),
                     ),
                 ]),
             ];
@@ -238,7 +239,7 @@ impl SessionManager {
         }
 
         frame.render_widget(Paragraph::new(Line::from(Span::styled("Info", header_style))), header_area);
-        frame.render_widget(Paragraph::new("No selection").style(Style::default().fg(Color::DarkGray)), body_area);
+        frame.render_widget(Paragraph::new("No selection").style(Style::default().fg(theme::ansi_bright_black())), body_area);
     }
 
     // Detailed host/folder panel (shown when no tabs are open).
@@ -256,44 +257,44 @@ impl SessionManager {
             let mut lines = vec![
                 Line::from(""),
                 Line::from(vec![
-                    Span::styled("Host: ", Style::default().fg(Color::Gray)),
-                    Span::styled(&host.name, Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)),
+                    Span::styled("Host: ", Style::default().fg(theme::ansi_white())),
+                    Span::styled(&host.name, Style::default().fg(theme::ansi_yellow()).add_modifier(Modifier::BOLD)),
                 ]),
                 Line::from(""),
             ];
 
             if let Some(hostname) = &host.hostname {
                 lines.push(Line::from(vec![
-                    Span::styled("  Hostname: ", Style::default().fg(Color::Gray)),
-                    Span::styled(hostname, Style::default().fg(Color::White)),
+                    Span::styled("  Hostname: ", Style::default().fg(theme::ansi_white())),
+                    Span::styled(hostname, Style::default().fg(theme::ansi_bright_white())),
                 ]));
             }
 
             if let Some(user) = &host.user {
                 lines.push(Line::from(vec![
-                    Span::styled("  User: ", Style::default().fg(Color::Gray)),
-                    Span::styled(user, Style::default().fg(Color::White)),
+                    Span::styled("  User: ", Style::default().fg(theme::ansi_white())),
+                    Span::styled(user, Style::default().fg(theme::ansi_bright_white())),
                 ]));
             }
 
             if let Some(port) = &host.port {
                 lines.push(Line::from(vec![
-                    Span::styled("  Port: ", Style::default().fg(Color::Gray)),
-                    Span::styled(port.to_string(), Style::default().fg(Color::White)),
+                    Span::styled("  Port: ", Style::default().fg(theme::ansi_white())),
+                    Span::styled(port.to_string(), Style::default().fg(theme::ansi_bright_white())),
                 ]));
             }
 
             if let Some(identity) = &host.identity_file {
                 lines.push(Line::from(vec![
-                    Span::styled("  IdentityFile: ", Style::default().fg(Color::Gray)),
-                    Span::styled(identity, Style::default().fg(Color::DarkGray)),
+                    Span::styled("  IdentityFile: ", Style::default().fg(theme::ansi_white())),
+                    Span::styled(identity, Style::default().fg(theme::ansi_bright_black())),
                 ]));
             }
 
             if let Some(proxy) = &host.proxy_jump {
                 lines.push(Line::from(vec![
-                    Span::styled("  ProxyJump: ", Style::default().fg(Color::Gray)),
-                    Span::styled(proxy, Style::default().fg(Color::White)),
+                    Span::styled("  ProxyJump: ", Style::default().fg(theme::ansi_white())),
+                    Span::styled(proxy, Style::default().fg(theme::ansi_bright_white())),
                 ]));
             }
 
@@ -303,39 +304,42 @@ impl SessionManager {
                 vec![
                     Line::from(""),
                     Line::from(vec![
-                        Span::styled("Folder: ", Style::default().fg(Color::Gray)),
-                        Span::styled(&folder.name, Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)),
+                        Span::styled("Folder: ", Style::default().fg(theme::ansi_white())),
+                        Span::styled(&folder.name, Style::default().fg(theme::ansi_yellow()).add_modifier(Modifier::BOLD)),
                     ]),
                     Line::from(""),
                     Line::from(vec![
-                        Span::styled("  Path: ", Style::default().fg(Color::Gray)),
-                        Span::styled(folder.path.display().to_string(), Style::default().fg(Color::White)),
+                        Span::styled("  Path: ", Style::default().fg(theme::ansi_white())),
+                        Span::styled(folder.path.display().to_string(), Style::default().fg(theme::ansi_bright_white())),
                     ]),
                     Line::from(vec![
-                        Span::styled("  Child Folders: ", Style::default().fg(Color::Gray)),
-                        Span::styled(folder.children.len().to_string(), Style::default().fg(Color::White)),
+                        Span::styled("  Child Folders: ", Style::default().fg(theme::ansi_white())),
+                        Span::styled(folder.children.len().to_string(), Style::default().fg(theme::ansi_bright_white())),
                     ]),
                     Line::from(vec![
-                        Span::styled("  Hosts: ", Style::default().fg(Color::Gray)),
+                        Span::styled("  Hosts: ", Style::default().fg(theme::ansi_white())),
                         Span::styled(
                             format!("{} direct / {} total", folder.host_indices.len(), self.folder_descendant_host_count(folder_id)),
-                            Style::default().fg(Color::White),
+                            Style::default().fg(theme::ansi_bright_white()),
                         ),
                     ]),
                 ]
             } else {
                 vec![
                     Line::from(""),
-                    Line::from(Span::styled("No folder selected", Style::default().fg(Color::DarkGray))),
+                    Line::from(Span::styled("No folder selected", Style::default().fg(theme::ansi_bright_black()))),
                 ]
             }
         } else {
-            vec![Line::from(""), Line::from(Span::styled("No selection", Style::default().fg(Color::DarkGray)))]
+            vec![
+                Line::from(""),
+                Line::from(Span::styled("No selection", Style::default().fg(theme::ansi_bright_black()))),
+            ]
         };
 
         let header = Paragraph::new(Line::from(Span::styled(
             "Host Details",
-            Style::default().fg(Color::DarkGray).add_modifier(Modifier::BOLD),
+            Style::default().fg(theme::ansi_bright_black()).add_modifier(Modifier::BOLD),
         )));
         frame.render_widget(header, header_area);
         frame.render_widget(Paragraph::new(content), body_area);

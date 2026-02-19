@@ -1,0 +1,48 @@
+# color-ssh session manager theme (Alacritty style)
+#
+# Copy/paste themes from terminalcolors.com using Alacritty key format:
+#   https://terminalcolors.com
+#
+# Location:
+#   ~/.color-ssh/cossh-theme.toml
+#
+# Supported keys:
+# - [colors.primary] foreground/background
+# - [colors.selection] background
+# - [colors.normal] black..white
+# - [colors.bright] black..white
+#
+# Extra sections/keys are ignored.
+
+[colors.primary]
+foreground = "#bcbcbc"
+background = "#262626"
+
+[colors.cursor]
+text = "#262626"
+cursor = "#bcbcbc"
+
+[colors.selection]
+text = "#262626"
+background = "#87afd7"
+
+[colors.normal]
+black = "#1c1c1c"
+red = "#af5f5f"
+green = "#5f875f"
+yellow = "#87875f"
+blue = "#5f87af"
+magenta = "#5f5f87"
+cyan = "#5f8787"
+white = "#6c6c6c"
+
+[colors.bright]
+black = "#444444"
+red = "#ff8700"
+green = "#87af87"
+yellow = "#ffffaf"
+blue = "#87afd7"
+magenta = "#8787af"
+cyan = "#5fafaf"
+white = "#ffffff"
+
