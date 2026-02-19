@@ -27,7 +27,7 @@ pub struct MainArgs {
 
 fn build_cli_command() -> Command {
     Command::new("cossh")
-        .version("v0.6.0")
+        .version(concat!("v", env!("CARGO_PKG_VERSION")))
         .author("@karsyboy")
         .about("A Rust-based SSH client wrapper with syntax highlighting and logging capabilities")
         .propagate_version(true)

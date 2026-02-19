@@ -12,6 +12,7 @@ use std::{collections::HashMap, path::PathBuf};
 
 /// Main configuration structure loaded from YAML
 #[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct Config {
     /// Application-wide settings
     #[serde(default)]
@@ -30,6 +31,7 @@ pub struct Config {
 
 /// Application settings
 #[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct Settings {
     /// Regex patterns for secrets to redact from logs
     #[serde(default)]
@@ -59,6 +61,7 @@ impl Default for Settings {
 
 /// Interactive-only session manager settings.
 #[derive(Debug, Deserialize, Default)]
+#[serde(deny_unknown_fields)]
 pub struct InteractiveSettings {
     /// History buffer size (scrollback lines for session manager tabs)
     #[serde(default = "default_history_buffer")]
@@ -120,11 +123,15 @@ where
 
 /// A single highlight rule mapping a regex pattern to a color
 #[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct HighlightRule {
     /// Regex pattern to match (will be compiled at config load time)
     pub regex: String,
     /// Color name from the palette to apply to matches (foreground)
     pub color: String,
+    /// Optional user-facing description for this rule (not used by runtime matching)
+    #[serde(default)]
+    pub description: Option<String>,
     /// Optional background color name from the palette
     #[serde(default)]
     pub bg_color: Option<String>,
@@ -132,6 +139,7 @@ pub struct HighlightRule {
 
 /// Runtime metadata not stored in config file
 #[derive(Debug, Deserialize, Default)]
+#[serde(deny_unknown_fields)]
 pub struct Metadata {
     /// Path to the loaded configuration file
     #[serde(default)]

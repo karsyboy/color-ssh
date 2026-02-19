@@ -27,7 +27,13 @@ pub fn config_watcher(profile: Option<String>) -> Option<RecommendedWatcher> {
 
     log_debug!("Initializing configuration file watcher");
 
-    let config_path = super::get_config().read().unwrap().metadata.config_path.clone();
+    let config_path = match super::get_config().read() {
+        Ok(config_guard) => config_guard.metadata.config_path.clone(),
+        Err(poisoned) => {
+            log_error!("Configuration lock poisoned while starting watcher; continuing with recovered state");
+            poisoned.into_inner().metadata.config_path.clone()
+        }
+    };
     let config_file_name = config_path.file_name().and_then(|segment| segment.to_str()).unwrap_or("").to_string();
 
     // Clone for use in the closure
@@ -74,7 +80,7 @@ pub fn config_watcher(profile: Option<String>) -> Option<RecommendedWatcher> {
                     while rx.recv_timeout(Duration::from_millis(500)).is_ok() {}
 
                     log_info!("Configuration change detected, reloading...");
-                    eprintln!("\r\nConfiguration change detected...\r");
+                    eprintln!("Configuration change detected...");
 
                     let config_loader = match ConfigLoader::new(profile.clone()) {
                         Ok(loader) => loader,
@@ -86,10 +92,10 @@ pub fn config_watcher(profile: Option<String>) -> Option<RecommendedWatcher> {
                     };
                     if let Err(err) = config_loader.reload_config() {
                         log_error!("Error reloading config: {}", err);
-                        eprintln!("Error reloading config: {}\r", err);
+                        eprintln!("Error reloading config: {}", err);
                     } else {
                         log_info!("Configuration reloaded successfully");
-                        eprintln!("Configuration reloaded [Press Enter]:\r");
+                        eprintln!("Configuration reloaded [Press Enter]");
                     }
                 }
                 Err(err) => {

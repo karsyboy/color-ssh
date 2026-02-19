@@ -63,7 +63,13 @@ pub fn process_handler(process_args: Vec<String>, is_non_interactive: bool) -> R
 
             // Cache rules and track config version for hot-reload support.
             let (mut cached_rules, mut cached_rule_set, mut cached_version) = {
-                let config_guard = config::get_config().read().unwrap();
+                let config_guard = match config::get_config().read() {
+                    Ok(config_guard) => config_guard,
+                    Err(poisoned) => {
+                        log_error!("Configuration lock poisoned while loading highlight rules; continuing with recovered state");
+                        poisoned.into_inner()
+                    }
+                };
                 (
                     config_guard.metadata.compiled_rules.clone(),
                     config_guard.metadata.compiled_rule_set.clone(),
@@ -78,7 +84,13 @@ pub fn process_handler(process_args: Vec<String>, is_non_interactive: bool) -> R
                 // Check if config has been reloaded and update rules if needed.
                 let current_version = config::current_config_version();
                 if current_version != cached_version {
-                    let config_guard = config::get_config().read().unwrap();
+                    let config_guard = match config::get_config().read() {
+                        Ok(config_guard) => config_guard,
+                        Err(poisoned) => {
+                            log_error!("Configuration lock poisoned while reloading highlight rules; continuing with recovered state");
+                            poisoned.into_inner()
+                        }
+                    };
                     cached_rules = config_guard.metadata.compiled_rules.clone();
                     cached_rule_set = config_guard.metadata.compiled_rule_set.clone();
                     cached_version = current_version;

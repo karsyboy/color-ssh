@@ -130,7 +130,13 @@ impl SshLogger {
 
     // Worker lifecycle.
     fn ensure_worker(&self) -> Result<SyncSender<SshLogCommand>, LogError> {
-        let mut worker_tx_guard = self.worker_tx.lock().unwrap();
+        let mut worker_tx_guard = match self.worker_tx.lock() {
+            Ok(worker_tx_guard) => worker_tx_guard,
+            Err(poisoned) => {
+                eprintln!("SSH log worker lock poisoned; continuing with recovered state");
+                poisoned.into_inner()
+            }
+        };
         if let Some(existing_tx) = worker_tx_guard.as_ref() {
             return Ok(existing_tx.clone());
         }
@@ -294,7 +300,13 @@ fn get_ssh_log_path() -> Result<PathBuf, LogError> {
 
     std::fs::create_dir_all(&log_dir)?;
 
-    let session_name = crate::config::get_config().read().unwrap().metadata.session_name.clone();
+    let session_name = match crate::config::get_config().read() {
+        Ok(config_guard) => config_guard.metadata.session_name.clone(),
+        Err(poisoned) => {
+            eprintln!("Configuration lock poisoned while reading SSH session name; continuing with recovered state");
+            poisoned.into_inner().metadata.session_name.clone()
+        }
+    };
     let sanitized = sanitize_session_name(&session_name);
     Ok(log_dir.join(format!("{sanitized}.log")))
 }

@@ -8,7 +8,7 @@
 //! - Hot-reloading configuration changes
 
 use super::style::Config;
-use crate::{debug_enabled, log_debug, log_info, log_warn};
+use crate::{debug_enabled, log_debug, log_error, log_info, log_warn};
 use regex::{Regex, RegexSet};
 use std::{
     path::PathBuf,
@@ -57,10 +57,10 @@ impl ConfigLoader {
         }
 
         // Check third possible location: current working directory
-        let current_dir = env::current_dir().unwrap_or_else(|err| {
-            eprintln!("Failed to get current directory: {}", err);
-            std::process::exit(1);
-        });
+        let current_dir = env::current_dir().map_err(|err| {
+            log_warn!("Failed to get current directory: {}", err);
+            io::Error::new(io::ErrorKind::NotFound, format!("Failed to get current directory: {}", err))
+        })?;
         let current_dir_path = current_dir.join(&config_filename);
         log_debug!("Checking: {:?}", current_dir_path);
         if current_dir_path.exists() {
@@ -69,10 +69,10 @@ impl ConfigLoader {
         }
 
         // If a profile was specified but no file found, error out
-        if profile.is_some() {
+        if let Some(profile_name) = profile {
             let err_msg = format!(
                 "Configuration profile '{}' not found. Please ensure the file exists in one of the standard locations.",
-                profile.as_ref().unwrap()
+                profile_name
             );
             log_warn!("{}", err_msg);
             return Err(io::Error::new(io::ErrorKind::NotFound, err_msg));
@@ -83,7 +83,7 @@ impl ConfigLoader {
         match Self::create_default_config() {
             Ok(path) => Ok(path),
             Err(err) => {
-                eprintln!("Failed to create default configuration file: {}\r", err);
+                eprintln!("Failed to create default configuration file: {}", err);
                 Err(err)
             }
         }
@@ -168,7 +168,13 @@ impl ConfigLoader {
     /// Loads and applies new configuration.
     pub(crate) fn reload_config(self) -> Result<(), String> {
         log_info!("Reloading configuration...");
-        let mut current_config = super::get_config().write().unwrap();
+        let mut current_config = match super::get_config().write() {
+            Ok(config_guard) => config_guard,
+            Err(poisoned) => {
+                log_error!("Configuration lock poisoned during reload; continuing with recovered state");
+                poisoned.into_inner()
+            }
+        };
 
         let mut new_config = self.load_config().map_err(|err| {
             log_warn!("Failed to reload configuration: {}", err);
@@ -271,7 +277,7 @@ fn compile_rules(config: &Config) -> Vec<(Regex, String)> {
         match Regex::new(&clean_regex) {
             Ok(regex) => rules.push((regex, ansi_code)),
             Err(err) => {
-                eprintln!("Warning: Invalid regex '{}' - {}\r", clean_regex, err);
+                eprintln!("Warning: Invalid regex '{}' - {}", clean_regex, err);
                 failed_rules.push((idx + 1, clean_regex));
             }
         }
@@ -358,7 +364,7 @@ fn compile_secret_patterns(config: &Config) -> Vec<Regex> {
                 Ok(regex) => patterns.push(regex),
                 Err(err) => {
                     log_warn!("Failed to compile secret pattern #{}: '{}' - {}", idx + 1, pattern, err);
-                    eprintln!("Warning: Invalid secret pattern '{}' - {}\r", pattern, err);
+                    eprintln!("Warning: Invalid secret pattern '{}' - {}", pattern, err);
                 }
             }
         }
@@ -407,21 +413,25 @@ mod tests {
             HighlightRule {
                 regex: "success".to_string(),
                 color: "ok_fg".to_string(),
+                description: None,
                 bg_color: None,
             },
             HighlightRule {
                 regex: "combo".to_string(),
                 color: "ok_fg".to_string(),
+                description: None,
                 bg_color: Some("ok_bg".to_string()),
             },
             HighlightRule {
                 regex: "fallback".to_string(),
                 color: "missing".to_string(),
+                description: None,
                 bg_color: None,
             },
             HighlightRule {
                 regex: "[unclosed".to_string(),
                 color: "ok_fg".to_string(),
+                description: None,
                 bg_color: None,
             },
         ];
@@ -441,11 +451,13 @@ mod tests {
             HighlightRule {
                 regex: "error".to_string(),
                 color: "ok_fg".to_string(),
+                description: None,
                 bg_color: None,
             },
             HighlightRule {
                 regex: "warn".to_string(),
                 color: "ok_fg".to_string(),
+                description: None,
                 bg_color: None,
             },
         ];
@@ -466,5 +478,55 @@ mod tests {
         let patterns = compile_secret_patterns(&config);
         assert_eq!(patterns.len(), 1);
         assert!(patterns[0].is_match("token=abc123"));
+    }
+
+    #[test]
+    fn rejects_unknown_top_level_config_fields() {
+        let yaml = r##"
+settings: {}
+interactive_settings: {}
+palette:
+  ok_fg: "#00ff00"
+rules: []
+unknown_top_level: true
+"##;
+
+        let err = serde_yaml::from_str::<Config>(yaml).expect_err("unknown field should fail schema validation");
+        assert!(err.to_string().contains("unknown field"));
+    }
+
+    #[test]
+    fn rejects_unknown_interactive_settings_fields() {
+        let yaml = r##"
+settings: {}
+interactive_settings:
+  host_tree_uncollapsed: false
+  unknown_interactive: true
+palette:
+  ok_fg: "#00ff00"
+rules: []
+"##;
+
+        let err = serde_yaml::from_str::<Config>(yaml).expect_err("unknown interactive field should fail schema validation");
+        assert!(err.to_string().contains("unknown field"));
+    }
+
+    #[test]
+    fn accepts_rule_description_field() {
+        let yaml = r##"
+settings: {}
+interactive_settings: {}
+palette:
+  ok_fg: "#00ff00"
+rules:
+  - regex: "error"
+    color: "ok_fg"
+    description: "Highlight errors in red"
+"##;
+
+        let parsed = serde_yaml::from_str::<Config>(yaml).expect("description should be accepted");
+        assert_eq!(parsed.rules.len(), 1);
+        assert_eq!(parsed.rules[0].description.as_deref(), Some("Highlight errors in red"));
+        assert_eq!(parsed.rules[0].bg_color, None);
     }
 }

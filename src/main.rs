@@ -1,6 +1,8 @@
 use cossh::{Result, args, config, log, log_debug, log_error, log_info, process, tui};
 use std::process::ExitCode;
 
+const APP_VERSION: &str = concat!("v", env!("CARGO_PKG_VERSION"));
+
 /// Extracts the SSH destination hostname from the provided SSH arguments returns hostname or none
 fn extract_ssh_destination(ssh_args: &[String]) -> Option<String> {
     // SSH flags that take an argument based off ssh version "OpenSSH_10.2p1"
@@ -48,14 +50,20 @@ fn main() -> Result<ExitCode> {
     if args.debug {
         logger.enable_debug();
     }
-    log_info!("color-ssh v0.6.0 starting");
+    log_info!("color-ssh {} starting", APP_VERSION);
 
     // If interactive mode is requested, launch the session manager
     if args.interactive {
         log_info!("Launching interactive session manager");
         // Init config so session manager can read interactive settings (if configured)
         let debug_from_config = if config::init_session_config(args.profile.clone()).is_ok() {
-            config::get_config().read().unwrap().settings.debug_mode
+            match config::get_config().read() {
+                Ok(config_guard) => config_guard.settings.debug_mode,
+                Err(poisoned) => {
+                    log_error!("Configuration lock poisoned while reading interactive debug setting; continuing with recovered state");
+                    poisoned.into_inner().settings.debug_mode
+                }
+            }
         } else {
             false
         };
@@ -90,12 +98,22 @@ fn main() -> Result<ExitCode> {
 
     // Get global settings from config
     let (debug_from_config, ssh_log_from_config, show_title) = {
-        let config_guard = config::get_config().read().unwrap();
-        (
-            config_guard.settings.debug_mode,
-            config_guard.settings.ssh_logging,
-            config_guard.settings.show_title,
-        )
+        match config::get_config().read() {
+            Ok(config_guard) => (
+                config_guard.settings.debug_mode,
+                config_guard.settings.ssh_logging,
+                config_guard.settings.show_title,
+            ),
+            Err(poisoned) => {
+                log_error!("Configuration lock poisoned while reading global settings; continuing with recovered state");
+                let config_guard = poisoned.into_inner();
+                (
+                    config_guard.settings.debug_mode,
+                    config_guard.settings.ssh_logging,
+                    config_guard.settings.show_title,
+                )
+            }
+        }
     };
 
     // Determine final logging mode
@@ -137,7 +155,11 @@ fn main() -> Result<ExitCode> {
             "\x1b[36m██║     ██║   ██║██║     ██║   ██║██╔══██╗╚════╝╚════██║╚════██║██╔══██║",
             "\x1b[34m╚██████╗╚██████╔╝███████╗╚██████╔╝██║  ██║      ███████║███████║██║  ██║",
             "\x1b[35m ╚═════╝ ╚═════╝ ╚══════╝ ╚═════╝ ╚═╝  ╚═╝      ╚══════╝╚══════╝╚═╝  ╚═╝",
-            "\x1b[31mVersion: \x1b[33m0.6.0\x1b[0m    \x1b[31mBy: \x1b[32m@Karsyboy\x1b[0m    \x1b[31mGithub: \x1b[34mhttps://github.com/karsyboy/color-ssh\x1b[0m",
+            concat!(
+                "\x1b[31mVersion: \x1b[33mv",
+                env!("CARGO_PKG_VERSION"),
+                "\x1b[0m    \x1b[31mBy: \x1b[32m@Karsyboy\x1b[0m    \x1b[31mGithub: \x1b[34mhttps://github.com/karsyboy/color-ssh\x1b[0m"
+            ),
             " ",
         ];
 
@@ -153,7 +175,16 @@ fn main() -> Result<ExitCode> {
         // Use COSSH_SESSION_NAME env var if set (from session manager tabs), otherwise use hostname
         let session_name = std::env::var("COSSH_SESSION_NAME").unwrap_or_else(|_| session_hostname.clone());
         let session_name = log::sanitize_session_name(&session_name);
-        config::get_config().write().unwrap().metadata.session_name = session_name.clone();
+        match config::get_config().write() {
+            Ok(mut config_guard) => {
+                config_guard.metadata.session_name = session_name.clone();
+            }
+            Err(poisoned) => {
+                log_error!("Configuration lock poisoned while setting session name; continuing with recovered state");
+                let mut config_guard = poisoned.into_inner();
+                config_guard.metadata.session_name = session_name.clone();
+            }
+        }
         log_debug!("Session name set to: {session_name}");
     }
 

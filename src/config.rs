@@ -35,10 +35,12 @@ use std::sync::{
 ///
 /// // Read configuration using helper
 /// let config = config::get_config();
-/// let show_title = config.read().unwrap().settings.show_title;
+/// let show_title = config.read().map(|guard| guard.settings.show_title).unwrap_or(true);
 ///
 /// // Write configuration using helper
-/// config::get_config().write().unwrap().metadata.session_name = "example".to_string();
+/// if let Ok(mut guard) = config::get_config().write() {
+///     guard.metadata.session_name = "example".to_string();
+/// }
 /// ```
 pub static SESSION_CONFIG: OnceCell<Arc<RwLock<style::Config>>> = OnceCell::new();
 static CONFIG_VERSION: AtomicU64 = AtomicU64::new(0);

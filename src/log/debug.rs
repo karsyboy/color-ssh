@@ -62,7 +62,13 @@ impl DebugLogger {
     // Log writing.
     pub(super) fn log(&self, level: LogLevel, message: &str) -> Result<(), LogError> {
         let formatted = self.formatter.format(Some(level), message);
-        let mut state = DEBUG_LOG_STATE.lock().unwrap();
+        let mut state = match DEBUG_LOG_STATE.lock() {
+            Ok(state_guard) => state_guard,
+            Err(poisoned) => {
+                eprintln!("Debug log state lock poisoned; continuing with recovered state");
+                poisoned.into_inner()
+            }
+        };
 
         // Lazy initialization: create log file on first use
         if state.writer.is_none() {
@@ -88,7 +94,13 @@ impl DebugLogger {
 
     // Force-flush buffered log output.
     pub(super) fn flush(&self) -> Result<(), LogError> {
-        let mut state = DEBUG_LOG_STATE.lock().unwrap();
+        let mut state = match DEBUG_LOG_STATE.lock() {
+            Ok(state_guard) => state_guard,
+            Err(poisoned) => {
+                eprintln!("Debug log state lock poisoned during flush; continuing with recovered state");
+                poisoned.into_inner()
+            }
+        };
         if let Some(writer) = state.writer.as_mut() {
             writer.flush()?;
             state.pending_bytes = 0;
