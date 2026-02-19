@@ -9,6 +9,27 @@ pub use errors::LogError;
 use once_cell::sync::Lazy;
 use std::sync::atomic::{AtomicBool, Ordering};
 
+/// Sanitize session name for use in log filenames.
+pub fn sanitize_session_name(raw: &str) -> String {
+    let mut sanitized = String::with_capacity(raw.len());
+    let mut has_valid = false;
+
+    for ch in raw.chars() {
+        if ch.is_ascii_alphanumeric() || matches!(ch, '.' | '_' | '-') {
+            sanitized.push(ch);
+            has_valid = true;
+        } else {
+            sanitized.push('_');
+        }
+    }
+
+    if !has_valid || sanitized == "." || sanitized == ".." {
+        return "session".to_string();
+    }
+
+    sanitized
+}
+
 // Global flags for enabling different logging types
 static DEBUG_MODE: AtomicBool = AtomicBool::new(false);
 static SSH_LOGGING: AtomicBool = AtomicBool::new(false);
@@ -123,5 +144,18 @@ impl Logger {
             self.ssh_logger.flush()?;
         }
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::sanitize_session_name;
+
+    #[test]
+    fn sanitizes_session_name_for_log_paths() {
+        assert_eq!(sanitize_session_name("prod-host"), "prod-host");
+        assert_eq!(sanitize_session_name("my host"), "my_host");
+        assert_eq!(sanitize_session_name(".."), "session");
+        assert_eq!(sanitize_session_name(""), "session");
     }
 }

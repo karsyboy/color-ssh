@@ -152,6 +152,7 @@ fn main() -> Result<ExitCode> {
 
         // Use COSSH_SESSION_NAME env var if set (from session manager tabs), otherwise use hostname
         let session_name = std::env::var("COSSH_SESSION_NAME").unwrap_or_else(|_| session_hostname.clone());
+        let session_name = log::sanitize_session_name(&session_name);
         config::get_config().write().unwrap().metadata.session_name = session_name.clone();
         log_debug!("Session name set to: {session_name}");
     }

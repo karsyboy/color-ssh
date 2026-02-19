@@ -117,6 +117,7 @@ pub fn process_handler(process_args: Vec<String>, is_non_interactive: bool) -> R
 
     // Buffer for reading data from SSH output
     let mut buffer = [0; 8192];
+    let mut pending_utf8: Vec<u8> = Vec::new();
     let mut total_bytes = 0;
 
     log_debug!("Starting to read SSH output...");
@@ -124,14 +125,58 @@ pub fn process_handler(process_args: Vec<String>, is_non_interactive: bool) -> R
     loop {
         match stdout.read(&mut buffer) {
             Ok(0) => {
+                if !pending_utf8.is_empty() {
+                    let chunk = String::from_utf8_lossy(&pending_utf8).to_string();
+                    pending_utf8.clear();
+                    if !chunk.is_empty() {
+                        if let Err(err) = log::LOGGER.log_ssh_raw(&chunk) {
+                            log_error!("Failed to write SSH log data: {}", err);
+                        }
+
+                        if let Err(err) = tx.send(chunk) {
+                            log_error!("Failed to send data to processing thread: {}", err);
+                        }
+                    }
+                }
                 log_debug!("EOF reached (total bytes read: {})", total_bytes);
                 break;
             }
             Ok(bytes_read) => {
                 total_bytes += bytes_read;
 
-                // Convert the read data to a String and send it to the processing thread
-                let chunk = String::from_utf8_lossy(&buffer[..bytes_read]).to_string();
+                pending_utf8.extend_from_slice(&buffer[..bytes_read]);
+
+                let mut chunk = String::new();
+                loop {
+                    match std::str::from_utf8(&pending_utf8) {
+                        Ok(valid) => {
+                            chunk.push_str(valid);
+                            pending_utf8.clear();
+                            break;
+                        }
+                        Err(err) => {
+                            let valid_up_to = err.valid_up_to();
+                            if valid_up_to > 0 {
+                                let valid = unsafe { std::str::from_utf8_unchecked(&pending_utf8[..valid_up_to]) };
+                                chunk.push_str(valid);
+                                pending_utf8.drain(..valid_up_to);
+                                continue;
+                            }
+                            if let Some(error_len) = err.error_len() {
+                                chunk.push('\u{FFFD}');
+                                pending_utf8.drain(..error_len);
+                                continue;
+                            }
+                            // Incomplete UTF-8 sequence at the end; wait for next read.
+                            break;
+                        }
+                    }
+                }
+
+                if chunk.is_empty() {
+                    continue;
+                }
+
                 if let Err(err) = log::LOGGER.log_ssh_raw(&chunk) {
                     log_error!("Failed to write SSH log data: {}", err);
                 }

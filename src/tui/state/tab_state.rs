@@ -2,6 +2,7 @@
 
 use crate::ssh_config::SshHost;
 use crate::tui::terminal_emulator::Parser;
+use crate::log_error;
 use portable_pty::{Child, MasterPty};
 use std::io::Write;
 use std::sync::{Arc, Mutex, atomic::AtomicU64};
@@ -14,6 +15,18 @@ pub struct SshSession {
     pub(crate) parser: Arc<Mutex<Parser>>,
     pub(crate) exited: Arc<Mutex<bool>>,
     pub(crate) render_epoch: Arc<AtomicU64>,
+}
+
+impl SshSession {
+    pub(crate) fn terminate(&mut self) {
+        if let Err(err) = self._child.kill() {
+            log_error!("Failed to terminate SSH session: {}", err);
+        }
+        let _ = self._child.try_wait();
+        if let Ok(mut exited) = self.exited.lock() {
+            *exited = true;
+        }
+    }
 }
 
 #[derive(Debug, Clone, Default)]

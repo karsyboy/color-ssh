@@ -30,7 +30,13 @@ impl SessionManager {
             return;
         }
 
-        self.tabs.remove(self.selected_tab);
+        let idx = self.selected_tab;
+        if let Some(session) = self.tabs.get_mut(idx).and_then(|tab| tab.session.take()) {
+            let mut session = session;
+            session.terminate();
+        }
+
+        self.tabs.remove(idx);
         if self.selected_tab >= self.tabs.len() && self.selected_tab > 0 {
             self.selected_tab -= 1;
         }

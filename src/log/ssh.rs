@@ -6,7 +6,7 @@
 //! - ANSI escape sequence filtering
 //! - Per-session log files organized by date
 
-use super::{LogError, formatter::LogFormatter};
+use super::{LogError, formatter::LogFormatter, sanitize_session_name};
 use chrono::Local;
 use once_cell::sync::Lazy;
 use regex::Regex;
@@ -289,10 +289,9 @@ fn get_ssh_log_path() -> Result<PathBuf, LogError> {
 
     std::fs::create_dir_all(&log_dir)?;
 
-    Ok(log_dir.join(format!(
-        "{}.log",
-        crate::config::get_config().read().unwrap().metadata.session_name.replace(".", "_")
-    )))
+    let session_name = crate::config::get_config().read().unwrap().metadata.session_name.clone();
+    let sanitized = sanitize_session_name(&session_name);
+    Ok(log_dir.join(format!("{sanitized}.log")))
 }
 
 fn current_secret_patterns() -> Vec<Regex> {
