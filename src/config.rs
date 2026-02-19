@@ -45,13 +45,22 @@ use std::sync::{
 pub static SESSION_CONFIG: OnceCell<Arc<RwLock<style::Config>>> = OnceCell::new();
 static CONFIG_VERSION: AtomicU64 = AtomicU64::new(0);
 
+fn fallback_config() -> style::Config {
+    style::Config {
+        settings: style::Settings::default(),
+        interactive_settings: None,
+        palette: std::collections::HashMap::new(),
+        rules: Vec::new(),
+        metadata: style::Metadata {
+            session_name: "session".to_string(),
+            ..Default::default()
+        },
+    }
+}
+
 /// Get a reference to the global configuration
-///
-/// # Panics
-/// Panics if the configuration has not been initialized via `init_session_config()`.
-/// This should only happen if called before main() completes initial setup.
 pub fn get_config() -> &'static Arc<RwLock<style::Config>> {
-    SESSION_CONFIG.get().expect("Configuration not initialized. Call init_session_config() first.")
+    SESSION_CONFIG.get_or_init(|| Arc::new(RwLock::new(fallback_config())))
 }
 
 /// Loads and initializes the global configuration with an optional profile.

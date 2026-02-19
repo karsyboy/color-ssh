@@ -83,7 +83,7 @@ impl ConfigLoader {
         match Self::create_default_config() {
             Ok(path) => Ok(path),
             Err(err) => {
-                eprintln!("Failed to create default configuration file: {}", err);
+                log_error!("Failed to create default configuration file: {}", err);
                 Err(err)
             }
         }
@@ -188,18 +188,12 @@ impl ConfigLoader {
 
         *current_config = new_config;
 
-        let new_rules = compile_rules(&current_config);
-        log_info!("Recompiled {} highlight rules", new_rules.len());
-
-        current_config.metadata.compiled_rule_set = compile_rule_set(&new_rules);
-        current_config.metadata.compiled_rules = new_rules;
-
-        // Recompile secret patterns
-        let new_secrets = compile_secret_patterns(&current_config);
-        if !new_secrets.is_empty() {
-            log_info!("Recompiled {} secret redaction patterns", new_secrets.len());
+        let rule_count = current_config.metadata.compiled_rules.len();
+        let secret_count = current_config.metadata.compiled_secret_patterns.len();
+        log_info!("Reloaded {} highlight rules", rule_count);
+        if secret_count > 0 {
+            log_info!("Reloaded {} secret redaction patterns", secret_count);
         }
-        current_config.metadata.compiled_secret_patterns = new_secrets;
 
         super::set_config_version(current_config.metadata.version);
         log_info!("Configuration reloaded successfully (version {})", current_config.metadata.version);
@@ -277,7 +271,7 @@ fn compile_rules(config: &Config) -> Vec<(Regex, String)> {
         match Regex::new(&clean_regex) {
             Ok(regex) => rules.push((regex, ansi_code)),
             Err(err) => {
-                eprintln!("Warning: Invalid regex '{}' - {}", clean_regex, err);
+                log_warn!("Invalid regex in rule #{} ('{}'): {}", idx + 1, clean_regex, err);
                 failed_rules.push((idx + 1, clean_regex));
             }
         }
@@ -364,7 +358,6 @@ fn compile_secret_patterns(config: &Config) -> Vec<Regex> {
                 Ok(regex) => patterns.push(regex),
                 Err(err) => {
                     log_warn!("Failed to compile secret pattern #{}: '{}' - {}", idx + 1, pattern, err);
-                    eprintln!("Warning: Invalid secret pattern '{}' - {}", pattern, err);
                 }
             }
         }

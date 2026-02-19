@@ -6,7 +6,13 @@
 use super::loader::ConfigLoader;
 use crate::{log_debug, log_error, log_info, log_warn};
 use notify::{Error, Event, RecommendedWatcher, RecursiveMode, Watcher};
-use std::{path::PathBuf, sync::mpsc, thread, time::Duration};
+use std::{
+    io::{self, Write},
+    path::PathBuf,
+    sync::mpsc,
+    thread,
+    time::Duration,
+};
 
 fn event_targets_config_file(event: &Event, config_file_name: &str) -> bool {
     event.paths.iter().any(|path| {
@@ -19,6 +25,12 @@ fn event_targets_config_file(event: &Event, config_file_name: &str) -> bool {
 
 fn should_reload_for_event(event: &Event, config_file_name: &str) -> bool {
     (event.kind.is_modify() || event.kind.is_create()) && event_targets_config_file(event, config_file_name)
+}
+
+fn print_reload_notice(message: &str) {
+    // Render notices on a clean line so they do not collide with remote shell prompts.
+    eprint!("\r\n[color-ssh] {}\r\n", message);
+    let _ = io::stderr().flush();
 }
 
 /// Start watching the configuration file for changes
@@ -65,7 +77,6 @@ pub fn config_watcher(profile: Option<String>) -> Option<RecommendedWatcher> {
 
     if let Err(err) = watcher.watch(watch_path, RecursiveMode::NonRecursive) {
         log_error!("Failed to watch config directory: {}", err);
-        eprintln!("Failed to watch config directory: {}", err);
         log_warn!("Configuration hot-reload disabled");
         return None;
     }
@@ -80,22 +91,21 @@ pub fn config_watcher(profile: Option<String>) -> Option<RecommendedWatcher> {
                     while rx.recv_timeout(Duration::from_millis(500)).is_ok() {}
 
                     log_info!("Configuration change detected, reloading...");
-                    eprintln!("Configuration change detected...");
 
                     let config_loader = match ConfigLoader::new(profile.clone()) {
                         Ok(loader) => loader,
                         Err(err) => {
                             log_error!("Error creating config loader for reload: {}", err);
-                            eprintln!("Error creating config loader for reload: {}", err);
+                            print_reload_notice(&format!("Config reload failed: {}", err));
                             continue;
                         }
                     };
                     if let Err(err) = config_loader.reload_config() {
                         log_error!("Error reloading config: {}", err);
-                        eprintln!("Error reloading config: {}", err);
+                        print_reload_notice(&format!("Config reload failed: {}", err));
                     } else {
                         log_info!("Configuration reloaded successfully");
-                        eprintln!("Configuration reloaded [Press Enter]");
+                        print_reload_notice("Config reloaded successfully");
                     }
                 }
                 Err(err) => {

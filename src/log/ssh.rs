@@ -65,7 +65,7 @@ impl SshLogWorkerState {
 }
 
 // Compiled regex for removing ANSI escape sequences
-static ANSI_ESCAPE_REGEX: Lazy<Regex> = Lazy::new(|| {
+static ANSI_ESCAPE_REGEX: Lazy<Option<Regex>> = Lazy::new(|| {
     Regex::new(
         r"(?x)
         \x1B\[[\x30-\x3F]*[\x20-\x2F]*[\x40-\x7E]    # CSI: ESC [ params intermediates final
@@ -75,7 +75,7 @@ static ANSI_ESCAPE_REGEX: Lazy<Regex> = Lazy::new(|| {
         |\x1B                                        # Stray ESC character
     ",
     )
-    .unwrap()
+    .ok()
 });
 
 #[derive(Clone)]
@@ -173,7 +173,7 @@ fn run_worker(receiver: Receiver<SshLogCommand>, formatter: LogFormatter, file_f
                 }
             }
             Ok(SshLogCommand::Flush(ack_tx)) => {
-                let flush_result = flush_worker(&mut state).map_err(|err| err.to_string());
+                let flush_result = flush_worker(&mut state, &formatter, file_factory.as_ref()).map_err(|err| err.to_string());
                 let _ = ack_tx.send(flush_result);
             }
             Err(RecvTimeoutError::Timeout) => {
@@ -182,7 +182,7 @@ fn run_worker(receiver: Receiver<SshLogCommand>, formatter: LogFormatter, file_f
                 }
             }
             Err(RecvTimeoutError::Disconnected) => {
-                let _ = flush_worker(&mut state);
+                let _ = flush_worker(&mut state, &formatter, file_factory.as_ref());
                 break;
             }
         }
@@ -272,11 +272,44 @@ fn flush_writer(state: &mut SshLogWorkerState) -> Result<(), LogError> {
     Ok(())
 }
 
-fn flush_worker(state: &mut SshLogWorkerState) -> Result<(), LogError> {
+fn flush_worker(state: &mut SshLogWorkerState, formatter: &LogFormatter, create_log_file: &dyn Fn() -> Result<File, LogError>) -> Result<(), LogError> {
+    flush_partial_line(state, formatter, create_log_file)?;
     flush_writer(state)?;
     if let Some(last_error) = state.last_error.take() {
         return Err(LogError::FormattingError(last_error));
     }
+    Ok(())
+}
+
+fn flush_partial_line(state: &mut SshLogWorkerState, formatter: &LogFormatter, create_log_file: &dyn Fn() -> Result<File, LogError>) -> Result<(), LogError> {
+    if state.line_buffer.is_empty() {
+        return Ok(());
+    }
+
+    refresh_secret_patterns_if_needed(
+        &mut state.cached_config_version,
+        crate::config::current_config_version(),
+        &mut state.cached_secret_patterns,
+        current_secret_patterns,
+    );
+
+    let tail_line = std::mem::take(&mut state.line_buffer);
+    let sanitized = sanitize_line(tail_line.trim_end_matches('\r'), &state.cached_secret_patterns);
+    if sanitized.is_empty() {
+        return Ok(());
+    }
+
+    if state.writer.is_none() {
+        state.writer = Some(BufWriter::new(create_log_file()?));
+    }
+
+    let formatted = format_log_line(state, formatter, sanitized.as_ref());
+    if let Some(writer) = state.writer.as_mut() {
+        writer.write_all(formatted.as_bytes())?;
+        writer.write_all(b"\n")?;
+    }
+    state.pending_bytes = state.pending_bytes.saturating_add(formatted.len() + 1);
+
     Ok(())
 }
 
@@ -320,7 +353,11 @@ fn current_secret_patterns() -> Vec<Regex> {
 
 fn sanitize_line<'a>(line: &'a str, secret_patterns: &[Regex]) -> Cow<'a, str> {
     let cleaned = if line.as_bytes().contains(&0x1b) {
-        ANSI_ESCAPE_REGEX.replace_all(line, "")
+        if let Some(ansi_escape_regex) = ANSI_ESCAPE_REGEX.as_ref() {
+            ansi_escape_regex.replace_all(line, "")
+        } else {
+            Cow::Borrowed(line)
+        }
     } else {
         Cow::Borrowed(line)
     };
@@ -471,6 +508,40 @@ mod tests {
         assert!(content.contains("line-one"));
         assert!(content.contains("line-two"));
         assert!(content.find("line-one").expect("line one exists") < content.find("line-two").expect("line two exists"));
+        let _ = fs::remove_file(log_path);
+    }
+
+    #[test]
+    fn worker_flush_writes_partial_tail_without_newline() {
+        let log_path = temp_log_path();
+        let (tx, rx) = mpsc::sync_channel(8);
+
+        let mut formatter = crate::log::formatter::LogFormatter::new();
+        formatter.set_include_timestamp(false);
+        formatter.set_include_break(false);
+        let path_for_worker = log_path.clone();
+        let file_factory: LogFileFactory = Arc::new(move || {
+            std::fs::OpenOptions::new()
+                .create(true)
+                .append(true)
+                .open(&path_for_worker)
+                .map_err(crate::log::LogError::from)
+        });
+
+        let worker = std::thread::spawn(move || {
+            run_worker(rx, formatter, file_factory);
+        });
+
+        tx.send(SshLogCommand::Chunk("partial-tail".to_string())).expect("send partial tail");
+
+        let (ack_tx, ack_rx) = mpsc::sync_channel(0);
+        tx.send(SshLogCommand::Flush(ack_tx)).expect("send flush");
+        assert!(ack_rx.recv().expect("flush ack").is_ok());
+
+        drop(tx);
+        worker.join().expect("worker should exit cleanly");
+        let content = fs::read_to_string(&log_path).expect("read log file");
+        assert!(content.contains("partial-tail"));
         let _ = fs::remove_file(log_path);
     }
 }

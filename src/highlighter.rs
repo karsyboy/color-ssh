@@ -4,7 +4,7 @@ use regex::{Regex, RegexSet};
 use std::{borrow::Cow, thread, time::Instant};
 
 // Compiled regex for stripping ANSI escape sequences before pattern matching.
-static ANSI_ESCAPE_REGEX: Lazy<Regex> = Lazy::new(|| {
+static ANSI_ESCAPE_REGEX: Lazy<Option<Regex>> = Lazy::new(|| {
     Regex::new(
         r"(?x)
         \x1B\[[\x30-\x3F]*[\x20-\x2F]*[\x40-\x7E]    # CSI: ESC [ params intermediates final
@@ -14,7 +14,7 @@ static ANSI_ESCAPE_REGEX: Lazy<Regex> = Lazy::new(|| {
         |\x1B                                        # Stray ESC character
     ",
     )
-    .unwrap()
+    .ok()
 });
 
 const MAX_RULES_FOR_REGEXSET_PREFILTER: usize = 24;
@@ -93,13 +93,18 @@ pub fn process_chunk_with_scratch<'a>(
     let use_regexset_prefilter = rule_set.is_some() && rules.len() <= MAX_RULES_FOR_REGEXSET_PREFILTER;
 
     if use_regexset_prefilter {
-        let prefilter = rule_set.expect("prefilter should exist when enabled");
-        let prefilter_started_at = debug_logging.then(Instant::now);
-        let matched_rules = prefilter.matches(clean_chunk);
-        for rule_idx in matched_rules.iter() {
-            push_matches(rule_idx, &rules[rule_idx].0);
+        if let Some(prefilter) = rule_set {
+            let prefilter_started_at = debug_logging.then(Instant::now);
+            let matched_rules = prefilter.matches(clean_chunk);
+            for rule_idx in matched_rules.iter() {
+                push_matches(rule_idx, &rules[rule_idx].0);
+            }
+            prefilter_elapsed_us = prefilter_started_at.map_or(0, |start| start.elapsed().as_micros());
+        } else {
+            for (rule_idx, (regex, _)) in rules.iter().enumerate() {
+                push_matches(rule_idx, regex);
+            }
         }
-        prefilter_elapsed_us = prefilter_started_at.map_or(0, |start| start.elapsed().as_micros());
     } else {
         for (rule_idx, (regex, _)) in rules.iter().enumerate() {
             push_matches(rule_idx, regex);
@@ -231,13 +236,29 @@ fn build_clean_chunk_no_ansi(raw: &str, clean_chunk: &mut String) {
 /// Build a mapping of the original string to a cleaned version with ANSI
 /// sequences and newlines removed and return both in reusable buffers.
 fn build_index_mapping(raw: &str, clean_chunk: &mut String, mapping: &mut Vec<usize>) {
+    let Some(ansi_escape_regex) = ANSI_ESCAPE_REGEX.as_ref() else {
+        build_clean_chunk_no_ansi(raw, clean_chunk);
+        mapping.clear();
+        mapping.reserve(raw.len().saturating_add(1));
+        let mut raw_idx = 0usize;
+        for ch in raw.chars() {
+            let ch_len = ch.len_utf8();
+            for _ in 0..ch_len {
+                mapping.push(raw_idx);
+            }
+            raw_idx = raw_idx.saturating_add(ch_len);
+        }
+        mapping.push(raw_idx);
+        return;
+    };
+
     clean_chunk.clear();
     mapping.clear();
     clean_chunk.reserve(raw.len());
     mapping.reserve(raw.len().saturating_add(1));
 
     let mut raw_idx = 0usize;
-    let mut ansi_iter = ANSI_ESCAPE_REGEX.find_iter(raw).peekable();
+    let mut ansi_iter = ansi_escape_regex.find_iter(raw).peekable();
 
     for ch in raw.chars() {
         let ch_len = ch.len_utf8();
