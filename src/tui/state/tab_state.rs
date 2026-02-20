@@ -35,6 +35,8 @@ impl SshSession {
 pub(crate) struct TerminalSearchState {
     pub(crate) active: bool,
     pub(crate) query: String,
+    pub(crate) query_cursor: usize,
+    pub(crate) query_selection: Option<(usize, usize)>,
     pub(crate) matches: Vec<(i64, u16, usize)>,
     pub(crate) current: usize,
 }

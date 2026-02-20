@@ -4,30 +4,196 @@ use crate::tui::{ConnectRequest, HostTreeRowKind, SessionManager};
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use std::io;
 
+fn char_len(text: &str) -> usize {
+    text.chars().count()
+}
+
+fn clamp_cursor(text: &str, cursor: &mut usize) {
+    *cursor = (*cursor).min(char_len(text));
+}
+
+fn normalized_selection(text: &str, selection: Option<(usize, usize)>) -> Option<(usize, usize)> {
+    let (start, end) = selection?;
+    let len = char_len(text);
+    let start = start.min(len);
+    let end = end.min(len);
+    if start == end {
+        None
+    } else if start < end {
+        Some((start, end))
+    } else {
+        Some((end, start))
+    }
+}
+
+fn byte_index_for_char(text: &str, char_index: usize) -> usize {
+    if char_index == 0 {
+        return 0;
+    }
+
+    let max = char_len(text);
+    let clamped = char_index.min(max);
+    if clamped == max {
+        return text.len();
+    }
+
+    text.char_indices().nth(clamped).map_or(text.len(), |(byte_index, _)| byte_index)
+}
+
+fn delete_selection(text: &mut String, cursor: &mut usize, selection: &mut Option<(usize, usize)>) -> bool {
+    let Some((start, end)) = normalized_selection(text, *selection) else {
+        *selection = None;
+        return false;
+    };
+
+    let start_byte = byte_index_for_char(text, start);
+    let end_byte = byte_index_for_char(text, end);
+    text.replace_range(start_byte..end_byte, "");
+    *cursor = start;
+    *selection = None;
+    true
+}
+
 impl SessionManager {
+    fn clear_host_search_query(&mut self) {
+        self.search_query.clear();
+        self.search_query_cursor = 0;
+        self.search_query_selection = None;
+    }
+
+    fn move_host_search_cursor_left(&mut self) {
+        clamp_cursor(&self.search_query, &mut self.search_query_cursor);
+        let active_selection = normalized_selection(&self.search_query, self.search_query_selection);
+        self.search_query_selection = None;
+        if let Some((start, _)) = active_selection {
+            self.search_query_cursor = start;
+        } else if self.search_query_cursor > 0 {
+            self.search_query_cursor -= 1;
+        }
+    }
+
+    fn move_host_search_cursor_right(&mut self) {
+        clamp_cursor(&self.search_query, &mut self.search_query_cursor);
+        let len = char_len(&self.search_query);
+        let active_selection = normalized_selection(&self.search_query, self.search_query_selection);
+        self.search_query_selection = None;
+        if let Some((_, end)) = active_selection {
+            self.search_query_cursor = end;
+        } else if self.search_query_cursor < len {
+            self.search_query_cursor += 1;
+        }
+    }
+
+    fn move_host_search_cursor_home(&mut self) {
+        self.search_query_cursor = 0;
+        self.search_query_selection = None;
+    }
+
+    fn move_host_search_cursor_end(&mut self) {
+        self.search_query_cursor = char_len(&self.search_query);
+        self.search_query_selection = None;
+    }
+
+    fn select_all_host_search_text(&mut self) {
+        let len = char_len(&self.search_query);
+        if len == 0 {
+            self.search_query_selection = None;
+            self.search_query_cursor = 0;
+        } else {
+            self.search_query_selection = Some((0, len));
+            self.search_query_cursor = len;
+        }
+    }
+
+    fn insert_host_search_char(&mut self, ch: char) -> bool {
+        let _ = delete_selection(&mut self.search_query, &mut self.search_query_cursor, &mut self.search_query_selection);
+        clamp_cursor(&self.search_query, &mut self.search_query_cursor);
+        let insert_at = byte_index_for_char(&self.search_query, self.search_query_cursor);
+        self.search_query.insert(insert_at, ch);
+        self.search_query_cursor += 1;
+        self.search_query_selection = None;
+        true
+    }
+
+    fn backspace_host_search_text(&mut self) -> bool {
+        if delete_selection(&mut self.search_query, &mut self.search_query_cursor, &mut self.search_query_selection) {
+            return true;
+        }
+
+        clamp_cursor(&self.search_query, &mut self.search_query_cursor);
+        if self.search_query_cursor == 0 {
+            self.search_query_selection = None;
+            return false;
+        }
+
+        let end = byte_index_for_char(&self.search_query, self.search_query_cursor);
+        let start = byte_index_for_char(&self.search_query, self.search_query_cursor - 1);
+        self.search_query.replace_range(start..end, "");
+        self.search_query_cursor -= 1;
+        self.search_query_selection = None;
+        true
+    }
+
+    fn delete_host_search_text(&mut self) -> bool {
+        if delete_selection(&mut self.search_query, &mut self.search_query_cursor, &mut self.search_query_selection) {
+            return true;
+        }
+
+        clamp_cursor(&self.search_query, &mut self.search_query_cursor);
+        let len = char_len(&self.search_query);
+        if self.search_query_cursor >= len {
+            self.search_query_selection = None;
+            return false;
+        }
+
+        let start = byte_index_for_char(&self.search_query, self.search_query_cursor);
+        let end = byte_index_for_char(&self.search_query, self.search_query_cursor + 1);
+        self.search_query.replace_range(start..end, "");
+        self.search_query_selection = None;
+        true
+    }
+
     // Search-mode input.
     pub(crate) fn handle_search_key(&mut self, key: KeyEvent) -> io::Result<()> {
         match key.code {
             KeyCode::Char('c') if key.modifiers.contains(KeyModifiers::CONTROL) => {
                 self.search_mode = false;
-                self.search_query.clear();
+                self.clear_host_search_query();
                 self.update_filtered_hosts();
             }
             KeyCode::Esc => {
                 self.search_mode = false;
-                self.search_query.clear();
+                self.clear_host_search_query();
                 self.update_filtered_hosts();
             }
             KeyCode::Enter => {
                 self.search_mode = false;
+                self.search_query_selection = None;
             }
+            KeyCode::Left => self.move_host_search_cursor_left(),
+            KeyCode::Right => self.move_host_search_cursor_right(),
+            KeyCode::Home => self.move_host_search_cursor_home(),
+            KeyCode::End => self.move_host_search_cursor_end(),
             KeyCode::Backspace => {
-                self.search_query.pop();
-                self.update_filtered_hosts();
+                if self.backspace_host_search_text() {
+                    self.update_filtered_hosts();
+                }
             }
-            KeyCode::Char(ch) => {
-                self.search_query.push(ch);
-                self.update_filtered_hosts();
+            KeyCode::Delete => {
+                if self.delete_host_search_text() {
+                    self.update_filtered_hosts();
+                }
+            }
+            KeyCode::Char('a') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                self.select_all_host_search_text();
+            }
+            KeyCode::Char('e') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                self.move_host_search_cursor_end();
+            }
+            KeyCode::Char(ch) if !key.modifiers.contains(KeyModifiers::CONTROL) && !key.modifiers.contains(KeyModifiers::ALT) => {
+                if self.insert_host_search_char(ch) {
+                    self.update_filtered_hosts();
+                }
             }
             _ => {}
         }
@@ -40,7 +206,10 @@ impl SessionManager {
             return;
         }
 
-        self.search_query.push_str(&filtered);
+        let _ = delete_selection(&mut self.search_query, &mut self.search_query_cursor, &mut self.search_query_selection);
+        for ch in filtered.chars() {
+            let _ = self.insert_host_search_char(ch);
+        }
         self.update_filtered_hosts();
     }
 
@@ -88,6 +257,8 @@ impl SessionManager {
             }
             KeyCode::Char('f') if self.focus_on_manager && key.modifiers.contains(KeyModifiers::CONTROL) => {
                 self.search_mode = true;
+                self.search_query_cursor = char_len(&self.search_query);
+                self.search_query_selection = None;
             }
             KeyCode::Char('q') if self.focus_on_manager && key.modifiers.is_empty() => {
                 self.open_quick_connect_modal();
@@ -111,7 +282,7 @@ impl SessionManager {
             }
             KeyCode::Char('c') if self.focus_on_manager && key.modifiers.contains(KeyModifiers::CONTROL) && !self.search_query.is_empty() => {
                 self.search_mode = false;
-                self.search_query.clear();
+                self.clear_host_search_query();
                 self.update_filtered_hosts();
             }
             KeyCode::Left if self.focus_on_manager && self.host_panel_visible && key.modifiers.contains(KeyModifiers::CONTROL) => {
@@ -176,5 +347,42 @@ impl SessionManager {
         }
 
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::SessionManager;
+    use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+
+    #[test]
+    fn paste_inserts_host_search_text_at_cursor() {
+        let mut app = SessionManager::new_for_tests();
+        app.search_mode = true;
+        app.search_query = "core-router".to_string();
+        app.search_query_cursor = 4;
+        app.search_query_selection = None;
+
+        app.handle_search_paste("-edge");
+
+        assert_eq!(app.search_query, "core-edge-router");
+        assert_eq!(app.search_query_cursor, 9);
+        assert_eq!(app.search_query_selection, None);
+    }
+
+    #[test]
+    fn host_search_supports_middle_insert_and_delete() {
+        let mut app = SessionManager::new_for_tests();
+        app.search_mode = true;
+        app.search_query = "admn".to_string();
+        app.search_query_cursor = 3;
+        app.search_query_selection = None;
+
+        app.handle_search_key(KeyEvent::new(KeyCode::Char('i'), KeyModifiers::NONE)).expect("insert");
+        assert_eq!(app.search_query, "admin");
+
+        app.handle_search_key(KeyEvent::new(KeyCode::Left, KeyModifiers::NONE)).expect("left");
+        app.handle_search_key(KeyEvent::new(KeyCode::Delete, KeyModifiers::NONE)).expect("delete");
+        assert_eq!(app.search_query, "admn");
     }
 }

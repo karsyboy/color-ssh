@@ -18,6 +18,71 @@ enum StatusContext {
     Terminal,
 }
 
+fn char_to_byte_index(text: &str, char_index: usize) -> usize {
+    if char_index == 0 {
+        return 0;
+    }
+    let len = text.chars().count();
+    let clamped = char_index.min(len);
+    if clamped == len {
+        text.len()
+    } else {
+        text.char_indices().nth(clamped).map_or(text.len(), |(byte_index, _)| byte_index)
+    }
+}
+
+fn push_if_non_empty(spans: &mut Vec<Span<'static>>, text: &str, style: Style) {
+    if !text.is_empty() {
+        spans.push(Span::styled(text.to_string(), style));
+    }
+}
+
+fn build_edit_value_spans(
+    text: &str,
+    cursor: usize,
+    selection: Option<(usize, usize)>,
+    value_style: Style,
+    cursor_style: Style,
+    selection_style: Style,
+) -> Vec<Span<'static>> {
+    let mut spans = Vec::new();
+    let len = text.chars().count();
+    let cursor = cursor.min(len);
+
+    if let Some((start_raw, end_raw)) = selection {
+        let start = start_raw.min(len);
+        let end = end_raw.min(len);
+        let (start, end) = if start <= end { (start, end) } else { (end, start) };
+
+        if start < end {
+            let start_byte = char_to_byte_index(text, start);
+            let end_byte = char_to_byte_index(text, end);
+            push_if_non_empty(&mut spans, &text[..start_byte], value_style);
+            push_if_non_empty(&mut spans, &text[start_byte..end_byte], selection_style);
+            push_if_non_empty(&mut spans, &text[end_byte..], value_style);
+            return spans;
+        }
+    }
+
+    if len == 0 {
+        spans.push(Span::styled(" ".to_string(), cursor_style));
+        return spans;
+    }
+
+    if cursor < len {
+        let cursor_start = char_to_byte_index(text, cursor);
+        let cursor_end = char_to_byte_index(text, cursor + 1);
+        push_if_non_empty(&mut spans, &text[..cursor_start], value_style);
+        push_if_non_empty(&mut spans, &text[cursor_start..cursor_end], cursor_style);
+        push_if_non_empty(&mut spans, &text[cursor_end..], value_style);
+    } else {
+        spans.push(Span::styled(text.to_string(), value_style));
+        spans.push(Span::styled(" ".to_string(), cursor_style));
+    }
+
+    spans
+}
+
 impl SessionManager {
     // Entry point.
     pub(crate) fn render_global_status_bar(&self, frame: &mut Frame, area: Rect) {
@@ -231,28 +296,55 @@ impl SessionManager {
 
     // Host search context.
     fn build_search_mode_status_spans(&self) -> (Vec<Span<'static>>, Vec<Span<'static>>) {
-        let left = vec![
+        let cursor_style = Style::default().fg(theme::ansi_black()).bg(theme::ansi_cyan()).add_modifier(Modifier::BOLD);
+        let selection_style = Style::default()
+            .fg(theme::selection_fg())
+            .bg(theme::selection_bg())
+            .add_modifier(Modifier::BOLD);
+        let mut left = vec![
             Span::styled("Host Search", Style::default().fg(theme::ansi_cyan()).add_modifier(Modifier::BOLD)),
             Self::context_split_indicator(),
-            Span::styled(self.search_query.clone(), Style::default().fg(theme::ansi_bright_white())),
-            Span::styled("_", Style::default().fg(theme::ansi_bright_white())),
         ];
+        left.extend(build_edit_value_spans(
+            &self.search_query,
+            self.search_query_cursor,
+            self.search_query_selection,
+            Style::default().fg(theme::ansi_bright_white()),
+            cursor_style,
+            selection_style,
+        ));
+
         let right = vec![
             Span::styled("Enter", Style::default().fg(theme::ansi_green())),
-            Span::styled(" | ", Style::default().fg(theme::ansi_bright_black())),
+            Span::styled(":done | ", Style::default().fg(theme::ansi_bright_black())),
             Span::styled("Esc", Style::default().fg(theme::ansi_red())),
             Span::styled("/", Style::default().fg(theme::ansi_bright_black())),
             Span::styled("^C", Style::default().fg(theme::ansi_red())),
-            Span::styled(":clear", Style::default().fg(theme::ansi_bright_black())),
+            Span::styled(":clear | ", Style::default().fg(theme::ansi_bright_black())),
+            Span::styled("←/→", Style::default().fg(theme::ansi_cyan())),
+            Span::styled(":move | ", Style::default().fg(theme::ansi_bright_black())),
+            Span::styled("Home/End", Style::default().fg(theme::ansi_cyan())),
+            Span::styled(":edge | ", Style::default().fg(theme::ansi_bright_black())),
+            Span::styled("^A", Style::default().fg(theme::ansi_yellow())),
+            Span::styled(":all", Style::default().fg(theme::ansi_bright_black())),
         ];
         (left, right)
     }
 
     // Terminal search context.
     fn build_terminal_search_status_spans(&self) -> (Vec<Span<'static>>, Vec<Span<'static>>) {
-        let (query, matches_len, current_idx) = self
-            .current_tab_search()
-            .map_or_else(|| (String::new(), 0, 0), |search| (search.query.clone(), search.matches.len(), search.current));
+        let (query, cursor, selection, matches_len, current_idx) = self.current_tab_search().map_or_else(
+            || (String::new(), 0usize, None, 0usize, 0usize),
+            |search| {
+                (
+                    search.query.clone(),
+                    search.query_cursor,
+                    search.query_selection,
+                    search.matches.len(),
+                    search.current,
+                )
+            },
+        );
 
         let match_info = if matches_len > 0 {
             format!("{}/{}", current_idx + 1, matches_len)
@@ -260,21 +352,40 @@ impl SessionManager {
             "0/0".to_string()
         };
 
-        let left = vec![
+        let cursor_style = Style::default().fg(theme::ansi_black()).bg(theme::ansi_cyan()).add_modifier(Modifier::BOLD);
+        let selection_style = Style::default()
+            .fg(theme::selection_fg())
+            .bg(theme::selection_bg())
+            .add_modifier(Modifier::BOLD);
+        let mut left = vec![
             Span::styled("Terminal Search", Style::default().fg(theme::ansi_cyan()).add_modifier(Modifier::BOLD)),
             Self::context_split_indicator(),
-            Span::styled(query, Style::default().fg(theme::ansi_bright_white())),
-            Span::styled("_", Style::default().fg(theme::ansi_bright_white())),
+        ];
+        left.extend(build_edit_value_spans(
+            &query,
+            cursor,
+            selection,
+            Style::default().fg(theme::ansi_bright_white()),
+            cursor_style,
+            selection_style,
+        ));
+        left.extend([
             Span::styled(" ", Style::default()),
             Span::styled(format!("({match_info})"), Style::default().fg(theme::ansi_yellow())),
-        ];
+        ]);
         let right = vec![
             Span::styled("Enter", Style::default().fg(theme::ansi_green())),
-            Span::styled(" | ", Style::default().fg(theme::ansi_bright_black())),
+            Span::styled(":next | ", Style::default().fg(theme::ansi_bright_black())),
             Span::styled("Esc", Style::default().fg(theme::ansi_red())),
             Span::styled(":clear | ", Style::default().fg(theme::ansi_bright_black())),
             Span::styled("↑/↓", Style::default().fg(theme::ansi_cyan())),
-            Span::styled(":next/prev", Style::default().fg(theme::ansi_bright_black())),
+            Span::styled(":next/prev | ", Style::default().fg(theme::ansi_bright_black())),
+            Span::styled("←/→", Style::default().fg(theme::ansi_cyan())),
+            Span::styled(":move | ", Style::default().fg(theme::ansi_bright_black())),
+            Span::styled("Home/End", Style::default().fg(theme::ansi_cyan())),
+            Span::styled(":edge | ", Style::default().fg(theme::ansi_bright_black())),
+            Span::styled("^A", Style::default().fg(theme::ansi_yellow())),
+            Span::styled(":all", Style::default().fg(theme::ansi_bright_black())),
         ];
         (left, right)
     }

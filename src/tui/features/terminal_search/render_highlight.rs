@@ -38,6 +38,8 @@ mod tests {
         let search = TerminalSearchState {
             active: true,
             query: "abc".to_string(),
+            query_cursor: 3,
+            query_selection: None,
             matches: vec![(2, 4, 3), (2, 10, 2), (3, 1, 1)],
             current: 1,
         };

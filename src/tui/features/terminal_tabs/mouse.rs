@@ -24,14 +24,8 @@ impl SessionManager {
             return Ok(());
         }
 
-        if self.current_tab_search().map(|search_state| search_state.active).unwrap_or(false)
-            && self.is_pty_mouse_mode_active()
-            && let Some(search) = self.current_tab_search_mut()
-        {
-            search.active = false;
-            search.query.clear();
-            search.matches.clear();
-            search.current = 0;
+        if self.current_tab_search().map(|search_state| search_state.active).unwrap_or(false) && self.is_pty_mouse_mode_active() {
+            self.clear_terminal_search();
         }
 
         match mouse.kind {
