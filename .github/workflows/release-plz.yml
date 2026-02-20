@@ -1,6 +1,10 @@
 # Name of the workflow: you can change it.
 name: Release-plz
 
+permissions:
+  contents: write
+  pull-requests: write
+
 # The action runs on every push to the main branch.
 on:
   push:
@@ -33,9 +37,37 @@ jobs:
           token: ${{ secrets.RELEASE_PLZ_TOKEN }}
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
-      - name: Run release-plz
+      - name: Run release-plz (release PR)
         uses: release-plz/action@v0.5
+        with:
+          command: release-pr
         env:
           GITHUB_TOKEN: ${{ secrets.RELEASE_PLZ_TOKEN }}
           # In `release-plz-pr` this is only required if you are using a private registry.
+          CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
+
+  # Release/tag after the release PR changes are on main.
+  # On regular dev merges this should no-op.
+  release-plz-release:
+    name: Release-plz Release
+    runs-on: ubuntu-latest
+    needs:
+      - release-plz-pr
+    concurrency:
+      group: release-plz-release-${{ github.ref }}
+      cancel-in-progress: false
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.RELEASE_PLZ_TOKEN }}
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+      - name: Run release-plz (release)
+        uses: release-plz/action@v0.5
+        with:
+          command: release
+        env:
+          GITHUB_TOKEN: ${{ secrets.RELEASE_PLZ_TOKEN }}
           CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
