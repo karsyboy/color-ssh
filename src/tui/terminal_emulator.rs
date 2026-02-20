@@ -306,6 +306,10 @@ impl<'a> Screen<'a> {
         !self.parser.term.mode().contains(TermMode::SHOW_CURSOR)
     }
 
+    pub(crate) fn bracketed_paste_enabled(&self) -> bool {
+        self.parser.term.mode().contains(TermMode::BRACKETED_PASTE)
+    }
+
     // Cell lookups.
     pub(crate) fn cell(&self, row: u16, col: u16) -> Option<CellRef<'_>> {
         let grid = self.parser.term.grid();

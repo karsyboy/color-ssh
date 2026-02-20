@@ -11,6 +11,18 @@ fn tab_title_display_width(title: &str) -> usize {
     display_width(title)
 }
 
+fn encode_paste_bytes(pasted: &str, bracketed: bool) -> Vec<u8> {
+    if !bracketed {
+        return pasted.as_bytes().to_vec();
+    }
+
+    let mut out = Vec::with_capacity(pasted.len() + 12);
+    out.extend_from_slice(b"\x1b[200~");
+    out.extend_from_slice(pasted.as_bytes());
+    out.extend_from_slice(b"\x1b[201~");
+    out
+}
+
 impl SessionManager {
     // Selection/focus helpers.
     pub(crate) fn clear_selection_state(&mut self) {
@@ -141,7 +153,9 @@ impl SessionManager {
         if !self.focus_on_manager && !self.tabs.is_empty() && self.selected_tab < self.tabs.len() {
             self.tabs[self.selected_tab].scroll_offset = 0;
             self.clear_selection_state();
-            self.write_bytes_to_active_pty(pasted.as_bytes())?;
+            let bracketed = self.pty_bracketed_paste_enabled();
+            let bytes = encode_paste_bytes(&pasted, bracketed);
+            self.write_bytes_to_active_pty(&bytes)?;
         }
 
         Ok(())
@@ -195,6 +209,8 @@ impl SessionManager {
                 if !self.is_pty_mouse_mode_active() {
                     if let Some(search) = self.current_tab_search_mut() {
                         search.active = true;
+                        search.query_cursor = search.query.chars().count();
+                        search.query_selection = None;
                     }
                 } else {
                     self.send_key_to_pty(key)?;
@@ -263,6 +279,23 @@ impl SessionManager {
         }
 
         Ok(())
+    }
+
+    fn pty_bracketed_paste_enabled(&self) -> bool {
+        if self.selected_tab >= self.tabs.len() {
+            return false;
+        }
+
+        let tab = &self.tabs[self.selected_tab];
+        let Some(session) = &tab.session else {
+            return false;
+        };
+
+        if let Ok(parser) = session.parser.lock() {
+            return parser.screen().bracketed_paste_enabled();
+        }
+
+        false
     }
 
     // Key-event encoding dispatch.
@@ -396,5 +429,12 @@ mod tests {
 
         let form = app.quick_connect.as_ref().expect("quick connect state");
         assert_eq!(form.user, "ops");
+    }
+
+    #[test]
+    fn encode_paste_bytes_wraps_bracketed_payload_when_enabled() {
+        let pasted = "hello\nworld";
+        assert_eq!(encode_paste_bytes(pasted, true), b"\x1b[200~hello\nworld\x1b[201~".to_vec());
+        assert_eq!(encode_paste_bytes(pasted, false), pasted.as_bytes().to_vec());
     }
 }
