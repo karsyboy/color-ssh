@@ -13,6 +13,7 @@ use crossterm::execute;
 use ratatui::style::Color as UiColor;
 use std::io::{Write, stdout};
 use std::sync::{Arc, Mutex};
+use unicode_width::UnicodeWidthChar;
 
 pub(crate) use alacritty_terminal::vte::ansi::Color as AnsiColor;
 
@@ -349,13 +350,24 @@ pub(crate) struct CellRef<'a> {
 }
 
 impl<'a> CellRef<'a> {
+    fn is_renderable_primary_char(ch: char) -> bool {
+        ch != ' ' && !ch.is_control()
+    }
+
+    fn is_renderable_zero_width(ch: char) -> bool {
+        !ch.is_control() && ch.width().unwrap_or(0) == 0
+    }
+
     // Text content.
     pub(crate) fn has_contents(&self) -> bool {
-        !self.cell.flags.intersects(Flags::WIDE_CHAR_SPACER | Flags::LEADING_WIDE_CHAR_SPACER) && self.cell.c != ' '
+        !self.cell.flags.intersects(Flags::WIDE_CHAR_SPACER | Flags::LEADING_WIDE_CHAR_SPACER) && Self::is_renderable_primary_char(self.cell.c)
     }
 
     pub(crate) fn contents(&self) -> String {
         if self.cell.flags.intersects(Flags::WIDE_CHAR_SPACER | Flags::LEADING_WIDE_CHAR_SPACER) {
+            return " ".to_string();
+        }
+        if !Self::is_renderable_primary_char(self.cell.c) {
             return " ".to_string();
         }
 
@@ -363,7 +375,9 @@ impl<'a> CellRef<'a> {
         out.push(self.cell.c);
         if let Some(zerowidth) = self.cell.zerowidth() {
             for c in zerowidth {
-                out.push(*c);
+                if Self::is_renderable_zero_width(*c) {
+                    out.push(*c);
+                }
             }
         }
         out
@@ -495,4 +509,31 @@ fn ansi_index_to_theme_color(index: u8) -> UiColor {
 
 fn ui_color_to_rgb(color: UiColor) -> Option<Rgb> {
     if let UiColor::Rgb(r, g, b) = color { Some(Rgb { r, g, b }) } else { None }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::Parser;
+
+    #[test]
+    fn tabs_render_as_spaces_not_control_chars() {
+        let mut parser = Parser::new(2, 16, 100);
+        parser.process(b"A\tB");
+        let screen = parser.screen();
+
+        let tab_cell = screen.cell(0, 1).expect("tab cell");
+        assert!(!tab_cell.has_contents());
+        assert_eq!(tab_cell.contents(), " ");
+    }
+
+    #[test]
+    fn plain_ascii_cell_is_rendered_normally() {
+        let mut parser = Parser::new(2, 16, 100);
+        parser.process(b"Z");
+        let screen = parser.screen();
+
+        let cell = screen.cell(0, 0).expect("cell");
+        assert!(cell.has_contents());
+        assert_eq!(cell.contents(), "Z");
+    }
 }
