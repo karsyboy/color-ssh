@@ -1,7 +1,7 @@
 //! Event loop and top-level event routing.
 
 use crate::tui::SessionManager;
-use crossterm::event::{self, Event};
+use crossterm::event::{self, Event, KeyCode, KeyEvent};
 use ratatui::Terminal;
 use std::{io, time::Duration};
 
@@ -53,6 +53,20 @@ fn resolve_action(app: &SessionManager) -> AppAction {
     AppAction::Host(HostAction::HandleKey)
 }
 
+fn should_mark_ui_dirty_for_key(app: &SessionManager, key: &KeyEvent) -> bool {
+    let terminal_view_active = !app.focus_on_manager && !app.tabs.is_empty() && app.selected_tab < app.tabs.len();
+    let terminal_search_active = app.current_tab_search().map(|search_state| search_state.active).unwrap_or(false);
+    let direct_terminal_input = terminal_view_active && !terminal_search_active && app.quick_connect.is_none() && !app.search_mode;
+
+    // Forwarded terminal typing/paste characters don't need eager UI invalidation.
+    // PTY output updates render_epoch and drives redraws.
+    if direct_terminal_input && key.modifiers.is_empty() && matches!(key.code, KeyCode::Char(_) | KeyCode::Enter | KeyCode::Tab) {
+        return false;
+    }
+
+    true
+}
+
 pub(crate) fn run_app<B: ratatui::backend::Backend>(terminal: &mut Terminal<B>, app: &mut SessionManager) -> io::Result<()> {
     const EVENT_POLL_INTERVAL: Duration = Duration::from_millis(50);
     const RENDER_HEARTBEAT: Duration = Duration::from_millis(250);
@@ -75,11 +89,17 @@ pub(crate) fn run_app<B: ratatui::backend::Backend>(terminal: &mut Terminal<B>, 
         if event::poll(EVENT_POLL_INTERVAL)? {
             match event::read()? {
                 Event::Key(key) => {
-                    app.mark_ui_dirty();
+                    if should_mark_ui_dirty_for_key(app, &key) {
+                        app.mark_ui_dirty();
+                    }
                     match resolve_action(app) {
                         AppAction::Exit => app.should_exit = true,
                         AppAction::Host(_) | AppAction::Tab(_) | AppAction::Terminal(_) | AppAction::QuickConnect(_) => app.handle_key(key)?,
                     }
+                }
+                Event::Paste(text) => {
+                    app.mark_ui_dirty();
+                    app.handle_paste(text)?;
                 }
                 Event::Mouse(mouse) => {
                     app.mark_ui_dirty();

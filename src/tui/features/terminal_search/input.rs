@@ -57,6 +57,18 @@ impl SessionManager {
         }
         Ok(())
     }
+
+    pub(crate) fn handle_terminal_search_paste(&mut self, pasted: &str) {
+        let filtered: String = pasted.chars().filter(|ch| !ch.is_control()).collect();
+        if filtered.is_empty() {
+            return;
+        }
+
+        if let Some(search) = self.current_tab_search_mut() {
+            search.query.push_str(&filtered);
+            self.update_terminal_search();
+        }
+    }
 }
 
 #[cfg(test)]
@@ -132,5 +144,14 @@ mod tests {
         app.handle_terminal_search_key(KeyEvent::new(KeyCode::Backspace, KeyModifiers::NONE))
             .expect("backspace");
         assert_eq!(app.current_tab_search().map(|search| search.query.as_str()), Some(""));
+    }
+
+    #[test]
+    fn paste_appends_terminal_search_query() {
+        let mut app = app_with_active_search();
+        app.handle_terminal_search_paste("err\nwarn");
+
+        // Control characters are filtered from pasted text.
+        assert_eq!(app.current_tab_search().map(|search| search.query.as_str()), Some("errwarn"));
     }
 }

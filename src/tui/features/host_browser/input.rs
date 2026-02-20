@@ -34,6 +34,16 @@ impl SessionManager {
         Ok(())
     }
 
+    pub(crate) fn handle_search_paste(&mut self, pasted: &str) {
+        let filtered: String = pasted.chars().filter(|ch| !ch.is_control()).collect();
+        if filtered.is_empty() {
+            return;
+        }
+
+        self.search_query.push_str(&filtered);
+        self.update_filtered_hosts();
+    }
+
     // Host-browser / manager input.
     pub(crate) fn handle_manager_key(&mut self, key: KeyEvent) -> io::Result<()> {
         match key.code {

@@ -100,6 +100,31 @@ impl SessionManager {
         }
     }
 
+    pub(crate) fn handle_quick_connect_paste(&mut self, pasted: &str) {
+        let Some(form) = self.quick_connect.as_mut() else {
+            return;
+        };
+
+        form.finish_mouse_selection();
+        let filtered: String = pasted.chars().filter(|ch| !ch.is_control()).collect();
+        if filtered.is_empty() {
+            return;
+        }
+
+        match form.selected {
+            QuickConnectField::User | QuickConnectField::Host => {
+                let field = form.selected;
+                for ch in filtered.chars() {
+                    form.insert_char(field, ch);
+                }
+                if field == QuickConnectField::Host {
+                    form.host_required = false;
+                }
+            }
+            _ => {}
+        }
+    }
+
     // Form submit validation + action.
     pub(crate) fn submit_quick_connect_modal(&mut self) {
         let Some(form) = self.quick_connect.as_mut() else {

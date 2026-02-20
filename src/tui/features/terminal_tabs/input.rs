@@ -118,6 +118,35 @@ impl SessionManager {
         self.handle_manager_key(key)
     }
 
+    pub(crate) fn handle_paste(&mut self, pasted: String) -> io::Result<()> {
+        if pasted.is_empty() {
+            return Ok(());
+        }
+
+        if self.quick_connect.is_some() {
+            self.handle_quick_connect_paste(&pasted);
+            return Ok(());
+        }
+
+        if self.search_mode {
+            self.handle_search_paste(&pasted);
+            return Ok(());
+        }
+
+        if !self.focus_on_manager && self.current_tab_search().map(|search_state| search_state.active).unwrap_or(false) {
+            self.handle_terminal_search_paste(&pasted);
+            return Ok(());
+        }
+
+        if !self.focus_on_manager && !self.tabs.is_empty() && self.selected_tab < self.tabs.len() {
+            self.tabs[self.selected_tab].scroll_offset = 0;
+            self.clear_selection_state();
+            self.write_bytes_to_active_pty(pasted.as_bytes())?;
+        }
+
+        Ok(())
+    }
+
     // Terminal-tab key handling.
     pub(crate) fn handle_tab_key(&mut self, key: KeyEvent) -> io::Result<()> {
         if self.current_tab_search().map(|search_state| search_state.active).unwrap_or(false) {
@@ -288,7 +317,7 @@ impl SessionManager {
 mod tests {
     use super::*;
     use crate::ssh_config::SshHost;
-    use crate::tui::{HostTab, TerminalSearchState};
+    use crate::tui::{HostTab, QuickConnectField, QuickConnectState, TerminalSearchState};
 
     fn host_tab(title: &str) -> HostTab {
         HostTab {
@@ -354,5 +383,18 @@ mod tests {
         let titles: Vec<&str> = app.tabs.iter().map(|tab| tab.title.as_str()).collect();
         assert_eq!(titles, vec!["one", "three", "two"]);
         assert_eq!(app.selected_tab, 2);
+    }
+
+    #[test]
+    fn handle_paste_routes_to_quick_connect_form_when_modal_open() {
+        let mut app = SessionManager::new_for_tests();
+        let mut form = QuickConnectState::new(false, vec!["default".to_string()]);
+        form.selected = QuickConnectField::User;
+        app.quick_connect = Some(form);
+
+        app.handle_paste("ops\n".to_string()).expect("paste should succeed");
+
+        let form = app.quick_connect.as_ref().expect("quick connect state");
+        assert_eq!(form.user, "ops");
     }
 }
