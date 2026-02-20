@@ -26,15 +26,42 @@ pub(super) fn build_ssh_host_tree(config_path: &Path) -> io::Result<SshHostTreeM
     let mut next_id: FolderId = 0;
     let root_name = config_path.file_name().and_then(|segment| segment.to_str()).unwrap_or("config").to_string();
 
-    let root = parse_tree_folder(config_path, &root_name, &mut hosts, &mut visited, &mut next_id)?.unwrap_or_else(|| TreeFolder {
+    let mut root = parse_tree_folder(config_path, &root_name, &mut hosts, &mut visited, &mut next_id)?.unwrap_or_else(|| TreeFolder {
         id: 0,
         name: root_name,
         path: config_path.to_path_buf(),
         children: Vec::new(),
         host_indices: Vec::new(),
     });
+    sort_tree_folder(&mut root, &hosts);
 
     Ok(SshHostTreeModel { root, hosts })
+}
+
+fn sort_tree_folder(folder: &mut TreeFolder, hosts: &[SshHost]) {
+    folder.host_indices.sort_by(|left_idx, right_idx| {
+        let left_name = hosts.get(*left_idx).map(|host| host.name.as_str()).unwrap_or_default();
+        let right_name = hosts.get(*right_idx).map(|host| host.name.as_str()).unwrap_or_default();
+        let left_key = left_name.to_lowercase();
+        let right_key = right_name.to_lowercase();
+        left_key
+            .cmp(&right_key)
+            .then_with(|| left_name.cmp(right_name))
+            .then_with(|| left_idx.cmp(right_idx))
+    });
+
+    for child in &mut folder.children {
+        sort_tree_folder(child, hosts);
+    }
+
+    folder.children.sort_by(|left, right| {
+        let left_key = left.name.to_lowercase();
+        let right_key = right.name.to_lowercase();
+        left_key
+            .cmp(&right_key)
+            .then_with(|| left.name.cmp(&right.name))
+            .then_with(|| left.id.cmp(&right.id))
+    });
 }
 
 fn parse_tree_folder(
