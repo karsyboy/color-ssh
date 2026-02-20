@@ -1,14 +1,10 @@
-mod errors;
-
-pub use errors::HighlightError;
-
-use crate::log_debug;
+use crate::{debug_enabled, log_debug};
 use once_cell::sync::Lazy;
-use regex::Regex;
-use std::thread;
+use regex::{Regex, RegexSet};
+use std::{borrow::Cow, thread, time::Instant};
 
-// Compiled regex for stripping ANSI escape sequences before pattern matching
-static ANSI_ESCAPE_REGEX: Lazy<Regex> = Lazy::new(|| {
+// Compiled regex for stripping ANSI escape sequences before pattern matching.
+static ANSI_ESCAPE_REGEX: Lazy<Option<Regex>> = Lazy::new(|| {
     Regex::new(
         r"(?x)
         \x1B\[[\x30-\x3F]*[\x20-\x2F]*[\x40-\x7E]    # CSI: ESC [ params intermediates final
@@ -18,139 +14,431 @@ static ANSI_ESCAPE_REGEX: Lazy<Regex> = Lazy::new(|| {
         |\x1B                                        # Stray ESC character
     ",
     )
-    .unwrap()
+    .ok()
 });
 
-/// Processes a chunk of text by applying syntax highlighting based on the provided rules and returns the highlighted string.
-pub fn process_chunk(chunk: String, chunk_id: i32, rules: &[(Regex, String)], reset_color: &str) -> String {
-    let thread_id = thread::current().id();
+// Heuristic: regex-set prefiltering tends to help with smaller rule sets, but
+// can become net overhead once the rule list grows.
+const MAX_RULES_FOR_REGEXSET_PREFILTER: usize = 24;
 
-    // Clean up the chunk and build the index mapping
-    let (clean_chunk, mapping) = build_index_mapping(&chunk);
+#[derive(Default)]
+pub struct HighlightScratch {
+    clean_chunk: String,
+    mapping: Vec<usize>,
+    matches: Vec<(usize, usize, usize)>,
+    highlighted: String,
+}
 
-    let mut matches: Vec<(usize, usize, String, String)> = Vec::new();
+/// Processes a chunk using reusable scratch buffers to reduce per-chunk allocations.
+pub fn process_chunk_with_scratch<'a>(
+    chunk: &'a str,
+    chunk_id: i32,
+    rules: &[(Regex, String)],
+    rule_set: Option<&RegexSet>,
+    reset_color: &str,
+    scratch: &'a mut HighlightScratch,
+) -> Cow<'a, str> {
+    // Fast path: nothing to do, so return original chunk without allocating.
+    if chunk.is_empty() || rules.is_empty() {
+        return Cow::Borrowed(chunk);
+    }
 
-    // Find all matches in the chunk using the provided regex rules
-    for (regex, color) in rules {
-        for mat in regex.find_iter(&clean_chunk) {
+    let debug_logging = debug_enabled!();
+    let thread_id = debug_logging.then(|| thread::current().id());
+
+    // Timers are created only in debug mode so production hot path stays lean.
+    let build_started_at = debug_logging.then(Instant::now);
+    let has_ansi = chunk.as_bytes().contains(&0x1b);
+    let has_newline_or_cr = chunk.as_bytes().iter().any(|byte| matches!(*byte, b'\n' | b'\r'));
+
+    let (clean_chunk, use_mapping) = if has_ansi {
+        // ANSI path: strip escape bytes for matching while tracking clean->raw offsets.
+        build_index_mapping(chunk, &mut scratch.clean_chunk, &mut scratch.mapping);
+        (scratch.clean_chunk.as_str(), true)
+    } else if has_newline_or_cr {
+        // Newline path: map line breaks to spaces so cross-line patterns can match.
+        build_clean_chunk_no_ansi(chunk, &mut scratch.clean_chunk);
+        scratch.mapping.clear();
+        (scratch.clean_chunk.as_str(), false)
+    } else {
+        // Plain path: match directly on the original bytes.
+        scratch.mapping.clear();
+        (chunk, false)
+    };
+
+    // All-visible-bytes could be removed after ANSI stripping.
+    if clean_chunk.is_empty() {
+        return Cow::Borrowed(chunk);
+    }
+
+    let build_elapsed_us = build_started_at.map_or(0, |start| start.elapsed().as_micros());
+
+    scratch.matches.clear();
+    let mut rule_timings_ns = debug_logging.then(|| vec![0u128; rules.len()]);
+    let mut prefilter_elapsed_us = 0u128;
+
+    // Applies one rule and stores all discovered raw byte ranges.
+    let mut push_matches = |rule_idx: usize, regex: &Regex| {
+        let rule_started_at = debug_logging.then(Instant::now);
+
+        for mat in regex.find_iter(clean_chunk) {
             let clean_start = mat.start();
             let clean_end = mat.end();
 
-            // Map clean indices back to raw chunk indices
-            let raw_start = if clean_start < mapping.len() {
-                mapping[clean_start]
+            let (raw_start, raw_end) = if use_mapping {
+                // For ANSI-cleaned chunks, remap match offsets back to original raw chunk.
+                map_clean_range_to_raw(clean_start, clean_end, &scratch.mapping, chunk.len(), thread_id, chunk_id)
             } else {
-                log_debug!(
-                    "[{:?}] Chunk[{:?}] Index mapping fallback: clean_start {} >= mapping.len() {}",
-                    thread_id,
-                    chunk_id,
-                    clean_start,
-                    mapping.len()
-                );
-                0 // Fallback to 0 if clean_start is out of bounds
+                (clean_start, clean_end)
             };
 
-            let raw_end = if clean_end < mapping.len() {
-                mapping[clean_end]
-            } else {
-                log_debug!(
-                    "[{:?}] Chunk[{:?}] Index mapping fallback: clean_end {} >= mapping.len() {}",
-                    thread_id,
-                    chunk_id,
-                    clean_end,
-                    mapping.len()
-                );
-                chunk.len() // Fallback to the full length of the chunk if clean_end is out of bounds
-            };
+            scratch.matches.push((raw_start, raw_end, rule_idx));
+        }
 
-            // Extract the matched text and store it with the color
-            let matched_text = chunk[raw_start..raw_end].to_owned();
-            matches.push((raw_start, raw_end, matched_text, color.clone()));
+        if let (Some(start), Some(rule_timings)) = (rule_started_at, rule_timings_ns.as_mut()) {
+            rule_timings[rule_idx] = rule_timings[rule_idx].saturating_add(start.elapsed().as_nanos());
+        }
+    };
+
+    // Prefilter is optional and capped by a rule-count heuristic.
+    let use_regexset_prefilter = rule_set.is_some() && rules.len() <= MAX_RULES_FOR_REGEXSET_PREFILTER;
+
+    if use_regexset_prefilter {
+        if let Some(prefilter) = rule_set {
+            let prefilter_started_at = debug_logging.then(Instant::now);
+            let matched_rules = prefilter.matches(clean_chunk);
+            for rule_idx in matched_rules.iter() {
+                push_matches(rule_idx, &rules[rule_idx].0);
+            }
+            prefilter_elapsed_us = prefilter_started_at.map_or(0, |start| start.elapsed().as_micros());
+        } else {
+            for (rule_idx, (regex, _)) in rules.iter().enumerate() {
+                push_matches(rule_idx, regex);
+            }
+        }
+    } else {
+        for (rule_idx, (regex, _)) in rules.iter().enumerate() {
+            push_matches(rule_idx, regex);
         }
     }
 
-    // Sort matches by starting position to handle overlaps
-    matches.sort_by_key(|&(start, _, _, _)| start);
+    if scratch.matches.is_empty() {
+        return Cow::Borrowed(chunk);
+    }
 
-    // Apply the color formatting to the chunk based on the matches
-    let estimated_capacity = chunk.len() + (matches.len() * 20);
-    let mut highlighted = String::with_capacity(estimated_capacity);
-    let mut last_index = 0;
+    // Deterministic conflict ordering:
+    // 1) earliest start wins
+    // 2) when starts are equal, lower rule index (config order) wins
+    // 3) final end tie-break keeps ordering total for unstable sort
+    scratch
+        .matches
+        .sort_unstable_by(|left, right| left.0.cmp(&right.0).then(left.2.cmp(&right.2)).then(left.1.cmp(&right.1)));
 
-    for (start, end, matched_text, color) in matches.clone() {
-        // Skip overlapping matches the first match wins
+    let format_started_at = debug_logging.then(Instant::now);
+    let estimated_capacity = chunk
+        .len()
+        .saturating_add(scratch.matches.len().saturating_mul(reset_color.len().saturating_add(16)));
+    scratch.highlighted.clear();
+    scratch.highlighted.reserve(estimated_capacity);
+
+    let mut last_index = 0usize;
+    let mut accepted_match_count = 0usize;
+
+    for (start, end, rule_idx) in scratch.matches.iter().copied() {
+        // First accepted range wins; later overlapping ranges are discarded.
         if last_index > start {
             continue;
         }
+        accepted_match_count = accepted_match_count.saturating_add(1);
 
-        // Append the text between the last match and the current match
-        highlighted.push_str(&chunk[last_index..start]);
-
-        // Append the matched text with color formatting
-        highlighted.push_str(&format!("{}{}{}", color, matched_text, reset_color));
+        scratch.highlighted.push_str(&chunk[last_index..start]);
+        scratch.highlighted.push_str(&rules[rule_idx].1);
+        scratch.highlighted.push_str(&chunk[start..end]);
+        scratch.highlighted.push_str(reset_color);
         last_index = end;
     }
 
-    // Append the remaining text after the last match
-    highlighted.push_str(&chunk[last_index..]);
+    scratch.highlighted.push_str(&chunk[last_index..]);
 
-    // Debug logging for detailed highlighting analysis
-    log_debug!("[{:?}] Chunk[{:?}] 1:Raw chunk: {:?}", thread_id, chunk_id, chunk);
-    log_debug!("[{:?}] Chunk[{:?}] 2:Clean chunk: {:?}", thread_id, chunk_id, clean_chunk);
-    log_debug!("[{:?}] Chunk[{:?}] 3:Matches: {:?}", thread_id, chunk_id, matches);
-    log_debug!("[{:?}] Chunk[{:?}] 4:Filtered matches: {:?}", thread_id, chunk_id, matches);
-    log_debug!("[{:?}] Chunk[{:?}] 5:Highlighted chunk: {:?}", thread_id, chunk_id, highlighted);
+    if let Some(thread_id) = thread_id {
+        let format_elapsed_us = format_started_at.map_or(0, |start| start.elapsed().as_micros());
+        let total_match_elapsed_us: u128 = rule_timings_ns
+            .as_ref()
+            .map(|timings| timings.iter().copied().sum::<u128>() / 1000)
+            .unwrap_or(0);
 
-    highlighted
+        let top_rules = rule_timings_ns.as_ref().map(|timings| top_rule_timing_summary(timings, 5)).unwrap_or_default();
+
+        log_debug!("[{:?}] Chunk[{:?}] 1:Raw chunk: {:?}", thread_id, chunk_id, chunk);
+        log_debug!("[{:?}] Chunk[{:?}] 2:Clean chunk: {:?}", thread_id, chunk_id, clean_chunk);
+        log_debug!("[{:?}] Chunk[{:?}] 3:Matches: {:?}", thread_id, chunk_id, scratch.matches);
+        log_debug!(
+            "[{:?}] Chunk[{:?}] 4:Accepted matches: {}/{}",
+            thread_id,
+            chunk_id,
+            accepted_match_count,
+            scratch.matches.len()
+        );
+        log_debug!("[{:?}] Chunk[{:?}] 5:Highlighted chunk: {:?}", thread_id, chunk_id, scratch.highlighted);
+        log_debug!(
+            "[{:?}] Chunk[{:?}] 6:Timings build={}us prefilter={}us match={}us format={}us prefilter_used={} top_rules={}",
+            thread_id,
+            chunk_id,
+            build_elapsed_us,
+            prefilter_elapsed_us,
+            total_match_elapsed_us,
+            format_elapsed_us,
+            use_regexset_prefilter,
+            top_rules
+        );
+    }
+
+    // Return borrowed output from scratch to avoid cloning the highlighted chunk.
+    Cow::Borrowed(&scratch.highlighted)
 }
 
-/// Build a mapping of the original string to a cleaned version with ANSI sequences and newlines removed and return both the clean string and mapping.
-fn build_index_mapping(raw: &str) -> (String, Vec<usize>) {
-    // First, identify all ANSI escape sequence positions in the raw string
-    let ansi_ranges: Vec<(usize, usize)> = ANSI_ESCAPE_REGEX.find_iter(raw).map(|m| (m.start(), m.end())).collect();
+fn map_clean_range_to_raw(
+    clean_start: usize,
+    clean_end: usize,
+    mapping: &[usize],
+    raw_len: usize,
+    thread_id: Option<thread::ThreadId>,
+    chunk_id: i32,
+) -> (usize, usize) {
+    let raw_start = if clean_start < mapping.len() {
+        mapping[clean_start]
+    } else {
+        if let Some(thread_id) = thread_id {
+            log_debug!(
+                "[{:?}] Chunk[{:?}] Index mapping fallback: clean_start {} >= mapping.len() {}",
+                thread_id,
+                chunk_id,
+                clean_start,
+                mapping.len()
+            );
+        }
+        0
+    };
 
-    let mut clean_chunk = String::with_capacity(raw.len());
-    let mut mapping = Vec::with_capacity(raw.len());
+    let raw_end = if clean_end < mapping.len() {
+        mapping[clean_end]
+    } else {
+        if let Some(thread_id) = thread_id {
+            log_debug!(
+                "[{:?}] Chunk[{:?}] Index mapping fallback: clean_end {} >= mapping.len() {}",
+                thread_id,
+                chunk_id,
+                clean_end,
+                mapping.len()
+            );
+        }
+        raw_len
+    };
 
-    let mut raw_idx = 0;
-    let mut ansi_iter = ansi_ranges.iter().peekable();
+    (raw_start, raw_end)
+}
+
+fn build_clean_chunk_no_ansi(raw: &str, clean_chunk: &mut String) {
+    clean_chunk.clear();
+    clean_chunk.reserve(raw.len());
+
+    if raw.is_ascii() {
+        clean_chunk.push_str(raw);
+        // SAFETY: `clean_chunk` contains ASCII bytes only at this point. Replacing
+        // `\n`/`\r` with ASCII space preserves UTF-8 validity.
+        unsafe {
+            for byte in clean_chunk.as_bytes_mut() {
+                if matches!(*byte, b'\n' | b'\r') {
+                    *byte = b' ';
+                }
+            }
+        }
+        return;
+    }
+
+    for ch in raw.chars() {
+        // Keep byte count stable enough for non-ANSI path by replacing line breaks
+        // with one visible separator for regex matching.
+        if ch == '\n' || ch == '\r' {
+            clean_chunk.push(' ');
+        } else {
+            clean_chunk.push(ch);
+        }
+    }
+}
+
+/// Build a mapping of the original string to a cleaned version with ANSI
+/// sequences and newlines removed and return both in reusable buffers.
+fn build_index_mapping(raw: &str, clean_chunk: &mut String, mapping: &mut Vec<usize>) {
+    let Some(ansi_escape_regex) = ANSI_ESCAPE_REGEX.as_ref() else {
+        // Regex compile failure fallback: keep semantics without ANSI stripping.
+        build_clean_chunk_no_ansi(raw, clean_chunk);
+        mapping.clear();
+        mapping.reserve(raw.len().saturating_add(1));
+        let mut raw_idx = 0usize;
+        for ch in raw.chars() {
+            let ch_len = ch.len_utf8();
+            for _ in 0..ch_len {
+                mapping.push(raw_idx);
+            }
+            raw_idx = raw_idx.saturating_add(ch_len);
+        }
+        mapping.push(raw_idx);
+        return;
+    };
+
+    clean_chunk.clear();
+    mapping.clear();
+    clean_chunk.reserve(raw.len());
+    mapping.reserve(raw.len().saturating_add(1));
+
+    let mut raw_idx = 0usize;
+    let mut ansi_iter = ansi_escape_regex.find_iter(raw).peekable();
 
     for ch in raw.chars() {
         let ch_len = ch.len_utf8();
 
-        // Skip characters that are part of ANSI escape sequences
-        let mut in_ansi = false;
-        while let Some((start, end)) = ansi_iter.peek() {
-            if raw_idx >= *end {
+        while let Some(escape_match) = ansi_iter.peek() {
+            if raw_idx >= escape_match.end() {
                 ansi_iter.next();
-            } else if raw_idx >= *start && raw_idx < *end {
-                in_ansi = true;
-                break;
             } else {
                 break;
             }
         }
 
-        if !in_ansi {
-            // Track the byte position in clean string for each byte of the character
-            let clean_byte_pos = clean_chunk.len();
+        let in_ansi = ansi_iter
+            .peek()
+            .map(|escape_match| raw_idx >= escape_match.start() && raw_idx < escape_match.end())
+            .unwrap_or(false);
 
+        if !in_ansi {
+            let clean_byte_pos = clean_chunk.len();
             if ch == '\n' || ch == '\r' {
                 clean_chunk.push(' ');
             } else {
                 clean_chunk.push(ch);
             }
 
-            // Map each byte position in the clean string to the corresponding byte position in raw
-            let clean_char_len = clean_chunk.len() - clean_byte_pos;
+            // Each clean byte points to the raw byte where the source char starts.
+            let clean_char_len = clean_chunk.len().saturating_sub(clean_byte_pos);
             for _ in 0..clean_char_len {
                 mapping.push(raw_idx);
             }
         }
 
-        raw_idx += ch_len;
+        raw_idx = raw_idx.saturating_add(ch_len);
     }
 
     mapping.push(raw_idx);
-    (clean_chunk, mapping)
+}
+
+fn top_rule_timing_summary(rule_timings_ns: &[u128], limit: usize) -> String {
+    let mut indexed: Vec<(usize, u128)> = rule_timings_ns.iter().copied().enumerate().filter(|(_, elapsed_ns)| *elapsed_ns > 0).collect();
+    indexed.sort_unstable_by(|left, right| right.1.cmp(&left.1));
+
+    indexed
+        .into_iter()
+        .take(limit)
+        .map(|(idx, elapsed_ns)| format!("r{}={}us", idx, elapsed_ns / 1000))
+        .collect::<Vec<_>>()
+        .join(",")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{HighlightScratch, process_chunk_with_scratch};
+    use regex::{Regex, RegexSet};
+
+    fn process_chunk_once(chunk: &str, chunk_id: i32, rules: &[(Regex, String)], rule_set: Option<&RegexSet>, reset_color: &str) -> String {
+        let mut scratch = HighlightScratch::default();
+        process_chunk_with_scratch(chunk, chunk_id, rules, rule_set, reset_color, &mut scratch).into_owned()
+    }
+
+    #[test]
+    fn highlights_text_when_match_exists_inside_ansi_sequences() {
+        let rules = vec![(Regex::new("error").expect("regex"), "<red>".to_string())];
+        let chunk = "\x1b[31merror\x1b[0m".to_string();
+
+        let output = process_chunk_once(&chunk, 0, &rules, None, "</red>");
+        assert!(output.contains("<red>error"));
+        assert!(output.ends_with("</red>"));
+    }
+
+    #[test]
+    fn keeps_first_match_when_ranges_overlap() {
+        let rules = vec![
+            (Regex::new("ab").expect("regex"), "<a>".to_string()),
+            (Regex::new("abc").expect("regex"), "<b>".to_string()),
+        ];
+
+        let output = process_chunk_once("abc", 1, &rules, None, "</>");
+        assert_eq!(output, "<a>ab</>c");
+    }
+
+    #[test]
+    fn keeps_rule_order_for_equal_start_overlaps() {
+        let rules = vec![
+            (Regex::new("abc").expect("regex"), "<first>".to_string()),
+            (Regex::new("ab").expect("regex"), "<second>".to_string()),
+        ];
+
+        let output = process_chunk_once("abc", 7, &rules, None, "</>");
+        assert_eq!(output, "<first>abc</>");
+    }
+
+    #[test]
+    fn maps_newlines_as_spaces_for_matching_but_preserves_raw_text() {
+        let rules = vec![(Regex::new("a b").expect("regex"), "<x>".to_string())];
+
+        let output = process_chunk_once("a\nb", 2, &rules, None, "</x>");
+        assert_eq!(output, "<x>a\nb</x>");
+    }
+
+    #[test]
+    fn returns_original_chunk_when_no_rules_exist() {
+        let output = process_chunk_once("plain text", 3, &[], None, "</>");
+        assert_eq!(output, "plain text");
+    }
+
+    #[test]
+    fn prefilter_rule_set_matches_same_output_as_full_scan() {
+        let rules = vec![
+            (Regex::new("error").expect("regex"), "<r>".to_string()),
+            (Regex::new("warn").expect("regex"), "<y>".to_string()),
+            (Regex::new("ok").expect("regex"), "<g>".to_string()),
+        ];
+        let patterns: Vec<&str> = rules.iter().map(|(regex, _)| regex.as_str()).collect();
+        let rule_set = RegexSet::new(patterns).expect("regex set");
+        let chunk = "warn and error and ok";
+
+        let with_prefilter = process_chunk_once(chunk, 4, &rules, Some(&rule_set), "</>");
+        let without_prefilter = process_chunk_once(chunk, 4, &rules, None, "</>");
+        assert_eq!(with_prefilter, without_prefilter);
+    }
+
+    #[test]
+    fn scratch_path_matches_single_shot_output_for_plain_text() {
+        let rules = vec![(Regex::new("status").expect("regex"), "<c>".to_string())];
+        let chunk = "status ok".to_string();
+
+        let single_shot = process_chunk_once(&chunk, 5, &rules, None, "</c>");
+
+        let mut scratch = HighlightScratch::default();
+        let from_scratch = process_chunk_with_scratch(&chunk, 5, &rules, None, "</c>", &mut scratch).into_owned();
+
+        assert_eq!(single_shot, from_scratch);
+    }
+
+    #[test]
+    fn scratch_path_matches_single_shot_output_for_ansi_text() {
+        let rules = vec![(Regex::new("error").expect("regex"), "<e>".to_string())];
+        let chunk = "\x1b[31merror\x1b[0m happened".to_string();
+
+        let single_shot = process_chunk_once(&chunk, 6, &rules, None, "</e>");
+
+        let mut scratch = HighlightScratch::default();
+        let from_scratch = process_chunk_with_scratch(&chunk, 6, &rules, None, "</e>", &mut scratch).into_owned();
+
+        assert_eq!(single_shot, from_scratch);
+    }
 }

@@ -8,19 +8,22 @@
 //! - Hot-reloading configuration changes
 
 use super::style::Config;
-use crate::{debug_enabled, log_debug, log_info, log_warn};
-use regex::Regex;
+use crate::{debug_enabled, log_debug, log_error, log_info, log_warn};
+use regex::{Regex, RegexSet};
 use std::{
     path::PathBuf,
     {env, fs, io},
 };
 
-pub struct ConfigLoader {
+const DEFAULT_CONFIG_FILENAME: &str = "cossh-config.yaml";
+
+pub(crate) struct ConfigLoader {
     config_path: PathBuf,
 }
 
 impl ConfigLoader {
-    pub fn new(profile: Option<String>) -> Result<Self, io::Error> {
+    // Construction / path discovery.
+    pub(crate) fn new(profile: Option<String>) -> Result<Self, io::Error> {
         let config_path = Self::find_config_path(&profile)?;
         Ok(Self { config_path })
     }
@@ -29,11 +32,11 @@ impl ConfigLoader {
     fn find_config_path(profile: &Option<String>) -> Result<PathBuf, io::Error> {
         log_debug!("Searching for configuration file...");
         let config_filename = match profile {
-            Some(p) if !p.is_empty() => format!("{}.cossh-config.yaml", p),
-            _ => ".cossh-config.yaml".to_string(),
+            Some(profile_name) if !profile_name.is_empty() => format!("{}.cossh-config.yaml", profile_name),
+            _ => DEFAULT_CONFIG_FILENAME.to_string(),
         };
 
-        // Check first possible location: ~/.color-ssh/{profile}.cossh-config.yaml
+        // Check first possible location: ~/.color-ssh/{config_filename}
         if let Some(home_dir) = dirs::home_dir() {
             let cossh_dir_path = home_dir.join(".color-ssh").join(&config_filename);
             log_debug!("Checking: {:?}", cossh_dir_path);
@@ -43,7 +46,7 @@ impl ConfigLoader {
             }
         }
 
-        // Check second possible location: ~/{profile}.cossh-config.yaml
+        // Check second possible location: ~/{config_filename}
         if let Some(home_dir) = dirs::home_dir() {
             let home_dir_path = home_dir.join(&config_filename);
             log_debug!("Checking: {:?}", home_dir_path);
@@ -54,12 +57,11 @@ impl ConfigLoader {
         }
 
         // Check third possible location: current working directory
-        let current_dir_path = env::current_dir()
-            .unwrap_or_else(|err| {
-                eprintln!("Failed to get current directory: {}", err);
-                std::process::exit(1);
-            })
-            .join(&config_filename);
+        let current_dir = env::current_dir().map_err(|err| {
+            log_warn!("Failed to get current directory: {}", err);
+            io::Error::new(io::ErrorKind::NotFound, format!("Failed to get current directory: {}", err))
+        })?;
+        let current_dir_path = current_dir.join(&config_filename);
         log_debug!("Checking: {:?}", current_dir_path);
         if current_dir_path.exists() {
             log_info!("Found config at: {:?}", current_dir_path);
@@ -67,10 +69,10 @@ impl ConfigLoader {
         }
 
         // If a profile was specified but no file found, error out
-        if profile.is_some() {
+        if let Some(profile_name) = profile {
             let err_msg = format!(
                 "Configuration profile '{}' not found. Please ensure the file exists in one of the standard locations.",
-                profile.as_ref().unwrap()
+                profile_name
             );
             log_warn!("{}", err_msg);
             return Err(io::Error::new(io::ErrorKind::NotFound, err_msg));
@@ -81,7 +83,7 @@ impl ConfigLoader {
         match Self::create_default_config() {
             Ok(path) => Ok(path),
             Err(err) => {
-                eprintln!("Failed to create default configuration file: {}\r", err);
+                log_error!("Failed to create default configuration file: {}", err);
                 Err(err)
             }
         }
@@ -91,7 +93,7 @@ impl ConfigLoader {
     fn create_default_config() -> io::Result<PathBuf> {
         let home_dir = dirs::home_dir().ok_or_else(|| io::Error::new(io::ErrorKind::NotFound, "Failed to get home directory"))?;
         let cossh_dir = home_dir.join(".color-ssh");
-        let config_path = cossh_dir.join(".cossh-config.yaml");
+        let config_path = cossh_dir.join(DEFAULT_CONFIG_FILENAME);
 
         // Create the .cossh directory if it does not exist
         if !cossh_dir.exists() {
@@ -107,8 +109,9 @@ impl ConfigLoader {
         Ok(config_path)
     }
 
+    // Initial load and compile pipeline.
     /// Load the configuration from the config file
-    pub fn load_config(self) -> io::Result<Config> {
+    pub(crate) fn load_config(self) -> io::Result<Config> {
         log_info!("Loading configuration from: {:?}", self.config_path);
 
         // Read the configuration file
@@ -139,6 +142,7 @@ impl ConfigLoader {
                 // Compile the rules
                 let compiled_rules = compile_rules(&config);
                 log_info!("Compiled {} highlight rules", compiled_rules.len());
+                config.metadata.compiled_rule_set = compile_rule_set(&compiled_rules);
                 config.metadata.compiled_rules = compiled_rules;
 
                 // Compile secret redaction patterns
@@ -160,10 +164,17 @@ impl ConfigLoader {
         }
     }
 
+    // Reload pipeline for live config updates.
     /// Loads and applies new configuration.
-    pub fn reload_config(self) -> Result<(), String> {
+    pub(crate) fn reload_config(self) -> Result<(), String> {
         log_info!("Reloading configuration...");
-        let mut current_config = super::get_config().write().unwrap();
+        let mut current_config = match super::get_config().write() {
+            Ok(config_guard) => config_guard,
+            Err(poisoned) => {
+                log_error!("Configuration lock poisoned during reload; continuing with recovered state");
+                poisoned.into_inner()
+            }
+        };
 
         let mut new_config = self.load_config().map_err(|err| {
             log_warn!("Failed to reload configuration: {}", err);
@@ -177,18 +188,14 @@ impl ConfigLoader {
 
         *current_config = new_config;
 
-        let new_rules = compile_rules(&current_config);
-        log_info!("Recompiled {} highlight rules", new_rules.len());
-
-        current_config.metadata.compiled_rules = new_rules;
-
-        // Recompile secret patterns
-        let new_secrets = compile_secret_patterns(&current_config);
-        if !new_secrets.is_empty() {
-            log_info!("Recompiled {} secret redaction patterns", new_secrets.len());
+        let rule_count = current_config.metadata.compiled_rules.len();
+        let secret_count = current_config.metadata.compiled_secret_patterns.len();
+        log_info!("Reloaded {} highlight rules", rule_count);
+        if secret_count > 0 {
+            log_info!("Reloaded {} secret redaction patterns", secret_count);
         }
-        current_config.metadata.compiled_secret_patterns = new_secrets;
 
+        super::set_config_version(current_config.metadata.version);
         log_info!("Configuration reloaded successfully (version {})", current_config.metadata.version);
 
         Ok(())
@@ -206,7 +213,7 @@ fn is_valid_hex_color(color: &str) -> bool {
     if color.len() != 7 || !color.starts_with('#') {
         return false;
     }
-    color[1..].chars().all(|c| c.is_ascii_hexdigit())
+    color[1..].chars().all(|hex_char| hex_char.is_ascii_hexdigit())
 }
 
 /// Compiles the highlighting rules from the configuration into a vector of regex patterns and their corresponding colors
@@ -264,7 +271,7 @@ fn compile_rules(config: &Config) -> Vec<(Regex, String)> {
         match Regex::new(&clean_regex) {
             Ok(regex) => rules.push((regex, ansi_code)),
             Err(err) => {
-                eprintln!("Warning: Invalid regex '{}' - {}\r", clean_regex, err);
+                log_warn!("Invalid regex in rule #{} ('{}'): {}", idx + 1, clean_regex, err);
                 failed_rules.push((idx + 1, clean_regex));
             }
         }
@@ -287,6 +294,21 @@ fn compile_rules(config: &Config) -> Vec<(Regex, String)> {
     rules
 }
 
+fn compile_rule_set(rules: &[(Regex, String)]) -> Option<RegexSet> {
+    if rules.is_empty() {
+        return None;
+    }
+
+    let patterns: Vec<&str> = rules.iter().map(|(regex, _)| regex.as_str()).collect();
+    match RegexSet::new(patterns) {
+        Ok(regex_set) => Some(regex_set),
+        Err(err) => {
+            log_warn!("Failed to compile regex prefilter set: {}", err);
+            None
+        }
+    }
+}
+
 /// Type of color to convert (foreground or background)
 #[derive(Debug, Clone, Copy)]
 enum ColorType {
@@ -304,7 +326,7 @@ fn hex_to_ansi(hex: &str, color_type: ColorType) -> String {
     // Check if the hex code is valid (starts with '#' and has 7 characters)
     if hex.len() == 7 && hex.starts_with('#') {
         // Parse the red, green, and blue values from the hex string
-        if let (Ok(r), Ok(g), Ok(b)) = (
+        if let (Ok(red), Ok(green), Ok(blue)) = (
             u8::from_str_radix(&hex[1..3], 16),
             u8::from_str_radix(&hex[3..5], 16),
             u8::from_str_radix(&hex[5..7], 16),
@@ -315,7 +337,7 @@ fn hex_to_ansi(hex: &str, color_type: ColorType) -> String {
                 ColorType::Foreground => 38,
                 ColorType::Background => 48,
             };
-            return format!("\x1b[{};2;{};{};{}m", code, r, g, b);
+            return format!("\x1b[{};2;{};{};{}m", code, red, green, blue);
         }
     }
     // Return empty string if the hex is invalid (will use reset instead)
@@ -336,11 +358,168 @@ fn compile_secret_patterns(config: &Config) -> Vec<Regex> {
                 Ok(regex) => patterns.push(regex),
                 Err(err) => {
                     log_warn!("Failed to compile secret pattern #{}: '{}' - {}", idx + 1, pattern, err);
-                    eprintln!("Warning: Invalid secret pattern '{}' - {}\r", pattern, err);
                 }
             }
         }
     }
 
     patterns
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{ColorType, compile_rule_set, compile_rules, compile_secret_patterns, hex_to_ansi, is_valid_hex_color};
+    use crate::config::style::{Config, HighlightRule, Metadata, Settings};
+    use std::collections::HashMap;
+
+    fn base_config() -> Config {
+        Config {
+            settings: Settings::default(),
+            interactive_settings: None,
+            palette: HashMap::new(),
+            rules: Vec::new(),
+            metadata: Metadata::default(),
+        }
+    }
+
+    #[test]
+    fn validates_hex_color_format() {
+        assert!(is_valid_hex_color("#00ffAA"));
+        assert!(!is_valid_hex_color("00ffAA"));
+        assert!(!is_valid_hex_color("#00ffA"));
+        assert!(!is_valid_hex_color("#00ffZZ"));
+    }
+
+    #[test]
+    fn converts_hex_to_ansi_for_fg_and_bg() {
+        assert_eq!(hex_to_ansi("#112233", ColorType::Foreground), "\x1b[38;2;17;34;51m");
+        assert_eq!(hex_to_ansi("#112233", ColorType::Background), "\x1b[48;2;17;34;51m");
+        assert_eq!(hex_to_ansi("oops", ColorType::Foreground), "");
+    }
+
+    #[test]
+    fn compiles_rules_and_handles_missing_colors_and_invalid_regex() {
+        let mut config = base_config();
+        config.palette.insert("ok_fg".to_string(), "#00ff00".to_string());
+        config.palette.insert("ok_bg".to_string(), "#0000ff".to_string());
+        config.rules = vec![
+            HighlightRule {
+                regex: "success".to_string(),
+                color: "ok_fg".to_string(),
+                description: None,
+                bg_color: None,
+            },
+            HighlightRule {
+                regex: "combo".to_string(),
+                color: "ok_fg".to_string(),
+                description: None,
+                bg_color: Some("ok_bg".to_string()),
+            },
+            HighlightRule {
+                regex: "fallback".to_string(),
+                color: "missing".to_string(),
+                description: None,
+                bg_color: None,
+            },
+            HighlightRule {
+                regex: "[unclosed".to_string(),
+                color: "ok_fg".to_string(),
+                description: None,
+                bg_color: None,
+            },
+        ];
+
+        let compiled = compile_rules(&config);
+        assert_eq!(compiled.len(), 3, "invalid regex should be dropped");
+        assert_eq!(compiled[0].1, "\x1b[38;2;0;255;0m");
+        assert_eq!(compiled[1].1, "\x1b[38;2;0;255;0;48;2;0;0;255m");
+        assert_eq!(compiled[2].1, "\x1b[0m", "missing palette entry should fall back to reset");
+    }
+
+    #[test]
+    fn compiles_rule_set_for_prefiltering() {
+        let mut config = base_config();
+        config.palette.insert("ok_fg".to_string(), "#00ff00".to_string());
+        config.rules = vec![
+            HighlightRule {
+                regex: "error".to_string(),
+                color: "ok_fg".to_string(),
+                description: None,
+                bg_color: None,
+            },
+            HighlightRule {
+                regex: "warn".to_string(),
+                color: "ok_fg".to_string(),
+                description: None,
+                bg_color: None,
+            },
+        ];
+
+        let compiled_rules = compile_rules(&config);
+        let rule_set = compile_rule_set(&compiled_rules).expect("rule set should compile");
+        let matches = rule_set.matches("warn only");
+
+        assert!(matches.matched(1));
+        assert!(!matches.matched(0));
+    }
+
+    #[test]
+    fn compiles_only_valid_secret_patterns() {
+        let mut config = base_config();
+        config.settings.remove_secrets = Some(vec!["token=\\w+".to_string(), "[".to_string()]);
+
+        let patterns = compile_secret_patterns(&config);
+        assert_eq!(patterns.len(), 1);
+        assert!(patterns[0].is_match("token=abc123"));
+    }
+
+    #[test]
+    fn rejects_unknown_top_level_config_fields() {
+        let yaml = r##"
+settings: {}
+interactive_settings: {}
+palette:
+  ok_fg: "#00ff00"
+rules: []
+unknown_top_level: true
+"##;
+
+        let err = serde_yaml::from_str::<Config>(yaml).expect_err("unknown field should fail schema validation");
+        assert!(err.to_string().contains("unknown field"));
+    }
+
+    #[test]
+    fn rejects_unknown_interactive_settings_fields() {
+        let yaml = r##"
+settings: {}
+interactive_settings:
+  host_tree_uncollapsed: false
+  unknown_interactive: true
+palette:
+  ok_fg: "#00ff00"
+rules: []
+"##;
+
+        let err = serde_yaml::from_str::<Config>(yaml).expect_err("unknown interactive field should fail schema validation");
+        assert!(err.to_string().contains("unknown field"));
+    }
+
+    #[test]
+    fn accepts_rule_description_field() {
+        let yaml = r##"
+settings: {}
+interactive_settings: {}
+palette:
+  ok_fg: "#00ff00"
+rules:
+  - regex: "error"
+    color: "ok_fg"
+    description: "Highlight errors in red"
+"##;
+
+        let parsed = serde_yaml::from_str::<Config>(yaml).expect("description should be accepted");
+        assert_eq!(parsed.rules.len(), 1);
+        assert_eq!(parsed.rules[0].description.as_deref(), Some("Highlight errors in red"));
+        assert_eq!(parsed.rules[0].bg_color, None);
+    }
 }

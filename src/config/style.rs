@@ -6,16 +6,20 @@
 //! - Highlight rules with regex patterns
 //! - Runtime metadata
 
-use regex::Regex;
-use serde::Deserialize;
+use regex::{Regex, RegexSet};
+use serde::{Deserialize, Deserializer};
 use std::{collections::HashMap, path::PathBuf};
 
 /// Main configuration structure loaded from YAML
 #[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct Config {
     /// Application-wide settings
     #[serde(default)]
     pub settings: Settings,
+    /// Interactive session-manager settings (optional block)
+    #[serde(default)]
+    pub interactive_settings: Option<InteractiveSettings>,
     /// Color palette mapping names to hex codes (converted to ANSI at runtime)
     pub palette: HashMap<String, String>,
     /// Syntax highlighting rules
@@ -27,6 +31,7 @@ pub struct Config {
 
 /// Application settings
 #[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct Settings {
     /// Regex patterns for secrets to redact from logs
     #[serde(default)]
@@ -43,6 +48,7 @@ pub struct Settings {
 }
 
 impl Default for Settings {
+    // Default settings used when keys are missing in config files.
     fn default() -> Self {
         Self {
             remove_secrets: None,
@@ -53,17 +59,79 @@ impl Default for Settings {
     }
 }
 
+/// Interactive-only session manager settings.
+#[derive(Debug, Deserialize, Default)]
+#[serde(deny_unknown_fields)]
+pub struct InteractiveSettings {
+    /// History buffer size (scrollback lines for session manager tabs)
+    #[serde(default = "default_history_buffer")]
+    pub history_buffer: usize,
+    /// Whether host tree folders should start uncollapsed in session manager.
+    /// `false` (default) means the tree starts collapsed.
+    #[serde(default = "default_host_tree_uncollapsed")]
+    pub host_tree_uncollapsed: bool,
+    /// Whether the host info pane is shown by default
+    #[serde(default = "default_info_view")]
+    pub info_view: bool,
+    /// Host panel width as a percentage of terminal width
+    #[serde(default = "default_host_view_size", deserialize_with = "deserialize_host_view_size")]
+    pub host_view_size: u16,
+    /// Host info pane height as a percentage of host panel height
+    #[serde(default = "default_info_view_size", deserialize_with = "deserialize_info_view_size")]
+    pub info_view_size: u16,
+}
+
 fn default_show_title() -> bool {
     true
 }
 
+fn default_history_buffer() -> usize {
+    1000
+}
+
+fn default_host_tree_uncollapsed() -> bool {
+    false
+}
+
+fn default_info_view() -> bool {
+    true
+}
+
+fn default_host_view_size() -> u16 {
+    25
+}
+
+fn default_info_view_size() -> u16 {
+    40
+}
+
+fn deserialize_host_view_size<'de, D>(deserializer: D) -> Result<u16, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    let value = u16::deserialize(deserializer)?;
+    Ok(value.clamp(10, 70))
+}
+
+fn deserialize_info_view_size<'de, D>(deserializer: D) -> Result<u16, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    let value = u16::deserialize(deserializer)?;
+    Ok(value.clamp(10, 80))
+}
+
 /// A single highlight rule mapping a regex pattern to a color
 #[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct HighlightRule {
     /// Regex pattern to match (will be compiled at config load time)
     pub regex: String,
     /// Color name from the palette to apply to matches (foreground)
     pub color: String,
+    /// Optional user-facing description for this rule (not used by runtime matching)
+    #[serde(default)]
+    pub description: Option<String>,
     /// Optional background color name from the palette
     #[serde(default)]
     pub bg_color: Option<String>,
@@ -71,6 +139,7 @@ pub struct HighlightRule {
 
 /// Runtime metadata not stored in config file
 #[derive(Debug, Deserialize, Default)]
+#[serde(deny_unknown_fields)]
 pub struct Metadata {
     /// Path to the loaded configuration file
     #[serde(default)]
@@ -80,6 +149,9 @@ pub struct Metadata {
     /// Compiled regex rules (regex + ANSI color code)
     #[serde(skip)]
     pub compiled_rules: Vec<(Regex, String)>,
+    /// Regex-set prefilter used to cheaply identify rules that might match a chunk.
+    #[serde(skip)]
+    pub compiled_rule_set: Option<RegexSet>,
     /// Pre-compiled secret redaction patterns
     #[serde(skip)]
     pub compiled_secret_patterns: Vec<Regex>,

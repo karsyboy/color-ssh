@@ -3,6 +3,8 @@ pub mod config;
 pub mod highlighter;
 pub mod log;
 pub mod process;
+pub mod ssh_config;
+pub mod tui;
 
 use std::io;
 
@@ -16,18 +18,16 @@ pub enum Error {
     Io(io::Error),
     /// Configuration loading or parsing error
     Config(config::ConfigError),
-    /// Syntax highlighting error
-    Highlight(highlighter::HighlightError),
     /// Logging operation error
     Log(log::LogError),
 }
 
 impl std::fmt::Display for Error {
+    // Human-readable top-level error formatting.
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Error::Io(err) => write!(f, "IO error: {}", err),
             Error::Config(err) => write!(f, "Configuration error: {}", err),
-            Error::Highlight(err) => write!(f, "Highlighting error: {}", err),
             Error::Log(err) => write!(f, "Logging error: {}", err),
         }
     }
@@ -35,7 +35,7 @@ impl std::fmt::Display for Error {
 
 impl std::error::Error for Error {}
 
-// Implement From for each error type to enable easy error conversion
+// Error conversions for `?` propagation at crate boundaries.
 
 impl From<io::Error> for Error {
     fn from(err: io::Error) -> Self {
@@ -46,12 +46,6 @@ impl From<io::Error> for Error {
 impl From<config::ConfigError> for Error {
     fn from(err: config::ConfigError) -> Self {
         Error::Config(err)
-    }
-}
-
-impl From<highlighter::HighlightError> for Error {
-    fn from(err: highlighter::HighlightError) -> Self {
-        Error::Highlight(err)
     }
 }
 

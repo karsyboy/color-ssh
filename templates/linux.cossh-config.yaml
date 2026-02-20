@@ -1,0 +1,55 @@
+# Description: This is the default template created by color-ssh (cossh).
+# It provides basic keyword highlighting for common success/error patterns.
+# For more templates and examples, visit: https://github.com/karsyboy/color-ssh
+
+# ============================================================================
+# SETTINGS SECTION (Optional)
+# ============================================================================
+settings:
+  show_title: true
+  debug_mode: false
+  ssh_logging: false
+
+# ============================================================================
+# INTERACTIVE SETTINGS SECTION (Optional)
+# ============================================================================
+interactive_settings:
+  history_buffer: 1000
+  host_tree_uncollapsed: false
+  info_view: true
+  host_view_size: 15
+  info_view_size: 25 
+
+# ============================================================================
+# COLOR PALETTE
+# ============================================================================
+# Define reusable colors using hex codes. Reference these by name in your rules.
+# These colors can be used for both foreground (text) and background.
+palette:
+  Red: '#c71800'
+  Green: '#28c501'
+  Blue: '#5698c8'
+  Yellow: '#ffcc00'
+  Black: '#000000'
+  White: '#ffffff'
+  DarkRed: '#8b0000'
+
+
+# ============================================================================
+# HIGHLIGHTING RULES
+# ============================================================================
+rules:
+  # Highlight positive/success indicators in green
+  - description: Match on good keywords
+    regex: (?ix)\b(good|up|success|ok|connected)\b
+    color: Green
+
+  # Highlight neutral/informational keywords in blue
+  - description: Match on neutral keywords
+    regex: (?ix)\b(neutral|info|status)\b
+    color: Blue
+
+  # Highlight negative/error indicators in red with dark red background for emphasis
+  - description: Match on bad keywords
+    regex: (?ix)\b(down|error|disabled|fail|denied)\b
+    color: Red

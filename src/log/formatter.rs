@@ -9,14 +9,15 @@ use super::LogLevel;
 use chrono::Local;
 
 #[derive(Clone)]
-pub struct LogFormatter {
+pub(super) struct LogFormatter {
     include_timestamp: bool,
     include_level: bool,
     include_break: bool,
 }
 
 impl LogFormatter {
-    pub fn new() -> Self {
+    // Construction.
+    pub(super) fn new() -> Self {
         Self {
             include_timestamp: false,
             include_level: false,
@@ -24,8 +25,9 @@ impl LogFormatter {
         }
     }
 
+    // Formatting.
     /// Format a log message with optional timestamp, level, and separator
-    pub fn format(&self, level: Option<LogLevel>, message: &str) -> String {
+    pub(super) fn format(&self, level: Option<LogLevel>, message: &str) -> String {
         let mut formatted = String::new();
 
         // Add timestamp with consistent formatting (e.g., "2026-01-25 14:30:45.123")
@@ -51,16 +53,22 @@ impl LogFormatter {
         formatted
     }
 
-    pub fn set_include_timestamp(&mut self, include: bool) {
+    // Option toggles.
+    pub(super) fn set_include_timestamp(&mut self, include: bool) {
         self.include_timestamp = include;
     }
 
-    pub fn set_include_level(&mut self, include: bool) {
+    pub(super) fn set_include_level(&mut self, include: bool) {
         self.include_level = include;
     }
 
-    pub fn set_include_break(&mut self, include: bool) {
+    pub(super) fn set_include_break(&mut self, include: bool) {
         self.include_break = include;
+    }
+
+    // Fast-path capability checks.
+    pub(crate) fn uses_cached_timestamp_prefix_without_level(&self) -> bool {
+        self.include_timestamp && self.include_break && !self.include_level
     }
 }
 

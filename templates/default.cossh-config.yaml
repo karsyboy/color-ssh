@@ -10,9 +10,19 @@ settings:
   show_title: true              # Display a colored title banner at session start
   debug_mode: false             # Enable debug logging to ~/.color-ssh/logs/cossh.log
   ssh_logging: false            # Enable SSH session logging by default
-  # remove_secrets:               # Regex patterns to redact from logs (useful for passwords/keys)
-  #   - '9[\s]\$9\$.*'           # Example: Juniper type 9 secrets
-  #   - 'sha512[\s]\$6\$.*'      # Example: SHA-512 password hashes
+  # remove_secrets:             # Regex patterns to redact from logs (useful for passwords/keys)
+  #   - '9[\s]\$9\$.*'          # Example: Juniper type 9 secrets
+  #   - 'sha512[\s]\$6\$.*'     # Example: SHA-512 password hashes
+
+# ============================================================================
+# INTERACTIVE SETTINGS SECTION (Optional)
+# ============================================================================
+interactive_settings:
+  history_buffer: 1000          # Scrollback buffer size for session manager tabs
+  host_tree_uncollapsed: false  # Start SSH host tree folders expanded (false = collapsed)
+  info_view: true               # Show host info pane by default
+  host_view_size: 15            # Host panel width (% of terminal width, clamped 10-70)
+  info_view_size: 25            # Host info height (% of host panel height, clamped 10-80)
 
 
 # ============================================================================
