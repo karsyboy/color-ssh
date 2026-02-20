@@ -123,6 +123,7 @@ Host switch01
     #_sshpass true
 ```
 
+For more info on the TUI go here [TUI User Guide](docs/TUI_USER_GUIDE.md).
 
 ## Uninstall
 
@@ -159,7 +160,9 @@ If you need help, have an issue, or just want to make a sugestion / request a fe
 
 ## Special Thanks
 
-Thanks to the following projects for the insperation behind Color SSH.
+Thanks to the following projects for the inspiration behind Color SSH.
 
 - [Chromaterm](https://github.com/hSaria/ChromaTerm)
 - [netcli-highlight](https://github.com/danielmacuare/netcli-highlight)
+
+Also thank you to [Alacritty](https://github.com/alacritty/alacritty) for the terminal create that is being used to render the terminal in the TUI
