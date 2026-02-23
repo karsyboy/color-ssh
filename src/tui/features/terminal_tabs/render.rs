@@ -8,7 +8,7 @@ use crate::tui::ui::theme::{self, display_width, truncate_to_display_width};
 use ratatui::{
     Frame,
     layout::{Constraint, Direction, Layout, Rect},
-    style::{Color, Modifier, Style},
+    style::{Modifier, Style},
     text::{Line, Span},
     widgets::Paragraph,
 };
@@ -353,22 +353,9 @@ impl SessionManager {
 
                             if cell.inverse() {
                                 std::mem::swap(&mut fg_color, &mut bg_color);
-                                if fg_color == Color::Reset {
-                                    fg_color = theme::ansi_black();
-                                }
-                                if bg_color == Color::Reset {
-                                    bg_color = theme::ansi_bright_white();
-                                }
                             }
 
-                            let mut s = Style::default();
-
-                            if fg_color != Color::Reset {
-                                s = s.fg(fg_color);
-                            }
-                            if bg_color != Color::Reset {
-                                s = s.bg(bg_color);
-                            }
+                            let mut s = Style::default().fg(fg_color).bg(bg_color);
                             if cell.bold() {
                                 s = s.add_modifier(Modifier::BOLD);
                             }
