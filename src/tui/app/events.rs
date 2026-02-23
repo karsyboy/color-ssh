@@ -2,7 +2,7 @@
 
 use crate::tui::SessionManager;
 use crossterm::event::{self, Event, KeyCode, KeyEvent};
-use ratatui::Terminal;
+use ratatui::DefaultTerminal;
 use std::{io, time::Duration};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -67,7 +67,7 @@ fn should_mark_ui_dirty_for_key(app: &SessionManager, key: &KeyEvent) -> bool {
     true
 }
 
-pub(crate) fn run_app<B: ratatui::backend::Backend>(terminal: &mut Terminal<B>, app: &mut SessionManager) -> io::Result<()> {
+pub(crate) fn run_app(terminal: &mut DefaultTerminal, app: &mut SessionManager) -> io::Result<()> {
     const EVENT_POLL_INTERVAL: Duration = Duration::from_millis(50);
     const RENDER_HEARTBEAT: Duration = Duration::from_millis(250);
 
