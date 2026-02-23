@@ -6,6 +6,9 @@ pub mod process;
 pub mod ssh_config;
 pub mod tui;
 
+#[cfg(test)]
+mod test;
+
 use std::io;
 
 /// Result type alias for color-ssh operations
