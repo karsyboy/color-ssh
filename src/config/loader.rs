@@ -8,6 +8,7 @@
 //! - Hot-reloading configuration changes
 
 use super::style::Config;
+use crate::highlighter::CompiledHighlightRule;
 use crate::{debug_enabled, log_debug, log_error, log_info, log_warn};
 use regex::{Regex, RegexSet};
 use std::{
@@ -221,7 +222,7 @@ fn is_valid_hex_color(color: &str) -> bool {
 ///  - `config`: A reference to the Config struct containing the color palette and highlighting rules
 ///
 /// Returns a vector of tuples, each containing a regex pattern and the corresponding ANSI color code
-fn compile_rules(config: &Config) -> Vec<(Regex, String)> {
+fn compile_rules(config: &Config) -> Vec<CompiledHighlightRule> {
     let mut rules = Vec::new();
     let mut failed_rules = Vec::new();
     let mut missing_colors = Vec::new();
@@ -269,7 +270,7 @@ fn compile_rules(config: &Config) -> Vec<(Regex, String)> {
         let clean_regex = rule.regex.replace('\n', "").trim().to_string();
 
         match Regex::new(&clean_regex) {
-            Ok(regex) => rules.push((regex, ansi_code)),
+            Ok(regex) => rules.push(CompiledHighlightRule::new(regex, ansi_code)),
             Err(err) => {
                 log_warn!("Invalid regex in rule #{} ('{}'): {}", idx + 1, clean_regex, err);
                 failed_rules.push((idx + 1, clean_regex));
@@ -286,20 +287,26 @@ fn compile_rules(config: &Config) -> Vec<(Regex, String)> {
     }
 
     if debug_enabled!() {
-        for (i, (regex, color)) in rules.iter().enumerate() {
-            log_debug!("Rule {}: regex = {:?}, color = {:?}", i + 1, regex, color);
+        for (i, rule) in rules.iter().enumerate() {
+            log_debug!(
+                "Rule {}: regex = {:?}, color = {:?}, reset_mode = {:?}",
+                i + 1,
+                rule.regex,
+                rule.style,
+                rule.reset_mode
+            );
         }
     }
 
     rules
 }
 
-fn compile_rule_set(rules: &[(Regex, String)]) -> Option<RegexSet> {
+fn compile_rule_set(rules: &[CompiledHighlightRule]) -> Option<RegexSet> {
     if rules.is_empty() {
         return None;
     }
 
-    let patterns: Vec<&str> = rules.iter().map(|(regex, _)| regex.as_str()).collect();
+    let patterns: Vec<&str> = rules.iter().map(|rule| rule.regex.as_str()).collect();
     match RegexSet::new(patterns) {
         Ok(regex_set) => Some(regex_set),
         Err(err) => {
@@ -431,9 +438,9 @@ mod tests {
 
         let compiled = compile_rules(&config);
         assert_eq!(compiled.len(), 3, "invalid regex should be dropped");
-        assert_eq!(compiled[0].1, "\x1b[38;2;0;255;0m");
-        assert_eq!(compiled[1].1, "\x1b[38;2;0;255;0;48;2;0;0;255m");
-        assert_eq!(compiled[2].1, "\x1b[0m", "missing palette entry should fall back to reset");
+        assert_eq!(compiled[0].style, "\x1b[38;2;0;255;0m");
+        assert_eq!(compiled[1].style, "\x1b[38;2;0;255;0;48;2;0;0;255m");
+        assert_eq!(compiled[2].style, "\x1b[0m", "missing palette entry should fall back to reset");
     }
 
     #[test]

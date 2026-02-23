@@ -90,6 +90,7 @@ pub fn process_handler(process_args: Vec<String>, is_non_interactive: bool) -> R
             log_debug!("Output processing thread started");
             let mut chunk_id = 0;
             let mut highlight_scratch = highlighter::HighlightScratch::default();
+            let mut color_state = highlighter::AnsiColorState::default();
 
             // Cache rules and track config version for hot-reload support.
             let (mut cached_rules, mut cached_rule_set, mut cached_version) = {
@@ -136,6 +137,7 @@ pub fn process_handler(process_args: Vec<String>, is_non_interactive: bool) -> R
                             &cached_rules,
                             cached_rule_set.as_ref(),
                             reset_color,
+                            &mut color_state,
                             &mut highlight_scratch,
                         );
                         chunk_id += 1;

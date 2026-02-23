@@ -6,6 +6,7 @@
 //! - Highlight rules with regex patterns
 //! - Runtime metadata
 
+use crate::highlighter::CompiledHighlightRule;
 use regex::{Regex, RegexSet};
 use serde::{Deserialize, Deserializer};
 use std::{collections::HashMap, path::PathBuf};
@@ -148,7 +149,7 @@ pub struct Metadata {
     pub session_name: String,
     /// Compiled regex rules (regex + ANSI color code)
     #[serde(skip)]
-    pub compiled_rules: Vec<(Regex, String)>,
+    pub(crate) compiled_rules: Vec<CompiledHighlightRule>,
     /// Regex-set prefilter used to cheaply identify rules that might match a chunk.
     #[serde(skip)]
     pub compiled_rule_set: Option<RegexSet>,
