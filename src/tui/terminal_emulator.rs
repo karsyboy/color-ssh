@@ -1,6 +1,4 @@
 //! Lightweight terminal-emulator wrapper backed by `alacritty_terminal`.
-
-use crate::tui::ui::theme;
 use alacritty_terminal::event::{Event, EventListener, WindowSize};
 use alacritty_terminal::grid::{Dimensions, Scroll};
 use alacritty_terminal::index::{Boundary, Column, Line, Point};
@@ -92,12 +90,7 @@ impl ParserEventListener {
 
     // ANSI 16-color lookup for color queries.
     fn color_index_rgb(index: usize) -> Rgb {
-        let color = if index <= 15 {
-            ansi_index_to_theme_color(index as u8)
-        } else {
-            ansi_index_to_theme_color(7)
-        };
-        ui_color_to_rgb(color).unwrap_or(Rgb { r: 229, g: 229, b: 229 })
+        if index <= 15 { ansi_index_to_rgb(index as u8) } else { ansi_index_to_rgb(7) }
     }
 }
 
@@ -414,105 +407,62 @@ impl<'a> CellRef<'a> {
 }
 
 pub(crate) fn to_ratatui_color(color: AnsiColor) -> UiColor {
-    // Foreground path: honor theme palette.
     match color {
-        AnsiColor::Named(named) => match named {
-            NamedColor::Black | NamedColor::DimBlack => ansi_index_to_theme_color(0),
-            NamedColor::Red | NamedColor::DimRed => ansi_index_to_theme_color(1),
-            NamedColor::Green | NamedColor::DimGreen => ansi_index_to_theme_color(2),
-            NamedColor::Yellow | NamedColor::DimYellow => ansi_index_to_theme_color(3),
-            NamedColor::Blue | NamedColor::DimBlue => ansi_index_to_theme_color(4),
-            NamedColor::Magenta | NamedColor::DimMagenta => ansi_index_to_theme_color(5),
-            NamedColor::Cyan | NamedColor::DimCyan => ansi_index_to_theme_color(6),
-            NamedColor::White | NamedColor::DimWhite => ansi_index_to_theme_color(7),
-            NamedColor::BrightBlack | NamedColor::DimForeground => ansi_index_to_theme_color(8),
-            NamedColor::BrightRed => ansi_index_to_theme_color(9),
-            NamedColor::BrightGreen => ansi_index_to_theme_color(10),
-            NamedColor::BrightYellow => ansi_index_to_theme_color(11),
-            NamedColor::BrightBlue => ansi_index_to_theme_color(12),
-            NamedColor::BrightMagenta => ansi_index_to_theme_color(13),
-            NamedColor::BrightCyan => ansi_index_to_theme_color(14),
-            NamedColor::BrightWhite | NamedColor::BrightForeground => ansi_index_to_theme_color(15),
-            NamedColor::Foreground => theme::ansi_white(),
-            NamedColor::Background | NamedColor::Cursor => UiColor::Reset,
-        },
-        AnsiColor::Indexed(idx) => match idx {
-            0..=15 => ansi_index_to_theme_color(idx),
-            _ => UiColor::Indexed(idx),
-        },
+        AnsiColor::Named(named) => named_color_to_ansi_index(named).map(UiColor::Indexed).unwrap_or(UiColor::Reset),
+        AnsiColor::Indexed(idx) => UiColor::Indexed(idx),
         AnsiColor::Spec(rgb) => UiColor::Rgb(rgb.r, rgb.g, rgb.b),
     }
 }
 
 pub(crate) fn to_ratatui_background_color(color: AnsiColor) -> UiColor {
-    // Background path: keep legacy/default ANSI mapping.
     match color {
-        AnsiColor::Named(named) => match named {
-            NamedColor::Black | NamedColor::DimBlack => UiColor::Black,
-            NamedColor::Red | NamedColor::DimRed => UiColor::Red,
-            NamedColor::Green | NamedColor::DimGreen => UiColor::Green,
-            NamedColor::Yellow | NamedColor::DimYellow => UiColor::Yellow,
-            NamedColor::Blue | NamedColor::DimBlue => UiColor::Blue,
-            NamedColor::Magenta | NamedColor::DimMagenta => UiColor::Magenta,
-            NamedColor::Cyan | NamedColor::DimCyan => UiColor::Cyan,
-            NamedColor::White | NamedColor::DimWhite => UiColor::Gray,
-            NamedColor::BrightBlack | NamedColor::DimForeground => UiColor::DarkGray,
-            NamedColor::BrightRed => UiColor::LightRed,
-            NamedColor::BrightGreen => UiColor::LightGreen,
-            NamedColor::BrightYellow => UiColor::LightYellow,
-            NamedColor::BrightBlue => UiColor::LightBlue,
-            NamedColor::BrightMagenta => UiColor::LightMagenta,
-            NamedColor::BrightCyan => UiColor::LightCyan,
-            NamedColor::BrightWhite | NamedColor::BrightForeground => UiColor::White,
-            NamedColor::Foreground | NamedColor::Background | NamedColor::Cursor => UiColor::Reset,
-        },
-        AnsiColor::Indexed(idx) => match idx {
-            0 => UiColor::Black,
-            1 => UiColor::Red,
-            2 => UiColor::Green,
-            3 => UiColor::Yellow,
-            4 => UiColor::Blue,
-            5 => UiColor::Magenta,
-            6 => UiColor::Cyan,
-            7 => UiColor::Gray,
-            8 => UiColor::DarkGray,
-            9 => UiColor::LightRed,
-            10 => UiColor::LightGreen,
-            11 => UiColor::LightYellow,
-            12 => UiColor::LightBlue,
-            13 => UiColor::LightMagenta,
-            14 => UiColor::LightCyan,
-            15 => UiColor::White,
-            _ => UiColor::Indexed(idx),
-        },
+        AnsiColor::Named(named) => named_color_to_ansi_index(named).map(UiColor::Indexed).unwrap_or(UiColor::Reset),
+        AnsiColor::Indexed(idx) => UiColor::Indexed(idx),
         AnsiColor::Spec(rgb) => UiColor::Rgb(rgb.r, rgb.g, rgb.b),
     }
 }
 
-fn ansi_index_to_theme_color(index: u8) -> UiColor {
-    let palette = theme::session_theme().ansi;
-    match index {
-        0 => palette.black,
-        1 => palette.red,
-        2 => palette.green,
-        3 => palette.yellow,
-        4 => palette.blue,
-        5 => palette.magenta,
-        6 => palette.cyan,
-        7 => palette.white,
-        8 => palette.bright_black,
-        9 => palette.bright_red,
-        10 => palette.bright_green,
-        11 => palette.bright_yellow,
-        12 => palette.bright_blue,
-        13 => palette.bright_magenta,
-        14 => palette.bright_cyan,
-        _ => palette.bright_white,
+fn named_color_to_ansi_index(named: NamedColor) -> Option<u8> {
+    match named {
+        NamedColor::Black | NamedColor::DimBlack => Some(0),
+        NamedColor::Red | NamedColor::DimRed => Some(1),
+        NamedColor::Green | NamedColor::DimGreen => Some(2),
+        NamedColor::Yellow | NamedColor::DimYellow => Some(3),
+        NamedColor::Blue | NamedColor::DimBlue => Some(4),
+        NamedColor::Magenta | NamedColor::DimMagenta => Some(5),
+        NamedColor::Cyan | NamedColor::DimCyan => Some(6),
+        NamedColor::White | NamedColor::DimWhite => Some(7),
+        NamedColor::BrightBlack | NamedColor::DimForeground => Some(8),
+        NamedColor::BrightRed => Some(9),
+        NamedColor::BrightGreen => Some(10),
+        NamedColor::BrightYellow => Some(11),
+        NamedColor::BrightBlue => Some(12),
+        NamedColor::BrightMagenta => Some(13),
+        NamedColor::BrightCyan => Some(14),
+        NamedColor::BrightWhite | NamedColor::BrightForeground => Some(15),
+        NamedColor::Foreground | NamedColor::Background | NamedColor::Cursor => None,
     }
 }
 
-fn ui_color_to_rgb(color: UiColor) -> Option<Rgb> {
-    if let UiColor::Rgb(r, g, b) = color { Some(Rgb { r, g, b }) } else { None }
+fn ansi_index_to_rgb(index: u8) -> Rgb {
+    match index {
+        0 => Rgb { r: 0, g: 0, b: 0 },
+        1 => Rgb { r: 205, g: 0, b: 0 },
+        2 => Rgb { r: 0, g: 205, b: 0 },
+        3 => Rgb { r: 205, g: 205, b: 0 },
+        4 => Rgb { r: 0, g: 0, b: 238 },
+        5 => Rgb { r: 205, g: 0, b: 205 },
+        6 => Rgb { r: 0, g: 205, b: 205 },
+        7 => Rgb { r: 229, g: 229, b: 229 },
+        8 => Rgb { r: 127, g: 127, b: 127 },
+        9 => Rgb { r: 255, g: 0, b: 0 },
+        10 => Rgb { r: 0, g: 255, b: 0 },
+        11 => Rgb { r: 255, g: 255, b: 0 },
+        12 => Rgb { r: 92, g: 92, b: 255 },
+        13 => Rgb { r: 255, g: 0, b: 255 },
+        14 => Rgb { r: 0, g: 255, b: 255 },
+        _ => Rgb { r: 255, g: 255, b: 255 },
+    }
 }
 
 #[cfg(test)]

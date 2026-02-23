@@ -93,16 +93,6 @@ Configuration files are looked for in the following order:
 
 If no configuration file is found the default configuration will be created at `~/.color-ssh/cossh-config.yaml`.
 
-#### Theme Config
-
-- Path: `~/.color-ssh/cossh-theme.toml`
-- Auto-created on first run if it does not exist
-- Uses Alacritty-style TOML color keys:
-  - `[colors.primary]` (`foreground`, `background`)
-  - `[colors.selection]` (`text`, `background`)
-  - `[colors.normal]` and `[colors.bright]` (`black`..`white`)
-- Starter template: [`templates/cossh-theme.toml`](templates/cossh-theme.toml)
-
 #### Color-SSH TUI Metadata in `~/.ssh/config`
 
 The interactive session manger supports metadata comments inside the SSH config file.
