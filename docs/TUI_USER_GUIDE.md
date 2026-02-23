@@ -184,7 +184,7 @@ Tab bar:
 Terminal pane:
 
 - Drag to select text.
-- Releasing after a drag copies selected text to clipboard automatically.
+- Right-click to copy the current selection to clipboard (selection is then cleared).
 - Mouse wheel scrolls scrollback when local mouse handling is active.
 - If the remote app enables mouse reporting (for example full-screen TUIs), mouse events go to the remote app.
 - In remote mouse mode, hold `Shift` (or `Alt`) while dragging to force local text selection.

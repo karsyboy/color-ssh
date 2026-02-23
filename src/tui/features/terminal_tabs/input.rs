@@ -29,6 +29,7 @@ impl SessionManager {
         self.selection_start = None;
         self.selection_end = None;
         self.is_selecting = false;
+        self.selection_dragged = false;
     }
 
     pub(crate) fn focus_manager_panel(&mut self) {
@@ -174,6 +175,7 @@ impl SessionManager {
             KeyCode::Char('c') if key.modifiers == KeyModifiers::ALT => {
                 if self.selection_start.is_some() && self.selection_end.is_some() {
                     self.copy_selection_to_clipboard();
+                    self.clear_selection_state();
                 }
             }
             KeyCode::Char('w') if key.modifiers.contains(KeyModifiers::CONTROL) => {

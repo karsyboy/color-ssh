@@ -135,3 +135,68 @@ fn scroll_markers_move_tab_strip_left_and_right() {
     app.handle_mouse(left_marker_click).expect("left marker click");
     assert_eq!(app.tab_scroll_offset, 0);
 }
+
+#[test]
+fn left_drag_selection_is_kept_on_release() {
+    let mut app = app_with_tabs(&["one"]);
+    app.tab_content_area = Rect::new(0, 1, 40, 10);
+    app.focus_on_manager = false;
+
+    let down = MouseEvent {
+        kind: MouseEventKind::Down(MouseButton::Left),
+        column: 1,
+        row: 2,
+        modifiers: KeyModifiers::NONE,
+    };
+    app.handle_mouse(down).expect("mouse down");
+
+    let drag = MouseEvent {
+        kind: MouseEventKind::Drag(MouseButton::Left),
+        column: 4,
+        row: 2,
+        modifiers: KeyModifiers::NONE,
+    };
+    app.handle_mouse(drag).expect("mouse drag");
+
+    let up = MouseEvent {
+        kind: MouseEventKind::Up(MouseButton::Left),
+        column: 4,
+        row: 2,
+        modifiers: KeyModifiers::NONE,
+    };
+    app.handle_mouse(up).expect("mouse up");
+
+    assert!(!app.is_selecting);
+    assert!(app.selection_start.is_some());
+    assert!(app.selection_end.is_some());
+}
+
+#[test]
+fn right_click_copies_and_clears_existing_selection() {
+    let mut app = app_with_tabs(&["one"]);
+    app.tab_content_area = Rect::new(0, 1, 40, 10);
+    app.focus_on_manager = false;
+    app.selection_start = Some((0, 1));
+    app.selection_end = Some((0, 4));
+    app.selection_dragged = true;
+
+    let right_down = MouseEvent {
+        kind: MouseEventKind::Down(MouseButton::Right),
+        column: 2,
+        row: 2,
+        modifiers: KeyModifiers::NONE,
+    };
+    app.handle_mouse(right_down).expect("right down");
+
+    let right_up = MouseEvent {
+        kind: MouseEventKind::Up(MouseButton::Right),
+        column: 2,
+        row: 2,
+        modifiers: KeyModifiers::NONE,
+    };
+    app.handle_mouse(right_up).expect("right up");
+
+    assert!(app.selection_start.is_none());
+    assert!(app.selection_end.is_none());
+    assert!(!app.selection_dragged);
+}

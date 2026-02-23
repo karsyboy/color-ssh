@@ -87,3 +87,21 @@ fn encode_paste_bytes_wraps_bracketed_payload_when_enabled() {
     assert_eq!(encode_paste_bytes(pasted, true), b"\x1b[200~hello\nworld\x1b[201~".to_vec());
     assert_eq!(encode_paste_bytes(pasted, false), pasted.as_bytes().to_vec());
 }
+
+#[test]
+fn alt_c_copies_and_clears_selection() {
+    let mut app = SessionManager::new_for_tests();
+    app.tabs.push(host_tab("copy-target"));
+    app.selected_tab = 0;
+    app.focus_on_manager = false;
+    app.selection_start = Some((0, 1));
+    app.selection_end = Some((0, 4));
+    app.selection_dragged = true;
+
+    let key = KeyEvent::new(KeyCode::Char('c'), KeyModifiers::ALT);
+    app.handle_key(key).expect("handle_key should succeed");
+
+    assert!(app.selection_start.is_none());
+    assert!(app.selection_end.is_none());
+    assert!(!app.selection_dragged);
+}

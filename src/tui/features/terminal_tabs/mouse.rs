@@ -297,6 +297,10 @@ impl SessionManager {
                 }
             }
             MouseEventKind::Down(MouseButton::Right) => {
+                if self.mouse_to_vt_coords(mouse.column, mouse.row).is_some() && self.selection_start.is_some() && self.selection_end.is_some() {
+                    return Ok(());
+                }
+
                 if self.is_pty_mouse_mode_active()
                     && let Some((col, row)) = self.mouse_to_vt_coords(mouse.column, mouse.row)
                 {
@@ -314,9 +318,7 @@ impl SessionManager {
                     self.ensure_tab_visible();
                 } else if self.is_selecting {
                     self.is_selecting = false;
-                    if self.selection_dragged {
-                        self.copy_selection_to_clipboard();
-                    } else {
+                    if !self.selection_dragged {
                         self.clear_selection_state();
                     }
                 } else if self.is_pty_mouse_mode_active() {
@@ -420,6 +422,12 @@ impl SessionManager {
                 }
             }
             MouseEventKind::Up(MouseButton::Right) => {
+                if self.mouse_to_vt_coords(mouse.column, mouse.row).is_some() && self.selection_start.is_some() && self.selection_end.is_some() {
+                    self.copy_selection_to_clipboard();
+                    self.clear_selection_state();
+                    return Ok(());
+                }
+
                 if self.is_pty_mouse_mode_active() {
                     let mode = self.pty_mouse_mode();
                     if mode != terminal_emulator::MouseProtocolMode::Press
