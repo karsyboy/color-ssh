@@ -13,10 +13,57 @@ use std::sync::{
 };
 use std::time::Instant;
 
+fn modifier_parameter(modifiers: KeyModifiers) -> u8 {
+    let mut param = 1u8;
+    if modifiers.contains(KeyModifiers::SHIFT) {
+        param = param.saturating_add(1);
+    }
+    if modifiers.contains(KeyModifiers::ALT) {
+        param = param.saturating_add(2);
+    }
+    if modifiers.contains(KeyModifiers::CONTROL) {
+        param = param.saturating_add(4);
+    }
+    param
+}
+
+fn prefix_with_escape(mut bytes: Vec<u8>) -> Vec<u8> {
+    let mut prefixed = Vec::with_capacity(bytes.len() + 1);
+    prefixed.push(0x1b);
+    prefixed.append(&mut bytes);
+    prefixed
+}
+
+fn encode_csi_cursor_key(final_byte: u8, modifiers: KeyModifiers) -> Vec<u8> {
+    let base = vec![0x1b, b'[', final_byte];
+    if modifiers.is_empty() {
+        return base;
+    }
+    if modifiers == KeyModifiers::ALT {
+        return prefix_with_escape(base);
+    }
+
+    let final_char = final_byte as char;
+    format!("\x1b[1;{}{}", modifier_parameter(modifiers), final_char).into_bytes()
+}
+
+fn encode_csi_tilde_key(code: u8, modifiers: KeyModifiers) -> Vec<u8> {
+    if modifiers.is_empty() {
+        return format!("\x1b[{}~", code).into_bytes();
+    }
+    if modifiers == KeyModifiers::ALT {
+        return prefix_with_escape(format!("\x1b[{}~", code).into_bytes());
+    }
+
+    format!("\x1b[{};{}~", code, modifier_parameter(modifiers)).into_bytes()
+}
+
 pub(crate) fn encode_key_event_bytes(key: KeyEvent) -> Option<Vec<u8>> {
-    let mut bytes = match key.code {
+    let modifiers = key.modifiers & (KeyModifiers::SHIFT | KeyModifiers::ALT | KeyModifiers::CONTROL);
+
+    let bytes = match key.code {
         KeyCode::Char(ch) => {
-            if key.modifiers.contains(KeyModifiers::CONTROL) {
+            let mut out = if modifiers.contains(KeyModifiers::CONTROL) {
                 let control_byte = match ch {
                     '@' | ' ' => 0,
                     'a'..='z' => (ch as u8) - b'a' + 1,
@@ -32,31 +79,57 @@ pub(crate) fn encode_key_event_bytes(key: KeyEvent) -> Option<Vec<u8>> {
                 vec![control_byte]
             } else {
                 ch.to_string().into_bytes()
+            };
+
+            if modifiers.contains(KeyModifiers::ALT) {
+                out = prefix_with_escape(out);
+            }
+            out
+        }
+        KeyCode::Enter => {
+            let out = vec![b'\r'];
+            if modifiers.contains(KeyModifiers::ALT) {
+                prefix_with_escape(out)
+            } else {
+                out
             }
         }
-        KeyCode::Enter => vec![b'\r'],
-        KeyCode::Backspace => vec![127],
-        KeyCode::Tab => vec![b'\t'],
-        KeyCode::Esc => vec![27],
-        KeyCode::Up => b"\x1b[A".to_vec(),
-        KeyCode::Down => b"\x1b[B".to_vec(),
-        KeyCode::Right => b"\x1b[C".to_vec(),
-        KeyCode::Left => b"\x1b[D".to_vec(),
-        KeyCode::Home => b"\x1b[H".to_vec(),
-        KeyCode::End => b"\x1b[F".to_vec(),
-        KeyCode::PageUp => b"\x1b[5~".to_vec(),
-        KeyCode::PageDown => b"\x1b[6~".to_vec(),
-        KeyCode::Delete => b"\x1b[3~".to_vec(),
-        KeyCode::Insert => b"\x1b[2~".to_vec(),
+        KeyCode::Backspace => {
+            let out = vec![127];
+            if modifiers.contains(KeyModifiers::ALT) {
+                prefix_with_escape(out)
+            } else {
+                out
+            }
+        }
+        KeyCode::Tab => {
+            let out = vec![b'\t'];
+            if modifiers.contains(KeyModifiers::ALT) {
+                prefix_with_escape(out)
+            } else {
+                out
+            }
+        }
+        KeyCode::Esc => {
+            let out = vec![27];
+            if modifiers.contains(KeyModifiers::ALT) {
+                prefix_with_escape(out)
+            } else {
+                out
+            }
+        }
+        KeyCode::Up => encode_csi_cursor_key(b'A', modifiers),
+        KeyCode::Down => encode_csi_cursor_key(b'B', modifiers),
+        KeyCode::Right => encode_csi_cursor_key(b'C', modifiers),
+        KeyCode::Left => encode_csi_cursor_key(b'D', modifiers),
+        KeyCode::Home => encode_csi_cursor_key(b'H', modifiers),
+        KeyCode::End => encode_csi_cursor_key(b'F', modifiers),
+        KeyCode::PageUp => encode_csi_tilde_key(5, modifiers),
+        KeyCode::PageDown => encode_csi_tilde_key(6, modifiers),
+        KeyCode::Delete => encode_csi_tilde_key(3, modifiers),
+        KeyCode::Insert => encode_csi_tilde_key(2, modifiers),
         _ => return None,
     };
-
-    if key.modifiers.contains(KeyModifiers::ALT) {
-        let mut meta_prefixed = Vec::with_capacity(bytes.len() + 1);
-        meta_prefixed.push(0x1b);
-        meta_prefixed.append(&mut bytes);
-        return Some(meta_prefixed);
-    }
 
     Some(bytes)
 }
@@ -386,5 +459,17 @@ mod tests {
     fn encode_key_event_bytes_alt_arrow_prefixes_escape() {
         let key = KeyEvent::new(KeyCode::Up, KeyModifiers::ALT);
         assert_eq!(encode_key_event_bytes(key), Some(b"\x1b\x1b[A".to_vec()));
+    }
+
+    #[test]
+    fn encode_key_event_bytes_shift_arrow_preserves_shift_modifier() {
+        let key = KeyEvent::new(KeyCode::Left, KeyModifiers::SHIFT);
+        assert_eq!(encode_key_event_bytes(key), Some(b"\x1b[1;2D".to_vec()));
+    }
+
+    #[test]
+    fn encode_key_event_bytes_shift_pageup_preserves_shift_modifier() {
+        let key = KeyEvent::new(KeyCode::PageUp, KeyModifiers::SHIFT);
+        assert_eq!(encode_key_event_bytes(key), Some(b"\x1b[5;2~".to_vec()));
     }
 }

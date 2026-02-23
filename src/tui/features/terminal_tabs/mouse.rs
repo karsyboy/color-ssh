@@ -15,6 +15,10 @@ enum TabBarHit {
     TabClose(usize),
 }
 
+fn force_local_selection(modifiers: KeyModifiers) -> bool {
+    modifiers.intersects(KeyModifiers::ALT | KeyModifiers::SHIFT)
+}
+
 impl SessionManager {
     // Top-level mouse routing for host panel, tab bar, and terminal area.
     /// Handle mouse events.
@@ -178,9 +182,9 @@ impl SessionManager {
                 {
                     self.focus_on_manager = false;
                     self.search_mode = false;
-                    let alt_held = mouse.modifiers.contains(KeyModifiers::ALT);
+                    let local_override = force_local_selection(mouse.modifiers);
 
-                    if self.is_pty_mouse_mode_active() && !alt_held {
+                    if self.is_pty_mouse_mode_active() && !local_override {
                         if self.tabs[self.selected_tab].scroll_offset > 0 {
                             self.tabs[self.selected_tab].scroll_offset = 0;
                         }
@@ -189,7 +193,7 @@ impl SessionManager {
                         if let Some((col, row)) = self.mouse_to_vt_coords(mouse.column, mouse.row) {
                             self.send_mouse_to_pty(0, col, row, false)?;
                         }
-                    } else if !self.is_pty_mouse_mode_active() || alt_held {
+                    } else if !self.is_pty_mouse_mode_active() || local_override {
                         let vt_row = mouse.row.saturating_sub(area.y);
                         let vt_col = mouse.column.saturating_sub(area.x);
                         let scroll_offset = self.tabs[self.selected_tab].scroll_offset;
@@ -254,13 +258,6 @@ impl SessionManager {
                             None => {}
                         }
                     }
-                } else if self.is_pty_mouse_mode_active() {
-                    let mode = self.pty_mouse_mode();
-                    if (mode == terminal_emulator::MouseProtocolMode::AnyMotion || mode == terminal_emulator::MouseProtocolMode::ButtonMotion)
-                        && let Some((col, row)) = self.mouse_to_vt_coords(mouse.column, mouse.row)
-                    {
-                        self.send_mouse_to_pty(32, col, row, false)?;
-                    }
                 } else if self.is_selecting && !self.tabs.is_empty() && self.selected_tab < self.tabs.len() {
                     self.selection_dragged = true;
                     let area = self.tab_content_area;
@@ -290,6 +287,13 @@ impl SessionManager {
                     let scroll_offset = self.tabs[self.selected_tab].scroll_offset;
                     let abs_row = vt_row as i64 - scroll_offset as i64;
                     self.selection_end = Some((abs_row, vt_col));
+                } else if self.is_pty_mouse_mode_active() && !force_local_selection(mouse.modifiers) {
+                    let mode = self.pty_mouse_mode();
+                    if (mode == terminal_emulator::MouseProtocolMode::AnyMotion || mode == terminal_emulator::MouseProtocolMode::ButtonMotion)
+                        && let Some((col, row)) = self.mouse_to_vt_coords(mouse.column, mouse.row)
+                    {
+                        self.send_mouse_to_pty(32, col, row, false)?;
+                    }
                 }
             }
             MouseEventKind::Down(MouseButton::Right) => {
@@ -575,7 +579,7 @@ impl SessionManager {
 
 #[cfg(test)]
 mod tests {
-    use super::SessionManager;
+    use super::{SessionManager, force_local_selection};
     use crate::ssh_config::SshHost;
     use crate::tui::terminal_emulator::MouseProtocolEncoding;
     use crate::tui::{HostTab, TerminalSearchState};
@@ -615,6 +619,14 @@ mod tests {
     fn encode_mouse_event_bytes_default_clamps_large_coords() {
         let bytes = SessionManager::encode_mouse_event_bytes(MouseProtocolEncoding::Default, 0, 500, 900, false);
         assert_eq!(bytes, vec![0x1b, b'[', b'M', 32, 255, 255]);
+    }
+
+    #[test]
+    fn force_local_selection_accepts_shift_and_alt() {
+        assert!(force_local_selection(KeyModifiers::SHIFT));
+        assert!(force_local_selection(KeyModifiers::ALT));
+        assert!(force_local_selection(KeyModifiers::SHIFT | KeyModifiers::ALT));
+        assert!(!force_local_selection(KeyModifiers::NONE));
     }
 
     #[test]

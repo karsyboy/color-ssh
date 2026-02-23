@@ -187,7 +187,7 @@ Terminal pane:
 - Releasing after a drag copies selected text to clipboard automatically.
 - Mouse wheel scrolls scrollback when local mouse handling is active.
 - If the remote app enables mouse reporting (for example full-screen TUIs), mouse events go to the remote app.
-- In remote mouse mode, hold `Alt` while dragging to force local text selection.
+- In remote mouse mode, hold `Shift` (or `Alt`) while dragging to force local text selection.
 
 ## SSH Config Metadata for Better TUI Results
 
@@ -242,4 +242,3 @@ Validation and limits:
 - `host_view_size` is clamped to `10..70`.
 - `info_view_size` is clamped to `10..80`.
 - Runtime panel width is also bounded by terminal size.
-
