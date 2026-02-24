@@ -5,9 +5,9 @@
 
 use super::{LogError, LogLevel, formatter::LogFormatter};
 use std::{
-    fs::{File, OpenOptions},
+    fs::{self, File, OpenOptions},
     io::{BufWriter, Write},
-    path::PathBuf,
+    path::{Path, PathBuf},
     sync::{
         Arc, Mutex,
         mpsc::{self, Receiver, RecvTimeoutError, SyncSender},
@@ -16,9 +16,16 @@ use std::{
     time::{Duration, Instant},
 };
 
+#[cfg(unix)]
+use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
+
 const DEBUG_LOG_FLUSH_BYTES: usize = 16 * 1024;
 const DEBUG_LOG_FLUSH_INTERVAL: Duration = Duration::from_millis(100);
 const DEBUG_LOG_QUEUE_CAPACITY: usize = 2048;
+#[cfg(unix)]
+const PRIVATE_LOG_DIR_MODE: u32 = 0o700;
+#[cfg(unix)]
+const PRIVATE_LOG_FILE_MODE: u32 = 0o600;
 
 enum DebugLogCommand {
     Entry(LogLevel, String),
@@ -132,12 +139,7 @@ impl DebugLogger {
     // File path and file creation helpers.
     fn create_log_file() -> Result<File, LogError> {
         let log_path = Self::get_debug_log_path()?;
-
-        OpenOptions::new()
-            .create(true) // Create if doesn't exist
-            .append(true) // Append to preserve existing logs
-            .open(log_path)
-            .map_err(LogError::from)
+        open_private_append_file(&log_path)
     }
 
     fn get_debug_log_path() -> Result<PathBuf, LogError> {
@@ -146,10 +148,51 @@ impl DebugLogger {
         let log_dir = home_dir.join(".color-ssh").join("logs");
 
         // Create directory structure if it doesn't exist
-        std::fs::create_dir_all(&log_dir)?;
+        create_private_directory(&log_dir)?;
 
         Ok(log_dir.join("cossh.log"))
     }
+}
+
+fn create_private_directory(path: &Path) -> Result<(), LogError> {
+    fs::create_dir_all(path)?;
+    set_private_directory_permissions(path)
+}
+
+fn open_private_append_file(path: &Path) -> Result<File, LogError> {
+    let mut options = OpenOptions::new();
+    options
+        .create(true) // Create if missing.
+        .append(true); // Preserve existing logs.
+    #[cfg(unix)]
+    {
+        options.mode(PRIVATE_LOG_FILE_MODE);
+    }
+    let file = options.open(path)?;
+    set_private_file_permissions(path)?;
+    Ok(file)
+}
+
+#[cfg(unix)]
+fn set_private_directory_permissions(path: &Path) -> Result<(), LogError> {
+    fs::set_permissions(path, fs::Permissions::from_mode(PRIVATE_LOG_DIR_MODE))?;
+    Ok(())
+}
+
+#[cfg(not(unix))]
+fn set_private_directory_permissions(_path: &Path) -> Result<(), LogError> {
+    Ok(())
+}
+
+#[cfg(unix)]
+fn set_private_file_permissions(path: &Path) -> Result<(), LogError> {
+    fs::set_permissions(path, fs::Permissions::from_mode(PRIVATE_LOG_FILE_MODE))?;
+    Ok(())
+}
+
+#[cfg(not(unix))]
+fn set_private_file_permissions(_path: &Path) -> Result<(), LogError> {
+    Ok(())
 }
 
 fn run_worker(receiver: Receiver<DebugLogCommand>, formatter: LogFormatter) {

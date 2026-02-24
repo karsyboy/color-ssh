@@ -12,9 +12,9 @@ use once_cell::sync::Lazy;
 use regex::Regex;
 use std::{
     borrow::Cow,
-    fs::{File, OpenOptions},
+    fs::{self, File, OpenOptions},
     io::{BufWriter, Write},
-    path::PathBuf,
+    path::{Path, PathBuf},
     sync::{
         Arc, Mutex,
         mpsc::{self, Receiver, RecvTimeoutError, SyncSender},
@@ -23,10 +23,17 @@ use std::{
     time::{Duration, Instant},
 };
 
+#[cfg(unix)]
+use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
+
 const SSH_LOG_FLUSH_BYTES: usize = 64 * 1024;
 const SSH_LOG_FLUSH_INTERVAL: Duration = Duration::from_millis(100);
 // 1024 * ~8KiB chunks ~= ~8MiB bounded backlog.
 const SSH_LOG_QUEUE_CAPACITY: usize = 1024;
+#[cfg(unix)]
+const PRIVATE_LOG_DIR_MODE: u32 = 0o700;
+#[cfg(unix)]
+const PRIVATE_LOG_FILE_MODE: u32 = 0o600;
 
 enum SshLogCommand {
     Chunk(Arc<String>),
@@ -161,8 +168,7 @@ impl SshLogger {
     // File creation helper.
     fn create_log_file() -> Result<File, LogError> {
         let log_path = get_ssh_log_path()?;
-
-        OpenOptions::new().create(true).append(true).open(log_path).map_err(LogError::from)
+        open_private_append_file(&log_path)
     }
 }
 
@@ -335,7 +341,7 @@ fn get_ssh_log_path() -> Result<PathBuf, LogError> {
     let date = Local::now().format("%Y-%m-%d");
     let log_dir = home_dir.join(".color-ssh").join("logs").join("ssh_sessions").join(date.to_string());
 
-    std::fs::create_dir_all(&log_dir)?;
+    create_private_directory(&log_dir)?;
 
     let session_name = match crate::config::get_config().read() {
         Ok(config_guard) => config_guard.metadata.session_name.clone(),
@@ -346,6 +352,47 @@ fn get_ssh_log_path() -> Result<PathBuf, LogError> {
     };
     let sanitized = sanitize_session_name(&session_name);
     Ok(log_dir.join(format!("{sanitized}.log")))
+}
+
+fn create_private_directory(path: &Path) -> Result<(), LogError> {
+    fs::create_dir_all(path)?;
+    set_private_directory_permissions(path)
+}
+
+fn open_private_append_file(path: &Path) -> Result<File, LogError> {
+    let mut options = OpenOptions::new();
+    options
+        .create(true) // Create if missing.
+        .append(true); // Preserve existing logs.
+    #[cfg(unix)]
+    {
+        options.mode(PRIVATE_LOG_FILE_MODE);
+    }
+    let file = options.open(path)?;
+    set_private_file_permissions(path)?;
+    Ok(file)
+}
+
+#[cfg(unix)]
+fn set_private_directory_permissions(path: &Path) -> Result<(), LogError> {
+    fs::set_permissions(path, fs::Permissions::from_mode(PRIVATE_LOG_DIR_MODE))?;
+    Ok(())
+}
+
+#[cfg(not(unix))]
+fn set_private_directory_permissions(_path: &Path) -> Result<(), LogError> {
+    Ok(())
+}
+
+#[cfg(unix)]
+fn set_private_file_permissions(path: &Path) -> Result<(), LogError> {
+    fs::set_permissions(path, fs::Permissions::from_mode(PRIVATE_LOG_FILE_MODE))?;
+    Ok(())
+}
+
+#[cfg(not(unix))]
+fn set_private_file_permissions(_path: &Path) -> Result<(), LogError> {
+    Ok(())
 }
 
 fn current_secret_patterns() -> Vec<Regex> {
