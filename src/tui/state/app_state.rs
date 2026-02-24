@@ -1,6 +1,7 @@
 //! Core TUI state and initialization.
 
 use super::host_browser_state::{HostSearchEntry, HostTreeRow};
+use super::pass_prompt_state::PassPromptState;
 use super::quick_connect_state::QuickConnectState;
 use super::tab_state::{HostTab, TerminalSearchState};
 use crate::auth::pass::PassCache;
@@ -66,6 +67,7 @@ pub(crate) struct AppState {
     pub(crate) host_panel_visible: bool,
     pub(crate) host_info_visible: bool,
     pub(crate) quick_connect: Option<QuickConnectState>,
+    pub(crate) pass_prompt: Option<PassPromptState>,
     pub(crate) pass_cache: PassCache,
     pub(crate) quick_connect_default_ssh_logging: bool,
     pub(crate) last_terminal_size: (u16, u16),
@@ -260,6 +262,7 @@ impl AppState {
             host_panel_visible: true,
             host_info_visible,
             quick_connect: None,
+            pass_prompt: None,
             pass_cache: PassCache::default(),
             quick_connect_default_ssh_logging,
             last_terminal_size: (term_width, term_height),
@@ -323,6 +326,7 @@ impl AppState {
             host_panel_visible: true,
             host_info_visible: true,
             quick_connect: None,
+            pass_prompt: None,
             pass_cache: PassCache::default(),
             quick_connect_default_ssh_logging: false,
             last_terminal_size: (100, 30),

@@ -19,6 +19,7 @@ pub enum PassFallbackReason {
     MissingKeyFile,
     MissingGpg,
     MissingPassTool,
+    DecryptPromptUnavailable,
     DecryptFailedAfterRetries,
 }
 
@@ -26,6 +27,22 @@ pub enum PassFallbackReason {
 pub enum PassResolveResult {
     Ready(String),
     Disabled,
+    Fallback(PassFallbackReason),
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum PassPromptStatus {
+    Ready(String),
+    Disabled,
+    PromptRequired,
+    Fallback(PassFallbackReason),
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum PassPromptSubmitResult {
+    Ready(String),
+    Disabled,
+    InvalidPassphrase,
     Fallback(PassFallbackReason),
 }
 
@@ -110,8 +127,42 @@ enum DecryptError {
     MissingGpg,
 }
 
-pub fn fallback_notice() -> &'static str {
-    FALLBACK_NOTICE
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum DecryptWithPassphraseError {
+    InvalidPassphrase,
+    MissingGpg,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum PassPreflight {
+    Ready(String),
+    Disabled,
+    NeedsDecrypt(PathBuf),
+    Fallback(PassFallbackReason),
+}
+
+pub fn fallback_notice(reason: PassFallbackReason) -> String {
+    match reason {
+        PassFallbackReason::InvalidPassKeyName => {
+            "Password auto-login unavailable due to invalid #_pass key name; falling back to standard SSH password prompt.".to_string()
+        }
+        PassFallbackReason::MissingKeyFile => {
+            "Password auto-login unavailable because the configured key file was not found; falling back to standard SSH password prompt.".to_string()
+        }
+        PassFallbackReason::MissingGpg => {
+            "Password auto-login unavailable because gpg is not available; falling back to standard SSH password prompt.".to_string()
+        }
+        PassFallbackReason::MissingPassTool => {
+            "Password auto-login unavailable because sshpass is not available; falling back to standard SSH password prompt.".to_string()
+        }
+        PassFallbackReason::DecryptPromptUnavailable => format!(
+            "{} Hint: in terminal-only environments run `export GPG_TTY=$(tty)` and use a TTY pinentry (for example pinentry-curses).",
+            FALLBACK_NOTICE
+        ),
+        PassFallbackReason::DecryptFailedAfterRetries => {
+            "Password auto-login unavailable; gpg decryption failed after multiple attempts. Falling back to standard SSH password prompt.".to_string()
+        }
+    }
 }
 
 pub fn validate_pass_key_name(name: &str) -> bool {
@@ -133,34 +184,42 @@ pub fn extract_password_from_plaintext(plaintext: &[u8]) -> Option<String> {
 }
 
 pub fn resolve_pass_key(pass_key: &str, cache: &mut PassCache) -> PassResolveResult {
-    if pass_key.is_empty() {
-        return PassResolveResult::Disabled;
+    match preflight_pass_key(pass_key, cache) {
+        PassPreflight::Ready(password) => PassResolveResult::Ready(password),
+        PassPreflight::Disabled => PassResolveResult::Disabled,
+        PassPreflight::NeedsDecrypt(key_path) => match decrypt_with_retry(&key_path, decrypt_pass_from_file) {
+            Ok(password) => {
+                cache.insert(pass_key, password.clone());
+                PassResolveResult::Ready(password)
+            }
+            Err(reason) => PassResolveResult::Fallback(reason),
+        },
+        PassPreflight::Fallback(reason) => PassResolveResult::Fallback(reason),
     }
-    if !validate_pass_key_name(pass_key) {
-        return PassResolveResult::Fallback(PassFallbackReason::InvalidPassKeyName);
-    }
-    if let Some(cached_password) = cache.get(pass_key) {
-        return PassResolveResult::Ready(cached_password);
-    }
-    if !cache.pass_tool_available() {
-        return PassResolveResult::Fallback(PassFallbackReason::MissingPassTool);
-    }
-    if !cache.gpg_available() {
-        return PassResolveResult::Fallback(PassFallbackReason::MissingGpg);
-    }
-    let Some(key_path) = pass_key_path(pass_key) else {
-        return PassResolveResult::Fallback(PassFallbackReason::MissingKeyFile);
-    };
-    if !key_path.is_file() {
-        return PassResolveResult::Fallback(PassFallbackReason::MissingKeyFile);
-    }
+}
 
-    match decrypt_with_retry(&key_path, decrypt_pass_from_file) {
-        Ok(password) => {
-            cache.insert(pass_key, password.clone());
-            PassResolveResult::Ready(password)
-        }
-        Err(reason) => PassResolveResult::Fallback(reason),
+pub fn resolve_pass_key_for_tui(pass_key: &str, cache: &mut PassCache) -> PassPromptStatus {
+    match preflight_pass_key(pass_key, cache) {
+        PassPreflight::Ready(password) => PassPromptStatus::Ready(password),
+        PassPreflight::Disabled => PassPromptStatus::Disabled,
+        PassPreflight::NeedsDecrypt(_) => PassPromptStatus::PromptRequired,
+        PassPreflight::Fallback(reason) => PassPromptStatus::Fallback(reason),
+    }
+}
+
+pub fn submit_tui_passphrase(pass_key: &str, passphrase: &str, cache: &mut PassCache) -> PassPromptSubmitResult {
+    match preflight_pass_key(pass_key, cache) {
+        PassPreflight::Ready(password) => PassPromptSubmitResult::Ready(password),
+        PassPreflight::Disabled => PassPromptSubmitResult::Disabled,
+        PassPreflight::Fallback(reason) => PassPromptSubmitResult::Fallback(reason),
+        PassPreflight::NeedsDecrypt(key_path) => match decrypt_pass_from_file_with_passphrase(&key_path, passphrase) {
+            Ok(password) => {
+                cache.insert(pass_key, password.clone());
+                PassPromptSubmitResult::Ready(password)
+            }
+            Err(DecryptWithPassphraseError::InvalidPassphrase) => PassPromptSubmitResult::InvalidPassphrase,
+            Err(DecryptWithPassphraseError::MissingGpg) => PassPromptSubmitResult::Fallback(PassFallbackReason::MissingGpg),
+        },
     }
 }
 
@@ -180,9 +239,22 @@ pub fn create_pass_key_interactive(pass_key: &str) -> Result<PathBuf, PassCreate
 }
 
 fn decrypt_pass_from_file(path: &Path) -> Result<String, DecryptError> {
-    let output = Command::new(GPG_COMMAND).arg("--quiet").arg("--decrypt").arg(path).output();
-    match output {
-        Ok(output) => {
+    let mut command = Command::new(GPG_COMMAND);
+    command
+        .arg("--quiet")
+        .arg("--decrypt")
+        .arg(path)
+        .stdin(Stdio::inherit())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::inherit());
+    if let Some(gpg_tty) = resolve_gpg_tty() {
+        command.env("GPG_TTY", gpg_tty);
+    }
+
+    let child = command.spawn();
+    match child {
+        Ok(child) => {
+            let output = child.wait_with_output().map_err(|_| DecryptError::Retryable)?;
             if !output.status.success() {
                 return Err(DecryptError::Retryable);
             }
@@ -195,6 +267,72 @@ fn decrypt_pass_from_file(path: &Path) -> Result<String, DecryptError> {
             Err(DecryptError::Retryable)
         }
     }
+}
+
+fn decrypt_pass_from_file_with_passphrase(path: &Path, passphrase: &str) -> Result<String, DecryptWithPassphraseError> {
+    let mut command = Command::new(GPG_COMMAND);
+    command
+        .arg("--quiet")
+        .arg("--batch")
+        .arg("--pinentry-mode")
+        .arg("loopback")
+        .arg("--passphrase-fd")
+        .arg("0")
+        .arg("--decrypt")
+        .arg(path)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
+
+    let mut child = command.spawn().map_err(|err| {
+        if err.kind() == io::ErrorKind::NotFound {
+            DecryptWithPassphraseError::MissingGpg
+        } else {
+            DecryptWithPassphraseError::InvalidPassphrase
+        }
+    })?;
+
+    let Some(mut stdin) = child.stdin.take() else {
+        return Err(DecryptWithPassphraseError::InvalidPassphrase);
+    };
+
+    stdin
+        .write_all(passphrase.as_bytes())
+        .map_err(|_| DecryptWithPassphraseError::InvalidPassphrase)?;
+    stdin.write_all(b"\n").map_err(|_| DecryptWithPassphraseError::InvalidPassphrase)?;
+    drop(stdin);
+
+    let output = child.wait_with_output().map_err(|_| DecryptWithPassphraseError::InvalidPassphrase)?;
+    if !output.status.success() {
+        return Err(DecryptWithPassphraseError::InvalidPassphrase);
+    }
+
+    extract_password_from_plaintext(&output.stdout).ok_or(DecryptWithPassphraseError::InvalidPassphrase)
+}
+
+fn preflight_pass_key(pass_key: &str, cache: &mut PassCache) -> PassPreflight {
+    if pass_key.is_empty() {
+        return PassPreflight::Disabled;
+    }
+    if !validate_pass_key_name(pass_key) {
+        return PassPreflight::Fallback(PassFallbackReason::InvalidPassKeyName);
+    }
+    if let Some(cached_password) = cache.get(pass_key) {
+        return PassPreflight::Ready(cached_password);
+    }
+    if !cache.pass_tool_available() {
+        return PassPreflight::Fallback(PassFallbackReason::MissingPassTool);
+    }
+    if !cache.gpg_available() {
+        return PassPreflight::Fallback(PassFallbackReason::MissingGpg);
+    }
+    let Some(key_path) = pass_key_path(pass_key) else {
+        return PassPreflight::Fallback(PassFallbackReason::MissingKeyFile);
+    };
+    if !key_path.is_file() {
+        return PassPreflight::Fallback(PassFallbackReason::MissingKeyFile);
+    }
+    PassPreflight::NeedsDecrypt(key_path)
 }
 
 fn decrypt_with_retry<F>(path: &Path, mut decrypt_once: F) -> Result<String, PassFallbackReason>
@@ -299,22 +437,27 @@ fn prompt_for_pass_password() -> Result<String, PassCreateError> {
 }
 
 fn encrypt_payload_with_gpg(output_path: &Path, plaintext: &[u8]) -> Result<(), PassCreateError> {
-    let mut child = Command::new(GPG_COMMAND)
+    let mut command = Command::new(GPG_COMMAND);
+    command
         .arg("--quiet")
         .arg("--symmetric")
         .arg("--output")
         .arg(output_path)
         .stdin(Stdio::piped())
         .stdout(Stdio::null())
-        .stderr(Stdio::piped())
-        .spawn()
-        .map_err(|err| {
-            if err.kind() == io::ErrorKind::NotFound {
-                PassCreateError::MissingGpg
-            } else {
-                PassCreateError::Io(err)
-            }
-        })?;
+        .stderr(Stdio::piped());
+
+    if let Some(gpg_tty) = resolve_gpg_tty() {
+        command.env("GPG_TTY", gpg_tty);
+    }
+
+    let mut child = command.spawn().map_err(|err| {
+        if err.kind() == io::ErrorKind::NotFound {
+            PassCreateError::MissingGpg
+        } else {
+            PassCreateError::Io(err)
+        }
+    })?;
 
     let Some(mut stdin) = child.stdin.take() else {
         return Err(PassCreateError::Io(io::Error::other("failed to open gpg stdin")));
@@ -328,11 +471,37 @@ fn encrypt_payload_with_gpg(output_path: &Path, plaintext: &[u8]) -> Result<(), 
     }
 
     let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
+    if stderr.contains("Inappropriate ioctl for device") || stderr.contains("problem with the agent") {
+        return Err(PassCreateError::GpgFailed(format!(
+            "{}\nHint: in terminal-only environments run `export GPG_TTY=$(tty)` and use a TTY pinentry (for example pinentry-curses).",
+            stderr
+        )));
+    }
+
     if stderr.is_empty() {
         Err(PassCreateError::GpgFailed("unknown gpg error".to_string()))
     } else {
         Err(PassCreateError::GpgFailed(stderr))
     }
+}
+
+fn resolve_gpg_tty() -> Option<String> {
+    if let Ok(value) = std::env::var("GPG_TTY")
+        && !value.trim().is_empty()
+    {
+        return Some(value);
+    }
+
+    #[cfg(unix)]
+    {
+        let path = fs::read_link("/proc/self/fd/0").ok()?;
+        let rendered = path.to_string_lossy().to_string();
+        if rendered.starts_with("/dev/") {
+            return Some(rendered);
+        }
+    }
+
+    None
 }
 
 #[cfg(unix)]

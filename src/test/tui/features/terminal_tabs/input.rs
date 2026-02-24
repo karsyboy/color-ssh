@@ -1,6 +1,6 @@
 use super::*;
 use crate::ssh_config::SshHost;
-use crate::tui::{HostTab, QuickConnectField, QuickConnectState, TerminalSearchState};
+use crate::tui::{HostTab, PassPromptAction, PassPromptState, QuickConnectField, QuickConnectState, TerminalSearchState};
 
 fn host_tab(title: &str) -> HostTab {
     HostTab {
@@ -79,6 +79,17 @@ fn handle_paste_routes_to_quick_connect_form_when_modal_open() {
 
     let form = app.quick_connect.as_ref().expect("quick connect state");
     assert_eq!(form.user, "ops");
+}
+
+#[test]
+fn handle_paste_routes_to_pass_prompt_when_modal_open() {
+    let mut app = SessionManager::new_for_tests();
+    app.pass_prompt = Some(PassPromptState::new("shared".to_string(), PassPromptAction::ReconnectTab { tab_index: 0 }));
+
+    app.handle_paste("secret\n".to_string()).expect("paste should succeed");
+
+    let prompt = app.pass_prompt.as_ref().expect("pass prompt state");
+    assert_eq!(prompt.passphrase, "secret");
 }
 
 #[test]

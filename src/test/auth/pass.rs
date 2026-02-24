@@ -83,10 +83,28 @@ fn resolve_pass_key_uses_cache_without_decrypting_again() {
 }
 
 #[test]
+fn resolve_pass_key_for_tui_uses_cache_without_prompt() {
+    let mut cache = PassCache::default();
+    cache.passwords.insert("shared".to_string(), "cached-secret".to_string());
+
+    let result = resolve_pass_key_for_tui("shared", &mut cache);
+    assert_eq!(result, PassPromptStatus::Ready("cached-secret".to_string()));
+}
+
+#[test]
 fn resolve_pass_key_rejects_invalid_names() {
     let mut cache = PassCache::default();
     let result = resolve_pass_key("../bad", &mut cache);
     assert_eq!(result, PassResolveResult::Fallback(PassFallbackReason::InvalidPassKeyName));
+}
+
+#[test]
+fn submit_tui_passphrase_uses_cache_without_shelling_out() {
+    let mut cache = PassCache::default();
+    cache.passwords.insert("shared".to_string(), "cached-secret".to_string());
+
+    let result = submit_tui_passphrase("shared", "ignored", &mut cache);
+    assert_eq!(result, PassPromptSubmitResult::Ready("cached-secret".to_string()));
 }
 
 #[test]

@@ -1,4 +1,4 @@
-use super::{extract_ssh_destination, is_add_pass_mode, pass_key_for_destination_from_hosts, resolve_logging_settings};
+use super::{extract_ssh_destination, is_add_pass_mode, pass_key_for_destination_from_hosts, resolve_logging_settings, skip_pass_resolution_from_env};
 use cossh::args::MainArgs;
 use cossh::ssh_config::SshHost;
 
@@ -89,4 +89,14 @@ fn add_pass_mode_short_circuits_normal_connect_mode() {
 
     args.add_pass = Some("office_fw".to_string());
     assert!(is_add_pass_mode(&args));
+}
+
+#[test]
+fn skip_pass_resolution_env_parser_accepts_booleanish_values() {
+    assert!(skip_pass_resolution_from_env(Some("1")));
+    assert!(skip_pass_resolution_from_env(Some("true")));
+    assert!(skip_pass_resolution_from_env(Some("YES")));
+    assert!(!skip_pass_resolution_from_env(Some("0")));
+    assert!(!skip_pass_resolution_from_env(Some("")));
+    assert!(!skip_pass_resolution_from_env(None));
 }

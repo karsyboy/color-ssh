@@ -3,6 +3,7 @@ use cossh::{Result, args, config, log, log_debug, log_error, log_info, process, 
 use std::process::ExitCode;
 
 const APP_VERSION: &str = concat!("v", env!("CARGO_PKG_VERSION"));
+const SKIP_PASS_RESOLVE_ENV: &str = "COSSH_SKIP_PASS_RESOLVE";
 
 /// Extracts the SSH destination hostname from the provided SSH arguments returns hostname or none
 fn extract_ssh_destination(ssh_args: &[String]) -> Option<String> {
@@ -62,6 +63,14 @@ fn pass_key_for_destination(destination: &str) -> Option<String> {
 
 fn is_add_pass_mode(args: &args::MainArgs) -> bool {
     args.add_pass.is_some()
+}
+
+fn skip_pass_resolution_from_env(value: Option<&str>) -> bool {
+    value.is_some_and(|raw| matches!(raw.trim().to_ascii_lowercase().as_str(), "1" | "true" | "yes"))
+}
+
+fn should_skip_pass_resolution() -> bool {
+    skip_pass_resolution_from_env(std::env::var(SKIP_PASS_RESOLVE_ENV).ok().as_deref())
 }
 
 fn run_add_pass_cli(pass_name: &str) -> ExitCode {
@@ -237,7 +246,9 @@ fn main() -> Result<ExitCode> {
     let _watcher = config::config_watcher(args.profile.clone());
 
     let mut pass_password: Option<String> = None;
-    if !args.is_non_interactive
+    if should_skip_pass_resolution() {
+        log_debug!("Skipping #_pass resolution due to {}", SKIP_PASS_RESOLVE_ENV);
+    } else if !args.is_non_interactive
         && let Some(destination) = extract_ssh_destination(&args.ssh_args)
         && let Some(pass_key) = pass_key_for_destination(&destination)
     {
@@ -250,7 +261,7 @@ fn main() -> Result<ExitCode> {
             PassResolveResult::Disabled => {}
             PassResolveResult::Fallback(reason) => {
                 log_debug!("Pass auto-login fallback for destination {}: {:?}", destination, reason);
-                eprintln!("{}", pass::fallback_notice());
+                eprintln!("{}", pass::fallback_notice(reason));
             }
         }
     }

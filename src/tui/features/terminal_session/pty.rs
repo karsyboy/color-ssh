@@ -1,9 +1,9 @@
-//! SSH session spawning and PTY management
+//! SSH session spawning and PTY management.
 
-use crate::auth::pass::{self, PassResolveResult};
+use crate::auth::pass::{self, PassPromptStatus};
 use crate::ssh_config::SshHost;
 use crate::tui::terminal_emulator::Parser;
-use crate::tui::{HostTab, SessionManager, SshSession, TerminalSearchState};
+use crate::tui::{HostTab, PassPromptAction, SessionManager, SshSession, TerminalSearchState};
 use crate::{debug_enabled, log_debug, log_error};
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use portable_pty::{CommandBuilder, PtySize, native_pty_system};
@@ -147,17 +147,21 @@ impl SessionManager {
         crate::config::history_buffer_for_profile(host.profile.as_deref()).unwrap_or(self.history_buffer)
     }
 
-    fn resolve_host_pass_password(&mut self, host: &SshHost) -> (Option<String>, Option<&'static str>) {
+    fn resolve_host_pass_password(&mut self, host: &SshHost, action: PassPromptAction) -> Option<(Option<String>, Option<String>)> {
         let Some(pass_key) = host.pass_key.as_deref() else {
-            return (None, None);
+            return Some((None, None));
         };
 
-        match pass::resolve_pass_key(pass_key, &mut self.pass_cache) {
-            PassResolveResult::Ready(password) => (Some(password), None),
-            PassResolveResult::Disabled => (None, None),
-            PassResolveResult::Fallback(reason) => {
+        match pass::resolve_pass_key_for_tui(pass_key, &mut self.pass_cache) {
+            PassPromptStatus::Ready(password) => Some((Some(password), None)),
+            PassPromptStatus::Disabled => Some((None, None)),
+            PassPromptStatus::PromptRequired => {
+                self.open_pass_prompt(pass_key.to_string(), action);
+                None
+            }
+            PassPromptStatus::Fallback(reason) => {
                 log_debug!("Pass auto-login unavailable for host {}: {:?}", host.name, reason);
-                (None, Some(pass::fallback_notice()))
+                Some((None, Some(pass::fallback_notice(reason))))
             }
         }
     }
@@ -190,7 +194,17 @@ impl SessionManager {
     // Tab/session creation.
     fn open_host_tab(&mut self, host: SshHost, force_ssh_logging: bool) {
         log_debug!("Opening tab for host: {}", host.name);
+        let action = PassPromptAction::OpenHostTab {
+            host: host.clone(),
+            force_ssh_logging,
+        };
+        let Some((pass_password, pass_fallback_notice)) = self.resolve_host_pass_password(&host, action) else {
+            return;
+        };
+        self.open_host_tab_with_auth(host, force_ssh_logging, pass_password, pass_fallback_notice);
+    }
 
+    fn open_host_tab_with_auth(&mut self, host: SshHost, force_ssh_logging: bool, pass_password: Option<String>, pass_fallback_notice: Option<String>) {
         // Generate unique tab title with suffix for duplicate hosts
         let existing_count = self.tabs.iter().filter(|tab| tab.host.name == host.name).count();
         let tab_title = if existing_count == 0 {
@@ -201,7 +215,6 @@ impl SessionManager {
         let history_buffer = self.resolved_history_buffer_for_host(&host);
         log_debug!("Using history buffer {} for tab '{}' (profile: {:?})", history_buffer, tab_title, host.profile);
         let (initial_rows, initial_cols) = self.initial_pty_size();
-        let (pass_password, pass_fallback_notice) = self.resolve_host_pass_password(&host);
 
         // Spawn SSH session
         let session = match Self::spawn_ssh_session(
@@ -243,6 +256,17 @@ impl SessionManager {
         log_debug!("Created new tab at index {}", self.selected_tab);
     }
 
+    pub(crate) fn complete_pass_prompt_action(&mut self, action: PassPromptAction, pass_password: Option<String>, pass_fallback_notice: Option<String>) {
+        match action {
+            PassPromptAction::OpenHostTab { host, force_ssh_logging } => {
+                self.open_host_tab_with_auth(host, force_ssh_logging, pass_password, pass_fallback_notice);
+            }
+            PassPromptAction::ReconnectTab { tab_index } => {
+                self.reconnect_session_with_auth(tab_index, pass_password, pass_fallback_notice);
+            }
+        }
+    }
+
     // Spawn and wire a PTY-backed cossh process.
     /// Spawn an SSH session in a PTY
     fn spawn_ssh_session(
@@ -253,7 +277,7 @@ impl SessionManager {
         initial_rows: u16,
         initial_cols: u16,
         pass_password: Option<String>,
-        pass_fallback_notice: Option<&'static str>,
+        pass_fallback_notice: Option<String>,
     ) -> io::Result<SshSession> {
         let pty_system = native_pty_system();
         let rows = initial_rows.max(1);
@@ -288,6 +312,7 @@ impl SessionManager {
 
         cmd.arg(&host.name);
         cmd.env("COSSH_SESSION_NAME", tab_title);
+        cmd.env("COSSH_SKIP_PASS_RESOLVE", "1");
         if let Some(password) = pass_password.as_ref() {
             cmd.env("SSHPASS", password);
         }
@@ -385,17 +410,30 @@ impl SessionManager {
             return;
         }
 
-        let tab = &self.tabs[self.selected_tab];
-        let host = tab.host.clone();
+        let tab_index = self.selected_tab;
+        let host = self.tabs[tab_index].host.clone();
 
         log_debug!("Reconnecting session for host: {}", host.name);
 
-        // Spawn a new SSH session
+        let action = PassPromptAction::ReconnectTab { tab_index };
+        let Some((pass_password, pass_fallback_notice)) = self.resolve_host_pass_password(&host, action) else {
+            return;
+        };
+        self.reconnect_session_with_auth(tab_index, pass_password, pass_fallback_notice);
+    }
+
+    fn reconnect_session_with_auth(&mut self, tab_index: usize, pass_password: Option<String>, pass_fallback_notice: Option<String>) {
+        if self.tabs.is_empty() || tab_index >= self.tabs.len() {
+            return;
+        }
+
+        let tab = &self.tabs[tab_index];
+        let host = tab.host.clone();
         let tab_title = tab.title.clone();
-        let force_ssh_logging = self.tabs[self.selected_tab].force_ssh_logging;
+        let force_ssh_logging = tab.force_ssh_logging;
         let history_buffer = self.resolved_history_buffer_for_host(&host);
         let (initial_rows, initial_cols) = tab.last_pty_size.unwrap_or_else(|| self.initial_pty_size());
-        let (pass_password, pass_fallback_notice) = self.resolve_host_pass_password(&host);
+
         log_debug!(
             "Using history buffer {} for reconnect tab '{}' (profile: {:?})",
             history_buffer,
@@ -413,7 +451,7 @@ impl SessionManager {
             pass_fallback_notice,
         ) {
             Ok(session) => {
-                let tab = &mut self.tabs[self.selected_tab];
+                let tab = &mut self.tabs[tab_index];
                 tab.session = Some(session);
                 tab.scroll_offset = 0;
                 tab.terminal_search.matches.clear();

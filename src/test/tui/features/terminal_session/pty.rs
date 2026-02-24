@@ -1,6 +1,7 @@
 use super::{SessionManager, encode_key_event_bytes};
 use crate::auth::pass;
 use crate::ssh_config::SshHost;
+use crate::tui::PassPromptAction;
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
 #[test]
@@ -60,7 +61,14 @@ fn resolve_host_pass_password_reuses_cached_password() {
     let mut host = SshHost::new("device".to_string());
     host.pass_key = Some("shared".to_string());
 
-    let (password, notice) = app.resolve_host_pass_password(&host);
+    let result = app.resolve_host_pass_password(
+        &host,
+        PassPromptAction::OpenHostTab {
+            host: host.clone(),
+            force_ssh_logging: false,
+        },
+    );
+    let (password, notice) = result.expect("cached pass should resolve without prompt");
     assert_eq!(password.as_deref(), Some("secret"));
     assert_eq!(notice, None);
 }
@@ -71,7 +79,14 @@ fn resolve_host_pass_password_returns_fallback_notice_for_invalid_key() {
     let mut host = SshHost::new("device".to_string());
     host.pass_key = Some("../invalid".to_string());
 
-    let (password, notice) = app.resolve_host_pass_password(&host);
+    let result = app.resolve_host_pass_password(
+        &host,
+        PassPromptAction::OpenHostTab {
+            host: host.clone(),
+            force_ssh_logging: false,
+        },
+    );
+    let (password, notice) = result.expect("invalid key should fail without opening prompt");
     assert_eq!(password, None);
-    assert_eq!(notice, Some(pass::fallback_notice()));
+    assert_eq!(notice, Some(pass::fallback_notice(pass::PassFallbackReason::InvalidPassKeyName)));
 }

@@ -23,6 +23,10 @@ impl SessionManager {
     // Top-level mouse routing for host panel, tab bar, and terminal area.
     /// Handle mouse events.
     pub(crate) fn handle_mouse(&mut self, mouse: event::MouseEvent) -> io::Result<()> {
+        if self.pass_prompt.is_some() {
+            return Ok(());
+        }
+
         if self.quick_connect.is_some() {
             self.handle_quick_connect_mouse(mouse);
             return Ok(());

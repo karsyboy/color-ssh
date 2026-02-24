@@ -115,6 +115,11 @@ impl SessionManager {
             return Ok(());
         }
 
+        if self.pass_prompt.is_some() {
+            self.handle_pass_prompt_key(key);
+            return Ok(());
+        }
+
         if self.quick_connect.is_some() {
             self.handle_quick_connect_key(key);
             return Ok(());
@@ -133,6 +138,11 @@ impl SessionManager {
 
     pub(crate) fn handle_paste(&mut self, pasted: String) -> io::Result<()> {
         if pasted.is_empty() {
+            return Ok(());
+        }
+
+        if self.pass_prompt.is_some() {
+            self.handle_pass_prompt_paste(&pasted);
             return Ok(());
         }
 
