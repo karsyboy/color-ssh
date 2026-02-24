@@ -11,6 +11,7 @@ const PASS_TOOL_COMMAND: &str = "sshpass";
 const MAX_DECRYPT_ATTEMPTS: usize = 3;
 const GPG_PROBE_ARG: &str = "--version";
 const PASS_TOOL_PROBE_ARG: &str = "-V";
+const GPG_NO_SYMKEY_CACHE_ARG: &str = "--no-symkey-cache";
 const FALLBACK_NOTICE: &str = "Password auto-login unavailable; falling back to standard SSH password prompt.";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -53,6 +54,8 @@ pub enum PassCreateError {
     MissingGpg,
     PasswordMismatch,
     EmptyPassword,
+    GpgPassphraseMismatch,
+    EmptyGpgPassphrase,
     OverwriteDeclined,
     GpgFailed(String),
     Io(io::Error),
@@ -66,6 +69,8 @@ impl fmt::Display for PassCreateError {
             Self::MissingGpg => write!(f, "gpg is required but was not found in PATH"),
             Self::PasswordMismatch => write!(f, "password confirmation did not match"),
             Self::EmptyPassword => write!(f, "password cannot be empty"),
+            Self::GpgPassphraseMismatch => write!(f, "gpg passphrase confirmation did not match"),
+            Self::EmptyGpgPassphrase => write!(f, "gpg passphrase cannot be empty"),
             Self::OverwriteDeclined => write!(f, "existing key file was not overwritten"),
             Self::GpgFailed(message) => write!(f, "gpg encryption failed: {}", message),
             Self::Io(err) => write!(f, "{}", err),
@@ -239,21 +244,36 @@ pub fn create_pass_key_interactive(pass_key: &str) -> Result<PathBuf, PassCreate
 }
 
 fn decrypt_pass_from_file(path: &Path) -> Result<String, DecryptError> {
+    let passphrase = prompt_for_cli_gpg_passphrase().map_err(|_| DecryptError::Retryable)?;
+    if passphrase.is_empty() {
+        return Err(DecryptError::Retryable);
+    }
+
     let mut command = Command::new(GPG_COMMAND);
     command
         .arg("--quiet")
+        .arg(GPG_NO_SYMKEY_CACHE_ARG)
+        .arg("--batch")
+        .arg("--pinentry-mode")
+        .arg("loopback")
+        .arg("--passphrase-fd")
+        .arg("0")
         .arg("--decrypt")
         .arg(path)
-        .stdin(Stdio::inherit())
+        .stdin(Stdio::piped())
         .stdout(Stdio::piped())
-        .stderr(Stdio::inherit());
-    if let Some(gpg_tty) = resolve_gpg_tty() {
-        command.env("GPG_TTY", gpg_tty);
-    }
+        .stderr(Stdio::piped());
 
     let child = command.spawn();
     match child {
-        Ok(child) => {
+        Ok(mut child) => {
+            let Some(mut stdin) = child.stdin.take() else {
+                return Err(DecryptError::Retryable);
+            };
+            stdin.write_all(passphrase.as_bytes()).map_err(|_| DecryptError::Retryable)?;
+            stdin.write_all(b"\n").map_err(|_| DecryptError::Retryable)?;
+            drop(stdin);
+
             let output = child.wait_with_output().map_err(|_| DecryptError::Retryable)?;
             if !output.status.success() {
                 return Err(DecryptError::Retryable);
@@ -273,6 +293,7 @@ fn decrypt_pass_from_file_with_passphrase(path: &Path, passphrase: &str) -> Resu
     let mut command = Command::new(GPG_COMMAND);
     command
         .arg("--quiet")
+        .arg(GPG_NO_SYMKEY_CACHE_ARG)
         .arg("--batch")
         .arg("--pinentry-mode")
         .arg("loopback")
@@ -437,19 +458,23 @@ fn prompt_for_pass_password() -> Result<String, PassCreateError> {
 }
 
 fn encrypt_payload_with_gpg(output_path: &Path, plaintext: &[u8]) -> Result<(), PassCreateError> {
+    let gpg_passphrase = prompt_for_encrypt_gpg_passphrase()?;
+
     let mut command = Command::new(GPG_COMMAND);
     command
         .arg("--quiet")
+        .arg(GPG_NO_SYMKEY_CACHE_ARG)
+        .arg("--batch")
+        .arg("--pinentry-mode")
+        .arg("loopback")
+        .arg("--passphrase-fd")
+        .arg("0")
         .arg("--symmetric")
         .arg("--output")
         .arg(output_path)
         .stdin(Stdio::piped())
         .stdout(Stdio::null())
         .stderr(Stdio::piped());
-
-    if let Some(gpg_tty) = resolve_gpg_tty() {
-        command.env("GPG_TTY", gpg_tty);
-    }
 
     let mut child = command.spawn().map_err(|err| {
         if err.kind() == io::ErrorKind::NotFound {
@@ -462,6 +487,8 @@ fn encrypt_payload_with_gpg(output_path: &Path, plaintext: &[u8]) -> Result<(), 
     let Some(mut stdin) = child.stdin.take() else {
         return Err(PassCreateError::Io(io::Error::other("failed to open gpg stdin")));
     };
+    stdin.write_all(gpg_passphrase.as_bytes())?;
+    stdin.write_all(b"\n")?;
     stdin.write_all(plaintext)?;
     drop(stdin);
 
@@ -485,23 +512,20 @@ fn encrypt_payload_with_gpg(output_path: &Path, plaintext: &[u8]) -> Result<(), 
     }
 }
 
-fn resolve_gpg_tty() -> Option<String> {
-    if let Ok(value) = std::env::var("GPG_TTY")
-        && !value.trim().is_empty()
-    {
-        return Some(value);
-    }
+fn prompt_for_cli_gpg_passphrase() -> Result<String, io::Error> {
+    rpassword::prompt_password("Enter GPG passphrase: ")
+}
 
-    #[cfg(unix)]
-    {
-        let path = fs::read_link("/proc/self/fd/0").ok()?;
-        let rendered = path.to_string_lossy().to_string();
-        if rendered.starts_with("/dev/") {
-            return Some(rendered);
-        }
+fn prompt_for_encrypt_gpg_passphrase() -> Result<String, PassCreateError> {
+    let passphrase = rpassword::prompt_password("Enter GPG passphrase for key encryption: ")?;
+    let confirm = rpassword::prompt_password("Confirm GPG passphrase: ")?;
+    if passphrase.is_empty() {
+        return Err(PassCreateError::EmptyGpgPassphrase);
     }
-
-    None
+    if passphrase != confirm {
+        return Err(PassCreateError::GpgPassphraseMismatch);
+    }
+    Ok(passphrase)
 }
 
 #[cfg(unix)]

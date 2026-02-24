@@ -1,4 +1,7 @@
-use super::{extract_ssh_destination, is_add_pass_mode, pass_key_for_destination_from_hosts, resolve_logging_settings, skip_pass_resolution_from_env};
+use super::{
+    extract_ssh_destination, is_add_pass_mode, pass_key_for_destination_from_hosts, resolve_logging_settings, skip_pass_resolution_for_context,
+    skip_pass_resolution_from_env,
+};
 use cossh::args::MainArgs;
 use cossh::ssh_config::SshHost;
 
@@ -99,4 +102,12 @@ fn skip_pass_resolution_env_parser_accepts_booleanish_values() {
     assert!(!skip_pass_resolution_from_env(Some("0")));
     assert!(!skip_pass_resolution_from_env(Some("")));
     assert!(!skip_pass_resolution_from_env(None));
+}
+
+#[test]
+fn skip_pass_resolution_requires_tui_session_context() {
+    assert!(skip_pass_resolution_for_context(Some("1"), Some("tab-1")));
+    assert!(!skip_pass_resolution_for_context(Some("1"), None));
+    assert!(!skip_pass_resolution_for_context(Some("1"), Some("   ")));
+    assert!(!skip_pass_resolution_for_context(Some("0"), Some("tab-1")));
 }

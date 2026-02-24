@@ -69,8 +69,15 @@ fn skip_pass_resolution_from_env(value: Option<&str>) -> bool {
     value.is_some_and(|raw| matches!(raw.trim().to_ascii_lowercase().as_str(), "1" | "true" | "yes"))
 }
 
+fn skip_pass_resolution_for_context(skip_env: Option<&str>, session_name_env: Option<&str>) -> bool {
+    skip_pass_resolution_from_env(skip_env) && session_name_env.is_some_and(|value| !value.trim().is_empty())
+}
+
 fn should_skip_pass_resolution() -> bool {
-    skip_pass_resolution_from_env(std::env::var(SKIP_PASS_RESOLVE_ENV).ok().as_deref())
+    skip_pass_resolution_for_context(
+        std::env::var(SKIP_PASS_RESOLVE_ENV).ok().as_deref(),
+        std::env::var("COSSH_SESSION_NAME").ok().as_deref(),
+    )
 }
 
 fn run_add_pass_cli(pass_name: &str) -> ExitCode {
