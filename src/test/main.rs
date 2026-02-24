@@ -1,4 +1,4 @@
-use super::{extract_ssh_destination, pass_key_for_destination_from_hosts, resolve_logging_settings};
+use super::{extract_ssh_destination, is_add_pass_mode, pass_key_for_destination_from_hosts, resolve_logging_settings};
 use cossh::args::MainArgs;
 use cossh::ssh_config::SshHost;
 
@@ -11,6 +11,7 @@ fn base_args(debug: bool, ssh_logging: bool, test_mode: bool) -> MainArgs {
         profile: None,
         is_non_interactive: false,
         interactive: false,
+        add_pass: None,
     }
 }
 
@@ -79,4 +80,13 @@ fn pass_key_lookup_matches_exact_alias_only() {
     let hosts = vec![other, exact];
     assert_eq!(pass_key_for_destination_from_hosts("target", &hosts).as_deref(), Some("shared"));
     assert_eq!(pass_key_for_destination_from_hosts("tar", &hosts), None);
+}
+
+#[test]
+fn add_pass_mode_short_circuits_normal_connect_mode() {
+    let mut args = base_args(false, false, false);
+    assert!(!is_add_pass_mode(&args));
+
+    args.add_pass = Some("office_fw".to_string());
+    assert!(is_add_pass_mode(&args));
 }

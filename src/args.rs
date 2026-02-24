@@ -23,6 +23,8 @@ pub struct MainArgs {
     pub is_non_interactive: bool,
     /// Launch interactive session manager TUI
     pub interactive: bool,
+    /// Add encrypted pass key file under ~/.color-ssh/keys/<name>.gpg
+    pub add_pass: Option<String>,
 }
 
 fn build_cli_command() -> Command {
@@ -60,10 +62,22 @@ fn build_cli_command() -> Command {
                 .help("Ignore config logging settings; only use CLI -d/-l logging flags")
                 .action(clap::ArgAction::SetTrue),
         )
+        .arg(
+            Arg::new("add_pass")
+                .long("add-pass")
+                .help("Create or replace ~/.color-ssh/keys/<name>.gpg interactively")
+                .num_args(1)
+                .value_name("name")
+                .conflicts_with("ssh_args")
+                .conflicts_with("profile")
+                .conflicts_with("log")
+                .conflicts_with("test"),
+        )
         .arg(Arg::new("ssh_args").help("SSH arguments to forward to the SSH command").num_args(1..))
         .after_help(
             r"
 cossh                                              # Launch interactive session manager
+cossh --add-pass office_fw                         # Create ~/.color-ssh/keys/office_fw.gpg
 cossh -d                                           # Launch interactive session manager with debug enabled
 cossh -d user@example.com                          # Debug mode enabled
 cossh -l user@example.com                          # SSH logging enabled
@@ -93,8 +107,9 @@ where
     let ssh_logging = matches.get_flag("log");
     let test_mode = matches.get_flag("test");
     let profile = matches.get_one::<String>("profile").cloned().filter(|profile_name| !profile_name.is_empty());
+    let add_pass = matches.get_one::<String>("add_pass").cloned().filter(|value| !value.is_empty());
     let no_user_args = raw_args.len() <= 1;
-    let debug_only = debug && !ssh_logging && profile.is_none() && ssh_args.is_empty();
+    let debug_only = debug && !ssh_logging && profile.is_none() && ssh_args.is_empty() && add_pass.is_none();
     let interactive = no_user_args || debug_only;
 
     MainArgs {
@@ -105,6 +120,7 @@ where
         profile,
         is_non_interactive: detect_non_interactive_ssh_args(&ssh_args),
         ssh_args,
+        add_pass,
     }
 }
 
@@ -114,12 +130,14 @@ where
 /// - `-d, --debug` - Enable debug mode with detailed logging
 /// - `-l, --log` - Enable SSH session logging
 /// - `-t, --test` - Ignore config logging settings and use only CLI `-d/-l` logging flags
+/// - `--add-pass <name>` - Create `~/.color-ssh/keys/<name>.gpg` interactively
 /// - `ssh_args` - All remaining arguments are passed to SSH
 ///
 /// # Examples
 /// ```text
 /// cossh                              # Launch interactive session manager (default when no args)
 /// cossh -d                           # Launch interactive session manager with debug enabled
+/// cossh --add-pass office_fw         # Create encrypted pass key file
 /// cossh -d user@example.com          # Debug mode enabled
 /// cossh -l user@example.com          # SSH logging enabled
 /// cossh -tld -P network localhost    # Test mode with CLI-controlled logging
@@ -133,7 +151,7 @@ pub fn main_args() -> MainArgs {
     let cmd = build_cli_command();
     let parsed = parse_main_args_from(&cmd, std::env::args_os());
 
-    if !parsed.interactive && parsed.ssh_args.is_empty() {
+    if parsed.add_pass.is_none() && !parsed.interactive && parsed.ssh_args.is_empty() {
         let mut help_cmd = cmd;
         let _ = help_cmd.print_long_help();
         println!();

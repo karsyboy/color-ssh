@@ -220,6 +220,21 @@ Additional behavior:
 - Decrypt/passphrase failures retry up to 3 times, then fall back to normal SSH prompting.
 - Successfully decrypted passwords are cached for the running color-ssh process.
 
+### Create a `#_pass` Key File
+
+You can create encrypted pass key files directly from CLI:
+
+```bash
+cossh --add-pass lab_switch
+```
+
+Flow:
+
+- If `~/.color-ssh/keys/lab_switch.gpg` exists, you are asked to confirm overwrite.
+- You enter the SSH password twice with hidden prompts.
+- `gpg --symmetric` writes `~/.color-ssh/keys/lab_switch.gpg`.
+- On success, use `#_pass lab_switch` in `~/.ssh/config`.
+
 ## TUI-Related Config Options
 
 In your active `cossh` config file (`cossh-config.yaml` or `<profile>.cossh-config.yaml`), these keys affect the TUI:

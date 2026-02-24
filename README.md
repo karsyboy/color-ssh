@@ -67,11 +67,13 @@ Options:
   -l, --log                Enable SSH session logging to ~/.color-ssh/logs/ssh_sessions/
   -P, --profile <profile>  Specify a configuration profile to use
   -t, --test               Ignore config logging settings; only use CLI -d/-l logging flags
+      --add-pass <name>    Create or replace ~/.color-ssh/keys/<name>.gpg interactively
   -h, --help               Print help
   -V, --version            Print version
 
 
 cossh                                              # Launch interactive session manager
+cossh --add-pass office_fw                         # Create ~/.color-ssh/keys/office_fw.gpg
 cossh -d                                           # Launch interactive session manager with debug enabled
 cossh -d user@example.com                          # Debug mode enabled
 cossh -l user@example.com                          # SSH logging enabled
@@ -112,6 +114,21 @@ Host switch01
     #_Desc Example Switch
     #_pass test_pass
 ```
+
+#### Create an Encrypted Pass Key
+
+Use the CLI helper to create a key file used by `#_pass`:
+
+```bash
+cossh --add-pass office_fw
+```
+
+The command will:
+
+- Prompt to overwrite if `~/.color-ssh/keys/office_fw.gpg` already exists
+- Prompt for the SSH password twice (hidden input)
+- Run `gpg --symmetric` and write `~/.color-ssh/keys/office_fw.gpg`
+- Print a usage hint: `#_pass office_fw`
 
 For more info on the TUI go here [TUI User Guide](docs/TUI_USER_GUIDE.md).
 

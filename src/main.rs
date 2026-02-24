@@ -60,6 +60,24 @@ fn pass_key_for_destination(destination: &str) -> Option<String> {
     pass_key_for_destination_from_hosts(destination, &hosts)
 }
 
+fn is_add_pass_mode(args: &args::MainArgs) -> bool {
+    args.add_pass.is_some()
+}
+
+fn run_add_pass_cli(pass_name: &str) -> ExitCode {
+    match pass::create_pass_key_interactive(pass_name) {
+        Ok(path) => {
+            println!("Saved encrypted pass key: {}", path.display());
+            println!("Use in ~/.ssh/config: #_pass {}", pass_name);
+            ExitCode::SUCCESS
+        }
+        Err(err) => {
+            eprintln!("Failed to add pass key: {}", err);
+            ExitCode::from(1)
+        }
+    }
+}
+
 fn main() -> Result<ExitCode> {
     let args = args::main_args();
 
@@ -71,6 +89,12 @@ fn main() -> Result<ExitCode> {
         logger.enable_debug();
     }
     log_info!("color-ssh {} starting", APP_VERSION);
+
+    if is_add_pass_mode(&args)
+        && let Some(pass_name) = args.add_pass.as_deref()
+    {
+        return Ok(run_add_pass_cli(pass_name));
+    }
 
     // If interactive mode is requested, launch the session manager
     if args.interactive {
