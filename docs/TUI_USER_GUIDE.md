@@ -197,7 +197,7 @@ You can add metadata comments inside `~/.ssh/config` host blocks:
 | --- | --- |
 | `#_Desc <text>` | Description shown in host info pane |
 | `#_Profile <name>` | Uses profile `<name>.cossh-config.yaml` when opening that host |
-| `#_sshpass <true\|yes\|1>` | Runs that host via `sshpass -e` |
+| `#_pass <name>` | Decrypts `~/.color-ssh/keys/<name>.gpg` and runs that host with password auto-login |
 | `#_hidden <true\|yes\|1>` | Hides host from interactive host list |
 
 Example:
@@ -206,6 +206,7 @@ Example:
 Host prod-fw
   #_Desc Production firewall
   #_Profile network
+  #_pass lab_switch
   HostName 10.0.0.10
   User admin
   Port 22
@@ -215,6 +216,9 @@ Additional behavior:
 
 - Host aliases containing `*` or `?` are not shown in the interactive host list.
 - Standard OpenSSH `Include` directives are supported and shown as folder nodes.
+- `#_pass` key files are read from `~/.color-ssh/keys/<name>.gpg`.
+- Decrypt/passphrase failures retry up to 3 times, then fall back to normal SSH prompting.
+- Successfully decrypted passwords are cached for the running color-ssh process.
 
 ## TUI-Related Config Options
 

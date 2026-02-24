@@ -1,4 +1,4 @@
-use super::{map_exit_code, requires_immediate_terminal_flush, should_flush_immediately};
+use super::{build_ssh_command, map_exit_code, requires_immediate_terminal_flush, should_flush_immediately};
 use std::process::ExitCode;
 
 #[test]
@@ -38,4 +38,24 @@ fn does_not_force_immediate_flush_for_large_highlighted_chunks() {
     let raw = "x".repeat(1024);
     let processed = format!("\x1b[31m{}\x1b[0m", raw);
     assert!(!should_flush_immediately(&raw, &processed));
+}
+
+#[test]
+fn build_ssh_command_uses_plain_ssh_without_pass_password() {
+    let args = vec!["user@host".to_string(), "-p".to_string(), "22".to_string()];
+    let command = build_ssh_command(&args, None);
+
+    assert_eq!(command.program, "ssh");
+    assert_eq!(command.args, args);
+    assert!(command.env.is_empty());
+}
+
+#[test]
+fn build_ssh_command_wraps_with_password_injection_tool_when_password_present() {
+    let args = vec!["user@host".to_string()];
+    let command = build_ssh_command(&args, Some("top-secret"));
+
+    assert_eq!(command.program, "sshpass");
+    assert_eq!(command.args, vec!["-e".to_string(), "ssh".to_string(), "user@host".to_string()]);
+    assert_eq!(command.env, vec![("SSHPASS".to_string(), "top-secret".to_string())]);
 }

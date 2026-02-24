@@ -101,7 +101,7 @@ The interactive session manger supports metadata comments inside the SSH config 
 | --- | --- |
 | `#_Desc <text>` | Adds description in the info view. |
 | `#_Profile <name>` | Opens that host using the matching cossh profile (`[profile].cossh-config.yaml`). |
-| `#_sshpass <true\|yes\|1>` | Connects with `sshpass -e` for that host. |
+| `#_pass <name>` | Decrypts `~/.color-ssh/keys/<name>.gpg` and uses password auto-login for that host. |
 | `#_hidden <true\|yes\|1>` | Hides the host from the interactive host list. |
 
 ```sshconfig
@@ -110,7 +110,7 @@ Host switch01
     User admin
     #_Profile network
     #_Desc Example Switch
-    #_sshpass true
+    #_pass test_pass
 ```
 
 For more info on the TUI go here [TUI User Guide](docs/TUI_USER_GUIDE.md).

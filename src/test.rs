@@ -16,6 +16,9 @@
 //! - `src/test/config/loader.rs`
 //! - `src/test/config/watcher.rs`
 //!
+//! Auth:
+//! - `src/test/auth/pass.rs`
+//!
 //! Logging:
 //! - `src/test/log.rs`
 //! - `src/test/log/debug.rs`

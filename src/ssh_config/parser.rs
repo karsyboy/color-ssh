@@ -15,6 +15,10 @@ struct ParsedConfigFile {
     include_patterns: Vec<String>,
 }
 
+fn is_valid_pass_key_name(name: &str) -> bool {
+    !name.is_empty() && name.chars().all(|ch| ch.is_ascii_alphanumeric() || matches!(ch, '.' | '_' | '-'))
+}
+
 /// Parse an SSH config file and return a list of hosts.
 pub fn parse_ssh_config(config_path: &Path) -> io::Result<Vec<SshHost>> {
     Ok(build_ssh_host_tree(config_path)?.hosts)
@@ -139,11 +143,17 @@ fn parse_config_file(config_path: &Path) -> io::Result<ParsedConfigFile> {
                     host.profile = Some(profile.clone());
                 }
             }
-            if let Some(sshpass_val) = trimmed.strip_prefix("#_sshpass") {
-                let val = sshpass_val.trim().to_lowercase();
-                let use_sshpass = val == "true" || val == "yes" || val == "1";
-                for host in &mut current_hosts {
-                    host.use_sshpass = use_sshpass;
+            if let Some(pass_val) = trimmed.strip_prefix("#_pass") {
+                let pass_key = pass_val.trim();
+                if is_valid_pass_key_name(pass_key) {
+                    for host in &mut current_hosts {
+                        host.pass_key = Some(pass_key.to_string());
+                    }
+                } else {
+                    log_debug!("Ignoring invalid #_pass key name: {:?}", pass_key);
+                    for host in &mut current_hosts {
+                        host.pass_key = None;
+                    }
                 }
             }
             if let Some(hidden_val) = trimmed.strip_prefix("#_hidden") {

@@ -1,4 +1,6 @@
-use super::encode_key_event_bytes;
+use super::{SessionManager, encode_key_event_bytes};
+use crate::auth::pass;
+use crate::ssh_config::SshHost;
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
 #[test]
@@ -48,4 +50,28 @@ fn encode_key_event_bytes_shift_arrow_preserves_shift_modifier() {
 fn encode_key_event_bytes_shift_pageup_preserves_shift_modifier() {
     let key = KeyEvent::new(KeyCode::PageUp, KeyModifiers::SHIFT);
     assert_eq!(encode_key_event_bytes(key), Some(b"\x1b[5;2~".to_vec()));
+}
+
+#[test]
+fn resolve_host_pass_password_reuses_cached_password() {
+    let mut app = SessionManager::new_for_tests();
+    app.pass_cache.seed("shared", "secret");
+
+    let mut host = SshHost::new("device".to_string());
+    host.pass_key = Some("shared".to_string());
+
+    let (password, notice) = app.resolve_host_pass_password(&host);
+    assert_eq!(password.as_deref(), Some("secret"));
+    assert_eq!(notice, None);
+}
+
+#[test]
+fn resolve_host_pass_password_returns_fallback_notice_for_invalid_key() {
+    let mut app = SessionManager::new_for_tests();
+    let mut host = SshHost::new("device".to_string());
+    host.pass_key = Some("../invalid".to_string());
+
+    let (password, notice) = app.resolve_host_pass_password(&host);
+    assert_eq!(password, None);
+    assert_eq!(notice, Some(pass::fallback_notice()));
 }

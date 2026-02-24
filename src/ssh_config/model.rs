@@ -25,8 +25,8 @@ pub struct SshHost {
     pub description: Option<String>,
     /// Profile from `#_Profile` comment.
     pub profile: Option<String>,
-    /// Whether to use sshpass (from `#_sshpass` comment).
-    pub use_sshpass: bool,
+    /// Password key name (from `#_pass` comment).
+    pub pass_key: Option<String>,
     /// Whether to hide this host from the interactive host view (from `#_hidden` comment).
     pub hidden: bool,
     /// Local forward settings.
@@ -50,7 +50,7 @@ impl SshHost {
             proxy_jump: None,
             description: None,
             profile: None,
-            use_sshpass: false,
+            pass_key: None,
             hidden: false,
             local_forward: Vec::new(),
             remote_forward: Vec::new(),

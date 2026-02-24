@@ -29,7 +29,7 @@ fn parses_metadata_and_filters_hidden_wildcard_hosts() {
 
     write_file(
             &config_path,
-            "Host app\n#_Desc Production app\n#_Profile prod\n#_sshpass yes\nHostName 10.0.0.10\nUser deploy\nPort 2200\nIdentityFile ~/.ssh/id_app\nLocalForward 8080 localhost:80\nRemoteForward 9090 localhost:90\nCompression yes\n\nHost hidden-node\n#_hidden true\nHostName 10.0.0.20\n\nHost web-*\nHostName 10.0.0.30\n",
+            "Host app\n#_Desc Production app\n#_Profile prod\n#_pass test_pass\nHostName 10.0.0.10\nUser deploy\nPort 2200\nIdentityFile ~/.ssh/id_app\nLocalForward 8080 localhost:80\nRemoteForward 9090 localhost:90\nCompression yes\n\nHost hidden-node\n#_hidden true\nHostName 10.0.0.20\n\nHost web-*\nHostName 10.0.0.30\n",
         )
         .expect("write config");
 
@@ -43,7 +43,7 @@ fn parses_metadata_and_filters_hidden_wildcard_hosts() {
     assert_eq!(host.port, Some(2200));
     assert_eq!(host.description.as_deref(), Some("Production app"));
     assert_eq!(host.profile.as_deref(), Some("prod"));
-    assert!(host.use_sshpass);
+    assert_eq!(host.pass_key.as_deref(), Some("test_pass"));
     assert!(!host.hidden);
     assert_eq!(host.local_forward, vec!["8080 localhost:80"]);
     assert_eq!(host.remote_forward, vec!["9090 localhost:90"]);
@@ -95,7 +95,7 @@ fn expands_multi_alias_host_stanzas_and_applies_metadata_to_all_aliases() {
 
     write_file(
             &config_path,
-            "Host app-a app-b app-c\n#_Desc Shared app hosts\n#_Profile prod\nHostName app.internal\nUser deploy\nPort 2222\nIdentityFile ~/.ssh/id_app\nProxyJump bastion\n",
+            "Host app-a app-b app-c\n#_Desc Shared app hosts\n#_Profile prod\n#_pass shared_key\nHostName app.internal\nUser deploy\nPort 2222\nIdentityFile ~/.ssh/id_app\nProxyJump bastion\n",
         )
         .expect("write config");
 
@@ -109,6 +109,7 @@ fn expands_multi_alias_host_stanzas_and_applies_metadata_to_all_aliases() {
         assert_eq!(host.port, Some(2222));
         assert_eq!(host.description.as_deref(), Some("Shared app hosts"));
         assert_eq!(host.profile.as_deref(), Some("prod"));
+        assert_eq!(host.pass_key.as_deref(), Some("shared_key"));
         assert_eq!(host.proxy_jump.as_deref(), Some("bastion"));
         let identity = host.identity_file.as_deref().unwrap_or_default();
         assert!(identity.ends_with(".ssh/id_app"));
@@ -131,6 +132,29 @@ fn filters_hidden_and_wildcard_aliases_within_multi_alias_stanza() {
     let hosts = parse_ssh_config(&config_path).expect("parse config");
     let names: Vec<&str> = hosts.iter().map(|host| host.name.as_str()).collect();
     assert_eq!(names, vec!["db-primary", "db-standby"]);
+
+    let _ = fs::remove_dir_all(dir);
+}
+
+#[test]
+fn invalid_pass_key_names_are_ignored() {
+    let dir = test_dir("invalid_pass_key").expect("temp dir");
+    let config_path = dir.join("config");
+
+    write_file(
+        &config_path,
+        "Host invalid\n#_pass ../secret\nHostName invalid.example\n\nHost valid\n#_pass ok_1.2-3\nHostName valid.example\n",
+    )
+    .expect("write config");
+
+    let hosts = parse_ssh_config(&config_path).expect("parse config");
+    assert_eq!(hosts.len(), 2);
+
+    let invalid = hosts.iter().find(|host| host.name == "invalid").expect("invalid host");
+    assert_eq!(invalid.pass_key, None);
+
+    let valid = hosts.iter().find(|host| host.name == "valid").expect("valid host");
+    assert_eq!(valid.pass_key.as_deref(), Some("ok_1.2-3"));
 
     let _ = fs::remove_dir_all(dir);
 }

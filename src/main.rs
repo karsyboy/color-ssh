@@ -1,4 +1,5 @@
-use cossh::{Result, args, config, log, log_debug, log_error, log_info, process, tui};
+use cossh::auth::pass::{self, PassCache, PassResolveResult};
+use cossh::{Result, args, config, log, log_debug, log_error, log_info, process, ssh_config, tui};
 use std::process::ExitCode;
 
 const APP_VERSION: &str = concat!("v", env!("CARGO_PKG_VERSION"));
@@ -38,6 +39,25 @@ fn resolve_logging_settings(args: &args::MainArgs, debug_from_config: bool, ssh_
     } else {
         (args.debug || debug_from_config, args.ssh_logging || ssh_log_from_config)
     }
+}
+
+fn pass_key_for_destination_from_hosts(destination: &str, hosts: &[ssh_config::SshHost]) -> Option<String> {
+    hosts.iter().find(|host| host.name == destination).and_then(|host| host.pass_key.clone())
+}
+
+fn pass_key_for_destination(destination: &str) -> Option<String> {
+    let config_path = ssh_config::get_default_ssh_config_path()?;
+    if !config_path.exists() {
+        return None;
+    }
+    let hosts = match ssh_config::parse_ssh_config(&config_path) {
+        Ok(hosts) => hosts,
+        Err(err) => {
+            log_debug!("Failed to parse SSH config for #_pass lookup: {}", err);
+            return None;
+        }
+    };
+    pass_key_for_destination_from_hosts(destination, &hosts)
 }
 
 fn main() -> Result<ExitCode> {
@@ -192,9 +212,28 @@ fn main() -> Result<ExitCode> {
     log_debug!("Starting configuration file watcher");
     let _watcher = config::config_watcher(args.profile.clone());
 
+    let mut pass_password: Option<String> = None;
+    if !args.is_non_interactive
+        && let Some(destination) = extract_ssh_destination(&args.ssh_args)
+        && let Some(pass_key) = pass_key_for_destination(&destination)
+    {
+        let mut pass_cache = PassCache::default();
+        match pass::resolve_pass_key(&pass_key, &mut pass_cache) {
+            PassResolveResult::Ready(password) => {
+                pass_password = Some(password);
+                log_debug!("Pass auto-login enabled for destination {}", destination);
+            }
+            PassResolveResult::Disabled => {}
+            PassResolveResult::Fallback(reason) => {
+                log_debug!("Pass auto-login fallback for destination {}: {:?}", destination, reason);
+                eprintln!("{}", pass::fallback_notice());
+            }
+        }
+    }
+
     // Start the SSH process
     log_info!("Launching SSH process handler");
-    let exit_code = process::process_handler(args.ssh_args, args.is_non_interactive).map_err(|err| {
+    let exit_code = process::process_handler(args.ssh_args, args.is_non_interactive, pass_password).map_err(|err| {
         log_error!("Process handler failed: {}", err);
         eprintln!("Process failed: {err}");
         let _ = logger.flush_debug();

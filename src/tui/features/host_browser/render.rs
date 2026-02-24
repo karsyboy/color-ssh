@@ -197,10 +197,10 @@ impl SessionManager {
                 ]));
             }
 
-            if host.use_sshpass {
+            if host.pass_key.is_some() {
                 lines.push(Line::from(vec![
                     Span::styled("Pass: ", Style::default().fg(theme::ansi_bright_black())),
-                    Span::styled("sshpass", Style::default().fg(theme::ansi_yellow())),
+                    Span::styled("enabled", Style::default().fg(theme::ansi_yellow())),
                 ]));
             }
 

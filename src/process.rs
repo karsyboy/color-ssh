@@ -54,18 +54,56 @@ fn map_exit_code(success: bool, code: Option<i32>) -> ExitCode {
     }
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct PreparedSshCommand {
+    program: String,
+    args: Vec<String>,
+    env: Vec<(String, String)>,
+}
+
+fn build_ssh_command(args: &[String], pass_password: Option<&str>) -> PreparedSshCommand {
+    match pass_password {
+        Some(password) => {
+            let mut wrapped_args = vec!["-e".to_string(), "ssh".to_string()];
+            wrapped_args.extend(args.iter().cloned());
+            PreparedSshCommand {
+                program: "sshpass".to_string(),
+                args: wrapped_args,
+                env: vec![("SSHPASS".to_string(), password.to_string())],
+            }
+        }
+        None => PreparedSshCommand {
+            program: "ssh".to_string(),
+            args: args.to_vec(),
+            env: Vec::new(),
+        },
+    }
+}
+
+fn command_from_spec(spec: &PreparedSshCommand) -> Command {
+    let mut command = Command::new(&spec.program);
+    command.args(&spec.args);
+    for (key, value) in &spec.env {
+        command.env(key, value);
+    }
+    command
+}
+
 /// Main process handler for SSH subprocess returns an exit code based on the SSH process status
-pub fn process_handler(process_args: Vec<String>, is_non_interactive: bool) -> Result<ExitCode> {
+pub fn process_handler(process_args: Vec<String>, is_non_interactive: bool, pass_password: Option<String>) -> Result<ExitCode> {
     log_info!("Starting SSH process with args: {:?}", process_args);
     log_debug!("Non-interactive mode: {}", is_non_interactive);
+    if pass_password.is_some() {
+        log_debug!("Password auto-login path enabled for this launch");
+    }
 
     if is_non_interactive {
         log_info!("Using passthrough mode for non-interactive command");
-        return spawn_ssh_passthrough(&process_args);
+        return spawn_ssh_passthrough(&process_args, pass_password.as_deref());
     }
 
     // Spawn the SSH process
-    let mut child = spawn_ssh(&process_args).map_err(|err| {
+    let mut child = spawn_ssh(&process_args, pass_password.as_deref()).map_err(|err| {
         log_error!("Failed to spawn SSH process: {}", err);
         err
     })?;
@@ -311,11 +349,11 @@ pub fn process_handler(process_args: Vec<String>, is_non_interactive: bool) -> R
 }
 
 /// Spawns an SSH process with the provided arguments and returns the child process
-pub fn spawn_ssh(args: &[String]) -> std::io::Result<std::process::Child> {
-    log_debug!("Spawning SSH with args: {:?}", args);
+pub fn spawn_ssh(args: &[String], pass_password: Option<&str>) -> std::io::Result<std::process::Child> {
+    let command_spec = build_ssh_command(args, pass_password);
+    log_debug!("Spawning {} with args: {:?}", command_spec.program, command_spec.args);
 
-    let child = Command::new("ssh")
-        .args(args)
+    let child = command_from_spec(&command_spec)
         .stdin(Stdio::inherit())
         .stdout(Stdio::piped())
         .stderr(Stdio::inherit())
@@ -330,11 +368,11 @@ pub fn spawn_ssh(args: &[String]) -> std::io::Result<std::process::Child> {
 }
 
 /// Spawns SSH for non-interactive commands with direct stdout passthrough returns SSH exit code
-fn spawn_ssh_passthrough(args: &[String]) -> Result<ExitCode> {
-    log_debug!("Spawning SSH in passthrough mode with args: {:?}", args);
+fn spawn_ssh_passthrough(args: &[String], pass_password: Option<&str>) -> Result<ExitCode> {
+    let command_spec = build_ssh_command(args, pass_password);
+    log_debug!("Spawning {} in passthrough mode with args: {:?}", command_spec.program, command_spec.args);
 
-    let status = Command::new("ssh")
-        .args(args)
+    let status = command_from_spec(&command_spec)
         .stdin(Stdio::inherit())
         .stdout(Stdio::inherit())
         .stderr(Stdio::inherit())

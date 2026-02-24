@@ -1,5 +1,6 @@
 //! SSH session spawning and PTY management
 
+use crate::auth::pass::{self, PassResolveResult};
 use crate::ssh_config::SshHost;
 use crate::tui::terminal_emulator::Parser;
 use crate::tui::{HostTab, SessionManager, SshSession, TerminalSearchState};
@@ -146,6 +147,21 @@ impl SessionManager {
         crate::config::history_buffer_for_profile(host.profile.as_deref()).unwrap_or(self.history_buffer)
     }
 
+    fn resolve_host_pass_password(&mut self, host: &SshHost) -> (Option<String>, Option<&'static str>) {
+        let Some(pass_key) = host.pass_key.as_deref() else {
+            return (None, None);
+        };
+
+        match pass::resolve_pass_key(pass_key, &mut self.pass_cache) {
+            PassResolveResult::Ready(password) => (Some(password), None),
+            PassResolveResult::Disabled => (None, None),
+            PassResolveResult::Fallback(reason) => {
+                log_debug!("Pass auto-login unavailable for host {}: {:?}", host.name, reason);
+                (None, Some(pass::fallback_notice()))
+            }
+        }
+    }
+
     // Host selection -> tab opening.
     /// Select a host to open in a new tab
     pub(crate) fn select_host_to_connect(&mut self) {
@@ -185,9 +201,19 @@ impl SessionManager {
         let history_buffer = self.resolved_history_buffer_for_host(&host);
         log_debug!("Using history buffer {} for tab '{}' (profile: {:?})", history_buffer, tab_title, host.profile);
         let (initial_rows, initial_cols) = self.initial_pty_size();
+        let (pass_password, pass_fallback_notice) = self.resolve_host_pass_password(&host);
 
         // Spawn SSH session
-        let session = match Self::spawn_ssh_session(&host, &tab_title, history_buffer, force_ssh_logging, initial_rows, initial_cols) {
+        let session = match Self::spawn_ssh_session(
+            &host,
+            &tab_title,
+            history_buffer,
+            force_ssh_logging,
+            initial_rows,
+            initial_cols,
+            pass_password,
+            pass_fallback_notice,
+        ) {
             Ok(session) => Some(session),
             Err(err) => {
                 log_error!("Failed to spawn SSH session: {}", err);
@@ -226,6 +252,8 @@ impl SessionManager {
         force_ssh_logging: bool,
         initial_rows: u16,
         initial_cols: u16,
+        pass_password: Option<String>,
+        pass_fallback_notice: Option<&'static str>,
     ) -> io::Result<SshSession> {
         let pty_system = native_pty_system();
         let rows = initial_rows.max(1);
@@ -245,12 +273,11 @@ impl SessionManager {
         // Build cossh command to get syntax highlighting
         let cossh_path = std::env::current_exe().unwrap_or_else(|_| std::path::PathBuf::from("cossh"));
 
-        let mut cmd = if host.use_sshpass {
-            // Use sshpass -e to pass the password from SSHPASS env var
-            let mut sshpass_cmd = CommandBuilder::new("sshpass");
-            sshpass_cmd.arg("-e");
-            sshpass_cmd.arg(&cossh_path);
-            sshpass_cmd
+        let mut cmd = if pass_password.is_some() {
+            let mut pass_cmd = CommandBuilder::new("sshpass");
+            pass_cmd.arg("-e");
+            pass_cmd.arg(&cossh_path);
+            pass_cmd
         } else {
             CommandBuilder::new(&cossh_path)
         };
@@ -261,6 +288,9 @@ impl SessionManager {
 
         cmd.arg(&host.name);
         cmd.env("COSSH_SESSION_NAME", tab_title);
+        if let Some(password) = pass_password.as_ref() {
+            cmd.env("SSHPASS", password);
+        }
 
         // Pass profile if specified in .ssh/config via #_Profile
         if let Some(profile) = &host.profile {
@@ -268,13 +298,13 @@ impl SessionManager {
             cmd.arg(profile);
         }
 
-        let sshpass_info = if host.use_sshpass { " (via sshpass)" } else { "" };
+        let pass_info = if pass_password.is_some() { " (via pass)" } else { "" };
         let profile_info = host.profile.as_ref().map_or(String::new(), |profile| format!(" [profile: {}]", profile));
         let logging_info = if force_ssh_logging { " [ssh-logging]" } else { "" };
         log_debug!(
             "Spawning cossh command: cossh {}{}{}{} (session: {})",
             host.name,
-            sshpass_info,
+            pass_info,
             profile_info,
             logging_info,
             tab_title
@@ -296,6 +326,14 @@ impl SessionManager {
         let pty_master = Arc::new(Mutex::new(pty_pair.master));
         let render_epoch = Arc::new(AtomicU64::new(0));
         let render_epoch_clone = render_epoch.clone();
+
+        if let Some(notice) = pass_fallback_notice
+            && let Ok(mut parser) = parser.lock()
+        {
+            let message = format!("\r\n[color-ssh] {}\r\n", notice);
+            parser.process(message.as_bytes());
+            render_epoch.fetch_add(1, Ordering::Relaxed);
+        }
 
         // Spawn a thread to read from PTY
         std::thread::spawn(move || {
@@ -357,13 +395,23 @@ impl SessionManager {
         let force_ssh_logging = self.tabs[self.selected_tab].force_ssh_logging;
         let history_buffer = self.resolved_history_buffer_for_host(&host);
         let (initial_rows, initial_cols) = tab.last_pty_size.unwrap_or_else(|| self.initial_pty_size());
+        let (pass_password, pass_fallback_notice) = self.resolve_host_pass_password(&host);
         log_debug!(
             "Using history buffer {} for reconnect tab '{}' (profile: {:?})",
             history_buffer,
             tab_title,
             host.profile
         );
-        match Self::spawn_ssh_session(&host, &tab_title, history_buffer, force_ssh_logging, initial_rows, initial_cols) {
+        match Self::spawn_ssh_session(
+            &host,
+            &tab_title,
+            history_buffer,
+            force_ssh_logging,
+            initial_rows,
+            initial_cols,
+            pass_password,
+            pass_fallback_notice,
+        ) {
             Ok(session) => {
                 let tab = &mut self.tabs[self.selected_tab];
                 tab.session = Some(session);
