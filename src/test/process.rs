@@ -43,7 +43,7 @@ fn does_not_force_immediate_flush_for_large_highlighted_chunks() {
 #[test]
 fn build_ssh_command_uses_plain_ssh_without_pass_password() {
     let args = vec!["user@host".to_string(), "-p".to_string(), "22".to_string()];
-    let command = build_ssh_command(&args, None);
+    let command = build_ssh_command(&args, None).expect("plain ssh command should build");
 
     assert_eq!(command.program, "ssh");
     assert_eq!(command.args, args);
@@ -53,9 +53,14 @@ fn build_ssh_command_uses_plain_ssh_without_pass_password() {
 #[test]
 fn build_ssh_command_wraps_with_password_injection_tool_when_password_present() {
     let args = vec!["user@host".to_string()];
-    let command = build_ssh_command(&args, Some("top-secret"));
+    let command = build_ssh_command(&args, Some("top-secret".to_string())).expect("sshpass command should build");
 
     assert_eq!(command.program, "sshpass");
-    assert_eq!(command.args, vec!["-e".to_string(), "ssh".to_string(), "user@host".to_string()]);
-    assert_eq!(command.env, vec![("SSHPASS".to_string(), "top-secret".to_string())]);
+    assert_eq!(command.args.len(), 4);
+    assert_eq!(command.args[0], "-d");
+    assert_eq!(command.args[2], "ssh");
+    assert_eq!(command.args[3], "user@host");
+    let fd_arg: i32 = command.args[1].parse().expect("fd should parse as i32");
+    assert!(fd_arg > 2, "fd should be non-stdio descriptor");
+    assert!(command.env.is_empty());
 }

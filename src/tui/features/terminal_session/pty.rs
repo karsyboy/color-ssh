@@ -7,12 +7,14 @@ use crate::tui::{HostTab, PassPromptAction, SessionManager, SshSession, Terminal
 use crate::{debug_enabled, log_debug, log_error};
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use portable_pty::{CommandBuilder, PtySize, native_pty_system};
-use std::io::{self, Read};
+use std::io::{self, Read, Write};
 use std::sync::{
     Arc, Mutex,
     atomic::{AtomicU64, Ordering},
 };
 use std::time::Instant;
+
+const SSHPASS_STDIN_FD: &str = "0";
 
 fn modifier_parameter(modifiers: KeyModifiers) -> u8 {
     let mut param = 1u8;
@@ -133,6 +135,79 @@ pub(crate) fn encode_key_event_bytes(key: KeyEvent) -> Option<Vec<u8>> {
     };
 
     Some(bytes)
+}
+
+fn clear_sensitive_string(secret: &mut String) {
+    let mut bytes = std::mem::take(secret).into_bytes();
+    bytes.fill(0);
+}
+
+fn write_password_to_stream(writer: &mut dyn Write, password: &str) -> io::Result<()> {
+    writer.write_all(password.as_bytes())?;
+    writer.write_all(b"\n")?;
+    writer.flush()
+}
+
+fn inject_sshpass_password(writer: &mut dyn Write, mut password: String) -> io::Result<()> {
+    let result = write_password_to_stream(writer, &password);
+    clear_sensitive_string(&mut password);
+    result
+}
+
+fn suppress_initial_password_echo(chunk: &[u8], pending_line: &mut Vec<u8>, initial_password: &mut Option<String>) -> Vec<u8> {
+    let Some(password) = initial_password.as_ref() else {
+        if pending_line.is_empty() {
+            return chunk.to_vec();
+        }
+        pending_line.extend_from_slice(chunk);
+        return std::mem::take(pending_line);
+    };
+
+    pending_line.extend_from_slice(chunk);
+    let Some(newline_idx) = pending_line.iter().position(|byte| *byte == b'\n') else {
+        return Vec::new();
+    };
+
+    let mut line_end = newline_idx + 1;
+    while line_end > 0 && matches!(pending_line[line_end - 1], b'\r' | b'\n') {
+        line_end -= 1;
+    }
+
+    let mut output = Vec::new();
+    if pending_line[..line_end] != *password.as_bytes() {
+        output.extend_from_slice(&pending_line[..=newline_idx]);
+    }
+    output.extend_from_slice(&pending_line[newline_idx + 1..]);
+
+    pending_line.clear();
+    if let Some(mut consumed_password) = initial_password.take() {
+        clear_sensitive_string(&mut consumed_password);
+    }
+
+    output
+}
+
+fn flush_pending_initial_line(pending_line: &mut Vec<u8>, initial_password: &mut Option<String>) -> Vec<u8> {
+    if pending_line.is_empty() {
+        if let Some(mut consumed_password) = initial_password.take() {
+            clear_sensitive_string(&mut consumed_password);
+        }
+        return Vec::new();
+    }
+
+    let mut output = std::mem::take(pending_line);
+    if let Some(mut password) = initial_password.take() {
+        let mut line_end = output.len();
+        while line_end > 0 && matches!(output[line_end - 1], b'\r' | b'\n') {
+            line_end -= 1;
+        }
+        if output[..line_end] == *password.as_bytes() {
+            output.clear();
+        }
+        clear_sensitive_string(&mut password);
+    }
+
+    output
 }
 
 impl SessionManager {
@@ -296,9 +371,12 @@ impl SessionManager {
         // Build cossh command to get syntax highlighting
         let cossh_path = std::env::current_exe().unwrap_or_else(|_| std::path::PathBuf::from("cossh"));
 
-        let mut cmd = if pass_password.is_some() {
+        let using_pass_password = pass_password.is_some();
+        let initial_password_echo = pass_password.clone();
+        let mut cmd = if using_pass_password {
             let mut pass_cmd = CommandBuilder::new("sshpass");
-            pass_cmd.arg("-e");
+            pass_cmd.arg("-d");
+            pass_cmd.arg(SSHPASS_STDIN_FD);
             pass_cmd.arg(&cossh_path);
             pass_cmd
         } else {
@@ -312,9 +390,6 @@ impl SessionManager {
         cmd.arg(&host.name);
         cmd.env("COSSH_SESSION_NAME", tab_title);
         cmd.env("COSSH_SKIP_PASS_RESOLVE", "1");
-        if let Some(password) = pass_password.as_ref() {
-            cmd.env("SSHPASS", password);
-        }
 
         // Pass profile if specified in .ssh/config via #_Profile
         if let Some(profile) = &host.profile {
@@ -322,7 +397,7 @@ impl SessionManager {
             cmd.arg(profile);
         }
 
-        let pass_info = if pass_password.is_some() { " (via pass)" } else { "" };
+        let pass_info = if using_pass_password { " (via pass)" } else { "" };
         let profile_info = host.profile.as_ref().map_or(String::new(), |profile| format!(" [profile: {}]", profile));
         let logging_info = if force_ssh_logging { " [ssh-logging]" } else { "" };
         log_debug!(
@@ -339,7 +414,10 @@ impl SessionManager {
 
         // Get the master for reading/writing
         let mut reader = pty_pair.master.try_clone_reader().map_err(|err| io::Error::other(err.to_string()))?;
-        let writer = pty_pair.master.take_writer().map_err(|err| io::Error::other(err.to_string()))?;
+        let mut writer = pty_pair.master.take_writer().map_err(|err| io::Error::other(err.to_string()))?;
+        if let Some(password) = pass_password {
+            inject_sshpass_password(&mut *writer, password)?;
+        }
         let writer = Arc::new(Mutex::new(writer));
 
         // Create terminal parser/emulator and hook alacritty event callbacks to the PTY writer.
@@ -362,9 +440,18 @@ impl SessionManager {
         // Spawn a thread to read from PTY
         std::thread::spawn(move || {
             let mut buf = [0u8; 8192];
+            let mut pending_initial_line = Vec::new();
+            let mut initial_password_echo = initial_password_echo;
             loop {
                 match reader.read(&mut buf) {
                     Ok(0) => {
+                        let final_data = flush_pending_initial_line(&mut pending_initial_line, &mut initial_password_echo);
+                        if !final_data.is_empty()
+                            && let Ok(mut parser) = parser_clone.lock()
+                        {
+                            parser.process(&final_data);
+                            render_epoch_clone.fetch_add(1, Ordering::Relaxed);
+                        }
                         // EOF - process exited
                         if let Ok(mut exited) = exited_clone.lock() {
                             *exited = true;
@@ -372,11 +459,14 @@ impl SessionManager {
                         break;
                     }
                     Ok(bytes_read) => {
-                        let data = &buf[..bytes_read];
+                        let data = suppress_initial_password_echo(&buf[..bytes_read], &mut pending_initial_line, &mut initial_password_echo);
+                        if data.is_empty() {
+                            continue;
+                        }
 
                         if let Ok(mut parser) = parser_clone.lock() {
                             // Process PTY bytes through terminal emulator.
-                            parser.process(data);
+                            parser.process(&data);
                             render_epoch_clone.fetch_add(1, Ordering::Relaxed);
                         }
                     }

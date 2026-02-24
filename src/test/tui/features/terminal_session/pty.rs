@@ -1,4 +1,4 @@
-use super::{SessionManager, encode_key_event_bytes};
+use super::{SessionManager, encode_key_event_bytes, flush_pending_initial_line, suppress_initial_password_echo};
 use crate::auth::pass;
 use crate::ssh_config::SshHost;
 use crate::tui::PassPromptAction;
@@ -89,4 +89,40 @@ fn resolve_host_pass_password_returns_fallback_notice_for_invalid_key() {
     let (password, notice) = result.expect("invalid key should fail without opening prompt");
     assert_eq!(password, None);
     assert_eq!(notice, Some(pass::fallback_notice(pass::PassFallbackReason::InvalidPassKeyName)));
+}
+
+#[test]
+fn suppress_initial_password_echo_drops_matching_first_line() {
+    let mut pending = Vec::new();
+    let mut initial_password = Some("top-secret".to_string());
+
+    let output = suppress_initial_password_echo(b"top-secret\r\nbanner\r\n", &mut pending, &mut initial_password);
+
+    assert_eq!(output, b"banner\r\n");
+    assert!(pending.is_empty());
+    assert!(initial_password.is_none());
+}
+
+#[test]
+fn suppress_initial_password_echo_preserves_non_matching_first_line() {
+    let mut pending = Vec::new();
+    let mut initial_password = Some("top-secret".to_string());
+
+    let output = suppress_initial_password_echo(b"hello\r\nbanner\r\n", &mut pending, &mut initial_password);
+
+    assert_eq!(output, b"hello\r\nbanner\r\n");
+    assert!(pending.is_empty());
+    assert!(initial_password.is_none());
+}
+
+#[test]
+fn flush_pending_initial_line_drops_unterminated_password_echo() {
+    let mut pending = b"top-secret".to_vec();
+    let mut initial_password = Some("top-secret".to_string());
+
+    let output = flush_pending_initial_line(&mut pending, &mut initial_password);
+
+    assert!(output.is_empty());
+    assert!(pending.is_empty());
+    assert!(initial_password.is_none());
 }
