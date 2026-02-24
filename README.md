@@ -28,9 +28,15 @@
 - Configuration hot reload
 - Mutliple Profile Support
 - Configurable rules using regex matching
+- SSH auto login with sshpass
 
 
 ## Installation
+
+#### Requirement
+- SSH
+- sshpass (optional)
+- gpg (optional)
 
 ### Pre-built Binaries (Recommended)
 Download the latest release from [GitHub Releases](https://github.com/karsyboy/color-ssh/releases/) for your platform.
@@ -114,21 +120,6 @@ Host switch01
     #_Desc Example Switch
     #_pass test_pass
 ```
-
-#### Create an Encrypted Pass Key
-
-Use the CLI helper to create a key file used by `#_pass`:
-
-```bash
-cossh --add-pass office_fw
-```
-
-The command will:
-
-- Prompt to overwrite if `~/.color-ssh/keys/office_fw.gpg` already exists
-- Prompt for the SSH password twice (hidden input)
-- Run `gpg --symmetric` and write `~/.color-ssh/keys/office_fw.gpg`
-- Print a usage hint: `#_pass office_fw`
 
 For more info on the TUI go here [TUI User Guide](docs/TUI_USER_GUIDE.md).
 
