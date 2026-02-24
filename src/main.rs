@@ -61,10 +61,6 @@ fn pass_key_for_destination(destination: &str) -> Option<String> {
     pass_key_for_destination_from_hosts(destination, &hosts)
 }
 
-fn is_add_pass_mode(args: &args::MainArgs) -> bool {
-    args.add_pass.is_some()
-}
-
 fn skip_pass_resolution_from_env(value: Option<&str>) -> bool {
     value.is_some_and(|raw| matches!(raw.trim().to_ascii_lowercase().as_str(), "1" | "true" | "yes"))
 }
@@ -106,9 +102,7 @@ fn main() -> Result<ExitCode> {
     }
     log_info!("color-ssh {} starting", APP_VERSION);
 
-    if is_add_pass_mode(&args)
-        && let Some(pass_name) = args.add_pass.as_deref()
-    {
+    if let Some(pass_name) = args.add_pass.as_deref() {
         return Ok(run_add_pass_cli(pass_name));
     }
 
@@ -265,7 +259,6 @@ fn main() -> Result<ExitCode> {
                 pass_password = Some(password);
                 log_debug!("Pass auto-login enabled for destination {}", destination);
             }
-            PassResolveResult::Disabled => {}
             PassResolveResult::Fallback(reason) => {
                 log_debug!("Pass auto-login fallback for destination {}: {:?}", destination, reason);
                 eprintln!("{}", pass::fallback_notice(reason));

@@ -154,7 +154,6 @@ impl SessionManager {
 
         match pass::resolve_pass_key_for_tui(pass_key, &mut self.pass_cache) {
             PassPromptStatus::Ready(password) => Some((Some(password), None)),
-            PassPromptStatus::Disabled => Some((None, None)),
             PassPromptStatus::PromptRequired => {
                 self.open_pass_prompt(pass_key.to_string(), action);
                 None

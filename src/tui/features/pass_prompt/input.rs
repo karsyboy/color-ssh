@@ -91,9 +91,6 @@ impl SessionManager {
             PassPromptSubmitResult::Ready(password) => {
                 self.complete_pass_prompt_action(action, Some(password), None);
             }
-            PassPromptSubmitResult::Disabled => {
-                self.complete_pass_prompt_action(action, None, Some(pass::fallback_notice(PassFallbackReason::MissingKeyFile)));
-            }
             PassPromptSubmitResult::Fallback(reason) => {
                 self.complete_pass_prompt_action(action, None, Some(pass::fallback_notice(reason)));
             }
