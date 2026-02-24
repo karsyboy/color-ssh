@@ -3,6 +3,7 @@
 use crate::auth::pass::{self, PassFallbackReason, PassPromptSubmitResult};
 use crate::tui::{PassPromptAction, PassPromptState, SessionManager};
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+use zeroize::Zeroize;
 
 const PASS_PROMPT_CANCEL_NOTICE: &str = "Password auto-login canceled; falling back to standard SSH password prompt.";
 const PASS_PROMPT_RETRY_NOTICE: &str = "Invalid GPG passphrase. Try again.";
@@ -83,11 +84,14 @@ impl SessionManager {
             return;
         };
 
-        let passphrase = prompt.passphrase.clone();
+        let mut passphrase = std::mem::take(&mut prompt.passphrase);
         let action = prompt.action.clone();
         let pass_key = prompt.pass_key.clone();
 
-        match pass::submit_tui_passphrase(&pass_key, &passphrase, &mut self.pass_cache) {
+        let submit_result = pass::submit_tui_passphrase(&pass_key, &passphrase, &mut self.pass_cache);
+        passphrase.zeroize();
+
+        match submit_result {
             PassPromptSubmitResult::Ready(password) => {
                 self.complete_pass_prompt_action(action, Some(password), None);
             }

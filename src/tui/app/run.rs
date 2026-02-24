@@ -2,7 +2,7 @@
 
 use super::events::run_app;
 use crate::tui::AppState;
-use crate::{log_debug, log_error};
+use crate::{command_path, log_debug, log_error};
 use crossterm::{
     event::{DisableBracketedPaste, DisableMouseCapture, EnableBracketedPaste, EnableMouseCapture},
     execute,
@@ -73,7 +73,7 @@ pub fn run_session_manager() -> io::Result<()> {
     if let Some(request) = selected_request {
         log_debug!("Connecting to host: {}", request.target);
 
-        let cossh_path = std::env::current_exe().unwrap_or_else(|_| std::path::PathBuf::from("cossh"));
+        let cossh_path = command_path::cossh_path()?;
         let mut cmd = Command::new(cossh_path);
 
         if request.force_ssh_logging {

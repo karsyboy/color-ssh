@@ -1,6 +1,7 @@
 //! #_pass modal state and deferred action context.
 
 use crate::ssh_config::SshHost;
+use zeroize::Zeroize;
 
 pub(crate) const PASS_PROMPT_MAX_ATTEMPTS: usize = 3;
 
@@ -43,7 +44,7 @@ impl PassPromptState {
     }
 
     pub(crate) fn clear_passphrase(&mut self) {
-        self.passphrase.clear();
+        self.passphrase.zeroize();
         self.cursor = 0;
     }
 
@@ -87,6 +88,12 @@ impl PassPromptState {
         let start = byte_index_for_char(&self.passphrase, self.cursor);
         let end = byte_index_for_char(&self.passphrase, self.cursor + 1);
         self.passphrase.replace_range(start..end, "");
+    }
+}
+
+impl Drop for PassPromptState {
+    fn drop(&mut self) {
+        self.passphrase.zeroize();
     }
 }
 

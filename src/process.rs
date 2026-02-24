@@ -1,4 +1,4 @@
-use crate::{Result, config, highlighter, log, log_debug, log_error, log_info};
+use crate::{Result, command_path, config, highlighter, log, log_debug, log_error, log_info};
 #[cfg(unix)]
 use nix::fcntl::{FcntlArg, FdFlag, fcntl};
 use std::{
@@ -6,7 +6,7 @@ use std::{
     process::{Command, ExitCode, Stdio},
     sync::{
         Arc,
-        mpsc::{self, Receiver, RecvTimeoutError, Sender},
+        mpsc::{self, Receiver, RecvTimeoutError, SyncSender},
     },
     thread,
     time::{Duration, Instant},
@@ -20,6 +20,7 @@ use std::{
 const STDOUT_FLUSH_BYTES: usize = 32 * 1024;
 const STDOUT_FLUSH_INTERVAL: Duration = Duration::from_millis(25);
 const HIGHLIGHT_FLUSH_HINT_BYTES: usize = 256;
+const OUTPUT_QUEUE_CAPACITY: usize = 256;
 
 enum OutputChunk {
     Owned(String),
@@ -186,13 +187,14 @@ fn build_ssh_command(args: &[String], pass_password: Option<String>) -> io::Resu
     }
 }
 
-fn command_from_spec(spec: &PreparedSshCommand) -> Command {
-    let mut command = Command::new(&spec.program);
+fn command_from_spec(spec: &PreparedSshCommand) -> io::Result<Command> {
+    let program_path = command_path::resolve_known_command_path(&spec.program)?;
+    let mut command = Command::new(&program_path);
     command.args(&spec.args);
     for (key, value) in &spec.env {
         command.env(key, value);
     }
-    command
+    Ok(command)
 }
 
 /// Main process handler for SSH subprocess returns an exit code based on the SSH process status
@@ -227,7 +229,7 @@ pub fn process_handler(process_args: Vec<String>, is_non_interactive: bool, pass
     })?;
 
     // Create a channel for sending and receiving chunks from SSH
-    let (tx, rx): (Sender<OutputChunk>, Receiver<OutputChunk>) = mpsc::channel();
+    let (tx, rx): (SyncSender<OutputChunk>, Receiver<OutputChunk>) = mpsc::sync_channel(OUTPUT_QUEUE_CAPACITY);
 
     let reset_color = "\x1b[0m";
 
@@ -338,7 +340,7 @@ pub fn process_handler(process_args: Vec<String>, is_non_interactive: bool, pass
 
     log_debug!("Starting to read SSH output...");
 
-    let emit_chunk = |tx: &Sender<OutputChunk>, chunk: String| -> bool {
+    let emit_chunk = |tx: &SyncSender<OutputChunk>, chunk: String| -> bool {
         if chunk.is_empty() {
             return true;
         }
@@ -464,7 +466,7 @@ pub fn process_handler(process_args: Vec<String>, is_non_interactive: bool, pass
 fn spawn_ssh(command_spec: &mut PreparedSshCommand) -> std::io::Result<std::process::Child> {
     log_debug!("Spawning {} with args: {:?}", command_spec.program, command_spec.args);
 
-    let mut child = command_from_spec(command_spec)
+    let mut child = command_from_spec(command_spec)?
         .stdin(Stdio::inherit())
         .stdout(Stdio::piped())
         .stderr(Stdio::inherit())
@@ -487,7 +489,7 @@ fn spawn_ssh(command_spec: &mut PreparedSshCommand) -> std::io::Result<std::proc
 fn spawn_ssh_passthrough(command_spec: &mut PreparedSshCommand) -> Result<ExitCode> {
     log_debug!("Spawning {} in passthrough mode with args: {:?}", command_spec.program, command_spec.args);
 
-    let mut child = command_from_spec(command_spec)
+    let mut child = command_from_spec(command_spec)?
         .stdin(Stdio::inherit())
         .stdout(Stdio::inherit())
         .stderr(Stdio::inherit())

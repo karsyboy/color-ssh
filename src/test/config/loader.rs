@@ -1,4 +1,4 @@
-use super::{ColorType, compile_rule_set, compile_rules, compile_secret_patterns, hex_to_ansi, is_valid_hex_color};
+use super::{ColorType, compile_rule_set, compile_rules, compile_secret_patterns, hex_to_ansi, is_valid_hex_color, is_valid_profile_name};
 use crate::config::style::{Config, HighlightRule, Metadata, Settings};
 use std::collections::HashMap;
 
@@ -18,6 +18,16 @@ fn validates_hex_color_format() {
     assert!(!is_valid_hex_color("00ffAA"));
     assert!(!is_valid_hex_color("#00ffA"));
     assert!(!is_valid_hex_color("#00ffZZ"));
+}
+
+#[test]
+fn validates_profile_name_format() {
+    assert!(is_valid_profile_name("prod"));
+    assert!(is_valid_profile_name("prod_2"));
+    assert!(is_valid_profile_name("prod-2"));
+    assert!(!is_valid_profile_name("../prod"));
+    assert!(!is_valid_profile_name("prod/main"));
+    assert!(!is_valid_profile_name("prod.main"));
 }
 
 #[test]
@@ -114,7 +124,7 @@ rules: []
 unknown_top_level: true
 "##;
 
-    let err = serde_yaml::from_str::<Config>(yaml).expect_err("unknown field should fail schema validation");
+    let err = serde_yml::from_str::<Config>(yaml).expect_err("unknown field should fail schema validation");
     assert!(err.to_string().contains("unknown field"));
 }
 
@@ -130,7 +140,7 @@ palette:
 rules: []
 "##;
 
-    let err = serde_yaml::from_str::<Config>(yaml).expect_err("unknown interactive field should fail schema validation");
+    let err = serde_yml::from_str::<Config>(yaml).expect_err("unknown interactive field should fail schema validation");
     assert!(err.to_string().contains("unknown field"));
 }
 
@@ -147,7 +157,7 @@ rules:
     description: "Highlight errors in red"
 "##;
 
-    let parsed = serde_yaml::from_str::<Config>(yaml).expect("description should be accepted");
+    let parsed = serde_yml::from_str::<Config>(yaml).expect("description should be accepted");
     assert_eq!(parsed.rules.len(), 1);
     assert_eq!(parsed.rules[0].description.as_deref(), Some("Highlight errors in red"));
     assert_eq!(parsed.rules[0].bg_color, None);

@@ -76,7 +76,7 @@ fn decrypt_with_retry_missing_gpg_fails_immediately() {
 #[test]
 fn resolve_pass_key_uses_cache_without_decrypting_again() {
     let mut cache = PassCache::default();
-    cache.passwords.insert("shared".to_string(), "cached-secret".to_string());
+    cache.seed("shared", "cached-secret");
 
     let result = resolve_pass_key("shared", &mut cache);
     assert_eq!(result, PassResolveResult::Ready("cached-secret".to_string()));
@@ -85,7 +85,7 @@ fn resolve_pass_key_uses_cache_without_decrypting_again() {
 #[test]
 fn resolve_pass_key_for_tui_uses_cache_without_prompt() {
     let mut cache = PassCache::default();
-    cache.passwords.insert("shared".to_string(), "cached-secret".to_string());
+    cache.seed("shared", "cached-secret");
 
     let result = resolve_pass_key_for_tui("shared", &mut cache);
     assert_eq!(result, PassPromptStatus::Ready("cached-secret".to_string()));
@@ -101,7 +101,7 @@ fn resolve_pass_key_rejects_invalid_names() {
 #[test]
 fn submit_tui_passphrase_uses_cache_without_shelling_out() {
     let mut cache = PassCache::default();
-    cache.passwords.insert("shared".to_string(), "cached-secret".to_string());
+    cache.seed("shared", "cached-secret");
 
     let result = submit_tui_passphrase("shared", "ignored", &mut cache);
     assert_eq!(result, PassPromptSubmitResult::Ready("cached-secret".to_string()));

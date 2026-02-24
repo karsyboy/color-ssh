@@ -1,4 +1,5 @@
 //! Lightweight terminal-emulator wrapper backed by `alacritty_terminal`.
+use crate::config;
 use alacritty_terminal::event::{Event, EventListener, WindowSize};
 use alacritty_terminal::grid::{Dimensions, Scroll};
 use alacritty_terminal::index::{Boundary, Column, Line, Point};
@@ -88,6 +89,27 @@ impl ParserEventListener {
         let _ = out.flush();
     }
 
+    fn remote_clipboard_policy() -> (bool, usize) {
+        let config_guard = match config::get_config().read() {
+            Ok(guard) => guard,
+            Err(poisoned) => poisoned.into_inner(),
+        };
+
+        if let Some(interactive) = config_guard.interactive_settings.as_ref() {
+            return (interactive.allow_remote_clipboard_write, interactive.remote_clipboard_max_bytes);
+        }
+
+        (false, 4096)
+    }
+
+    fn allow_remote_clipboard_write(text: &str, max_bytes: usize) -> bool {
+        if text.is_empty() || text.len() > max_bytes {
+            return false;
+        }
+
+        !text.chars().any(|ch| ch.is_control() && !matches!(ch, '\n' | '\r' | '\t'))
+    }
+
     // ANSI 16-color lookup for color queries.
     fn color_index_rgb(index: usize) -> Rgb {
         if index <= 15 { ansi_index_to_rgb(index as u8) } else { ansi_index_to_rgb(7) }
@@ -98,7 +120,12 @@ impl EventListener for ParserEventListener {
     fn send_event(&self, event: Event) {
         match event {
             Event::PtyWrite(text) => self.write_pty(text.as_bytes()),
-            Event::ClipboardStore(_, text) => Self::copy_to_clipboard(&text),
+            Event::ClipboardStore(_, text) => {
+                let (enabled, max_bytes) = Self::remote_clipboard_policy();
+                if enabled && Self::allow_remote_clipboard_write(&text, max_bytes) {
+                    Self::copy_to_clipboard(&text);
+                }
+            }
             Event::ClipboardLoad(_, formatter) => {
                 let response = formatter("");
                 self.write_pty(response.as_bytes());

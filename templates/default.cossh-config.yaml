@@ -23,6 +23,8 @@ interactive_settings:
   info_view: true               # Show host info pane by default
   host_view_size: 15            # Host panel width (% of terminal width, clamped 10-70)
   info_view_size: 25            # Host info height (% of host panel height, clamped 10-80)
+  allow_remote_clipboard_write: false  # Accept remote OSC 52 clipboard writes (disabled by default)
+  remote_clipboard_max_bytes: 4096     # Max bytes accepted for remote clipboard writes (64-1048576)
 
 
 # ============================================================================

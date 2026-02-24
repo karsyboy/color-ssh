@@ -19,6 +19,8 @@ interactive_settings:
   info_view: true
   host_view_size: 15
   info_view_size: 25 
+  allow_remote_clipboard_write: false
+  remote_clipboard_max_bytes: 4096 
 
 # ============================================================================
 # COLOR PALETTE

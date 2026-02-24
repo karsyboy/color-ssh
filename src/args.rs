@@ -27,6 +27,18 @@ pub struct MainArgs {
     pub add_pass: Option<String>,
 }
 
+fn is_valid_profile_name(name: &str) -> bool {
+    !name.is_empty() && name.chars().all(|ch| ch.is_ascii_alphanumeric() || matches!(ch, '_' | '-'))
+}
+
+fn parse_profile_arg(value: &str) -> Result<String, String> {
+    let trimmed = value.trim();
+    if !is_valid_profile_name(trimmed) {
+        return Err("invalid profile name: use only letters, numbers, '_' or '-'".to_string());
+    }
+    Ok(trimmed.to_string())
+}
+
 fn build_cli_command() -> Command {
     Command::new("cossh")
         .version(concat!("v", env!("CARGO_PKG_VERSION")))
@@ -52,6 +64,7 @@ fn build_cli_command() -> Command {
                 .short('P')
                 .long("profile")
                 .help("Specify a configuration profile to use")
+                .value_parser(clap::builder::ValueParser::new(parse_profile_arg))
                 .num_args(1)
                 .required(false),
         )

@@ -1,5 +1,6 @@
 pub mod args;
 pub mod auth;
+mod command_path;
 pub mod config;
 pub mod highlighter;
 pub mod log;

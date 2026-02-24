@@ -4,7 +4,7 @@ use crate::auth::pass::{self, PassPromptStatus};
 use crate::ssh_config::SshHost;
 use crate::tui::terminal_emulator::Parser;
 use crate::tui::{HostTab, PassPromptAction, SessionManager, SshSession, TerminalSearchState};
-use crate::{debug_enabled, log_debug, log_error};
+use crate::{command_path, debug_enabled, log_debug, log_error};
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use portable_pty::{CommandBuilder, PtySize, native_pty_system};
 use std::io::{self, Read, Write};
@@ -369,12 +369,12 @@ impl SessionManager {
             .map_err(|err| io::Error::other(err.to_string()))?;
 
         // Build cossh command to get syntax highlighting
-        let cossh_path = std::env::current_exe().unwrap_or_else(|_| std::path::PathBuf::from("cossh"));
+        let cossh_path = command_path::cossh_path()?;
 
         let using_pass_password = pass_password.is_some();
         let initial_password_echo = pass_password.clone();
         let mut cmd = if using_pass_password {
-            let mut pass_cmd = CommandBuilder::new("sshpass");
+            let mut pass_cmd = CommandBuilder::new(command_path::sshpass_path()?);
             pass_cmd.arg("-d");
             pass_cmd.arg(SSHPASS_STDIN_FD);
             pass_cmd.arg(&cossh_path);

@@ -1,10 +1,12 @@
-use crate::log_debug;
+use crate::{command_path, log_debug};
 use std::collections::HashMap;
 use std::fmt;
 use std::fs;
 use std::io::{self, Write};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
+use std::time::{Duration, Instant};
+use zeroize::{Zeroize, Zeroizing};
 
 const GPG_COMMAND: &str = "gpg";
 const PASS_TOOL_COMMAND: &str = "sshpass";
@@ -12,6 +14,22 @@ const MAX_DECRYPT_ATTEMPTS: usize = 3;
 const GPG_PROBE_ARG: &str = "--version";
 const PASS_TOOL_PROBE_ARG: &str = "-V";
 const GPG_NO_SYMKEY_CACHE_ARG: &str = "--no-symkey-cache";
+const PASS_CACHE_TTL: Duration = Duration::from_secs(300);
+
+#[derive(Debug, Clone)]
+struct CachedPassword {
+    value: Zeroizing<String>,
+    inserted_at: Instant,
+}
+
+impl CachedPassword {
+    fn new(password: String) -> Self {
+        Self {
+            value: Zeroizing::new(password),
+            inserted_at: Instant::now(),
+        }
+    }
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PassFallbackReason {
@@ -83,18 +101,24 @@ impl From<io::Error> for PassCreateError {
 
 #[derive(Debug, Default, Clone)]
 pub struct PassCache {
-    passwords: HashMap<String, String>,
+    passwords: HashMap<String, CachedPassword>,
     gpg_available: Option<bool>,
     pass_tool_available: Option<bool>,
 }
 
 impl PassCache {
-    fn get(&self, key: &str) -> Option<String> {
-        self.passwords.get(key).cloned()
+    fn prune_expired(&mut self) {
+        self.passwords.retain(|_, cached| cached.inserted_at.elapsed() <= PASS_CACHE_TTL);
+    }
+
+    fn get(&mut self, key: &str) -> Option<String> {
+        self.prune_expired();
+        self.passwords.get(key).map(|cached| cached.value.to_string())
     }
 
     fn insert(&mut self, key: &str, password: String) {
-        self.passwords.insert(key.to_string(), password);
+        self.prune_expired();
+        self.passwords.insert(key.to_string(), CachedPassword::new(password));
     }
 
     #[cfg(test)]
@@ -221,7 +245,7 @@ pub fn create_pass_key_interactive(pass_key: &str) -> Result<PathBuf, PassCreate
 }
 
 fn decrypt_pass_from_file(path: &Path) -> Result<String, DecryptError> {
-    let mut command = gpg_decrypt_command();
+    let mut command = gpg_decrypt_command().map_err(map_decrypt_spawn_error)?;
     command
         .arg("--quiet")
         .arg("--decrypt")
@@ -231,15 +255,20 @@ fn decrypt_pass_from_file(path: &Path) -> Result<String, DecryptError> {
         .stderr(Stdio::inherit());
 
     let child = command.spawn().map_err(map_decrypt_spawn_error)?;
-    let output = child.wait_with_output().map_err(|_| DecryptError::Retryable)?;
+    let mut output = child.wait_with_output().map_err(|_| DecryptError::Retryable)?;
     if !output.status.success() {
+        output.stdout.zeroize();
+        output.stderr.zeroize();
         return Err(DecryptError::Retryable);
     }
-    extract_password_from_plaintext(&output.stdout).ok_or(DecryptError::Retryable)
+    let extracted = extract_password_from_plaintext(&output.stdout).ok_or(DecryptError::Retryable);
+    output.stdout.zeroize();
+    output.stderr.zeroize();
+    extracted
 }
 
 fn decrypt_pass_from_file_with_passphrase(path: &Path, passphrase: &str) -> Result<String, DecryptWithPassphraseError> {
-    let mut command = gpg_decrypt_command();
+    let mut command = gpg_decrypt_command().map_err(map_passphrase_spawn_error)?;
     command
         .arg("--quiet")
         .arg("--batch")
@@ -259,18 +288,27 @@ fn decrypt_pass_from_file_with_passphrase(path: &Path, passphrase: &str) -> Resu
         return Err(DecryptWithPassphraseError::InvalidPassphrase);
     };
 
-    stdin
-        .write_all(passphrase.as_bytes())
-        .map_err(|_| DecryptWithPassphraseError::InvalidPassphrase)?;
-    stdin.write_all(b"\n").map_err(|_| DecryptWithPassphraseError::InvalidPassphrase)?;
+    let mut passphrase_bytes = passphrase.as_bytes().to_vec();
+    let write_result = (|| -> Result<(), DecryptWithPassphraseError> {
+        stdin.write_all(&passphrase_bytes).map_err(|_| DecryptWithPassphraseError::InvalidPassphrase)?;
+        stdin.write_all(b"\n").map_err(|_| DecryptWithPassphraseError::InvalidPassphrase)?;
+        Ok(())
+    })();
+    passphrase_bytes.zeroize();
+    write_result?;
     drop(stdin);
 
-    let output = child.wait_with_output().map_err(|_| DecryptWithPassphraseError::InvalidPassphrase)?;
+    let mut output = child.wait_with_output().map_err(|_| DecryptWithPassphraseError::InvalidPassphrase)?;
     if !output.status.success() {
+        output.stdout.zeroize();
+        output.stderr.zeroize();
         return Err(DecryptWithPassphraseError::InvalidPassphrase);
     }
 
-    extract_password_from_plaintext(&output.stdout).ok_or(DecryptWithPassphraseError::InvalidPassphrase)
+    let extracted = extract_password_from_plaintext(&output.stdout).ok_or(DecryptWithPassphraseError::InvalidPassphrase);
+    output.stdout.zeroize();
+    output.stderr.zeroize();
+    extracted
 }
 
 fn preflight_pass_key(pass_key: &str, cache: &mut PassCache) -> PassPreflight {
@@ -312,7 +350,11 @@ where
 }
 
 fn command_available(command: &str, probe_arg: &str) -> bool {
-    Command::new(command)
+    let Ok(command_path) = command_path::resolve_known_command_path(command) else {
+        return false;
+    };
+
+    Command::new(command_path)
         .arg(probe_arg)
         .stdin(Stdio::null())
         .stdout(Stdio::null())
@@ -321,9 +363,9 @@ fn command_available(command: &str, probe_arg: &str) -> bool {
         .is_ok()
 }
 
-fn gpg_decrypt_command() -> Command {
-    let command = Command::new(GPG_COMMAND);
-    command
+fn gpg_decrypt_command() -> io::Result<Command> {
+    let command = Command::new(command_path::gpg_path()?);
+    Ok(command)
 }
 
 fn cached_command_available(cache: &mut Option<bool>, command: &str, probe_arg: &str) -> bool {
@@ -360,8 +402,10 @@ where
         fs::remove_file(&output_path)?;
     }
 
-    let password = prompt_password()?;
-    encrypt_payload(&output_path, password.as_bytes())?;
+    let mut password = prompt_password()?;
+    let encrypt_result = encrypt_payload(&output_path, password.as_bytes());
+    password.zeroize();
+    encrypt_result?;
 
     if !output_path.is_file() {
         return Err(PassCreateError::GpgFailed("no encrypted file was created".to_string()));
@@ -394,13 +438,18 @@ fn prompt_overwrite_existing_key(path: &Path) -> Result<bool, PassCreateError> {
     Ok(parse_overwrite_confirmation(&input))
 }
 
-fn confirm_password_entry(password: String, confirm_password: String) -> Result<String, PassCreateError> {
+fn confirm_password_entry(mut password: String, mut confirm_password: String) -> Result<String, PassCreateError> {
     if password.is_empty() {
+        password.zeroize();
+        confirm_password.zeroize();
         return Err(PassCreateError::EmptyPassword);
     }
     if password != confirm_password {
+        password.zeroize();
+        confirm_password.zeroize();
         return Err(PassCreateError::PasswordMismatch);
     }
+    confirm_password.zeroize();
     Ok(password)
 }
 
@@ -411,9 +460,9 @@ fn prompt_for_pass_password() -> Result<String, PassCreateError> {
 }
 
 fn encrypt_payload_with_gpg(output_path: &Path, plaintext: &[u8]) -> Result<(), PassCreateError> {
-    let gpg_passphrase = prompt_for_encrypt_gpg_passphrase()?;
+    let mut gpg_passphrase = prompt_for_encrypt_gpg_passphrase()?;
 
-    let mut command = Command::new(GPG_COMMAND);
+    let mut command = Command::new(command_path::gpg_path().map_err(map_create_spawn_error)?);
     command
         .arg("--quiet")
         .arg(GPG_NO_SYMKEY_CACHE_ARG)
@@ -429,38 +478,51 @@ fn encrypt_payload_with_gpg(output_path: &Path, plaintext: &[u8]) -> Result<(), 
         .stdout(Stdio::null())
         .stderr(Stdio::piped());
 
-    let mut child = command.spawn().map_err(map_create_spawn_error)?;
+    let result = (|| -> Result<(), PassCreateError> {
+        let mut child = command.spawn().map_err(map_create_spawn_error)?;
 
-    let Some(mut stdin) = child.stdin.take() else {
-        return Err(PassCreateError::Io(io::Error::other("failed to open gpg stdin")));
-    };
-    stdin.write_all(gpg_passphrase.as_bytes())?;
-    stdin.write_all(b"\n")?;
-    stdin.write_all(plaintext)?;
-    drop(stdin);
+        let Some(mut stdin) = child.stdin.take() else {
+            return Err(PassCreateError::Io(io::Error::other("failed to open gpg stdin")));
+        };
+        stdin.write_all(gpg_passphrase.as_bytes())?;
+        stdin.write_all(b"\n")?;
+        stdin.write_all(plaintext)?;
+        drop(stdin);
 
-    let output = child.wait_with_output()?;
-    if output.status.success() {
-        return Ok(());
-    }
+        let mut output = child.wait_with_output()?;
+        if output.status.success() {
+            output.stdout.zeroize();
+            output.stderr.zeroize();
+            return Ok(());
+        }
 
-    let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
-    if stderr.is_empty() {
-        Err(PassCreateError::GpgFailed("unknown gpg error".to_string()))
-    } else {
-        Err(PassCreateError::GpgFailed(stderr))
-    }
+        let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
+        output.stdout.zeroize();
+        output.stderr.zeroize();
+        if stderr.is_empty() {
+            Err(PassCreateError::GpgFailed("unknown gpg error".to_string()))
+        } else {
+            Err(PassCreateError::GpgFailed(stderr))
+        }
+    })();
+    gpg_passphrase.zeroize();
+    result
 }
 
 fn prompt_for_encrypt_gpg_passphrase() -> Result<String, PassCreateError> {
-    let passphrase = rpassword::prompt_password("Enter GPG passphrase for key encryption: ")?;
-    let confirm = rpassword::prompt_password("Confirm GPG passphrase: ")?;
+    let mut passphrase = rpassword::prompt_password("Enter GPG passphrase for key encryption: ")?;
+    let mut confirm = rpassword::prompt_password("Confirm GPG passphrase: ")?;
     if passphrase.is_empty() {
+        passphrase.zeroize();
+        confirm.zeroize();
         return Err(PassCreateError::EmptyGpgPassphrase);
     }
     if passphrase != confirm {
+        passphrase.zeroize();
+        confirm.zeroize();
         return Err(PassCreateError::GpgPassphraseMismatch);
     }
+    confirm.zeroize();
     Ok(passphrase)
 }
 

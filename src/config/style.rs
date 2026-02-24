@@ -80,6 +80,13 @@ pub struct InteractiveSettings {
     /// Host info pane height as a percentage of host panel height
     #[serde(default = "default_info_view_size", deserialize_with = "deserialize_info_view_size")]
     pub info_view_size: u16,
+    /// Allow remote OSC 52 clipboard write requests emitted by SSH sessions.
+    /// Disabled by default for safety.
+    #[serde(default = "default_remote_clipboard_write")]
+    pub allow_remote_clipboard_write: bool,
+    /// Maximum clipboard payload size accepted from remote OSC 52 requests.
+    #[serde(default = "default_remote_clipboard_max_bytes", deserialize_with = "deserialize_remote_clipboard_max_bytes")]
+    pub remote_clipboard_max_bytes: usize,
 }
 
 fn default_show_title() -> bool {
@@ -106,6 +113,14 @@ fn default_info_view_size() -> u16 {
     40
 }
 
+fn default_remote_clipboard_write() -> bool {
+    false
+}
+
+fn default_remote_clipboard_max_bytes() -> usize {
+    4096
+}
+
 fn deserialize_host_view_size<'de, D>(deserializer: D) -> Result<u16, D::Error>
 where
     D: Deserializer<'de>,
@@ -120,6 +135,14 @@ where
 {
     let value = u16::deserialize(deserializer)?;
     Ok(value.clamp(10, 80))
+}
+
+fn deserialize_remote_clipboard_max_bytes<'de, D>(deserializer: D) -> Result<usize, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    let value = usize::deserialize(deserializer)?;
+    Ok(value.clamp(64, 1_048_576))
 }
 
 /// A single highlight rule mapping a regex pattern to a color

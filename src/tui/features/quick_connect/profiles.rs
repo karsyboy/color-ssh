@@ -6,6 +6,10 @@ use std::cmp::Ordering;
 use std::collections::HashSet;
 use std::fs;
 
+fn is_valid_profile_name(name: &str) -> bool {
+    !name.is_empty() && name.chars().all(|ch| ch.is_ascii_alphanumeric() || matches!(ch, '_' | '-'))
+}
+
 impl SessionManager {
     // Scan config directory for profile-specific config filenames.
     pub(crate) fn discover_quick_connect_profiles(&self) -> Vec<String> {
@@ -37,8 +41,7 @@ impl SessionManager {
                 }
 
                 if let Some(profile_name) = filename.strip_suffix(".cossh-config.yaml")
-                    && !profile_name.is_empty()
-                    && !profile_name.starts_with('.')
+                    && is_valid_profile_name(profile_name)
                 {
                     profiles.insert(profile_name.to_string());
                 }

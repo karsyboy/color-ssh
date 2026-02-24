@@ -18,6 +18,10 @@ use std::{
 
 const DEFAULT_CONFIG_FILENAME: &str = "cossh-config.yaml";
 
+fn is_valid_profile_name(name: &str) -> bool {
+    !name.is_empty() && name.chars().all(|ch| ch.is_ascii_alphanumeric() || matches!(ch, '_' | '-'))
+}
+
 pub(crate) struct ConfigLoader {
     config_path: PathBuf,
 }
@@ -32,9 +36,21 @@ impl ConfigLoader {
     /// Find the configuration file in standard locations
     fn find_config_path(profile: &Option<String>) -> Result<PathBuf, io::Error> {
         log_debug!("Searching for configuration file...");
-        let config_filename = match profile {
-            Some(profile_name) if !profile_name.is_empty() => format!("{}.cossh-config.yaml", profile_name),
-            _ => DEFAULT_CONFIG_FILENAME.to_string(),
+        let normalized_profile = match profile.as_deref().map(str::trim) {
+            Some(profile_name) if !profile_name.is_empty() => {
+                if !is_valid_profile_name(profile_name) {
+                    return Err(io::Error::new(
+                        io::ErrorKind::InvalidInput,
+                        format!("Invalid profile name '{}': use only letters, numbers, '_' or '-'", profile_name),
+                    ));
+                }
+                Some(profile_name.to_string())
+            }
+            _ => None,
+        };
+        let config_filename = match &normalized_profile {
+            Some(profile_name) => format!("{}.cossh-config.yaml", profile_name),
+            None => DEFAULT_CONFIG_FILENAME.to_string(),
         };
 
         // Check first possible location: ~/.color-ssh/{config_filename}
@@ -70,7 +86,7 @@ impl ConfigLoader {
         }
 
         // If a profile was specified but no file found, error out
-        if let Some(profile_name) = profile {
+        if let Some(profile_name) = normalized_profile {
             let err_msg = format!(
                 "Configuration profile '{}' not found. Please ensure the file exists in one of the standard locations.",
                 profile_name
@@ -121,7 +137,7 @@ impl ConfigLoader {
             err
         })?;
 
-        match serde_yaml::from_str::<Config>(&config_content) {
+        match serde_yml::from_str::<Config>(&config_content) {
             Ok(mut config) => {
                 config.metadata.config_path = self.config_path;
                 log_debug!("Parsed configuration successfully");

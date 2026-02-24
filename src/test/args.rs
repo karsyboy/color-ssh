@@ -99,3 +99,16 @@ fn rejects_add_pass_with_profile_log_and_test_flags() {
     assert!(cmd.clone().try_get_matches_from(["cossh", "--add-pass", "office_fw", "--log"]).is_err());
     assert!(cmd.try_get_matches_from(["cossh", "--add-pass", "office_fw", "--test"]).is_err());
 }
+
+#[test]
+fn rejects_invalid_profile_names() {
+    let cmd = build_cli_command();
+
+    assert!(cmd.clone().try_get_matches_from(["cossh", "--profile", "../prod", "user@example.com"]).is_err());
+    assert!(
+        cmd.clone()
+            .try_get_matches_from(["cossh", "--profile", "prod/main", "user@example.com"])
+            .is_err()
+    );
+    assert!(cmd.try_get_matches_from(["cossh", "--profile", "prod.config", "user@example.com"]).is_err());
+}
