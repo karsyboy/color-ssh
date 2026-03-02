@@ -6,7 +6,7 @@ use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use zeroize::Zeroize;
 
 const PASS_PROMPT_CANCEL_NOTICE: &str = "Password auto-login canceled; falling back to standard SSH password prompt.";
-const PASS_PROMPT_RETRY_NOTICE: &str = "Invalid GPG passphrase. Try again.";
+const PASS_PROMPT_RETRY_NOTICE: &str = "Invalid key passphrase. Try again.";
 
 impl SessionManager {
     pub(crate) fn open_pass_prompt(&mut self, pass_key: String, action: PassPromptAction) {

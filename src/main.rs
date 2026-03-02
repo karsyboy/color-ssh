@@ -1,6 +1,7 @@
 use cossh::auth::pass::{self, PassCache, PassResolveResult};
 use cossh::{Result, args, config, log, log_debug, log_error, log_info, process, ssh_config, tui};
 use std::process::ExitCode;
+use std::time::Duration;
 
 const APP_VERSION: &str = concat!("v", env!("CARGO_PKG_VERSION"));
 const SKIP_PASS_RESOLVE_ENV: &str = "COSSH_SKIP_PASS_RESOLVE";
@@ -151,12 +152,13 @@ fn main() -> Result<ExitCode> {
     }
 
     // Get global settings from config
-    let (debug_from_config, ssh_log_from_config, show_title) = {
+    let (debug_from_config, ssh_log_from_config, show_title, direct_connect_pass_cache_ttl_seconds) = {
         match config::get_config().read() {
             Ok(config_guard) => (
                 config_guard.settings.debug_mode,
                 config_guard.settings.ssh_logging,
                 config_guard.settings.show_title,
+                config_guard.settings.direct_connect_pass_cache_ttl_seconds,
             ),
             Err(poisoned) => {
                 log_error!("Configuration lock poisoned while reading global settings; continuing with recovered state");
@@ -165,6 +167,7 @@ fn main() -> Result<ExitCode> {
                     config_guard.settings.debug_mode,
                     config_guard.settings.ssh_logging,
                     config_guard.settings.show_title,
+                    config_guard.settings.direct_connect_pass_cache_ttl_seconds,
                 )
             }
         }
@@ -254,7 +257,8 @@ fn main() -> Result<ExitCode> {
         && let Some(pass_key) = pass_key_for_destination(&destination)
     {
         let mut pass_cache = PassCache::default();
-        match pass::resolve_pass_key(&pass_key, &mut pass_cache) {
+        let direct_connect_pass_cache_ttl = Duration::from_secs(direct_connect_pass_cache_ttl_seconds);
+        match pass::resolve_pass_key_for_direct_connect(&pass_key, &mut pass_cache, direct_connect_pass_cache_ttl) {
             PassResolveResult::Ready(password) => {
                 pass_password = Some(password);
                 log_debug!("Pass auto-login enabled for destination {}", destination);

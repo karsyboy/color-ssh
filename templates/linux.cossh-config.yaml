@@ -9,6 +9,7 @@ settings:
   show_title: true
   debug_mode: false
   ssh_logging: false
+  direct_connect_pass_cache_ttl_seconds: 300
 
 # ============================================================================
 # INTERACTIVE SETTINGS SECTION (Optional)
@@ -18,9 +19,9 @@ interactive_settings:
   host_tree_uncollapsed: false
   info_view: true
   host_view_size: 15
-  info_view_size: 25 
+  info_view_size: 25
   allow_remote_clipboard_write: false
-  remote_clipboard_max_bytes: 4096 
+  remote_clipboard_max_bytes: 4096
 
 # ============================================================================
 # COLOR PALETTE
@@ -28,14 +29,13 @@ interactive_settings:
 # Define reusable colors using hex codes. Reference these by name in your rules.
 # These colors can be used for both foreground (text) and background.
 palette:
-  Red: '#c71800'
-  Green: '#28c501'
-  Blue: '#5698c8'
-  Yellow: '#ffcc00'
-  Black: '#000000'
-  White: '#ffffff'
-  DarkRed: '#8b0000'
-
+  Red: "#c71800"
+  Green: "#28c501"
+  Blue: "#5698c8"
+  Yellow: "#ffcc00"
+  Black: "#000000"
+  White: "#ffffff"
+  DarkRed: "#8b0000"
 
 # ============================================================================
 # HIGHLIGHTING RULES

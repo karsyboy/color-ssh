@@ -2,6 +2,7 @@ use super::*;
 use std::fs;
 use std::path::Path;
 use std::sync::atomic::{AtomicU64, Ordering};
+use std::time::Duration;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 static TEST_COUNTER: AtomicU64 = AtomicU64::new(0);
@@ -34,7 +35,7 @@ fn extract_password_uses_first_line_and_trims_line_endings_only() {
 fn pass_key_path_uses_color_ssh_keys_directory() {
     let path = pass_key_path("lab").expect("home dir");
     let rendered = path.to_string_lossy();
-    assert!(rendered.ends_with("/.color-ssh/keys/lab.gpg"));
+    assert!(rendered.ends_with("/.color-ssh/keys/lab.key"));
 }
 
 #[test]
@@ -59,18 +60,6 @@ fn decrypt_with_retry_stops_after_three_attempts() {
 
     assert_eq!(result, Err(PassFallbackReason::DecryptFailedAfterRetries));
     assert_eq!(attempts, 3);
-}
-
-#[test]
-fn decrypt_with_retry_missing_gpg_fails_immediately() {
-    let mut attempts = 0usize;
-    let result = decrypt_with_retry(Path::new("/tmp/ignored"), |_| {
-        attempts += 1;
-        Err(DecryptError::MissingGpg)
-    });
-
-    assert_eq!(result, Err(PassFallbackReason::MissingGpg));
-    assert_eq!(attempts, 1);
 }
 
 #[test]
@@ -132,7 +121,7 @@ fn parse_overwrite_confirmation_accepts_yes_values() {
 #[test]
 fn create_pass_key_with_hooks_declines_existing_file_without_encrypting() {
     let root = temp_path("overwrite_decline");
-    let output_path = root.join("keys").join("device.gpg");
+    let output_path = root.join("keys").join("device.key");
     fs::create_dir_all(output_path.parent().expect("parent")).expect("create keys");
     fs::write(&output_path, b"existing").expect("write existing");
 
@@ -159,7 +148,7 @@ fn create_pass_key_with_hooks_declines_existing_file_without_encrypting() {
 #[test]
 fn create_pass_key_with_hooks_passes_raw_password_bytes_without_newline() {
     let root = temp_path("create_success");
-    let output_path = root.join("keys").join("device.gpg");
+    let output_path = root.join("keys").join("device.key");
     let mut seen_payload = Vec::new();
 
     let result = create_pass_key_with_hooks(
@@ -187,7 +176,7 @@ fn create_pass_key_with_hooks_enforces_unix_permissions() {
     use std::os::unix::fs::PermissionsExt;
 
     let root = temp_path("permissions");
-    let output_path = root.join("keys").join("device.gpg");
+    let output_path = root.join("keys").join("device.key");
 
     create_pass_key_with_hooks(
         "device",
@@ -206,6 +195,54 @@ fn create_pass_key_with_hooks_enforces_unix_permissions() {
 
     assert_eq!(dir_mode, 0o700);
     assert_eq!(file_mode, 0o600);
+
+    let _ = fs::remove_dir_all(root);
+}
+
+#[test]
+fn encrypt_payload_for_storage_round_trips_password_bytes() {
+    let encrypted = encrypt_payload_for_storage(b"top-secret", "enc-passphrase").expect("encrypt payload");
+    let decrypted = decrypt_payload_with_passphrase(&encrypted, "enc-passphrase").expect("decrypt payload");
+    assert_eq!(decrypted, b"top-secret");
+}
+
+#[test]
+fn decrypt_payload_with_wrong_passphrase_fails() {
+    let encrypted = encrypt_payload_for_storage(b"top-secret", "enc-passphrase").expect("encrypt payload");
+    let result = decrypt_payload_with_passphrase(&encrypted, "wrong");
+    assert_eq!(result, Err(DecryptWithPassphraseError::InvalidPassphrase));
+}
+
+#[test]
+fn direct_connect_cache_path_uses_cache_directory_and_extension() {
+    let home = temp_path("direct_connect_cache_path");
+    let path = direct_connect_cache_path_for_home(&home, "shared-key");
+    let expected_suffix = Path::new(".color-ssh").join("cache").join("direct-connect-pass").join("shared-key.cache");
+    assert!(path.ends_with(expected_suffix));
+}
+
+#[test]
+fn direct_connect_cache_record_round_trip_and_expiry_behavior() {
+    let record = encode_direct_connect_cache_record("cached-secret", 200);
+    let valid = decode_direct_connect_cache_record(&record, 199);
+    let expired = decode_direct_connect_cache_record(&record, 200);
+
+    assert_eq!(valid.as_deref(), Some("cached-secret"));
+    assert_eq!(expired, None);
+}
+
+#[test]
+fn write_and_read_direct_connect_cached_password_round_trip() {
+    let root = temp_path("direct_connect_cache_io");
+    let pass_key = "device01";
+    let cache_path = direct_connect_cache_path_for_home(&root, pass_key);
+    fs::create_dir_all(cache_path.parent().expect("cache parent")).expect("create cache parent");
+
+    let record = encode_direct_connect_cache_record("cached-secret", unix_timestamp_secs() + Duration::from_secs(60).as_secs());
+    fs::write(&cache_path, &record).expect("seed cache file");
+
+    let loaded = read_direct_connect_cached_password_from_path(&cache_path, unix_timestamp_secs());
+    assert_eq!(loaded.as_deref(), Some("cached-secret"));
 
     let _ = fs::remove_dir_all(root);
 }

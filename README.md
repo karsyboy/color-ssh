@@ -36,7 +36,6 @@
 #### Requirement
 - SSH
 - sshpass (optional)
-- gpg (optional)
 
 ### Pre-built Binaries (Recommended)
 Download the latest release from [GitHub Releases](https://github.com/karsyboy/color-ssh/releases/) for your platform.
@@ -73,13 +72,13 @@ Options:
   -l, --log                Enable SSH session logging to ~/.color-ssh/logs/ssh_sessions/
   -P, --profile <profile>  Specify a configuration profile to use
   -t, --test               Ignore config logging settings; only use CLI -d/-l logging flags
-      --add-pass <name>    Create or replace ~/.color-ssh/keys/<name>.gpg interactively
+      --add-pass <name>    Create or replace ~/.color-ssh/keys/<name>.key interactively
   -h, --help               Print help
   -V, --version            Print version
 
 
 cossh                                              # Launch interactive session manager
-cossh --add-pass office_fw                         # Create ~/.color-ssh/keys/office_fw.gpg
+cossh --add-pass office_fw                         # Create ~/.color-ssh/keys/office_fw.key
 cossh -d                                           # Launch interactive session manager with debug enabled
 cossh -d user@example.com                          # Debug mode enabled
 cossh -l user@example.com                          # SSH logging enabled
@@ -101,6 +100,10 @@ Configuration files are looked for in the following order:
 
 If no configuration file is found the default configuration will be created at `~/.color-ssh/cossh-config.yaml`.
 
+Common `settings` keys:
+
+- `direct_connect_pass_cache_ttl_seconds`: cache `#_pass` direct-connect unlocks for this many seconds (`0` disables persistent cache).
+
 #### Color-SSH TUI Metadata in `~/.ssh/config`
 
 The interactive session manger supports metadata comments inside the SSH config file.
@@ -109,7 +112,7 @@ The interactive session manger supports metadata comments inside the SSH config 
 | --- | --- |
 | `#_Desc <text>` | Adds description in the info view. |
 | `#_Profile <name>` | Opens that host using the matching cossh profile (`[profile].cossh-config.yaml`). |
-| `#_pass <name>` | Decrypts `~/.color-ssh/keys/<name>.gpg` and uses password auto-login for that host. |
+| `#_pass <name>` | Decrypts `~/.color-ssh/keys/<name>.key` and uses password auto-login for that host. |
 | `#_hidden <true\|yes\|1>` | Hides the host from the interactive host list. |
 
 ```sshconfig

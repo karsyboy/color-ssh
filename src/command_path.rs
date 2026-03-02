@@ -29,7 +29,6 @@ impl CachedPathError {
 
 static SSH_PATH: OnceCell<Result<PathBuf, CachedPathError>> = OnceCell::new();
 static SSHPASS_PATH: OnceCell<Result<PathBuf, CachedPathError>> = OnceCell::new();
-static GPG_PATH: OnceCell<Result<PathBuf, CachedPathError>> = OnceCell::new();
 static COSSH_PATH: OnceCell<Result<PathBuf, CachedPathError>> = OnceCell::new();
 
 fn resolve_cached(
@@ -52,10 +51,6 @@ pub(crate) fn sshpass_path() -> io::Result<PathBuf> {
     resolve_cached(&SSHPASS_PATH, "sshpass", || resolve_path_from_env("sshpass"))
 }
 
-pub(crate) fn gpg_path() -> io::Result<PathBuf> {
-    resolve_cached(&GPG_PATH, "gpg", || resolve_path_from_env("gpg"))
-}
-
 pub(crate) fn cossh_path() -> io::Result<PathBuf> {
     resolve_cached(&COSSH_PATH, "cossh", resolve_current_exe_path)
 }
@@ -64,7 +59,6 @@ pub(crate) fn resolve_known_command_path(command: &str) -> io::Result<PathBuf> {
     match command {
         "ssh" => ssh_path(),
         "sshpass" => sshpass_path(),
-        "gpg" => gpg_path(),
         "cossh" => cossh_path(),
         _ => Err(io::Error::new(
             io::ErrorKind::InvalidInput,
