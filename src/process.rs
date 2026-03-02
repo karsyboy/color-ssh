@@ -161,6 +161,13 @@ fn unlock_agent_interactively(client: &agent::AgentClient) -> io::Result<()> {
                 }
                 eprintln!("Invalid master password. Try again.");
             }
+            Err(agent::AgentError::VaultNotInitialized) => {
+                master_password.zeroize();
+                return Err(io::Error::new(
+                    io::ErrorKind::NotFound,
+                    "password vault is not initialized; run `cossh vault init` or `cossh vault add <name>`",
+                ));
+            }
             Err(err) => {
                 master_password.zeroize();
                 return Err(io::Error::new(io::ErrorKind::PermissionDenied, err.to_string()));
@@ -202,7 +209,10 @@ fn build_ssh_command(args: &[String], explicit_pass_entry: Option<&str>) -> io::
         Ok(secret) => secret,
         Err(agent::AgentError::Locked) => {
             if !io::stdin().is_terminal() {
-                return Err(io::Error::new(io::ErrorKind::PermissionDenied, "password vault is locked; run cossh --unlock"));
+                return Err(io::Error::new(
+                    io::ErrorKind::PermissionDenied,
+                    "password vault is locked; run `cossh vault unlock`",
+                ));
             }
             unlock_agent_interactively(&client)?;
             client
@@ -523,12 +533,12 @@ fn spawn_ssh(command_spec: &PreparedSshCommand) -> std::io::Result<std::process:
     command.stdin(Stdio::inherit()).stdout(Stdio::piped()).stderr(Stdio::inherit());
 
     #[cfg(unix)]
-    let password_writer = if let Some(password) = &command_spec.password {
+    let password_pipe = if let Some(password) = &command_spec.password {
         use nix::libc;
         use nix::unistd::pipe;
-        use std::os::fd::AsRawFd;
+        use std::os::fd::{AsRawFd, OwnedFd};
 
-        let (read_end, write_end) = pipe().map_err(|err| io::Error::other(err.to_string()))?;
+        let (read_end, write_end): (OwnedFd, OwnedFd) = pipe().map_err(|err| io::Error::other(err.to_string()))?;
         let read_fd = read_end.as_raw_fd();
         unsafe {
             command.pre_exec(move || {
@@ -538,7 +548,10 @@ fn spawn_ssh(command_spec: &PreparedSshCommand) -> std::io::Result<std::process:
                 Ok(())
             });
         }
-        Some((write_end, password.clone()))
+
+        // Keep the read end alive in the parent until after spawn so the child
+        // can inherit it and dup it onto FD 3.
+        Some((read_end, write_end, password.clone()))
     } else {
         None
     };
@@ -549,11 +562,21 @@ fn spawn_ssh(command_spec: &PreparedSshCommand) -> std::io::Result<std::process:
     })?;
 
     #[cfg(unix)]
-    if let Some((write_end, mut password)) = password_writer {
+    if let Some((read_end, write_end, mut password)) = password_pipe {
+        drop(read_end);
         let mut write_end = std::fs::File::from(write_end);
         if let Err(err) = write_end.write_all(password.as_bytes()).and_then(|_| write_end.write_all(b"\n")) {
             password.zeroize();
-            return Err(err);
+            if err.kind() != io::ErrorKind::BrokenPipe {
+                return Err(err);
+            }
+            log_warn!("sshpass closed its password pipe early; allowing child process to report the underlying failure");
+        } else if let Err(err) = write_end.flush() {
+            password.zeroize();
+            if err.kind() != io::ErrorKind::BrokenPipe {
+                return Err(err);
+            }
+            log_warn!("sshpass closed its password pipe during flush; allowing child process to report the underlying failure");
         }
         password.zeroize();
     }

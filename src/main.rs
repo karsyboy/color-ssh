@@ -68,8 +68,25 @@ fn prompt_new_master_password() -> std::result::Result<String, String> {
     )
 }
 
+fn prompt_new_master_password_with_label(label: &str) -> std::result::Result<String, String> {
+    confirm_hidden_value(
+        &format!("Enter {label} vault master password: "),
+        &format!("Confirm {label} vault master password: "),
+        "master password cannot be empty",
+        "master password confirmation did not match",
+    )
+}
+
 fn prompt_existing_master_password() -> std::result::Result<String, String> {
     let password = rpassword::prompt_password("Enter vault master password: ").map_err(|err| err.to_string())?;
+    if password.is_empty() {
+        return Err("master password cannot be empty".to_string());
+    }
+    Ok(password)
+}
+
+fn prompt_existing_master_password_with_label(label: &str) -> std::result::Result<String, String> {
+    let password = rpassword::prompt_password(&format!("Enter {label} vault master password: ")).map_err(|err| err.to_string())?;
     if password.is_empty() {
         return Err("master password cannot be empty".to_string());
     }
@@ -95,13 +112,32 @@ fn initialize_vault_if_needed() -> std::result::Result<Option<String>, String> {
         return Ok(None);
     }
 
+    println!("Password vault is not initialized. Starting first-run setup.");
     let password = prompt_new_master_password()?;
     if let Err(err) = vault::initialize_vault(&password) {
         let mut password = password;
         password.zeroize();
         return Err(err.to_string());
     }
+    println!("Password vault initialized.");
     Ok(Some(password))
+}
+
+fn run_vault_init_cli() -> ExitCode {
+    match initialize_vault_if_needed() {
+        Ok(Some(mut password)) => {
+            password.zeroize();
+            ExitCode::SUCCESS
+        }
+        Ok(None) => {
+            println!("Password vault is already initialized");
+            ExitCode::SUCCESS
+        }
+        Err(err) => {
+            eprintln!("Failed to initialize password vault: {err}");
+            ExitCode::from(1)
+        }
+    }
 }
 
 fn run_add_pass_cli(pass_name: &str) -> ExitCode {
@@ -159,6 +195,18 @@ fn run_add_pass_cli(pass_name: &str) -> ExitCode {
 }
 
 fn run_remove_pass_cli(pass_name: &str) -> ExitCode {
+    match vault::vault_exists() {
+        Ok(true) => {}
+        Ok(false) => {
+            eprintln!("Password vault is not initialized. Run `cossh vault init` first.");
+            return ExitCode::from(1);
+        }
+        Err(err) => {
+            eprintln!("Failed to read password vault state: {err}");
+            return ExitCode::from(1);
+        }
+    }
+
     let mut master_password = match prompt_existing_master_password() {
         Ok(password) => password,
         Err(err) => {
@@ -235,6 +283,18 @@ fn run_unlock_cli() -> ExitCode {
 }
 
 fn run_lock_cli() -> ExitCode {
+    match vault::vault_exists() {
+        Ok(true) => {}
+        Ok(false) => {
+            println!("Password vault is not initialized");
+            return ExitCode::SUCCESS;
+        }
+        Err(err) => {
+            eprintln!("Failed to read password vault state: {err}");
+            return ExitCode::from(1);
+        }
+    }
+
     let client = match agent::AgentClient::new() {
         Ok(client) => client,
         Err(err) => {
@@ -285,14 +345,28 @@ fn run_vault_status_cli() -> ExitCode {
 }
 
 fn run_set_master_password_cli() -> ExitCode {
-    let mut current_password = match prompt_existing_master_password() {
+    let initial_password = match initialize_vault_if_needed() {
+        Ok(password) => password,
+        Err(err) => {
+            eprintln!("Failed to initialize password vault: {err}");
+            return ExitCode::from(1);
+        }
+    };
+
+    if let Some(mut password) = initial_password {
+        password.zeroize();
+        println!("Password vault master password set");
+        return ExitCode::SUCCESS;
+    }
+
+    let mut current_password = match prompt_existing_master_password_with_label("current") {
         Ok(password) => password,
         Err(err) => {
             eprintln!("Failed to capture current master password: {err}");
             return ExitCode::from(1);
         }
     };
-    let mut new_password = match prompt_new_master_password() {
+    let mut new_password = match prompt_new_master_password_with_label("new") {
         Ok(password) => password,
         Err(err) => {
             current_password.zeroize();
@@ -338,23 +412,17 @@ fn main() -> Result<ExitCode> {
         return Ok(ExitCode::SUCCESS);
     }
 
-    if let Some(pass_name) = args.add_pass.as_deref() {
-        return Ok(run_add_pass_cli(pass_name));
-    }
-    if let Some(pass_name) = args.remove_pass.as_deref() {
-        return Ok(run_remove_pass_cli(pass_name));
-    }
-    if args.unlock {
-        return Ok(run_unlock_cli());
-    }
-    if args.lock {
-        return Ok(run_lock_cli());
-    }
-    if args.vault_status {
-        return Ok(run_vault_status_cli());
-    }
-    if args.set_master_password {
-        return Ok(run_set_master_password_cli());
+    if let Some(vault_command) = args.vault_command.as_ref() {
+        let exit_code = match vault_command {
+            args::VaultCommand::Init => run_vault_init_cli(),
+            args::VaultCommand::AddPass(pass_name) => run_add_pass_cli(pass_name),
+            args::VaultCommand::RemovePass(pass_name) => run_remove_pass_cli(pass_name),
+            args::VaultCommand::Unlock => run_unlock_cli(),
+            args::VaultCommand::Lock => run_lock_cli(),
+            args::VaultCommand::Status => run_vault_status_cli(),
+            args::VaultCommand::SetMasterPassword => run_set_master_password_cli(),
+        };
+        return Ok(exit_code);
     }
 
     // If interactive mode is requested, launch the session manager

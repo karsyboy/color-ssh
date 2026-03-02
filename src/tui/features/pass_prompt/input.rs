@@ -112,31 +112,9 @@ impl SessionManager {
         master_password.zeroize();
 
         match unlock_result {
-            Ok(_) => match client.get_secret(&entry_name) {
-                Ok(password) => {
-                    self.complete_vault_unlock_action(action, Some(password), None);
-                }
-                Err(agent::AgentError::EntryNotFound) => {
-                    self.complete_vault_unlock_action(
-                        action,
-                        None,
-                        Some(format!(
-                            "Password auto-login is unavailable because vault entry '{}' was not found; continuing with the standard SSH password prompt.",
-                            entry_name
-                        )),
-                    );
-                }
-                Err(err) => {
-                    self.complete_vault_unlock_action(
-                        action,
-                        None,
-                        Some(format!(
-                            "Password auto-login is unavailable because the password vault could not provide entry '{}' ({err}); continuing with the standard SSH password prompt.",
-                            entry_name
-                        )),
-                    );
-                }
-            },
+            Ok(_) => {
+                self.complete_vault_unlock_action(action, Some(entry_name), None);
+            }
             Err(agent::AgentError::InvalidMasterPassword) => {
                 prompt.attempts += 1;
                 if prompt.attempts >= prompt.max_attempts {
@@ -151,6 +129,13 @@ impl SessionManager {
                 prompt.error = Some(VAULT_UNLOCK_RETRY_NOTICE.to_string());
                 prompt.clear_master_password();
                 self.vault_unlock = Some(prompt);
+            }
+            Err(agent::AgentError::VaultNotInitialized) => {
+                self.complete_vault_unlock_action(
+                    action,
+                    None,
+                    Some("Password vault is not initialized. Run `cossh vault init` or `cossh vault add <name>` first.".to_string()),
+                );
             }
             Err(err) => {
                 self.complete_vault_unlock_action(

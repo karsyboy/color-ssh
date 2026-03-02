@@ -1,20 +1,18 @@
 //! SSH session spawning and PTY management.
 
-use crate::auth::{agent, transport};
+use crate::auth::agent;
 use crate::ssh_config::SshHost;
 use crate::tui::terminal_emulator::Parser;
 use crate::tui::{HostTab, SessionManager, SshSession, TerminalSearchState, VaultUnlockAction};
 use crate::{command_path, debug_enabled, log_debug, log_error};
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use portable_pty::{CommandBuilder, PtySize, native_pty_system};
-use std::io::{self, Read, Write};
+use std::io::{self, Read};
 use std::sync::{
     Arc, Mutex,
     atomic::{AtomicU64, Ordering},
 };
 use std::time::Instant;
-
-const SSHPASS_STDIN_FD: &str = "0";
 
 fn modifier_parameter(modifiers: KeyModifiers) -> u8 {
     let mut param = 1u8;
@@ -137,86 +135,6 @@ pub(crate) fn encode_key_event_bytes(key: KeyEvent) -> Option<Vec<u8>> {
     Some(bytes)
 }
 
-fn clear_sensitive_string(secret: &mut String) {
-    let mut bytes = std::mem::take(secret).into_bytes();
-    bytes.fill(0);
-}
-
-fn merge_fallback_notice(existing: Option<String>, next: String) -> String {
-    match existing {
-        Some(existing) if !existing.is_empty() => format!("{existing} {next}"),
-        _ => next,
-    }
-}
-
-fn write_password_to_stream(writer: &mut dyn Write, password: &str) -> io::Result<()> {
-    writer.write_all(password.as_bytes())?;
-    writer.write_all(b"\n")?;
-    writer.flush()
-}
-
-fn inject_sshpass_password(writer: &mut dyn Write, mut password: String) -> io::Result<()> {
-    let result = write_password_to_stream(writer, &password);
-    clear_sensitive_string(&mut password);
-    result
-}
-
-fn suppress_initial_password_echo(chunk: &[u8], pending_line: &mut Vec<u8>, initial_password: &mut Option<String>) -> Vec<u8> {
-    let Some(password) = initial_password.as_ref() else {
-        if pending_line.is_empty() {
-            return chunk.to_vec();
-        }
-        pending_line.extend_from_slice(chunk);
-        return std::mem::take(pending_line);
-    };
-
-    pending_line.extend_from_slice(chunk);
-    let Some(newline_idx) = pending_line.iter().position(|byte| *byte == b'\n') else {
-        return Vec::new();
-    };
-
-    let mut line_end = newline_idx + 1;
-    while line_end > 0 && matches!(pending_line[line_end - 1], b'\r' | b'\n') {
-        line_end -= 1;
-    }
-
-    let mut output = Vec::new();
-    if pending_line[..line_end] != *password.as_bytes() {
-        output.extend_from_slice(&pending_line[..=newline_idx]);
-    }
-    output.extend_from_slice(&pending_line[newline_idx + 1..]);
-
-    pending_line.clear();
-    if let Some(mut consumed_password) = initial_password.take() {
-        clear_sensitive_string(&mut consumed_password);
-    }
-
-    output
-}
-
-fn flush_pending_initial_line(pending_line: &mut Vec<u8>, initial_password: &mut Option<String>) -> Vec<u8> {
-    if pending_line.is_empty() {
-        if let Some(mut consumed_password) = initial_password.take() {
-            clear_sensitive_string(&mut consumed_password);
-        }
-        return Vec::new();
-    }
-
-    let mut output = std::mem::take(pending_line);
-    if let Some(mut password) = initial_password.take() {
-        let mut line_end = output.len();
-        while line_end > 0 && matches!(output[line_end - 1], b'\r' | b'\n') {
-            line_end -= 1;
-        }
-        if output[..line_end] == *password.as_bytes() {
-            output.clear();
-        }
-        clear_sensitive_string(&mut password);
-    }
-
-    output
-}
-
 impl SessionManager {
     // PTY sizing / config helpers.
     fn initial_pty_size(&self) -> (u16, u16) {
@@ -252,7 +170,7 @@ impl SessionManager {
         };
 
         match client.get_secret(pass_key) {
-            Ok(password) => Some((Some(password), None)),
+            Ok(_) => Some((Some(pass_key.to_string()), None)),
             Err(agent::AgentError::Locked) => {
                 self.open_vault_unlock(pass_key.to_string(), action);
                 None
@@ -308,13 +226,13 @@ impl SessionManager {
             host: host.clone(),
             force_ssh_logging,
         };
-        let Some((pass_password, pass_fallback_notice)) = self.resolve_host_pass_password(&host, action) else {
+        let Some((pass_entry_override, pass_fallback_notice)) = self.resolve_host_pass_password(&host, action) else {
             return;
         };
-        self.open_host_tab_with_auth(host, force_ssh_logging, pass_password, pass_fallback_notice);
+        self.open_host_tab_with_auth(host, force_ssh_logging, pass_entry_override, pass_fallback_notice);
     }
 
-    fn open_host_tab_with_auth(&mut self, host: SshHost, force_ssh_logging: bool, pass_password: Option<String>, pass_fallback_notice: Option<String>) {
+    fn open_host_tab_with_auth(&mut self, host: SshHost, force_ssh_logging: bool, pass_entry_override: Option<String>, pass_fallback_notice: Option<String>) {
         // Generate unique tab title with suffix for duplicate hosts
         let existing_count = self.tabs.iter().filter(|tab| tab.host.name == host.name).count();
         let tab_title = if existing_count == 0 {
@@ -334,7 +252,7 @@ impl SessionManager {
             force_ssh_logging,
             initial_rows,
             initial_cols,
-            pass_password,
+            pass_entry_override,
             pass_fallback_notice,
         ) {
             Ok(session) => Some(session),
@@ -366,13 +284,18 @@ impl SessionManager {
         log_debug!("Created new tab at index {}", self.selected_tab);
     }
 
-    pub(crate) fn complete_vault_unlock_action(&mut self, action: VaultUnlockAction, pass_password: Option<String>, pass_fallback_notice: Option<String>) {
+    pub(crate) fn complete_vault_unlock_action(
+        &mut self,
+        action: VaultUnlockAction,
+        pass_entry_override: Option<String>,
+        pass_fallback_notice: Option<String>,
+    ) {
         match action {
             VaultUnlockAction::OpenHostTab { host, force_ssh_logging } => {
-                self.open_host_tab_with_auth(host, force_ssh_logging, pass_password, pass_fallback_notice);
+                self.open_host_tab_with_auth(host, force_ssh_logging, pass_entry_override, pass_fallback_notice);
             }
             VaultUnlockAction::ReconnectTab { tab_index } => {
-                self.reconnect_session_with_auth(tab_index, pass_password, pass_fallback_notice);
+                self.reconnect_session_with_auth(tab_index, pass_entry_override, pass_fallback_notice);
             }
         }
     }
@@ -386,7 +309,7 @@ impl SessionManager {
         force_ssh_logging: bool,
         initial_rows: u16,
         initial_cols: u16,
-        pass_password: Option<String>,
+        pass_entry_override: Option<String>,
         pass_fallback_notice: Option<String>,
     ) -> io::Result<SshSession> {
         let pty_system = native_pty_system();
@@ -407,44 +330,16 @@ impl SessionManager {
         // Build cossh command to get syntax highlighting
         let cossh_path = command_path::cossh_path()?;
 
-        let mut pass_password = pass_password;
-        let mut pass_fallback_notice = pass_fallback_notice;
-        let mut using_pass_password = false;
-        let mut initial_password_echo = None;
-        let mut cmd = match pass_password.as_ref() {
-            Some(_) => match transport::tui_backend() {
-                transport::PasswordTransportBackend::UnixSshpassTui => match command_path::sshpass_path() {
-                    Ok(sshpass_path) => {
-                        using_pass_password = true;
-                        initial_password_echo = pass_password.clone();
-                        let mut pass_cmd = CommandBuilder::new(sshpass_path);
-                        pass_cmd.arg("-d");
-                        pass_cmd.arg(SSHPASS_STDIN_FD);
-                        pass_cmd.arg(&cossh_path);
-                        pass_cmd
-                    }
-                    Err(_) => {
-                        if let Some(mut password) = pass_password.take() {
-                            clear_sensitive_string(&mut password);
-                        }
-                        pass_fallback_notice = Some(merge_fallback_notice(pass_fallback_notice, transport::missing_sshpass_notice()));
-                        CommandBuilder::new(&cossh_path)
-                    }
-                },
-                transport::PasswordTransportBackend::UnsupportedWindows => {
-                    if let Some(mut password) = pass_password.take() {
-                        clear_sensitive_string(&mut password);
-                    }
-                    pass_fallback_notice = Some(merge_fallback_notice(pass_fallback_notice, transport::unsupported_transport_notice()));
-                    CommandBuilder::new(&cossh_path)
-                }
-                transport::PasswordTransportBackend::UnixSshpassDirect => CommandBuilder::new(&cossh_path),
-            },
-            None => CommandBuilder::new(&cossh_path),
-        };
+        let using_pass_entry = pass_entry_override.is_some();
+        let mut cmd = CommandBuilder::new(&cossh_path);
 
         if force_ssh_logging {
             cmd.arg("-l");
+        }
+
+        if let Some(pass_entry_override) = &pass_entry_override {
+            cmd.arg("--pass-entry");
+            cmd.arg(pass_entry_override);
         }
 
         cmd.arg(&host.name);
@@ -456,7 +351,7 @@ impl SessionManager {
             cmd.arg(profile);
         }
 
-        let pass_info = if using_pass_password { " (via pass)" } else { "" };
+        let pass_info = if using_pass_entry { " (via vault)" } else { "" };
         let profile_info = host.profile.as_ref().map_or(String::new(), |profile| format!(" [profile: {}]", profile));
         let logging_info = if force_ssh_logging { " [ssh-logging]" } else { "" };
         log_debug!(
@@ -473,10 +368,7 @@ impl SessionManager {
 
         // Get the master for reading/writing
         let mut reader = pty_pair.master.try_clone_reader().map_err(|err| io::Error::other(err.to_string()))?;
-        let mut writer = pty_pair.master.take_writer().map_err(|err| io::Error::other(err.to_string()))?;
-        if let Some(password) = pass_password {
-            inject_sshpass_password(&mut *writer, password)?;
-        }
+        let writer = pty_pair.master.take_writer().map_err(|err| io::Error::other(err.to_string()))?;
         let writer = Arc::new(Mutex::new(writer));
 
         // Create terminal parser/emulator and hook alacritty event callbacks to the PTY writer.
@@ -499,18 +391,9 @@ impl SessionManager {
         // Spawn a thread to read from PTY
         std::thread::spawn(move || {
             let mut buf = [0u8; 8192];
-            let mut pending_initial_line = Vec::new();
-            let mut initial_password_echo = initial_password_echo;
             loop {
                 match reader.read(&mut buf) {
                     Ok(0) => {
-                        let final_data = flush_pending_initial_line(&mut pending_initial_line, &mut initial_password_echo);
-                        if !final_data.is_empty()
-                            && let Ok(mut parser) = parser_clone.lock()
-                        {
-                            parser.process(&final_data);
-                            render_epoch_clone.fetch_add(1, Ordering::Relaxed);
-                        }
                         // EOF - process exited
                         if let Ok(mut exited) = exited_clone.lock() {
                             *exited = true;
@@ -518,14 +401,9 @@ impl SessionManager {
                         break;
                     }
                     Ok(bytes_read) => {
-                        let data = suppress_initial_password_echo(&buf[..bytes_read], &mut pending_initial_line, &mut initial_password_echo);
-                        if data.is_empty() {
-                            continue;
-                        }
-
                         if let Ok(mut parser) = parser_clone.lock() {
                             // Process PTY bytes through terminal emulator.
-                            parser.process(&data);
+                            parser.process(&buf[..bytes_read]);
                             render_epoch_clone.fetch_add(1, Ordering::Relaxed);
                         }
                     }
@@ -564,13 +442,13 @@ impl SessionManager {
         log_debug!("Reconnecting session for host: {}", host.name);
 
         let action = VaultUnlockAction::ReconnectTab { tab_index };
-        let Some((pass_password, pass_fallback_notice)) = self.resolve_host_pass_password(&host, action) else {
+        let Some((pass_entry_override, pass_fallback_notice)) = self.resolve_host_pass_password(&host, action) else {
             return;
         };
-        self.reconnect_session_with_auth(tab_index, pass_password, pass_fallback_notice);
+        self.reconnect_session_with_auth(tab_index, pass_entry_override, pass_fallback_notice);
     }
 
-    fn reconnect_session_with_auth(&mut self, tab_index: usize, pass_password: Option<String>, pass_fallback_notice: Option<String>) {
+    fn reconnect_session_with_auth(&mut self, tab_index: usize, pass_entry_override: Option<String>, pass_fallback_notice: Option<String>) {
         if self.tabs.is_empty() || tab_index >= self.tabs.len() {
             return;
         }
@@ -595,7 +473,7 @@ impl SessionManager {
             force_ssh_logging,
             initial_rows,
             initial_cols,
-            pass_password,
+            pass_entry_override,
             pass_fallback_notice,
         ) {
             Ok(session) => {

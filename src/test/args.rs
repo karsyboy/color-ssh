@@ -1,4 +1,4 @@
-use super::{build_cli_command, detect_non_interactive_ssh_args, parse_main_args_from};
+use super::{VaultCommand, build_cli_command, detect_non_interactive_ssh_args, parse_main_args_from};
 
 #[test]
 fn enters_interactive_mode_with_no_user_args() {
@@ -59,34 +59,38 @@ fn parses_test_mode_and_combined_short_flags() {
 }
 
 #[test]
-fn parses_add_pass_mode() {
+fn parses_vault_add_pass_mode() {
     let cmd = build_cli_command();
-    let parsed = parse_main_args_from(&cmd, ["cossh", "--add-pass", "office_fw"]);
+    let parsed = parse_main_args_from(&cmd, ["cossh", "vault", "add", "office_fw"]);
 
-    assert_eq!(parsed.add_pass.as_deref(), Some("office_fw"));
+    assert_eq!(parsed.vault_command, Some(VaultCommand::AddPass("office_fw".to_string())));
     assert!(!parsed.interactive);
     assert!(parsed.ssh_args.is_empty());
 }
 
 #[test]
-fn parses_add_pass_with_debug() {
+fn parses_vault_add_pass_with_debug() {
     let cmd = build_cli_command();
-    let parsed = parse_main_args_from(&cmd, ["cossh", "--debug", "--add-pass", "office_fw"]);
+    let parsed = parse_main_args_from(&cmd, ["cossh", "--debug", "vault", "add", "office_fw"]);
 
     assert!(parsed.debug);
-    assert_eq!(parsed.add_pass.as_deref(), Some("office_fw"));
+    assert_eq!(parsed.vault_command, Some(VaultCommand::AddPass("office_fw".to_string())));
 }
 
 #[test]
-fn parses_unlock_and_vault_status_modes() {
+fn parses_vault_init_unlock_and_status_modes() {
     let cmd = build_cli_command();
 
-    let unlock = parse_main_args_from(&cmd, ["cossh", "--unlock"]);
-    assert!(unlock.unlock);
+    let init = parse_main_args_from(&cmd, ["cossh", "vault", "init"]);
+    assert_eq!(init.vault_command, Some(VaultCommand::Init));
+    assert!(init.ssh_args.is_empty());
+
+    let unlock = parse_main_args_from(&cmd, ["cossh", "vault", "unlock"]);
+    assert_eq!(unlock.vault_command, Some(VaultCommand::Unlock));
     assert!(unlock.ssh_args.is_empty());
 
-    let status = parse_main_args_from(&cmd, ["cossh", "--vault-status"]);
-    assert!(status.vault_status);
+    let status = parse_main_args_from(&cmd, ["cossh", "vault", "status"]);
+    assert_eq!(status.vault_command, Some(VaultCommand::Status));
     assert!(status.ssh_args.is_empty());
 }
 
@@ -110,26 +114,26 @@ fn parses_hidden_agent_serve_mode() {
 }
 
 #[test]
-fn rejects_add_pass_with_ssh_args() {
+fn rejects_vault_add_pass_with_ssh_args() {
     let cmd = build_cli_command();
     assert!(
         cmd.clone()
-            .try_get_matches_from(["cossh", "--add-pass", "office_fw", "user@example.com"])
+            .try_get_matches_from(["cossh", "vault", "add", "office_fw", "user@example.com"])
             .is_err()
     );
 }
 
 #[test]
-fn rejects_add_pass_with_profile_log_and_test_flags() {
+fn rejects_vault_subcommand_with_profile_log_and_test_flags_after_it() {
     let cmd = build_cli_command();
 
     assert!(
         cmd.clone()
-            .try_get_matches_from(["cossh", "--add-pass", "office_fw", "--profile", "network"])
+            .try_get_matches_from(["cossh", "vault", "add", "office_fw", "--profile", "network"])
             .is_err()
     );
-    assert!(cmd.clone().try_get_matches_from(["cossh", "--add-pass", "office_fw", "--log"]).is_err());
-    assert!(cmd.try_get_matches_from(["cossh", "--add-pass", "office_fw", "--test"]).is_err());
+    assert!(cmd.clone().try_get_matches_from(["cossh", "vault", "add", "office_fw", "--log"]).is_err());
+    assert!(cmd.try_get_matches_from(["cossh", "vault", "add", "office_fw", "--test"]).is_err());
 }
 
 #[test]

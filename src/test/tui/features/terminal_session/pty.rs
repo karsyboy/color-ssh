@@ -1,4 +1,4 @@
-use super::{encode_key_event_bytes, flush_pending_initial_line, merge_fallback_notice, suppress_initial_password_echo};
+use super::encode_key_event_bytes;
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
 #[test]
@@ -48,46 +48,4 @@ fn encode_key_event_bytes_shift_arrow_preserves_shift_modifier() {
 fn encode_key_event_bytes_shift_pageup_preserves_shift_modifier() {
     let key = KeyEvent::new(KeyCode::PageUp, KeyModifiers::SHIFT);
     assert_eq!(encode_key_event_bytes(key), Some(b"\x1b[5;2~".to_vec()));
-}
-
-#[test]
-fn merge_fallback_notice_appends_new_message() {
-    let merged = merge_fallback_notice(Some("first".to_string()), "second".to_string());
-    assert_eq!(merged, "first second");
-}
-
-#[test]
-fn suppress_initial_password_echo_drops_matching_first_line() {
-    let mut pending = Vec::new();
-    let mut initial_password = Some("top-secret".to_string());
-
-    let output = suppress_initial_password_echo(b"top-secret\r\nbanner\r\n", &mut pending, &mut initial_password);
-
-    assert_eq!(output, b"banner\r\n");
-    assert!(pending.is_empty());
-    assert!(initial_password.is_none());
-}
-
-#[test]
-fn suppress_initial_password_echo_preserves_non_matching_first_line() {
-    let mut pending = Vec::new();
-    let mut initial_password = Some("top-secret".to_string());
-
-    let output = suppress_initial_password_echo(b"hello\r\nbanner\r\n", &mut pending, &mut initial_password);
-
-    assert_eq!(output, b"hello\r\nbanner\r\n");
-    assert!(pending.is_empty());
-    assert!(initial_password.is_none());
-}
-
-#[test]
-fn flush_pending_initial_line_drops_unterminated_password_echo() {
-    let mut pending = b"top-secret".to_vec();
-    let mut initial_password = Some("top-secret".to_string());
-
-    let output = flush_pending_initial_line(&mut pending, &mut initial_password);
-
-    assert!(output.is_empty());
-    assert!(pending.is_empty());
-    assert!(initial_password.is_none());
 }

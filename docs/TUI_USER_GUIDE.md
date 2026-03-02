@@ -226,7 +226,7 @@ Additional behavior:
 You can create password vault entries directly from CLI:
 
 ```bash
-cossh --add-pass lab_switch
+cossh vault add lab_switch
 ```
 
 Flow:
@@ -241,7 +241,7 @@ Flow:
 Unlock the vault before working with protected hosts:
 
 ```bash
-cossh --unlock
+cossh vault unlock
 ```
 
 Once unlocked:

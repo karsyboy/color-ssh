@@ -72,22 +72,17 @@ Options:
   -l, --log                Enable SSH session logging to ~/.color-ssh/logs/ssh_sessions/
   -P, --profile <profile>  Specify a configuration profile to use
   -t, --test               Ignore config logging settings; only use CLI -d/-l logging flags
-      --add-pass <name>    Create or replace a password vault entry interactively
-      --remove-pass <name> Remove a password vault entry
-      --unlock             Unlock the shared password vault
-      --lock               Lock the shared password vault
-      --vault-status       Show password vault status
-      --set-master-password Rotate the vault master password
       --pass-entry <name>  Override the password vault entry used for a direct launch
   -h, --help               Print help
   -V, --version            Print version
 
 
 cossh                                              # Launch interactive session manager
-cossh --add-pass office_fw                         # Create/update password vault entry 'office_fw'
-cossh --unlock                                     # Unlock the shared password vault
-cossh --lock                                       # Lock the shared password vault
-cossh --vault-status                               # Show password vault status
+cossh vault init                                   # Initialize the password vault
+cossh vault add office_fw                     # Create/update password vault entry 'office_fw'
+cossh vault unlock                                 # Unlock the shared password vault
+cossh vault lock                                   # Lock the shared password vault
+cossh vault status                                 # Show password vault status
 cossh -d                                           # Launch interactive session manager with debug enabled
 cossh -d user@example.com                          # Debug mode enabled
 cossh --pass-entry office_fw user@example.com      # Force a password vault entry for this launch
@@ -121,7 +116,7 @@ The interactive session manger supports metadata comments inside the SSH config 
 | `#_pass <name>` | Uses password vault entry `<name>` for password auto-login. |
 | `#_hidden <true\|yes\|1>` | Hides the host from the interactive host list. |
 
-`#_pass` works in both the TUI and direct launches. Unlock the vault once with `cossh --unlock`, then protected hosts can reuse that unlock until the vault relocks.
+`#_pass` works in both the TUI and direct launches. Unlock the vault once with `cossh vault unlock`, then protected hosts can reuse that unlock until the vault relocks.
 
 On macOS/Linux, protected hosts use `sshpass` for password transport. On Windows, vault lookup and unlock still work, but password transport falls back to the normal SSH prompt for now.
 
@@ -143,16 +138,18 @@ For more info on the TUI go here [TUI User Guide](docs/TUI_USER_GUIDE.md).
 Typical flow:
 
 ```bash
-cossh --add-pass office_fw
-cossh --unlock
+cossh vault init
+cossh vault add office_fw
+cossh vault unlock
 cossh office-fw
 ```
 
-- `--add-pass <name>` prompts for the vault master password, creates the vault on first use, and stores the SSH password as entry `<name>`.
-- `--unlock` starts or updates the background unlock agent so both TUI and direct launches can reuse the same unlocked session.
+- `vault init` explicitly initializes the master-password-protected vault.
+- `vault add <name>` prompts for the vault master password, creates the vault on first use, and stores the SSH password as entry `<name>`.
+- `vault unlock` starts or updates the background unlock agent so both TUI and direct launches can reuse the same unlocked session.
 - The unlock session relocks after the configured idle/absolute timeout.
-- `--set-master-password` rotates the vault master password.
-- `--remove-pass <name>` removes a stored password entry.
+- `vault set-master-password` creates the master password on first use or rotates it later.
+- `vault remove <name>` removes a stored password entry.
 
 #### Auth Config
 
