@@ -1,33 +1,39 @@
-//! #_pass prompt keyboard handling.
+//! Password vault unlock keyboard handling.
 
-use crate::auth::pass::{self, PassFallbackReason, PassPromptSubmitResult};
-use crate::tui::{PassPromptAction, PassPromptState, SessionManager};
+use crate::auth::{agent, ipc::UnlockPolicy};
+use crate::config;
+use crate::tui::{SessionManager, VaultUnlockAction, VaultUnlockState};
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use zeroize::Zeroize;
 
-const PASS_PROMPT_CANCEL_NOTICE: &str = "Password auto-login canceled; falling back to standard SSH password prompt.";
-const PASS_PROMPT_RETRY_NOTICE: &str = "Invalid key passphrase. Try again.";
+const VAULT_UNLOCK_CANCEL_NOTICE: &str = "Password vault unlock canceled; falling back to the standard SSH password prompt.";
+const VAULT_UNLOCK_RETRY_NOTICE: &str = "Invalid master password. Try again.";
+
+fn current_unlock_policy() -> UnlockPolicy {
+    let auth_settings = config::auth_settings();
+    UnlockPolicy::new(auth_settings.unlock_idle_timeout_seconds, auth_settings.unlock_absolute_timeout_seconds)
+}
 
 impl SessionManager {
-    pub(crate) fn open_pass_prompt(&mut self, pass_key: String, action: PassPromptAction) {
+    pub(crate) fn open_vault_unlock(&mut self, entry_name: String, action: VaultUnlockAction) {
         self.quick_connect = None;
-        self.pass_prompt = Some(PassPromptState::new(pass_key, action));
+        self.vault_unlock = Some(VaultUnlockState::new(entry_name, action));
         self.mark_ui_dirty();
     }
 
-    pub(crate) fn handle_pass_prompt_key(&mut self, key: KeyEvent) {
-        let Some(prompt) = self.pass_prompt.as_mut() else {
+    pub(crate) fn handle_vault_unlock_key(&mut self, key: KeyEvent) {
+        let Some(prompt) = self.vault_unlock.as_mut() else {
             return;
         };
 
         match key.code {
             KeyCode::Esc => {
                 let action = prompt.action.clone();
-                self.pass_prompt = None;
-                self.complete_pass_prompt_action(action, None, Some(PASS_PROMPT_CANCEL_NOTICE.to_string()));
+                self.vault_unlock = None;
+                self.complete_vault_unlock_action(action, None, Some(VAULT_UNLOCK_CANCEL_NOTICE.to_string()));
             }
             KeyCode::Enter => {
-                self.submit_pass_prompt();
+                self.submit_vault_unlock();
             }
             KeyCode::Left => {
                 prompt.move_cursor_left();
@@ -63,8 +69,8 @@ impl SessionManager {
         }
     }
 
-    pub(crate) fn handle_pass_prompt_paste(&mut self, pasted: &str) {
-        let Some(prompt) = self.pass_prompt.as_mut() else {
+    pub(crate) fn handle_vault_unlock_paste(&mut self, pasted: &str) {
+        let Some(prompt) = self.vault_unlock.as_mut() else {
             return;
         };
 
@@ -79,35 +85,81 @@ impl SessionManager {
         prompt.error = None;
     }
 
-    pub(crate) fn submit_pass_prompt(&mut self) {
-        let Some(mut prompt) = self.pass_prompt.take() else {
+    pub(crate) fn submit_vault_unlock(&mut self) {
+        let Some(mut prompt) = self.vault_unlock.take() else {
             return;
         };
 
-        let mut passphrase = std::mem::take(&mut prompt.passphrase);
+        let mut master_password = std::mem::take(&mut prompt.master_password);
         let action = prompt.action.clone();
-        let pass_key = prompt.pass_key.clone();
-
-        let submit_result = pass::submit_tui_passphrase(&pass_key, &passphrase, &mut self.pass_cache);
-        passphrase.zeroize();
-
-        match submit_result {
-            PassPromptSubmitResult::Ready(password) => {
-                self.complete_pass_prompt_action(action, Some(password), None);
+        let entry_name = prompt.entry_name.clone();
+        let client = match agent::AgentClient::new() {
+            Ok(client) => client,
+            Err(err) => {
+                master_password.zeroize();
+                self.complete_vault_unlock_action(
+                    action,
+                    None,
+                    Some(format!(
+                        "Password auto-login is unavailable because the password vault agent could not be started ({err}); continuing with the standard SSH password prompt."
+                    )),
+                );
+                return;
             }
-            PassPromptSubmitResult::Fallback(reason) => {
-                self.complete_pass_prompt_action(action, None, Some(pass::fallback_notice(reason)));
-            }
-            PassPromptSubmitResult::InvalidPassphrase => {
+        };
+
+        let unlock_result = client.unlock(&master_password, current_unlock_policy());
+        master_password.zeroize();
+
+        match unlock_result {
+            Ok(_) => match client.get_secret(&entry_name) {
+                Ok(password) => {
+                    self.complete_vault_unlock_action(action, Some(password), None);
+                }
+                Err(agent::AgentError::EntryNotFound) => {
+                    self.complete_vault_unlock_action(
+                        action,
+                        None,
+                        Some(format!(
+                            "Password auto-login is unavailable because vault entry '{}' was not found; continuing with the standard SSH password prompt.",
+                            entry_name
+                        )),
+                    );
+                }
+                Err(err) => {
+                    self.complete_vault_unlock_action(
+                        action,
+                        None,
+                        Some(format!(
+                            "Password auto-login is unavailable because the password vault could not provide entry '{}' ({err}); continuing with the standard SSH password prompt.",
+                            entry_name
+                        )),
+                    );
+                }
+            },
+            Err(agent::AgentError::InvalidMasterPassword) => {
                 prompt.attempts += 1;
                 if prompt.attempts >= prompt.max_attempts {
-                    self.complete_pass_prompt_action(action, None, Some(pass::fallback_notice(PassFallbackReason::DecryptFailedAfterRetries)));
+                    self.complete_vault_unlock_action(
+                        action,
+                        None,
+                        Some("Password auto-login is unavailable because vault unlock failed after multiple attempts; continuing with the standard SSH password prompt.".to_string()),
+                    );
                     return;
                 }
 
-                prompt.error = Some(PASS_PROMPT_RETRY_NOTICE.to_string());
-                prompt.clear_passphrase();
-                self.pass_prompt = Some(prompt);
+                prompt.error = Some(VAULT_UNLOCK_RETRY_NOTICE.to_string());
+                prompt.clear_master_password();
+                self.vault_unlock = Some(prompt);
+            }
+            Err(err) => {
+                self.complete_vault_unlock_action(
+                    action,
+                    None,
+                    Some(format!(
+                        "Password auto-login is unavailable because the password vault could not be unlocked ({err}); continuing with the standard SSH password prompt."
+                    )),
+                );
             }
         }
     }

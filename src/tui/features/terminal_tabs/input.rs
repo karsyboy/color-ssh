@@ -115,8 +115,8 @@ impl SessionManager {
             return Ok(());
         }
 
-        if self.pass_prompt.is_some() {
-            self.handle_pass_prompt_key(key);
+        if self.vault_unlock.is_some() {
+            self.handle_vault_unlock_key(key);
             return Ok(());
         }
 
@@ -141,8 +141,8 @@ impl SessionManager {
             return Ok(());
         }
 
-        if self.pass_prompt.is_some() {
-            self.handle_pass_prompt_paste(&pasted);
+        if self.vault_unlock.is_some() {
+            self.handle_vault_unlock_paste(&pasted);
             return Ok(());
         }
 

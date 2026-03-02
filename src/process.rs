@@ -1,5 +1,10 @@
-use crate::{Result, command_path, config, highlighter, log, log_debug, log_error, log_info};
+use crate::auth::{agent, ipc::UnlockPolicy, transport, vault};
+use crate::ssh_config::SshHost;
+use crate::{Result, command_path, config, highlighter, log, log_debug, log_error, log_info, log_warn};
+#[cfg(unix)]
+use std::os::unix::process::CommandExt;
 use std::{
+    io::IsTerminal,
     io::{self, Read, Write},
     process::{Command, ExitCode, Stdio},
     sync::{
@@ -9,6 +14,7 @@ use std::{
     thread,
     time::{Duration, Instant},
 };
+use zeroize::Zeroize;
 
 const STDOUT_FLUSH_BYTES: usize = 32 * 1024;
 const STDOUT_FLUSH_INTERVAL: Duration = Duration::from_millis(25);
@@ -60,13 +66,17 @@ struct PreparedSshCommand {
     program: String,
     args: Vec<String>,
     env: Vec<(String, String)>,
+    password: Option<String>,
+    fallback_notice: Option<String>,
 }
 
-fn build_ssh_command(args: &[String]) -> PreparedSshCommand {
+fn build_plain_ssh_command(args: &[String]) -> PreparedSshCommand {
     PreparedSshCommand {
         program: "ssh".to_string(),
         args: args.to_vec(),
         env: Vec::new(),
+        password: None,
+        fallback_notice: None,
     }
 }
 
@@ -80,12 +90,178 @@ fn command_from_spec(spec: &PreparedSshCommand) -> io::Result<Command> {
     Ok(command)
 }
 
+fn extract_ssh_destination(ssh_args: &[String]) -> Option<String> {
+    let flags_with_args = [
+        "-b", "-B", "-c", "-D", "-E", "-e", "-F", "-I", "-i", "-J", "-L", "-l", "-m", "-O", "-o", "-p", "-P", "-Q", "-R", "-S", "-w", "-W",
+    ];
+
+    let mut skip_next = false;
+    for arg in ssh_args {
+        if skip_next {
+            skip_next = false;
+            continue;
+        }
+        if arg.starts_with('-') {
+            if flags_with_args.contains(&arg.as_str()) {
+                skip_next = true;
+            }
+            continue;
+        }
+        return Some(arg.split_once('@').map_or_else(|| arg.clone(), |(_, host)| host.to_string()));
+    }
+    None
+}
+
+fn resolve_pass_entry_from_hosts(destination: &str, explicit_entry: Option<&str>, hosts: &[SshHost]) -> Option<String> {
+    if let Some(explicit_entry) = explicit_entry {
+        return Some(explicit_entry.to_string());
+    }
+
+    if let Some(host) = hosts.iter().find(|host| host.name == destination && host.pass_key.is_some()) {
+        return host.pass_key.clone();
+    }
+
+    let mut hostname_matches = hosts
+        .iter()
+        .filter(|host| host.hostname.as_deref() == Some(destination) && host.pass_key.is_some());
+    let first = hostname_matches.next()?;
+    if hostname_matches.next().is_some() {
+        return None;
+    }
+
+    first.pass_key.clone()
+}
+
+fn current_unlock_policy() -> UnlockPolicy {
+    let auth_settings = config::auth_settings();
+    UnlockPolicy::new(auth_settings.unlock_idle_timeout_seconds, auth_settings.unlock_absolute_timeout_seconds)
+}
+
+fn unlock_agent_interactively(client: &agent::AgentClient) -> io::Result<()> {
+    let policy = current_unlock_policy();
+    for attempt in 1..=3 {
+        let mut master_password = rpassword::prompt_password("Enter vault master password: ")?;
+        if master_password.is_empty() {
+            master_password.zeroize();
+            return Err(io::Error::new(io::ErrorKind::PermissionDenied, "master password cannot be empty"));
+        }
+
+        match client.unlock(&master_password, policy.clone()) {
+            Ok(_) => {
+                master_password.zeroize();
+                return Ok(());
+            }
+            Err(agent::AgentError::InvalidMasterPassword) => {
+                master_password.zeroize();
+                if attempt == 3 {
+                    return Err(io::Error::new(
+                        io::ErrorKind::PermissionDenied,
+                        "failed to unlock password vault after 3 attempts",
+                    ));
+                }
+                eprintln!("Invalid master password. Try again.");
+            }
+            Err(err) => {
+                master_password.zeroize();
+                return Err(io::Error::new(io::ErrorKind::PermissionDenied, err.to_string()));
+            }
+        }
+    }
+
+    Err(io::Error::new(
+        io::ErrorKind::PermissionDenied,
+        "failed to unlock password vault after 3 attempts",
+    ))
+}
+
+fn build_ssh_command(args: &[String], explicit_pass_entry: Option<&str>) -> io::Result<PreparedSshCommand> {
+    let mut command = build_plain_ssh_command(args);
+    let auth_settings = config::auth_settings();
+    if !auth_settings.direct_password_autologin {
+        return Ok(command);
+    }
+
+    let Some(pass_entry_name) = explicit_pass_entry.map(|name| name.to_string()).or_else(|| {
+        let destination = extract_ssh_destination(args)?;
+        let hosts = crate::ssh_config::load_ssh_host_tree().ok()?.hosts;
+        resolve_pass_entry_from_hosts(&destination, None, &hosts)
+    }) else {
+        return Ok(command);
+    };
+
+    if !vault::validate_entry_name(&pass_entry_name) {
+        command.fallback_notice = Some(
+            "Password auto-login is unavailable because the requested password entry name is invalid; continuing with the standard SSH password prompt."
+                .to_string(),
+        );
+        return Ok(command);
+    }
+
+    let client = agent::AgentClient::new().map_err(|err| io::Error::other(err.to_string()))?;
+    let secret = match client.get_secret(&pass_entry_name) {
+        Ok(secret) => secret,
+        Err(agent::AgentError::Locked) => {
+            if !io::stdin().is_terminal() {
+                return Err(io::Error::new(io::ErrorKind::PermissionDenied, "password vault is locked; run cossh --unlock"));
+            }
+            unlock_agent_interactively(&client)?;
+            client
+                .get_secret(&pass_entry_name)
+                .map_err(|err| io::Error::new(io::ErrorKind::PermissionDenied, err.to_string()))?
+        }
+        Err(agent::AgentError::EntryNotFound) => {
+            command.fallback_notice = Some(format!(
+                "Password auto-login is unavailable because vault entry '{}' was not found; continuing with the standard SSH password prompt.",
+                pass_entry_name
+            ));
+            return Ok(command);
+        }
+        Err(err) => {
+            command.fallback_notice = Some(format!(
+                "Password auto-login is unavailable because the password vault could not be queried ({err}); continuing with the standard SSH password prompt."
+            ));
+            return Ok(command);
+        }
+    };
+
+    let backend = transport::direct_backend();
+    match backend {
+        transport::PasswordTransportBackend::UnsupportedWindows => {
+            command.fallback_notice = Some(transport::unsupported_transport_notice());
+            Ok(command)
+        }
+        transport::PasswordTransportBackend::UnixSshpassDirect => {
+            if transport::ensure_backend_available(backend).is_err() {
+                command.fallback_notice = Some(transport::missing_sshpass_notice());
+                return Ok(command);
+            }
+
+            let mut wrapped_args = vec!["-d".to_string(), "3".to_string(), "ssh".to_string()];
+            wrapped_args.extend(args.iter().cloned());
+            command.program = "sshpass".to_string();
+            command.args = wrapped_args;
+            command.password = Some(secret);
+            Ok(command)
+        }
+        transport::PasswordTransportBackend::UnixSshpassTui => Ok(command),
+    }
+}
+
 /// Main process handler for SSH subprocess returns an exit code based on the SSH process status
-pub fn process_handler(process_args: Vec<String>, is_non_interactive: bool) -> Result<ExitCode> {
+pub fn process_handler(process_args: Vec<String>, is_non_interactive: bool, explicit_pass_entry: Option<String>) -> Result<ExitCode> {
     log_info!("Starting SSH process with args: {:?}", process_args);
     log_debug!("Non-interactive mode: {}", is_non_interactive);
 
-    let command_spec = build_ssh_command(&process_args);
+    let command_spec = if is_non_interactive {
+        build_plain_ssh_command(&process_args)
+    } else {
+        build_ssh_command(&process_args, explicit_pass_entry.as_deref())?
+    };
+
+    if let Some(notice) = &command_spec.fallback_notice {
+        log_warn!("{}", notice);
+        eprintln!("[color-ssh] {}", notice);
+    }
 
     if is_non_interactive {
         log_info!("Using passthrough mode for non-interactive command");
@@ -343,15 +519,44 @@ pub fn process_handler(process_args: Vec<String>, is_non_interactive: bool) -> R
 fn spawn_ssh(command_spec: &PreparedSshCommand) -> std::io::Result<std::process::Child> {
     log_debug!("Spawning {} with args: {:?}", command_spec.program, command_spec.args);
 
-    let child = command_from_spec(command_spec)?
-        .stdin(Stdio::inherit())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::inherit())
-        .spawn()
-        .map_err(|err| {
-            log_error!("Failed to spawn SSH command: {}", err);
-            err
-        })?;
+    let mut command = command_from_spec(command_spec)?;
+    command.stdin(Stdio::inherit()).stdout(Stdio::piped()).stderr(Stdio::inherit());
+
+    #[cfg(unix)]
+    let password_writer = if let Some(password) = &command_spec.password {
+        use nix::libc;
+        use nix::unistd::pipe;
+        use std::os::fd::AsRawFd;
+
+        let (read_end, write_end) = pipe().map_err(|err| io::Error::other(err.to_string()))?;
+        let read_fd = read_end.as_raw_fd();
+        unsafe {
+            command.pre_exec(move || {
+                if libc::dup2(read_fd, 3) == -1 {
+                    return Err(io::Error::last_os_error());
+                }
+                Ok(())
+            });
+        }
+        Some((write_end, password.clone()))
+    } else {
+        None
+    };
+
+    let child = command.spawn().map_err(|err| {
+        log_error!("Failed to spawn SSH command: {}", err);
+        err
+    })?;
+
+    #[cfg(unix)]
+    if let Some((write_end, mut password)) = password_writer {
+        let mut write_end = std::fs::File::from(write_end);
+        if let Err(err) = write_end.write_all(password.as_bytes()).and_then(|_| write_end.write_all(b"\n")) {
+            password.zeroize();
+            return Err(err);
+        }
+        password.zeroize();
+    }
 
     log_debug!("SSH process spawned (PID: {:?})", child.id());
     Ok(child)

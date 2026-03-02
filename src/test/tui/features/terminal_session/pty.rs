@@ -1,7 +1,4 @@
-use super::{SessionManager, encode_key_event_bytes, flush_pending_initial_line, suppress_initial_password_echo};
-use crate::auth::pass;
-use crate::ssh_config::SshHost;
-use crate::tui::PassPromptAction;
+use super::{encode_key_event_bytes, flush_pending_initial_line, merge_fallback_notice, suppress_initial_password_echo};
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
 #[test]
@@ -54,41 +51,9 @@ fn encode_key_event_bytes_shift_pageup_preserves_shift_modifier() {
 }
 
 #[test]
-fn resolve_host_pass_password_reuses_cached_password() {
-    let mut app = SessionManager::new_for_tests();
-    app.pass_cache.seed("shared", "secret");
-
-    let mut host = SshHost::new("device".to_string());
-    host.pass_key = Some("shared".to_string());
-
-    let result = app.resolve_host_pass_password(
-        &host,
-        PassPromptAction::OpenHostTab {
-            host: host.clone(),
-            force_ssh_logging: false,
-        },
-    );
-    let (password, notice) = result.expect("cached pass should resolve without prompt");
-    assert_eq!(password.as_deref(), Some("secret"));
-    assert_eq!(notice, None);
-}
-
-#[test]
-fn resolve_host_pass_password_returns_fallback_notice_for_invalid_key() {
-    let mut app = SessionManager::new_for_tests();
-    let mut host = SshHost::new("device".to_string());
-    host.pass_key = Some("../invalid".to_string());
-
-    let result = app.resolve_host_pass_password(
-        &host,
-        PassPromptAction::OpenHostTab {
-            host: host.clone(),
-            force_ssh_logging: false,
-        },
-    );
-    let (password, notice) = result.expect("invalid key should fail without opening prompt");
-    assert_eq!(password, None);
-    assert_eq!(notice, Some(pass::fallback_notice(pass::PassFallbackReason::InvalidPassKeyName)));
+fn merge_fallback_notice_appends_new_message() {
+    let merged = merge_fallback_notice(Some("first".to_string()), "second".to_string());
+    assert_eq!(merged, "first second");
 }
 
 #[test]

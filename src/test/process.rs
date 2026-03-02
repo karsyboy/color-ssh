@@ -1,4 +1,5 @@
-use super::{build_ssh_command, map_exit_code, requires_immediate_terminal_flush, should_flush_immediately};
+use super::{build_plain_ssh_command, map_exit_code, requires_immediate_terminal_flush, resolve_pass_entry_from_hosts, should_flush_immediately};
+use crate::ssh_config::SshHost;
 use std::process::ExitCode;
 
 #[test]
@@ -43,19 +44,40 @@ fn does_not_force_immediate_flush_for_large_highlighted_chunks() {
 #[test]
 fn build_ssh_command_uses_plain_ssh_without_pass_password() {
     let args = vec!["user@host".to_string(), "-p".to_string(), "22".to_string()];
-    let command = build_ssh_command(&args);
+    let command = build_plain_ssh_command(&args);
 
     assert_eq!(command.program, "ssh");
     assert_eq!(command.args, args);
     assert!(command.env.is_empty());
+    assert!(command.password.is_none());
 }
 
 #[test]
 fn build_ssh_command_never_wraps_direct_launches_with_sshpass() {
     let args = vec!["user@host".to_string()];
-    let command = build_ssh_command(&args);
+    let command = build_plain_ssh_command(&args);
 
     assert_eq!(command.program, "ssh");
     assert_eq!(command.args, args);
     assert!(command.env.is_empty());
+    assert!(command.password.is_none());
+}
+
+#[test]
+fn resolve_pass_entry_prefers_explicit_override() {
+    let mut host = SshHost::new("prod".to_string());
+    host.pass_key = Some("shared".to_string());
+
+    let resolved = resolve_pass_entry_from_hosts("prod", Some("override"), &[host]);
+    assert_eq!(resolved.as_deref(), Some("override"));
+}
+
+#[test]
+fn resolve_pass_entry_matches_unique_hostname_when_alias_not_found() {
+    let mut host = SshHost::new("prod".to_string());
+    host.hostname = Some("host.example.com".to_string());
+    host.pass_key = Some("shared".to_string());
+
+    let resolved = resolve_pass_entry_from_hosts("host.example.com", None, &[host]);
+    assert_eq!(resolved.as_deref(), Some("shared"));
 }

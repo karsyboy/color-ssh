@@ -3,7 +3,7 @@
 use super::include::{expand_include_pattern, resolve_include_pattern};
 use super::model::{FolderId, SshHost, SshHostTreeModel, TreeFolder};
 use super::path::expand_tilde;
-use crate::auth::pass::validate_pass_key_name;
+use crate::auth::vault::validate_entry_name;
 use crate::log_debug;
 use std::collections::HashSet;
 use std::fs::File;
@@ -142,7 +142,7 @@ fn parse_config_file(config_path: &Path) -> io::Result<ParsedConfigFile> {
             }
             if let Some(pass_val) = trimmed.strip_prefix("#_pass") {
                 let pass_key = pass_val.trim();
-                if validate_pass_key_name(pass_key) {
+                if validate_entry_name(pass_key) {
                     for host in &mut current_hosts {
                         host.pass_key = Some(pass_key.to_string());
                     }

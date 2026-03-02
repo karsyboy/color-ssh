@@ -48,6 +48,7 @@ static CONFIG_VERSION: AtomicU64 = AtomicU64::new(0);
 fn fallback_config() -> style::Config {
     style::Config {
         settings: style::Settings::default(),
+        auth_settings: style::AuthSettings::default(),
         interactive_settings: None,
         palette: std::collections::HashMap::new(),
         rules: Vec::new(),
@@ -83,6 +84,13 @@ pub(crate) fn history_buffer_for_profile(profile: Option<&str>) -> Option<usize>
     let config_loader = loader::ConfigLoader::new(Some(profile.to_string())).ok()?;
     let config = config_loader.load_config().ok()?;
     config.interactive_settings.map(|interactive| interactive.history_buffer)
+}
+
+pub fn auth_settings() -> style::AuthSettings {
+    match get_config().read() {
+        Ok(config_guard) => config_guard.auth_settings.clone(),
+        Err(poisoned) => poisoned.into_inner().auth_settings.clone(),
+    }
 }
 
 pub(crate) fn current_config_version() -> u64 {

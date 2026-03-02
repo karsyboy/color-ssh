@@ -18,6 +18,9 @@ pub struct Config {
     /// Application-wide settings
     #[serde(default)]
     pub settings: Settings,
+    /// Authentication and vault settings.
+    #[serde(default)]
+    pub auth_settings: AuthSettings,
     /// Interactive session-manager settings (optional block)
     #[serde(default)]
     pub interactive_settings: Option<InteractiveSettings>,
@@ -60,6 +63,35 @@ impl Default for Settings {
     }
 }
 
+/// Authentication settings for the shared password vault.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct AuthSettings {
+    /// Idle timeout in seconds before the unlock agent relocks the vault.
+    #[serde(default = "default_unlock_idle_timeout_seconds")]
+    pub unlock_idle_timeout_seconds: u64,
+    /// Maximum unlock lifetime in seconds before the agent relocks regardless of activity.
+    #[serde(default = "default_unlock_absolute_timeout_seconds")]
+    pub unlock_absolute_timeout_seconds: u64,
+    /// Whether direct `cossh host` launches should attempt password auto-login.
+    #[serde(default = "default_direct_password_autologin")]
+    pub direct_password_autologin: bool,
+    /// Whether TUI launches should attempt password auto-login.
+    #[serde(default = "default_tui_password_autologin")]
+    pub tui_password_autologin: bool,
+}
+
+impl Default for AuthSettings {
+    fn default() -> Self {
+        Self {
+            unlock_idle_timeout_seconds: default_unlock_idle_timeout_seconds(),
+            unlock_absolute_timeout_seconds: default_unlock_absolute_timeout_seconds(),
+            direct_password_autologin: default_direct_password_autologin(),
+            tui_password_autologin: default_tui_password_autologin(),
+        }
+    }
+}
+
 /// Interactive-only session manager settings.
 #[derive(Debug, Deserialize, Default)]
 #[serde(deny_unknown_fields)]
@@ -95,6 +127,22 @@ fn default_show_title() -> bool {
 
 fn default_history_buffer() -> usize {
     1000
+}
+
+fn default_unlock_idle_timeout_seconds() -> u64 {
+    900
+}
+
+fn default_unlock_absolute_timeout_seconds() -> u64 {
+    28_800
+}
+
+fn default_direct_password_autologin() -> bool {
+    true
+}
+
+fn default_tui_password_autologin() -> bool {
+    true
 }
 
 fn default_host_tree_uncollapsed() -> bool {

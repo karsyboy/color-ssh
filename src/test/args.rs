@@ -78,6 +78,38 @@ fn parses_add_pass_with_debug() {
 }
 
 #[test]
+fn parses_unlock_and_vault_status_modes() {
+    let cmd = build_cli_command();
+
+    let unlock = parse_main_args_from(&cmd, ["cossh", "--unlock"]);
+    assert!(unlock.unlock);
+    assert!(unlock.ssh_args.is_empty());
+
+    let status = parse_main_args_from(&cmd, ["cossh", "--vault-status"]);
+    assert!(status.vault_status);
+    assert!(status.ssh_args.is_empty());
+}
+
+#[test]
+fn parses_pass_entry_override_with_direct_launch() {
+    let cmd = build_cli_command();
+    let parsed = parse_main_args_from(&cmd, ["cossh", "--pass-entry", "office_fw", "user@example.com"]);
+
+    assert_eq!(parsed.pass_entry.as_deref(), Some("office_fw"));
+    assert_eq!(parsed.ssh_args, vec!["user@example.com".to_string()]);
+}
+
+#[test]
+fn parses_hidden_agent_serve_mode() {
+    let cmd = build_cli_command();
+    let parsed = parse_main_args_from(&cmd, ["cossh", "agent", "--serve"]);
+
+    assert!(parsed.agent_serve);
+    assert!(parsed.ssh_args.is_empty());
+    assert!(!parsed.interactive);
+}
+
+#[test]
 fn rejects_add_pass_with_ssh_args() {
     let cmd = build_cli_command();
     assert!(

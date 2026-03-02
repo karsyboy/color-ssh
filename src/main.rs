@@ -1,6 +1,7 @@
-use cossh::auth::pass;
+use cossh::auth::{agent, ipc::UnlockPolicy, vault};
 use cossh::{Result, args, config, log, log_debug, log_error, log_info, process, tui};
 use std::process::ExitCode;
+use zeroize::Zeroize;
 
 const APP_VERSION: &str = concat!("v", env!("CARGO_PKG_VERSION"));
 
@@ -41,15 +42,277 @@ fn resolve_logging_settings(args: &args::MainArgs, debug_from_config: bool, ssh_
     }
 }
 
+fn confirm_hidden_value(prompt: &str, confirm_prompt: &str, empty_message: &str, mismatch_message: &str) -> std::result::Result<String, String> {
+    let mut value = rpassword::prompt_password(prompt).map_err(|err| err.to_string())?;
+    let mut confirm = rpassword::prompt_password(confirm_prompt).map_err(|err| err.to_string())?;
+    if value.is_empty() {
+        value.zeroize();
+        confirm.zeroize();
+        return Err(empty_message.to_string());
+    }
+    if value != confirm {
+        value.zeroize();
+        confirm.zeroize();
+        return Err(mismatch_message.to_string());
+    }
+    confirm.zeroize();
+    Ok(value)
+}
+
+fn prompt_new_master_password() -> std::result::Result<String, String> {
+    confirm_hidden_value(
+        "Enter vault master password: ",
+        "Confirm vault master password: ",
+        "master password cannot be empty",
+        "master password confirmation did not match",
+    )
+}
+
+fn prompt_existing_master_password() -> std::result::Result<String, String> {
+    let password = rpassword::prompt_password("Enter vault master password: ").map_err(|err| err.to_string())?;
+    if password.is_empty() {
+        return Err("master password cannot be empty".to_string());
+    }
+    Ok(password)
+}
+
+fn prompt_entry_secret() -> std::result::Result<String, String> {
+    confirm_hidden_value(
+        "Enter SSH password to store: ",
+        "Confirm SSH password: ",
+        "password cannot be empty",
+        "password confirmation did not match",
+    )
+}
+
+fn unlock_policy_from_config() -> UnlockPolicy {
+    let auth_settings = config::auth_settings();
+    UnlockPolicy::new(auth_settings.unlock_idle_timeout_seconds, auth_settings.unlock_absolute_timeout_seconds)
+}
+
+fn initialize_vault_if_needed() -> std::result::Result<Option<String>, String> {
+    if vault::vault_exists().map_err(|err| err.to_string())? {
+        return Ok(None);
+    }
+
+    let password = prompt_new_master_password()?;
+    if let Err(err) = vault::initialize_vault(&password) {
+        let mut password = password;
+        password.zeroize();
+        return Err(err.to_string());
+    }
+    Ok(Some(password))
+}
+
 fn run_add_pass_cli(pass_name: &str) -> ExitCode {
-    match pass::create_pass_key_interactive(pass_name) {
-        Ok(path) => {
-            println!("Saved encrypted pass key: {}", path.display());
+    let initial_password = match initialize_vault_if_needed() {
+        Ok(password) => password,
+        Err(err) => {
+            eprintln!("Failed to initialize password vault: {err}");
+            return ExitCode::from(1);
+        }
+    };
+
+    let mut master_password = match initial_password {
+        Some(password) => password,
+        None => match prompt_existing_master_password() {
+            Ok(password) => password,
+            Err(err) => {
+                eprintln!("Failed to unlock password vault: {err}");
+                return ExitCode::from(1);
+            }
+        },
+    };
+
+    let unlocked = match vault::unlock_with_password(&master_password) {
+        Ok(unlocked) => unlocked,
+        Err(err) => {
+            master_password.zeroize();
+            eprintln!("Failed to unlock password vault: {err}");
+            return ExitCode::from(1);
+        }
+    };
+    master_password.zeroize();
+
+    let mut secret = match prompt_entry_secret() {
+        Ok(secret) => secret,
+        Err(err) => {
+            eprintln!("Failed to capture SSH password: {err}");
+            return ExitCode::from(1);
+        }
+    };
+
+    let result = unlocked.store_secret(pass_name, &secret);
+    secret.zeroize();
+
+    match result {
+        Ok(()) => {
+            println!("Saved password vault entry: {}", pass_name);
             println!("Use in ~/.ssh/config: #_pass {}", pass_name);
             ExitCode::SUCCESS
         }
         Err(err) => {
-            eprintln!("Failed to add pass key: {}", err);
+            eprintln!("Failed to save password vault entry: {err}");
+            ExitCode::from(1)
+        }
+    }
+}
+
+fn run_remove_pass_cli(pass_name: &str) -> ExitCode {
+    let mut master_password = match prompt_existing_master_password() {
+        Ok(password) => password,
+        Err(err) => {
+            eprintln!("Failed to unlock password vault: {err}");
+            return ExitCode::from(1);
+        }
+    };
+    let unlocked = match vault::unlock_with_password(&master_password) {
+        Ok(unlocked) => unlocked,
+        Err(err) => {
+            master_password.zeroize();
+            eprintln!("Failed to unlock password vault: {err}");
+            return ExitCode::from(1);
+        }
+    };
+    master_password.zeroize();
+
+    match unlocked.remove_entry(pass_name) {
+        Ok(()) => {
+            println!("Removed password vault entry: {}", pass_name);
+            ExitCode::SUCCESS
+        }
+        Err(err) => {
+            eprintln!("Failed to remove password vault entry: {err}");
+            ExitCode::from(1)
+        }
+    }
+}
+
+fn run_unlock_cli() -> ExitCode {
+    let initial_password = match initialize_vault_if_needed() {
+        Ok(password) => password,
+        Err(err) => {
+            eprintln!("Failed to initialize password vault: {err}");
+            return ExitCode::from(1);
+        }
+    };
+
+    let mut master_password = match initial_password {
+        Some(password) => password,
+        None => match prompt_existing_master_password() {
+            Ok(password) => password,
+            Err(err) => {
+                eprintln!("Failed to unlock password vault: {err}");
+                return ExitCode::from(1);
+            }
+        },
+    };
+
+    let client = match agent::AgentClient::new() {
+        Ok(client) => client,
+        Err(err) => {
+            master_password.zeroize();
+            eprintln!("Failed to start password vault agent: {err}");
+            return ExitCode::from(1);
+        }
+    };
+
+    let result = client.unlock(&master_password, unlock_policy_from_config());
+    master_password.zeroize();
+
+    match result {
+        Ok(status) => {
+            let expires = status.unlock_expires_in_seconds.unwrap_or_default();
+            println!("Password vault unlocked");
+            println!("Session expires in {} seconds", expires);
+            ExitCode::SUCCESS
+        }
+        Err(err) => {
+            eprintln!("Failed to unlock password vault: {err}");
+            ExitCode::from(1)
+        }
+    }
+}
+
+fn run_lock_cli() -> ExitCode {
+    let client = match agent::AgentClient::new() {
+        Ok(client) => client,
+        Err(err) => {
+            eprintln!("Failed to access password vault agent: {err}");
+            return ExitCode::from(1);
+        }
+    };
+
+    match client.lock() {
+        Ok(_) => {
+            println!("Password vault locked");
+            ExitCode::SUCCESS
+        }
+        Err(agent::AgentError::Io(_)) => {
+            println!("Password vault already locked");
+            ExitCode::SUCCESS
+        }
+        Err(err) => {
+            eprintln!("Failed to lock password vault: {err}");
+            ExitCode::from(1)
+        }
+    }
+}
+
+fn run_vault_status_cli() -> ExitCode {
+    let client = match agent::AgentClient::new() {
+        Ok(client) => client,
+        Err(err) => {
+            eprintln!("Failed to access password vault agent: {err}");
+            return ExitCode::from(1);
+        }
+    };
+
+    match client.status() {
+        Ok(status) => {
+            println!("vault_exists: {}", status.vault_exists);
+            println!("unlocked: {}", status.unlocked);
+            if let Some(expires) = status.unlock_expires_in_seconds {
+                println!("unlock_expires_in_seconds: {}", expires);
+            }
+            ExitCode::SUCCESS
+        }
+        Err(err) => {
+            eprintln!("Failed to read password vault status: {err}");
+            ExitCode::from(1)
+        }
+    }
+}
+
+fn run_set_master_password_cli() -> ExitCode {
+    let mut current_password = match prompt_existing_master_password() {
+        Ok(password) => password,
+        Err(err) => {
+            eprintln!("Failed to capture current master password: {err}");
+            return ExitCode::from(1);
+        }
+    };
+    let mut new_password = match prompt_new_master_password() {
+        Ok(password) => password,
+        Err(err) => {
+            current_password.zeroize();
+            eprintln!("Failed to capture new master password: {err}");
+            return ExitCode::from(1);
+        }
+    };
+
+    let result = vault::rotate_master_password(&current_password, &new_password);
+    current_password.zeroize();
+    new_password.zeroize();
+
+    match result {
+        Ok(()) => {
+            let _ = run_lock_cli();
+            println!("Password vault master password updated");
+            ExitCode::SUCCESS
+        }
+        Err(err) => {
+            eprintln!("Failed to rotate password vault master password: {err}");
             ExitCode::from(1)
         }
     }
@@ -67,8 +330,31 @@ fn main() -> Result<ExitCode> {
     }
     log_info!("color-ssh {} starting", APP_VERSION);
 
+    if args.agent_serve {
+        agent::run_server().map_err(|err| {
+            log_error!("Password vault agent failed: {}", err);
+            std::io::Error::other(err.to_string())
+        })?;
+        return Ok(ExitCode::SUCCESS);
+    }
+
     if let Some(pass_name) = args.add_pass.as_deref() {
         return Ok(run_add_pass_cli(pass_name));
+    }
+    if let Some(pass_name) = args.remove_pass.as_deref() {
+        return Ok(run_remove_pass_cli(pass_name));
+    }
+    if args.unlock {
+        return Ok(run_unlock_cli());
+    }
+    if args.lock {
+        return Ok(run_lock_cli());
+    }
+    if args.vault_status {
+        return Ok(run_vault_status_cli());
+    }
+    if args.set_master_password {
+        return Ok(run_set_master_password_cli());
     }
 
     // If interactive mode is requested, launch the session manager
@@ -213,7 +499,7 @@ fn main() -> Result<ExitCode> {
 
     // Start the SSH process
     log_info!("Launching SSH process handler");
-    let exit_code = process::process_handler(args.ssh_args, args.is_non_interactive).map_err(|err| {
+    let exit_code = process::process_handler(args.ssh_args, args.is_non_interactive, args.pass_entry).map_err(|err| {
         log_error!("Process handler failed: {}", err);
         eprintln!("Process failed: {err}");
         let _ = logger.flush_debug();

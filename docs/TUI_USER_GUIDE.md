@@ -197,7 +197,7 @@ You can add metadata comments inside `~/.ssh/config` host blocks:
 | --- | --- |
 | `#_Desc <text>` | Description shown in host info pane |
 | `#_Profile <name>` | Uses profile `<name>.cossh-config.yaml` when opening that host |
-| `#_pass <name>` | Decrypts `~/.color-ssh/keys/<name>.key` and runs that host with password auto-login |
+| `#_pass <name>` | Uses password vault entry `<name>` and runs that host with password auto-login |
 | `#_hidden <true\|yes\|1>` | Hides host from interactive host list |
 
 Example:
@@ -216,13 +216,14 @@ Additional behavior:
 
 - Host aliases containing `*` or `?` are not shown in the interactive host list.
 - Standard OpenSSH `Include` directives are supported and shown as folder nodes.
-- `#_pass` key files are read from `~/.color-ssh/keys/<name>.key`.
-- Decrypt/passphrase failures retry up to 3 times, then fall back to normal SSH prompting.
-- Successfully decrypted passwords are cached for the running color-ssh process.
+- `#_pass` entries are read from the password vault under `~/.color-ssh/vault/`.
+- If the vault is locked, the TUI prompts once for the master password and reuses that unlock for later protected hosts until the session relocks.
+- On macOS/Linux, password auto-login uses `sshpass`.
+- On Windows, protected hosts fall back to the normal SSH password prompt until a native transport backend is added.
 
-### Create a `#_pass` Key File
+### Create a `#_pass` Vault Entry
 
-You can create encrypted pass key files directly from CLI:
+You can create password vault entries directly from CLI:
 
 ```bash
 cossh --add-pass lab_switch
@@ -230,10 +231,34 @@ cossh --add-pass lab_switch
 
 Flow:
 
-- If `~/.color-ssh/keys/lab_switch.key` exists, you are asked to confirm overwrite.
+- On first use, `cossh` creates the master-password-protected vault.
 - You enter the SSH password twice with hidden prompts.
-- The encrypted key file is written to `~/.color-ssh/keys/lab_switch.key`.
+- The password is stored as vault entry `lab_switch`.
 - On success, use `#_pass lab_switch` in `~/.ssh/config`.
+
+### Unlock Once, Use TUI and Direct Mode
+
+Unlock the vault before working with protected hosts:
+
+```bash
+cossh --unlock
+```
+
+Once unlocked:
+
+- TUI host opens can reuse the same unlock.
+- Direct launches like `cossh prod-fw` can also reuse the same unlock.
+- The unlock session relocks after the configured idle or absolute timeout.
+
+The default auth config is:
+
+```yaml
+auth_settings:
+  unlock_idle_timeout_seconds: 900
+  unlock_absolute_timeout_seconds: 28800
+  direct_password_autologin: true
+  tui_password_autologin: true
+```
 
 ## TUI-Related Config Options
 

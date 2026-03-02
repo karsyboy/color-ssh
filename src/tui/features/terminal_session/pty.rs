@@ -1,9 +1,9 @@
 //! SSH session spawning and PTY management.
 
-use crate::auth::pass::{self, PassPromptStatus};
+use crate::auth::{agent, transport};
 use crate::ssh_config::SshHost;
 use crate::tui::terminal_emulator::Parser;
-use crate::tui::{HostTab, PassPromptAction, SessionManager, SshSession, TerminalSearchState};
+use crate::tui::{HostTab, SessionManager, SshSession, TerminalSearchState, VaultUnlockAction};
 use crate::{command_path, debug_enabled, log_debug, log_error};
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use portable_pty::{CommandBuilder, PtySize, native_pty_system};
@@ -142,6 +142,13 @@ fn clear_sensitive_string(secret: &mut String) {
     bytes.fill(0);
 }
 
+fn merge_fallback_notice(existing: Option<String>, next: String) -> String {
+    match existing {
+        Some(existing) if !existing.is_empty() => format!("{existing} {next}"),
+        _ => next,
+    }
+}
+
 fn write_password_to_stream(writer: &mut dyn Write, password: &str) -> io::Result<()> {
     writer.write_all(password.as_bytes())?;
     writer.write_all(b"\n")?;
@@ -222,20 +229,49 @@ impl SessionManager {
         crate::config::history_buffer_for_profile(host.profile.as_deref()).unwrap_or(self.history_buffer)
     }
 
-    fn resolve_host_pass_password(&mut self, host: &SshHost, action: PassPromptAction) -> Option<(Option<String>, Option<String>)> {
+    fn resolve_host_pass_password(&mut self, host: &SshHost, action: VaultUnlockAction) -> Option<(Option<String>, Option<String>)> {
+        let auth_settings = crate::config::auth_settings();
+        if !auth_settings.tui_password_autologin {
+            return Some((None, None));
+        }
+
         let Some(pass_key) = host.pass_key.as_deref() else {
             return Some((None, None));
         };
 
-        match pass::resolve_pass_key_for_tui(pass_key, &mut self.pass_cache) {
-            PassPromptStatus::Ready(password) => Some((Some(password), None)),
-            PassPromptStatus::PromptRequired => {
-                self.open_pass_prompt(pass_key.to_string(), action);
+        let client = match agent::AgentClient::new() {
+            Ok(client) => client,
+            Err(err) => {
+                return Some((
+                    None,
+                    Some(format!(
+                        "Password auto-login is unavailable because the password vault agent could not be started ({err}); continuing with the standard SSH password prompt."
+                    )),
+                ));
+            }
+        };
+
+        match client.get_secret(pass_key) {
+            Ok(password) => Some((Some(password), None)),
+            Err(agent::AgentError::Locked) => {
+                self.open_vault_unlock(pass_key.to_string(), action);
                 None
             }
-            PassPromptStatus::Fallback(reason) => {
-                log_debug!("Pass auto-login unavailable for host {}: {:?}", host.name, reason);
-                Some((None, Some(pass::fallback_notice(reason))))
+            Err(agent::AgentError::EntryNotFound) => Some((
+                None,
+                Some(format!(
+                    "Password auto-login is unavailable because vault entry '{}' was not found; continuing with the standard SSH password prompt.",
+                    pass_key
+                )),
+            )),
+            Err(err) => {
+                log_debug!("Password auto-login unavailable for host {}: {}", host.name, err);
+                Some((
+                    None,
+                    Some(format!(
+                        "Password auto-login is unavailable because the password vault could not be queried ({err}); continuing with the standard SSH password prompt."
+                    )),
+                ))
             }
         }
     }
@@ -268,7 +304,7 @@ impl SessionManager {
     // Tab/session creation.
     fn open_host_tab(&mut self, host: SshHost, force_ssh_logging: bool) {
         log_debug!("Opening tab for host: {}", host.name);
-        let action = PassPromptAction::OpenHostTab {
+        let action = VaultUnlockAction::OpenHostTab {
             host: host.clone(),
             force_ssh_logging,
         };
@@ -330,12 +366,12 @@ impl SessionManager {
         log_debug!("Created new tab at index {}", self.selected_tab);
     }
 
-    pub(crate) fn complete_pass_prompt_action(&mut self, action: PassPromptAction, pass_password: Option<String>, pass_fallback_notice: Option<String>) {
+    pub(crate) fn complete_vault_unlock_action(&mut self, action: VaultUnlockAction, pass_password: Option<String>, pass_fallback_notice: Option<String>) {
         match action {
-            PassPromptAction::OpenHostTab { host, force_ssh_logging } => {
+            VaultUnlockAction::OpenHostTab { host, force_ssh_logging } => {
                 self.open_host_tab_with_auth(host, force_ssh_logging, pass_password, pass_fallback_notice);
             }
-            PassPromptAction::ReconnectTab { tab_index } => {
+            VaultUnlockAction::ReconnectTab { tab_index } => {
                 self.reconnect_session_with_auth(tab_index, pass_password, pass_fallback_notice);
             }
         }
@@ -371,16 +407,40 @@ impl SessionManager {
         // Build cossh command to get syntax highlighting
         let cossh_path = command_path::cossh_path()?;
 
-        let using_pass_password = pass_password.is_some();
-        let initial_password_echo = pass_password.clone();
-        let mut cmd = if using_pass_password {
-            let mut pass_cmd = CommandBuilder::new(command_path::sshpass_path()?);
-            pass_cmd.arg("-d");
-            pass_cmd.arg(SSHPASS_STDIN_FD);
-            pass_cmd.arg(&cossh_path);
-            pass_cmd
-        } else {
-            CommandBuilder::new(&cossh_path)
+        let mut pass_password = pass_password;
+        let mut pass_fallback_notice = pass_fallback_notice;
+        let mut using_pass_password = false;
+        let mut initial_password_echo = None;
+        let mut cmd = match pass_password.as_ref() {
+            Some(_) => match transport::tui_backend() {
+                transport::PasswordTransportBackend::UnixSshpassTui => match command_path::sshpass_path() {
+                    Ok(sshpass_path) => {
+                        using_pass_password = true;
+                        initial_password_echo = pass_password.clone();
+                        let mut pass_cmd = CommandBuilder::new(sshpass_path);
+                        pass_cmd.arg("-d");
+                        pass_cmd.arg(SSHPASS_STDIN_FD);
+                        pass_cmd.arg(&cossh_path);
+                        pass_cmd
+                    }
+                    Err(_) => {
+                        if let Some(mut password) = pass_password.take() {
+                            clear_sensitive_string(&mut password);
+                        }
+                        pass_fallback_notice = Some(merge_fallback_notice(pass_fallback_notice, transport::missing_sshpass_notice()));
+                        CommandBuilder::new(&cossh_path)
+                    }
+                },
+                transport::PasswordTransportBackend::UnsupportedWindows => {
+                    if let Some(mut password) = pass_password.take() {
+                        clear_sensitive_string(&mut password);
+                    }
+                    pass_fallback_notice = Some(merge_fallback_notice(pass_fallback_notice, transport::unsupported_transport_notice()));
+                    CommandBuilder::new(&cossh_path)
+                }
+                transport::PasswordTransportBackend::UnixSshpassDirect => CommandBuilder::new(&cossh_path),
+            },
+            None => CommandBuilder::new(&cossh_path),
         };
 
         if force_ssh_logging {
@@ -503,7 +563,7 @@ impl SessionManager {
 
         log_debug!("Reconnecting session for host: {}", host.name);
 
-        let action = PassPromptAction::ReconnectTab { tab_index };
+        let action = VaultUnlockAction::ReconnectTab { tab_index };
         let Some((pass_password, pass_fallback_notice)) = self.resolve_host_pass_password(&host, action) else {
             return;
         };

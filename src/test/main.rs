@@ -11,6 +11,13 @@ fn base_args(debug: bool, ssh_logging: bool, test_mode: bool) -> MainArgs {
         is_non_interactive: false,
         interactive: false,
         add_pass: None,
+        remove_pass: None,
+        unlock: false,
+        lock: false,
+        vault_status: false,
+        set_master_password: false,
+        pass_entry: None,
+        agent_serve: false,
     }
 }
 

@@ -14,6 +14,12 @@ settings:
   #   - '9[\s]\$9\$.*'          # Example: Juniper type 9 secrets
   #   - 'sha512[\s]\$6\$.*'     # Example: SHA-512 password hashes
 
+auth_settings:
+  unlock_idle_timeout_seconds: 900 # Relock after 15 minutes of idle time
+  unlock_absolute_timeout_seconds: 28800 # Relock after 8 hours total
+  direct_password_autologin: true # Allow direct `cossh host` password auto-login
+  tui_password_autologin: true # Allow TUI password auto-login
+
 # ============================================================================
 # INTERACTIVE SETTINGS SECTION (Optional)
 # ============================================================================

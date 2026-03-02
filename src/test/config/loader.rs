@@ -1,10 +1,11 @@
 use super::{ColorType, compile_rule_set, compile_rules, compile_secret_patterns, hex_to_ansi, is_valid_hex_color, is_valid_profile_name};
-use crate::config::style::{Config, HighlightRule, Metadata, Settings};
+use crate::config::style::{AuthSettings, Config, HighlightRule, Metadata, Settings};
 use std::collections::HashMap;
 
 fn base_config() -> Config {
     Config {
         settings: Settings::default(),
+        auth_settings: AuthSettings::default(),
         interactive_settings: None,
         palette: HashMap::new(),
         rules: Vec::new(),

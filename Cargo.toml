@@ -22,6 +22,7 @@ path = "src/lib.rs"
 
 [dependencies]
 argon2 = "0.5.3"
+base64 = "0.22.1"
 chacha20poly1305 = "0.10.1"
 chrono = "0.4.43"
 clap = { version = "4.5.59", features = ["derive"] }
@@ -36,6 +37,7 @@ ratatui = "0.30.0"
 regex = "1.12.3"
 rpassword = "7.4.0"
 serde = {version ="1.0.228", features = ["derive"] }
+serde_json = "1.0.145"
 serde_yml = "0.0.12"
 unicode-width = "0.2.2"
 alacritty_terminal = "0.25.1"

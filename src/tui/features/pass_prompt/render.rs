@@ -1,4 +1,4 @@
-//! #_pass prompt modal rendering.
+//! Password vault unlock modal rendering.
 
 use crate::tui::SessionManager;
 use crate::tui::ui::theme;
@@ -24,8 +24,8 @@ fn char_to_byte_index(text: &str, char_index: usize) -> usize {
 }
 
 impl SessionManager {
-    pub(crate) fn render_pass_prompt_modal(&self, frame: &mut Frame, full_area: Rect) {
-        let Some(prompt) = &self.pass_prompt else {
+    pub(crate) fn render_vault_unlock_modal(&self, frame: &mut Frame, full_area: Rect) {
+        let Some(prompt) = &self.vault_unlock else {
             return;
         };
 
@@ -37,7 +37,7 @@ impl SessionManager {
         let block = Block::default()
             .borders(Borders::ALL)
             .border_style(Style::default().fg(theme::ansi_cyan()))
-            .title(" Unlock Pass Key ");
+            .title(" Unlock Password Vault ");
         let inner = block.inner(area);
         frame.render_widget(block, area);
 
@@ -47,7 +47,7 @@ impl SessionManager {
         let error_style = Style::default().fg(theme::ansi_red()).add_modifier(Modifier::BOLD);
         let hint_style = Style::default().fg(theme::ansi_bright_black());
 
-        let masked = prompt.masked_passphrase();
+        let masked = prompt.masked_master_password();
         let cursor = prompt.cursor.min(masked.chars().count());
         let mut pass_spans = Vec::new();
         if masked.is_empty() {
@@ -65,14 +65,14 @@ impl SessionManager {
 
         let mut lines = vec![
             Line::from(vec![
-                Span::styled("Key: ", label_style),
-                Span::styled(prompt.pass_key.clone(), value_style),
+                Span::styled("Entry: ", label_style),
+                Span::styled(prompt.entry_name.clone(), value_style),
                 Span::styled("  ", label_style),
                 Span::styled("Attempts: ", label_style),
                 Span::styled(format!("{}", prompt.remaining_attempts()), value_style),
             ]),
             {
-                let mut spans = vec![Span::styled("Passphrase: ", label_style)];
+                let mut spans = vec![Span::styled("Master Password: ", label_style)];
                 spans.extend(pass_spans);
                 Line::from(spans)
             },

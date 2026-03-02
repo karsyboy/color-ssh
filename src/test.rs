@@ -17,7 +17,8 @@
 //! - `src/test/config/watcher.rs`
 //!
 //! Auth:
-//! - `src/test/auth/pass.rs`
+//! - `src/test/auth/vault.rs`
+//! - `src/test/auth/agent.rs`
 //!
 //! Logging:
 //! - `src/test/log.rs`
