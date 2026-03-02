@@ -373,28 +373,6 @@ fn open_private_append_file(path: &Path) -> Result<File, LogError> {
     Ok(file)
 }
 
-#[cfg(unix)]
-fn set_private_directory_permissions(path: &Path) -> Result<(), LogError> {
-    fs::set_permissions(path, fs::Permissions::from_mode(PRIVATE_LOG_DIR_MODE))?;
-    Ok(())
-}
-
-#[cfg(not(unix))]
-fn set_private_directory_permissions(_path: &Path) -> Result<(), LogError> {
-    Ok(())
-}
-
-#[cfg(unix)]
-fn set_private_file_permissions(path: &Path) -> Result<(), LogError> {
-    fs::set_permissions(path, fs::Permissions::from_mode(PRIVATE_LOG_FILE_MODE))?;
-    Ok(())
-}
-
-#[cfg(not(unix))]
-fn set_private_file_permissions(_path: &Path) -> Result<(), LogError> {
-    Ok(())
-}
-
 fn current_secret_patterns() -> Vec<Regex> {
     crate::config::SESSION_CONFIG
         .get()
@@ -458,6 +436,28 @@ fn extract_complete_lines(buffer: &mut String) -> Vec<String> {
 
 fn should_flush(pending_bytes: usize, elapsed_since_flush: Duration) -> bool {
     pending_bytes >= SSH_LOG_FLUSH_BYTES || elapsed_since_flush >= SSH_LOG_FLUSH_INTERVAL
+}
+
+#[cfg(unix)]
+fn set_private_directory_permissions(path: &Path) -> Result<(), LogError> {
+    fs::set_permissions(path, fs::Permissions::from_mode(PRIVATE_LOG_DIR_MODE))?;
+    Ok(())
+}
+
+#[cfg(not(unix))]
+fn set_private_directory_permissions(_path: &Path) -> Result<(), LogError> {
+    Ok(())
+}
+
+#[cfg(unix)]
+fn set_private_file_permissions(path: &Path) -> Result<(), LogError> {
+    fs::set_permissions(path, fs::Permissions::from_mode(PRIVATE_LOG_FILE_MODE))?;
+    Ok(())
+}
+
+#[cfg(not(unix))]
+fn set_private_file_permissions(_path: &Path) -> Result<(), LogError> {
+    Ok(())
 }
 
 #[cfg(test)]

@@ -173,28 +173,6 @@ fn open_private_append_file(path: &Path) -> Result<File, LogError> {
     Ok(file)
 }
 
-#[cfg(unix)]
-fn set_private_directory_permissions(path: &Path) -> Result<(), LogError> {
-    fs::set_permissions(path, fs::Permissions::from_mode(PRIVATE_LOG_DIR_MODE))?;
-    Ok(())
-}
-
-#[cfg(not(unix))]
-fn set_private_directory_permissions(_path: &Path) -> Result<(), LogError> {
-    Ok(())
-}
-
-#[cfg(unix)]
-fn set_private_file_permissions(path: &Path) -> Result<(), LogError> {
-    fs::set_permissions(path, fs::Permissions::from_mode(PRIVATE_LOG_FILE_MODE))?;
-    Ok(())
-}
-
-#[cfg(not(unix))]
-fn set_private_file_permissions(_path: &Path) -> Result<(), LogError> {
-    Ok(())
-}
-
 fn run_worker(receiver: Receiver<DebugLogCommand>, formatter: LogFormatter) {
     let mut state = DebugLogWorkerState::new();
 
@@ -263,6 +241,28 @@ fn flush_worker(state: &mut DebugLogWorkerState) -> Result<(), LogError> {
 
 fn should_flush(pending_bytes: usize, elapsed_since_flush: Duration) -> bool {
     pending_bytes >= DEBUG_LOG_FLUSH_BYTES || elapsed_since_flush >= DEBUG_LOG_FLUSH_INTERVAL
+}
+
+#[cfg(unix)]
+fn set_private_directory_permissions(path: &Path) -> Result<(), LogError> {
+    fs::set_permissions(path, fs::Permissions::from_mode(PRIVATE_LOG_DIR_MODE))?;
+    Ok(())
+}
+
+#[cfg(not(unix))]
+fn set_private_directory_permissions(_path: &Path) -> Result<(), LogError> {
+    Ok(())
+}
+
+#[cfg(unix)]
+fn set_private_file_permissions(path: &Path) -> Result<(), LogError> {
+    fs::set_permissions(path, fs::Permissions::from_mode(PRIVATE_LOG_FILE_MODE))?;
+    Ok(())
+}
+
+#[cfg(not(unix))]
+fn set_private_file_permissions(_path: &Path) -> Result<(), LogError> {
+    Ok(())
 }
 
 #[cfg(test)]

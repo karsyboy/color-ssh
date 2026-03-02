@@ -10,17 +10,17 @@ use std::{
     time::{SystemTime, UNIX_EPOCH},
 };
 
-#[cfg(unix)]
-fn temp_path(prefix: &str) -> PathBuf {
-    let unique = SystemTime::now().duration_since(UNIX_EPOCH).expect("clock should be after epoch").as_nanos();
-    std::env::temp_dir().join(format!("cossh-log-debug-{prefix}-{unique}"))
-}
-
 #[test]
 fn should_flush_on_size_or_interval() {
     assert!(!should_flush(512, Duration::from_millis(20)));
     assert!(should_flush(16 * 1024, Duration::from_millis(20)));
     assert!(should_flush(1, Duration::from_millis(100)));
+}
+
+#[cfg(unix)]
+fn temp_path(prefix: &str) -> PathBuf {
+    let unique = SystemTime::now().duration_since(UNIX_EPOCH).expect("clock should be after epoch").as_nanos();
+    std::env::temp_dir().join(format!("cossh-log-debug-{prefix}-{unique}"))
 }
 
 #[cfg(unix)]

@@ -18,24 +18,6 @@ fn temp_paths(prefix: &str) -> VaultPaths {
     VaultPaths::new(std::env::temp_dir().join(format!("cossh_ipc_{prefix}_{nanos}_{serial}")))
 }
 
-#[cfg(unix)]
-fn unix_socket_bind_allowed() -> bool {
-    let paths = temp_paths("socket_probe");
-    fs::create_dir_all(paths.run_dir()).expect("create run dir for socket probe");
-    let path = paths.run_dir().join("probe.sock");
-    let allowed = match UnixListener::bind(&path) {
-        Ok(listener) => {
-            drop(listener);
-            true
-        }
-        Err(err) if matches!(err.kind(), io::ErrorKind::PermissionDenied | io::ErrorKind::Unsupported) => false,
-        Err(err) => panic!("unexpected unix socket probe failure: {err}"),
-    };
-    let _ = fs::remove_file(path);
-    let _ = fs::remove_dir_all(paths.base_dir());
-    allowed
-}
-
 #[test]
 fn endpoint_derivation_is_deterministic() {
     let paths = temp_paths("deterministic");
@@ -76,6 +58,38 @@ fn bind_listener_ignores_and_removes_legacy_state_file() {
     #[cfg(unix)]
     let _ = fs::remove_file(agent_endpoint(&paths).socket_path);
     let _ = fs::remove_dir_all(paths.base_dir());
+}
+
+#[test]
+fn read_write_json_line_round_trip() {
+    let mut buffer = Vec::new();
+    let request = AgentRequest {
+        payload: AgentRequestPayload::GetSecret { name: "edge".to_string() },
+    };
+
+    write_json_line(&mut buffer, &request).expect("write json line");
+    let mut reader = io::Cursor::new(buffer);
+    let decoded: AgentRequest = read_json_line(&mut reader).expect("read json line");
+
+    assert_eq!(decoded, request);
+}
+
+#[cfg(unix)]
+fn unix_socket_bind_allowed() -> bool {
+    let paths = temp_paths("socket_probe");
+    fs::create_dir_all(paths.run_dir()).expect("create run dir for socket probe");
+    let path = paths.run_dir().join("probe.sock");
+    let allowed = match UnixListener::bind(&path) {
+        Ok(listener) => {
+            drop(listener);
+            true
+        }
+        Err(err) if matches!(err.kind(), io::ErrorKind::PermissionDenied | io::ErrorKind::Unsupported) => false,
+        Err(err) => panic!("unexpected unix socket probe failure: {err}"),
+    };
+    let _ = fs::remove_file(path);
+    let _ = fs::remove_dir_all(paths.base_dir());
+    allowed
 }
 
 #[cfg(unix)]
@@ -170,18 +184,4 @@ fn windows_listener_accepts_same_user_connections() {
     };
     let _client = connect(&paths).expect("connect to listener");
     drop(listener);
-}
-
-#[test]
-fn read_write_json_line_round_trip() {
-    let mut buffer = Vec::new();
-    let request = AgentRequest {
-        payload: AgentRequestPayload::GetSecret { name: "edge".to_string() },
-    };
-
-    write_json_line(&mut buffer, &request).expect("write json line");
-    let mut reader = io::Cursor::new(buffer);
-    let decoded: AgentRequest = read_json_line(&mut reader).expect("read json line");
-
-    assert_eq!(decoded, request);
 }

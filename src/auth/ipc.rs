@@ -255,26 +255,9 @@ fn create_listener_for_endpoint(paths: &VaultPaths, endpoint: &AgentEndpoint) ->
     Ok(listener)
 }
 
-#[cfg(windows)]
-fn create_listener_for_endpoint(_paths: &VaultPaths, endpoint: &AgentEndpoint) -> io::Result<LocalSocketListener> {
-    let name = endpoint.identifier.as_str().to_ns_name::<GenericNamespaced>()?;
-    let security_descriptor = current_user_security_descriptor()?;
-    ListenerOptions::new()
-        .name(name)
-        .nonblocking(ListenerNonblockingMode::Accept)
-        .security_descriptor(security_descriptor)
-        .create_sync()
-}
-
 #[cfg(unix)]
 fn connect_to_endpoint(endpoint: &AgentEndpoint) -> io::Result<LocalSocketStream> {
     let name = endpoint.socket_path.as_os_str().to_fs_name::<GenericFilePath>()?;
-    LocalSocketStream::connect(name)
-}
-
-#[cfg(windows)]
-fn connect_to_endpoint(endpoint: &AgentEndpoint) -> io::Result<LocalSocketStream> {
-    let name = endpoint.identifier.as_str().to_ns_name::<GenericNamespaced>()?;
     LocalSocketStream::connect(name)
 }
 
@@ -295,11 +278,6 @@ fn remove_stale_socket_file(paths: &VaultPaths) -> io::Result<bool> {
     Ok(false)
 }
 
-#[cfg(not(unix))]
-fn remove_stale_socket_file(_paths: &VaultPaths) -> io::Result<bool> {
-    Ok(false)
-}
-
 #[cfg(unix)]
 fn cleanup_local_endpoint(paths: &VaultPaths) -> io::Result<()> {
     let endpoint = agent_endpoint(paths);
@@ -315,19 +293,9 @@ fn cleanup_local_endpoint(paths: &VaultPaths) -> io::Result<()> {
     Ok(())
 }
 
-#[cfg(not(unix))]
-fn cleanup_local_endpoint(_paths: &VaultPaths) -> io::Result<()> {
-    Ok(())
-}
-
 #[cfg(unix)]
 fn set_restrictive_directory_permissions(path: &Path) -> io::Result<()> {
     fs::set_permissions(path, fs::Permissions::from_mode(0o700))?;
-    Ok(())
-}
-
-#[cfg(not(unix))]
-fn set_restrictive_directory_permissions(_path: &Path) -> io::Result<()> {
     Ok(())
 }
 
@@ -338,8 +306,40 @@ fn set_restrictive_file_permissions(path: &Path) -> io::Result<()> {
 }
 
 #[cfg(not(unix))]
+fn remove_stale_socket_file(_paths: &VaultPaths) -> io::Result<bool> {
+    Ok(false)
+}
+
+#[cfg(not(unix))]
+fn cleanup_local_endpoint(_paths: &VaultPaths) -> io::Result<()> {
+    Ok(())
+}
+
+#[cfg(not(unix))]
+fn set_restrictive_directory_permissions(_path: &Path) -> io::Result<()> {
+    Ok(())
+}
+
+#[cfg(not(unix))]
 fn set_restrictive_file_permissions(_path: &Path) -> io::Result<()> {
     Ok(())
+}
+
+#[cfg(windows)]
+fn create_listener_for_endpoint(_paths: &VaultPaths, endpoint: &AgentEndpoint) -> io::Result<LocalSocketListener> {
+    let name = endpoint.identifier.as_str().to_ns_name::<GenericNamespaced>()?;
+    let security_descriptor = current_user_security_descriptor()?;
+    ListenerOptions::new()
+        .name(name)
+        .nonblocking(ListenerNonblockingMode::Accept)
+        .security_descriptor(security_descriptor)
+        .create_sync()
+}
+
+#[cfg(windows)]
+fn connect_to_endpoint(endpoint: &AgentEndpoint) -> io::Result<LocalSocketStream> {
+    let name = endpoint.identifier.as_str().to_ns_name::<GenericNamespaced>()?;
+    LocalSocketStream::connect(name)
 }
 
 #[cfg(windows)]
