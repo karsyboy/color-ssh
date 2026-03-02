@@ -1,8 +1,6 @@
 use crate::auth::{agent, ipc::UnlockPolicy, transport, vault};
 use crate::ssh_config::SshHost;
 use crate::{Result, command_path, config, highlighter, log, log_debug, log_error, log_info, log_warn};
-#[cfg(unix)]
-use std::os::unix::process::CommandExt;
 use std::{
     io::IsTerminal,
     io::{self, Read, Write},
@@ -66,7 +64,6 @@ struct PreparedSshCommand {
     program: String,
     args: Vec<String>,
     env: Vec<(String, String)>,
-    password: Option<String>,
     fallback_notice: Option<String>,
 }
 
@@ -75,7 +72,6 @@ fn build_plain_ssh_command(args: &[String]) -> PreparedSshCommand {
         program: "ssh".to_string(),
         args: args.to_vec(),
         env: Vec::new(),
-        password: None,
         fallback_notice: None,
     }
 }
@@ -205,7 +201,7 @@ fn build_ssh_command(args: &[String], explicit_pass_entry: Option<&str>) -> io::
     }
 
     let client = agent::AgentClient::new().map_err(|err| io::Error::other(err.to_string()))?;
-    let secret = match client.get_secret(&pass_entry_name) {
+    let mut secret = match client.get_secret(&pass_entry_name) {
         Ok(secret) => secret,
         Err(agent::AgentError::Locked) => {
             if !io::stdin().is_terminal() {
@@ -226,6 +222,13 @@ fn build_ssh_command(args: &[String], explicit_pass_entry: Option<&str>) -> io::
             ));
             return Ok(command);
         }
+        Err(agent::AgentError::VaultNotInitialized) => {
+            command.fallback_notice = Some(
+                "Password auto-login is unavailable because the password vault is not initialized; continuing with the standard SSH password prompt."
+                    .to_string(),
+            );
+            return Ok(command);
+        }
         Err(err) => {
             command.fallback_notice = Some(format!(
                 "Password auto-login is unavailable because the password vault could not be queried ({err}); continuing with the standard SSH password prompt."
@@ -236,24 +239,22 @@ fn build_ssh_command(args: &[String], explicit_pass_entry: Option<&str>) -> io::
 
     let backend = transport::direct_backend();
     match backend {
-        transport::PasswordTransportBackend::UnsupportedWindows => {
+        transport::PasswordTransportBackend::UnsupportedPlatform => {
+            secret.zeroize();
             command.fallback_notice = Some(transport::unsupported_transport_notice());
             Ok(command)
         }
-        transport::PasswordTransportBackend::UnixSshpassDirect => {
-            if transport::ensure_backend_available(backend).is_err() {
-                command.fallback_notice = Some(transport::missing_sshpass_notice());
+        transport::PasswordTransportBackend::InternalAskpass => {
+            if let Err(err) = transport::configure_internal_askpass_env(&mut command.env, &pass_entry_name) {
+                secret.zeroize();
+                command.fallback_notice = Some(format!(
+                    "Password auto-login is unavailable because the internal askpass helper could not be configured ({err}); continuing with the standard SSH password prompt."
+                ));
                 return Ok(command);
             }
-
-            let mut wrapped_args = vec!["-d".to_string(), "3".to_string(), "ssh".to_string()];
-            wrapped_args.extend(args.iter().cloned());
-            command.program = "sshpass".to_string();
-            command.args = wrapped_args;
-            command.password = Some(secret);
+            secret.zeroize();
             Ok(command)
         }
-        transport::PasswordTransportBackend::UnixSshpassTui => Ok(command),
     }
 }
 
@@ -532,54 +533,10 @@ fn spawn_ssh(command_spec: &PreparedSshCommand) -> std::io::Result<std::process:
     let mut command = command_from_spec(command_spec)?;
     command.stdin(Stdio::inherit()).stdout(Stdio::piped()).stderr(Stdio::inherit());
 
-    #[cfg(unix)]
-    let password_pipe = if let Some(password) = &command_spec.password {
-        use nix::libc;
-        use nix::unistd::pipe;
-        use std::os::fd::{AsRawFd, OwnedFd};
-
-        let (read_end, write_end): (OwnedFd, OwnedFd) = pipe().map_err(|err| io::Error::other(err.to_string()))?;
-        let read_fd = read_end.as_raw_fd();
-        unsafe {
-            command.pre_exec(move || {
-                if libc::dup2(read_fd, 3) == -1 {
-                    return Err(io::Error::last_os_error());
-                }
-                Ok(())
-            });
-        }
-
-        // Keep the read end alive in the parent until after spawn so the child
-        // can inherit it and dup it onto FD 3.
-        Some((read_end, write_end, password.clone()))
-    } else {
-        None
-    };
-
     let child = command.spawn().map_err(|err| {
         log_error!("Failed to spawn SSH command: {}", err);
         err
     })?;
-
-    #[cfg(unix)]
-    if let Some((read_end, write_end, mut password)) = password_pipe {
-        drop(read_end);
-        let mut write_end = std::fs::File::from(write_end);
-        if let Err(err) = write_end.write_all(password.as_bytes()).and_then(|_| write_end.write_all(b"\n")) {
-            password.zeroize();
-            if err.kind() != io::ErrorKind::BrokenPipe {
-                return Err(err);
-            }
-            log_warn!("sshpass closed its password pipe early; allowing child process to report the underlying failure");
-        } else if let Err(err) = write_end.flush() {
-            password.zeroize();
-            if err.kind() != io::ErrorKind::BrokenPipe {
-                return Err(err);
-            }
-            log_warn!("sshpass closed its password pipe during flush; allowing child process to report the underlying failure");
-        }
-        password.zeroize();
-    }
 
     log_debug!("SSH process spawned (PID: {:?})", child.id());
     Ok(child)

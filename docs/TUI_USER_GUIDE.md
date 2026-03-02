@@ -218,8 +218,7 @@ Additional behavior:
 - Standard OpenSSH `Include` directives are supported and shown as folder nodes.
 - `#_pass` entries are read from the password vault under `~/.color-ssh/vault/`.
 - If the vault is locked, the TUI prompts once for the master password and reuses that unlock for later protected hosts until the session relocks.
-- On macOS/Linux, password auto-login uses `sshpass`.
-- On Windows, protected hosts fall back to the normal SSH password prompt until a native transport backend is added.
+- On macOS, Linux, and Windows builds of OpenSSH that honor `SSH_ASKPASS`, password auto-login uses cossh's internal askpass helper.
 
 ### Create a `#_pass` Vault Entry
 

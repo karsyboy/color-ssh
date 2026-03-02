@@ -35,7 +35,6 @@
 
 #### Requirement
 - SSH
-- sshpass (optional on macOS/Linux for password auto-login)
 
 ### Pre-built Binaries (Recommended)
 Download the latest release from [GitHub Releases](https://github.com/karsyboy/color-ssh/releases/) for your platform.
@@ -118,7 +117,7 @@ The interactive session manger supports metadata comments inside the SSH config 
 
 `#_pass` works in both the TUI and direct launches. Unlock the vault once with `cossh vault unlock`, then protected hosts can reuse that unlock until the vault relocks.
 
-On macOS/Linux, protected hosts use `sshpass` for password transport. On Windows, vault lookup and unlock still work, but password transport falls back to the normal SSH prompt for now.
+On macOS, Linux, and Windows builds of OpenSSH that honor `SSH_ASKPASS`, protected hosts use cossh's internal askpass helper for password transport.
 
 ```sshconfig
 Host switch01

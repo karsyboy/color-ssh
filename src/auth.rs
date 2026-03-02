@@ -357,6 +357,49 @@ fn run_set_master_password_cli() -> ExitCode {
     }
 }
 
+pub fn run_internal_askpass() -> ExitCode {
+    let Some(entry_name) = transport::internal_askpass_entry() else {
+        eprintln!("Missing internal askpass entry");
+        return ExitCode::from(1);
+    };
+
+    let client = match agent::AgentClient::new() {
+        Ok(client) => client,
+        Err(err) => {
+            eprintln!("Failed to access password vault agent: {err}");
+            return ExitCode::from(1);
+        }
+    };
+
+    let mut secret = match client.get_secret(&entry_name) {
+        Ok(secret) => secret,
+        Err(err) => {
+            eprintln!("Failed to read password vault entry '{entry_name}': {err}");
+            return ExitCode::from(1);
+        }
+    };
+
+    let result = {
+        use std::io::Write;
+
+        let stdout = std::io::stdout();
+        let mut stdout = stdout.lock();
+        stdout
+            .write_all(secret.as_bytes())
+            .and_then(|_| stdout.write_all(b"\n"))
+            .and_then(|_| stdout.flush())
+    };
+    secret.zeroize();
+
+    match result {
+        Ok(()) => ExitCode::SUCCESS,
+        Err(err) => {
+            eprintln!("Failed to write askpass response: {err}");
+            ExitCode::from(1)
+        }
+    }
+}
+
 pub fn run_vault_command(vault_command: &args::VaultCommand) -> ExitCode {
     match vault_command {
         args::VaultCommand::Init => run_vault_init_cli(),

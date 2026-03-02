@@ -49,18 +49,18 @@ fn build_ssh_command_uses_plain_ssh_without_pass_password() {
     assert_eq!(command.program, "ssh");
     assert_eq!(command.args, args);
     assert!(command.env.is_empty());
-    assert!(command.password.is_none());
+    assert!(command.fallback_notice.is_none());
 }
 
 #[test]
-fn build_ssh_command_never_wraps_direct_launches_with_sshpass() {
+fn build_ssh_command_leaves_direct_launches_as_plain_ssh() {
     let args = vec!["user@host".to_string()];
     let command = build_plain_ssh_command(&args);
 
     assert_eq!(command.program, "ssh");
     assert_eq!(command.args, args);
     assert!(command.env.is_empty());
-    assert!(command.password.is_none());
+    assert!(command.fallback_notice.is_none());
 }
 
 #[test]

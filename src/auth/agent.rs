@@ -119,13 +119,18 @@ impl AgentClient {
 
     fn spawn_server(&self) -> Result<(), AgentError> {
         let cossh_path = command_path::cossh_path()?;
-        Command::new(cossh_path)
+        let mut command = Command::new(cossh_path);
+        command
             .arg("agent")
             .arg("--serve")
             .stdin(Stdio::null())
             .stdout(Stdio::null())
             .stderr(Stdio::null())
-            .spawn()?;
+            .env_remove(crate::auth::transport::INTERNAL_ASKPASS_MODE_ENV)
+            .env_remove(crate::auth::transport::INTERNAL_ASKPASS_ENTRY_ENV)
+            .env_remove("SSH_ASKPASS")
+            .env_remove("SSH_ASKPASS_REQUIRE");
+        command.spawn()?;
 
         let started_at = Instant::now();
         while started_at.elapsed() < AGENT_STARTUP_TIMEOUT {

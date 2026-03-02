@@ -41,6 +41,10 @@ fn resolve_logging_settings(args: &args::MainArgs, debug_from_config: bool, ssh_
 }
 
 fn main() -> Result<ExitCode> {
+    if auth::transport::is_internal_askpass_invocation() {
+        return Ok(auth::run_internal_askpass());
+    }
+
     let args = args::main_args();
 
     let logger = log::Logger::new();
