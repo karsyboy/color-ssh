@@ -46,9 +46,6 @@ pub struct Settings {
     /// Enable SSH session logging
     #[serde(default)]
     pub ssh_logging: bool,
-    /// Direct-connect cached password TTL in seconds (`0` disables persistent cache)
-    #[serde(default = "default_pass_cache_ttl", deserialize_with = "deserialize_pass_cache_ttl")]
-    pub pass_cache_ttl: u64,
 }
 
 impl Default for Settings {
@@ -59,7 +56,6 @@ impl Default for Settings {
             show_title: true,
             debug_mode: false,
             ssh_logging: false,
-            pass_cache_ttl: default_pass_cache_ttl(),
         }
     }
 }
@@ -125,10 +121,6 @@ fn default_remote_clipboard_max_bytes() -> usize {
     4096
 }
 
-fn default_pass_cache_ttl() -> u64 {
-    300
-}
-
 fn deserialize_host_view_size<'de, D>(deserializer: D) -> Result<u16, D::Error>
 where
     D: Deserializer<'de>,
@@ -151,14 +143,6 @@ where
 {
     let value = usize::deserialize(deserializer)?;
     Ok(value.clamp(64, 1_048_576))
-}
-
-fn deserialize_pass_cache_ttl<'de, D>(deserializer: D) -> Result<u64, D::Error>
-where
-    D: Deserializer<'de>,
-{
-    let value = u64::deserialize(deserializer)?;
-    Ok(value.min(86_400))
 }
 
 /// A single highlight rule mapping a regex pattern to a color

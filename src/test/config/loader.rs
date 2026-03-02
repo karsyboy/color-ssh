@@ -162,32 +162,3 @@ rules:
     assert_eq!(parsed.rules[0].description.as_deref(), Some("Highlight errors in red"));
     assert_eq!(parsed.rules[0].bg_color, None);
 }
-
-#[test]
-fn defaults_pass_cache_ttl_when_missing() {
-    let yaml = r##"
-settings: {}
-interactive_settings: {}
-palette:
-  ok_fg: "#00ff00"
-rules: []
-"##;
-
-    let parsed = serde_yml::from_str::<Config>(yaml).expect("settings should parse");
-    assert_eq!(parsed.settings.pass_cache_ttl, 300);
-}
-
-#[test]
-fn clamps_pass_cache_ttl_to_upper_bound() {
-    let yaml = r##"
-settings:
-  pass_cache_ttl: 999999
-interactive_settings: {}
-palette:
-  ok_fg: "#00ff00"
-rules: []
-"##;
-
-    let parsed = serde_yml::from_str::<Config>(yaml).expect("settings should parse");
-    assert_eq!(parsed.settings.pass_cache_ttl, 86_400);
-}

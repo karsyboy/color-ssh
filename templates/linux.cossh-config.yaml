@@ -9,7 +9,6 @@ settings:
   show_title: true
   debug_mode: false
   ssh_logging: false
-  pass_cache_ttl: 300
 
 # ============================================================================
 # INTERACTIVE SETTINGS SECTION (Optional)

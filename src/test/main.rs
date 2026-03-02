@@ -1,8 +1,5 @@
-use super::{
-    extract_ssh_destination, pass_key_for_destination_from_hosts, resolve_logging_settings, skip_pass_resolution_for_context, skip_pass_resolution_from_env,
-};
+use super::{extract_ssh_destination, resolve_logging_settings};
 use cossh::args::MainArgs;
-use cossh::ssh_config::SshHost;
 
 fn base_args(debug: bool, ssh_logging: bool, test_mode: bool) -> MainArgs {
     MainArgs {
@@ -69,35 +66,4 @@ fn normal_mode_merges_cli_and_config_logging_flags() {
 
     let args = base_args(false, true, false);
     assert_eq!(resolve_logging_settings(&args, false, false), (false, true));
-}
-
-#[test]
-fn pass_key_lookup_matches_exact_alias_only() {
-    let mut exact = SshHost::new("target".to_string());
-    exact.pass_key = Some("shared".to_string());
-
-    let mut other = SshHost::new("target-prod".to_string());
-    other.pass_key = Some("other".to_string());
-
-    let hosts = vec![other, exact];
-    assert_eq!(pass_key_for_destination_from_hosts("target", &hosts).as_deref(), Some("shared"));
-    assert_eq!(pass_key_for_destination_from_hosts("tar", &hosts), None);
-}
-
-#[test]
-fn skip_pass_resolution_env_parser_accepts_booleanish_values() {
-    assert!(skip_pass_resolution_from_env(Some("1")));
-    assert!(skip_pass_resolution_from_env(Some("true")));
-    assert!(skip_pass_resolution_from_env(Some("YES")));
-    assert!(!skip_pass_resolution_from_env(Some("0")));
-    assert!(!skip_pass_resolution_from_env(Some("")));
-    assert!(!skip_pass_resolution_from_env(None));
-}
-
-#[test]
-fn skip_pass_resolution_requires_tui_session_context() {
-    assert!(skip_pass_resolution_for_context(Some("1"), Some("tab-1")));
-    assert!(!skip_pass_resolution_for_context(Some("1"), None));
-    assert!(!skip_pass_resolution_for_context(Some("1"), Some("   ")));
-    assert!(!skip_pass_resolution_for_context(Some("0"), Some("tab-1")));
 }

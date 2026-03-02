@@ -1,10 +1,8 @@
-use cossh::auth::pass::{self, PassCache, PassResolveResult};
-use cossh::{Result, args, config, log, log_debug, log_error, log_info, process, ssh_config, tui};
+use cossh::auth::pass;
+use cossh::{Result, args, config, log, log_debug, log_error, log_info, process, tui};
 use std::process::ExitCode;
-use std::time::Duration;
 
 const APP_VERSION: &str = concat!("v", env!("CARGO_PKG_VERSION"));
-const SKIP_PASS_RESOLVE_ENV: &str = "COSSH_SKIP_PASS_RESOLVE";
 
 /// Extracts the SSH destination hostname from the provided SSH arguments returns hostname or none
 fn extract_ssh_destination(ssh_args: &[String]) -> Option<String> {
@@ -41,40 +39,6 @@ fn resolve_logging_settings(args: &args::MainArgs, debug_from_config: bool, ssh_
     } else {
         (args.debug || debug_from_config, args.ssh_logging || ssh_log_from_config)
     }
-}
-
-fn pass_key_for_destination_from_hosts(destination: &str, hosts: &[ssh_config::SshHost]) -> Option<String> {
-    hosts.iter().find(|host| host.name == destination).and_then(|host| host.pass_key.clone())
-}
-
-fn pass_key_for_destination(destination: &str) -> Option<String> {
-    let config_path = ssh_config::get_default_ssh_config_path()?;
-    if !config_path.exists() {
-        return None;
-    }
-    let hosts = match ssh_config::parse_ssh_config(&config_path) {
-        Ok(hosts) => hosts,
-        Err(err) => {
-            log_debug!("Failed to parse SSH config for #_pass lookup: {}", err);
-            return None;
-        }
-    };
-    pass_key_for_destination_from_hosts(destination, &hosts)
-}
-
-fn skip_pass_resolution_from_env(value: Option<&str>) -> bool {
-    value.is_some_and(|raw| matches!(raw.trim().to_ascii_lowercase().as_str(), "1" | "true" | "yes"))
-}
-
-fn skip_pass_resolution_for_context(skip_env: Option<&str>, session_name_env: Option<&str>) -> bool {
-    skip_pass_resolution_from_env(skip_env) && session_name_env.is_some_and(|value| !value.trim().is_empty())
-}
-
-fn should_skip_pass_resolution() -> bool {
-    skip_pass_resolution_for_context(
-        std::env::var(SKIP_PASS_RESOLVE_ENV).ok().as_deref(),
-        std::env::var("COSSH_SESSION_NAME").ok().as_deref(),
-    )
 }
 
 fn run_add_pass_cli(pass_name: &str) -> ExitCode {
@@ -152,13 +116,12 @@ fn main() -> Result<ExitCode> {
     }
 
     // Get global settings from config
-    let (debug_from_config, ssh_log_from_config, show_title, pass_cache_ttl) = {
+    let (debug_from_config, ssh_log_from_config, show_title) = {
         match config::get_config().read() {
             Ok(config_guard) => (
                 config_guard.settings.debug_mode,
                 config_guard.settings.ssh_logging,
                 config_guard.settings.show_title,
-                config_guard.settings.pass_cache_ttl,
             ),
             Err(poisoned) => {
                 log_error!("Configuration lock poisoned while reading global settings; continuing with recovered state");
@@ -167,7 +130,6 @@ fn main() -> Result<ExitCode> {
                     config_guard.settings.debug_mode,
                     config_guard.settings.ssh_logging,
                     config_guard.settings.show_title,
-                    config_guard.settings.pass_cache_ttl,
                 )
             }
         }
@@ -249,30 +211,9 @@ fn main() -> Result<ExitCode> {
     log_debug!("Starting configuration file watcher");
     let _watcher = config::config_watcher(args.profile.clone());
 
-    let mut pass_password: Option<String> = None;
-    if should_skip_pass_resolution() {
-        log_debug!("Skipping #_pass resolution due to {}", SKIP_PASS_RESOLVE_ENV);
-    } else if !args.is_non_interactive
-        && let Some(destination) = extract_ssh_destination(&args.ssh_args)
-        && let Some(pass_key) = pass_key_for_destination(&destination)
-    {
-        let mut pass_cache = PassCache::default();
-        let direct_connect_pass_cache_ttl = Duration::from_secs(pass_cache_ttl);
-        match pass::resolve_pass_key_for_direct_connect(&pass_key, &mut pass_cache, direct_connect_pass_cache_ttl) {
-            PassResolveResult::Ready(password) => {
-                pass_password = Some(password);
-                log_debug!("Pass auto-login enabled for destination {}", destination);
-            }
-            PassResolveResult::Fallback(reason) => {
-                log_debug!("Pass auto-login fallback for destination {}: {:?}", destination, reason);
-                eprintln!("{}", pass::fallback_notice(reason));
-            }
-        }
-    }
-
     // Start the SSH process
     log_info!("Launching SSH process handler");
-    let exit_code = process::process_handler(args.ssh_args, args.is_non_interactive, pass_password).map_err(|err| {
+    let exit_code = process::process_handler(args.ssh_args, args.is_non_interactive).map_err(|err| {
         log_error!("Process handler failed: {}", err);
         eprintln!("Process failed: {err}");
         let _ = logger.flush_debug();

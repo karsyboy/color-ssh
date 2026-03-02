@@ -9,7 +9,7 @@ use std::fs;
 use std::io::{self, Write};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
-use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
+use std::time::{Duration, Instant};
 use zeroize::{Zeroize, Zeroizing};
 
 const PASS_TOOL_COMMAND: &str = "sshpass";
@@ -26,9 +26,6 @@ const PASS_KEY_AAD: &[u8] = b"color-ssh/pass-key/v1";
 const PASS_KEY_KDF_MEMORY_KIB: u32 = 64 * 1024;
 const PASS_KEY_KDF_TIME_COST: u32 = 3;
 const PASS_KEY_KDF_PARALLELISM: u32 = 1;
-const DIRECT_CONNECT_CACHE_RECORD_HEADER_LEN: usize = 8;
-const DIRECT_CONNECT_CACHE_DIR: &str = "direct-connect-pass";
-const DIRECT_CONNECT_CACHE_EXTENSION: &str = "cache";
 
 #[derive(Debug, Clone)]
 struct CachedPassword {
@@ -207,26 +204,6 @@ pub fn resolve_pass_key(pass_key: &str, cache: &mut PassCache) -> PassResolveRes
     }
 }
 
-pub fn resolve_pass_key_for_direct_connect(pass_key: &str, cache: &mut PassCache, persistent_cache_ttl: Duration) -> PassResolveResult {
-    if persistent_cache_ttl.is_zero() {
-        clear_direct_connect_cached_password(pass_key);
-        return resolve_pass_key(pass_key, cache);
-    }
-
-    if let Some(password) = read_direct_connect_cached_password(pass_key) {
-        cache.insert(pass_key, password.clone());
-        return PassResolveResult::Ready(password);
-    }
-
-    let resolved = resolve_pass_key(pass_key, cache);
-    if let PassResolveResult::Ready(password) = &resolved
-        && let Err(err) = write_direct_connect_cached_password(pass_key, password, persistent_cache_ttl)
-    {
-        log_debug!("Failed to persist direct-connect pass cache for key {}: {}", pass_key, err);
-    }
-    resolved
-}
-
 pub fn resolve_pass_key_for_tui(pass_key: &str, cache: &mut PassCache) -> PassPromptStatus {
     match preflight_pass_key(pass_key, cache) {
         PassPreflight::Ready(password) => PassPromptStatus::Ready(password),
@@ -309,122 +286,6 @@ where
         }
     }
     Err(PassFallbackReason::DecryptFailedAfterRetries)
-}
-
-fn direct_connect_cache_path(pass_key: &str) -> Option<PathBuf> {
-    if !validate_pass_key_name(pass_key) {
-        return None;
-    }
-    dirs::home_dir().map(|home| direct_connect_cache_path_for_home(&home, pass_key))
-}
-
-fn direct_connect_cache_path_for_home(home: &Path, pass_key: &str) -> PathBuf {
-    home.join(".color-ssh")
-        .join("cache")
-        .join(DIRECT_CONNECT_CACHE_DIR)
-        .join(format!("{pass_key}.{DIRECT_CONNECT_CACHE_EXTENSION}"))
-}
-
-fn unix_timestamp_secs() -> u64 {
-    SystemTime::now().duration_since(UNIX_EPOCH).map(|duration| duration.as_secs()).unwrap_or(0)
-}
-
-fn unix_timestamp_nanos() -> u128 {
-    SystemTime::now().duration_since(UNIX_EPOCH).map(|duration| duration.as_nanos()).unwrap_or(0)
-}
-
-fn encode_direct_connect_cache_record(password: &str, expires_at_unix_secs: u64) -> Vec<u8> {
-    let mut record = Vec::with_capacity(DIRECT_CONNECT_CACHE_RECORD_HEADER_LEN + password.len());
-    record.extend_from_slice(&expires_at_unix_secs.to_le_bytes());
-    record.extend_from_slice(password.as_bytes());
-    record
-}
-
-fn decode_direct_connect_cache_record(record: &[u8], now_unix_secs: u64) -> Option<String> {
-    if record.len() < DIRECT_CONNECT_CACHE_RECORD_HEADER_LEN {
-        return None;
-    }
-
-    let mut expires_at = [0u8; DIRECT_CONNECT_CACHE_RECORD_HEADER_LEN];
-    expires_at.copy_from_slice(&record[..DIRECT_CONNECT_CACHE_RECORD_HEADER_LEN]);
-    let expires_at = u64::from_le_bytes(expires_at);
-    if now_unix_secs >= expires_at {
-        return None;
-    }
-
-    let password_bytes = &record[DIRECT_CONNECT_CACHE_RECORD_HEADER_LEN..];
-    if password_bytes.is_empty() {
-        return None;
-    }
-
-    std::str::from_utf8(password_bytes)
-        .ok()
-        .filter(|password| !password.is_empty())
-        .map(ToString::to_string)
-}
-
-fn read_direct_connect_cached_password(pass_key: &str) -> Option<String> {
-    let cache_path = direct_connect_cache_path(pass_key)?;
-    read_direct_connect_cached_password_from_path(&cache_path, unix_timestamp_secs())
-}
-
-fn read_direct_connect_cached_password_from_path(cache_path: &Path, now_unix_secs: u64) -> Option<String> {
-    let mut record = fs::read(cache_path).ok()?;
-    let decoded = decode_direct_connect_cache_record(&record, now_unix_secs);
-    record.zeroize();
-
-    if decoded.is_none() {
-        let _ = fs::remove_file(cache_path);
-    }
-
-    decoded
-}
-
-fn write_direct_connect_cached_password(pass_key: &str, password: &str, ttl: Duration) -> io::Result<()> {
-    let Some(cache_path) = direct_connect_cache_path(pass_key) else {
-        return Err(io::Error::new(io::ErrorKind::InvalidInput, "invalid pass key name"));
-    };
-    let Some(parent) = cache_path.parent() else {
-        return Err(io::Error::other("invalid direct-connect cache path"));
-    };
-
-    fs::create_dir_all(parent)?;
-    set_restrictive_directory_permissions(parent).map_err(pass_create_error_to_io)?;
-
-    let expires_at = unix_timestamp_secs().saturating_add(ttl.as_secs().max(1));
-    let mut record = encode_direct_connect_cache_record(password, expires_at);
-    let temp_path = cache_path.with_extension(format!(
-        "{DIRECT_CONNECT_CACHE_EXTENSION}.{}.{}.tmp",
-        std::process::id(),
-        unix_timestamp_nanos()
-    ));
-
-    let write_result = (|| -> io::Result<()> {
-        fs::write(&temp_path, &record)?;
-        set_restrictive_file_permissions(&temp_path).map_err(pass_create_error_to_io)?;
-        fs::rename(&temp_path, &cache_path)?;
-        set_restrictive_file_permissions(&cache_path).map_err(pass_create_error_to_io)?;
-        Ok(())
-    })();
-
-    record.zeroize();
-    if write_result.is_err() {
-        let _ = fs::remove_file(&temp_path);
-    }
-    write_result
-}
-
-fn clear_direct_connect_cached_password(pass_key: &str) {
-    if let Some(cache_path) = direct_connect_cache_path(pass_key) {
-        let _ = fs::remove_file(cache_path);
-    }
-}
-
-fn pass_create_error_to_io(err: PassCreateError) -> io::Error {
-    match err {
-        PassCreateError::Io(io_err) => io_err,
-        other => io::Error::other(other.to_string()),
-    }
 }
 
 fn command_available(command: &str, probe_arg: &str) -> bool {

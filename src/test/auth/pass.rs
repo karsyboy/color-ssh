@@ -1,8 +1,6 @@
 use super::*;
 use std::fs;
-use std::path::Path;
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::time::Duration;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 static TEST_COUNTER: AtomicU64 = AtomicU64::new(0);
@@ -211,38 +209,4 @@ fn decrypt_payload_with_wrong_passphrase_fails() {
     let encrypted = encrypt_payload_for_storage(b"top-secret", "enc-passphrase").expect("encrypt payload");
     let result = decrypt_payload_with_passphrase(&encrypted, "wrong");
     assert_eq!(result, Err(DecryptWithPassphraseError::InvalidPassphrase));
-}
-
-#[test]
-fn direct_connect_cache_path_uses_cache_directory_and_extension() {
-    let home = temp_path("direct_connect_cache_path");
-    let path = direct_connect_cache_path_for_home(&home, "shared-key");
-    let expected_suffix = Path::new(".color-ssh").join("cache").join("direct-connect-pass").join("shared-key.cache");
-    assert!(path.ends_with(expected_suffix));
-}
-
-#[test]
-fn direct_connect_cache_record_round_trip_and_expiry_behavior() {
-    let record = encode_direct_connect_cache_record("cached-secret", 200);
-    let valid = decode_direct_connect_cache_record(&record, 199);
-    let expired = decode_direct_connect_cache_record(&record, 200);
-
-    assert_eq!(valid.as_deref(), Some("cached-secret"));
-    assert_eq!(expired, None);
-}
-
-#[test]
-fn write_and_read_direct_connect_cached_password_round_trip() {
-    let root = temp_path("direct_connect_cache_io");
-    let pass_key = "device01";
-    let cache_path = direct_connect_cache_path_for_home(&root, pass_key);
-    fs::create_dir_all(cache_path.parent().expect("cache parent")).expect("create cache parent");
-
-    let record = encode_direct_connect_cache_record("cached-secret", unix_timestamp_secs() + Duration::from_secs(60).as_secs());
-    fs::write(&cache_path, &record).expect("seed cache file");
-
-    let loaded = read_direct_connect_cached_password_from_path(&cache_path, unix_timestamp_secs());
-    assert_eq!(loaded.as_deref(), Some("cached-secret"));
-
-    let _ = fs::remove_dir_all(root);
 }

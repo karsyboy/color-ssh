@@ -1,6 +1,4 @@
 use crate::{Result, command_path, config, highlighter, log, log_debug, log_error, log_info};
-#[cfg(unix)]
-use nix::fcntl::{FcntlArg, FdFlag, fcntl};
 use std::{
     io::{self, Read, Write},
     process::{Command, ExitCode, Stdio},
@@ -10,11 +8,6 @@ use std::{
     },
     thread,
     time::{Duration, Instant},
-};
-#[cfg(unix)]
-use std::{
-    os::{fd::AsRawFd, unix::net::UnixStream},
-    process::Child,
 };
 
 const STDOUT_FLUSH_BYTES: usize = 32 * 1024;
@@ -62,128 +55,18 @@ fn map_exit_code(success: bool, code: Option<i32>) -> ExitCode {
     }
 }
 
-#[cfg(unix)]
-fn write_sshpass_secret_or_terminate(command_spec: &mut PreparedSshCommand, child: &mut Child) -> io::Result<()> {
-    let Some(transport) = command_spec.sshpass_transport.as_mut() else {
-        return Ok(());
-    };
-    transport.close_parent_read_end();
-
-    if let Err(err) = transport.write_secret() {
-        let _ = child.kill();
-        let _ = child.wait();
-        return Err(err);
-    }
-
-    Ok(())
-}
-
-#[cfg(not(unix))]
-fn write_sshpass_secret_or_terminate(_command_spec: &mut PreparedSshCommand, _child: &mut std::process::Child) -> io::Result<()> {
-    Ok(())
-}
-
-#[cfg(unix)]
-#[derive(Debug)]
-struct SshPassFdTransport {
-    read_end: Option<UnixStream>,
-    read_fd: i32,
-    write_end: Option<UnixStream>,
-    secret: Option<Vec<u8>>,
-}
-
-#[cfg(unix)]
-impl SshPassFdTransport {
-    fn new(secret: String) -> io::Result<Self> {
-        let (read_end, write_end) = UnixStream::pair()?;
-        // Keep this descriptor across exec so `sshpass -d <fd>` can read it.
-        clear_close_on_exec(&read_end)?;
-        let read_fd = read_end.as_raw_fd();
-        Ok(Self {
-            read_end: Some(read_end),
-            read_fd,
-            write_end: Some(write_end),
-            secret: Some(secret.into_bytes()),
-        })
-    }
-
-    fn sshpass_fd(&self) -> i32 {
-        self.read_fd
-    }
-
-    fn close_parent_read_end(&mut self) {
-        self.read_end.take();
-    }
-
-    fn write_secret(&mut self) -> io::Result<()> {
-        let mut secret = self.secret.take().unwrap_or_default();
-        let result = (|| -> io::Result<()> {
-            let Some(mut writer) = self.write_end.take() else {
-                return Err(io::Error::other("sshpass password stream already consumed"));
-            };
-            writer.write_all(&secret)?;
-            writer.write_all(b"\n")?;
-            writer.flush()
-        })();
-        secret.fill(0);
-        secret.clear();
-        result
-    }
-}
-
-#[cfg(unix)]
-fn clear_close_on_exec(read_end: &UnixStream) -> io::Result<()> {
-    let fd_flags = fcntl(read_end, FcntlArg::F_GETFD).map_err(errno_to_io_error)?;
-    let mut fd_flags = FdFlag::from_bits_truncate(fd_flags);
-    if fd_flags.contains(FdFlag::FD_CLOEXEC) {
-        fd_flags.remove(FdFlag::FD_CLOEXEC);
-        fcntl(read_end, FcntlArg::F_SETFD(fd_flags)).map_err(errno_to_io_error)?;
-    }
-    Ok(())
-}
-
-#[cfg(unix)]
-fn errno_to_io_error(err: nix::errno::Errno) -> io::Error {
-    io::Error::from_raw_os_error(err as i32)
-}
-
 #[derive(Debug)]
 struct PreparedSshCommand {
     program: String,
     args: Vec<String>,
     env: Vec<(String, String)>,
-    #[cfg(unix)]
-    sshpass_transport: Option<SshPassFdTransport>,
 }
 
-fn build_ssh_command(args: &[String], pass_password: Option<String>) -> io::Result<PreparedSshCommand> {
-    match pass_password {
-        Some(password) => {
-            #[cfg(unix)]
-            {
-                let transport = SshPassFdTransport::new(password)?;
-                let mut wrapped_args = vec!["-d".to_string(), transport.sshpass_fd().to_string(), "ssh".to_string()];
-                wrapped_args.extend(args.iter().cloned());
-                Ok(PreparedSshCommand {
-                    program: "sshpass".to_string(),
-                    args: wrapped_args,
-                    env: Vec::new(),
-                    sshpass_transport: Some(transport),
-                })
-            }
-            #[cfg(not(unix))]
-            {
-                let _ = password;
-                Err(io::Error::other("sshpass descriptor-based password transport requires a unix target"))
-            }
-        }
-        None => Ok(PreparedSshCommand {
-            program: "ssh".to_string(),
-            args: args.to_vec(),
-            env: Vec::new(),
-            #[cfg(unix)]
-            sshpass_transport: None,
-        }),
+fn build_ssh_command(args: &[String]) -> PreparedSshCommand {
+    PreparedSshCommand {
+        program: "ssh".to_string(),
+        args: args.to_vec(),
+        env: Vec::new(),
     }
 }
 
@@ -198,25 +81,19 @@ fn command_from_spec(spec: &PreparedSshCommand) -> io::Result<Command> {
 }
 
 /// Main process handler for SSH subprocess returns an exit code based on the SSH process status
-pub fn process_handler(process_args: Vec<String>, is_non_interactive: bool, pass_password: Option<String>) -> Result<ExitCode> {
+pub fn process_handler(process_args: Vec<String>, is_non_interactive: bool) -> Result<ExitCode> {
     log_info!("Starting SSH process with args: {:?}", process_args);
     log_debug!("Non-interactive mode: {}", is_non_interactive);
-    if pass_password.is_some() {
-        log_debug!("Password auto-login path enabled for this launch");
-    }
 
-    let mut command_spec = build_ssh_command(&process_args, pass_password).map_err(|err| {
-        log_error!("Failed to prepare SSH command: {}", err);
-        err
-    })?;
+    let command_spec = build_ssh_command(&process_args);
 
     if is_non_interactive {
         log_info!("Using passthrough mode for non-interactive command");
-        return spawn_ssh_passthrough(&mut command_spec);
+        return spawn_ssh_passthrough(&command_spec);
     }
 
     // Spawn the SSH process
-    let mut child = spawn_ssh(&mut command_spec).map_err(|err| {
+    let mut child = spawn_ssh(&command_spec).map_err(|err| {
         log_error!("Failed to spawn SSH process: {}", err);
         err
     })?;
@@ -463,10 +340,10 @@ pub fn process_handler(process_args: Vec<String>, is_non_interactive: bool, pass
 }
 
 /// Spawns an SSH process with the provided arguments and returns the child process
-fn spawn_ssh(command_spec: &mut PreparedSshCommand) -> std::io::Result<std::process::Child> {
+fn spawn_ssh(command_spec: &PreparedSshCommand) -> std::io::Result<std::process::Child> {
     log_debug!("Spawning {} with args: {:?}", command_spec.program, command_spec.args);
 
-    let mut child = command_from_spec(command_spec)?
+    let child = command_from_spec(command_spec)?
         .stdin(Stdio::inherit())
         .stdout(Stdio::piped())
         .stderr(Stdio::inherit())
@@ -476,17 +353,12 @@ fn spawn_ssh(command_spec: &mut PreparedSshCommand) -> std::io::Result<std::proc
             err
         })?;
 
-    write_sshpass_secret_or_terminate(command_spec, &mut child).map_err(|err| {
-        log_error!("Failed to write sshpass secret: {}", err);
-        err
-    })?;
-
     log_debug!("SSH process spawned (PID: {:?})", child.id());
     Ok(child)
 }
 
 /// Spawns SSH for non-interactive commands with direct stdout passthrough returns SSH exit code
-fn spawn_ssh_passthrough(command_spec: &mut PreparedSshCommand) -> Result<ExitCode> {
+fn spawn_ssh_passthrough(command_spec: &PreparedSshCommand) -> Result<ExitCode> {
     log_debug!("Spawning {} in passthrough mode with args: {:?}", command_spec.program, command_spec.args);
 
     let mut child = command_from_spec(command_spec)?
@@ -498,11 +370,6 @@ fn spawn_ssh_passthrough(command_spec: &mut PreparedSshCommand) -> Result<ExitCo
             log_error!("Failed to execute SSH command in passthrough mode: {}", err);
             err
         })?;
-
-    write_sshpass_secret_or_terminate(command_spec, &mut child).map_err(|err| {
-        log_error!("Failed to write sshpass secret in passthrough mode: {}", err);
-        err
-    })?;
 
     let status = child.wait().map_err(|err| {
         log_error!("Failed to wait for SSH passthrough process: {}", err);

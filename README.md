@@ -28,7 +28,7 @@
 - Configuration hot reload
 - Mutliple Profile Support
 - Configurable rules using regex matching
-- SSH auto login with sshpass
+- TUI password auto login with sshpass
 
 
 ## Installation
@@ -100,10 +100,6 @@ Configuration files are looked for in the following order:
 
 If no configuration file is found the default configuration will be created at `~/.color-ssh/cossh-config.yaml`.
 
-Common `settings` keys:
-
-- `pass_cache_ttl`: cache `#_pass` direct-connect unlocks for this many seconds (`0` disables persistent cache).
-
 #### Color-SSH TUI Metadata in `~/.ssh/config`
 
 The interactive session manger supports metadata comments inside the SSH config file.
@@ -114,6 +110,8 @@ The interactive session manger supports metadata comments inside the SSH config 
 | `#_Profile <name>` | Opens that host using the matching cossh profile (`[profile].cossh-config.yaml`). |
 | `#_pass <name>` | Decrypts `~/.color-ssh/keys/<name>.key` and uses password auto-login for that host. |
 | `#_hidden <true\|yes\|1>` | Hides the host from the interactive host list. |
+
+`#_pass` auto-login is only used by the TUI. Direct launches like `cossh user@host` always use plain `ssh`.
 
 ```sshconfig
 Host switch01

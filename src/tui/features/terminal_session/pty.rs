@@ -389,7 +389,6 @@ impl SessionManager {
 
         cmd.arg(&host.name);
         cmd.env("COSSH_SESSION_NAME", tab_title);
-        cmd.env("COSSH_SKIP_PASS_RESOLVE", "1");
 
         // Pass profile if specified in .ssh/config via #_Profile
         if let Some(profile) = &host.profile {
