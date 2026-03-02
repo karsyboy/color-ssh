@@ -2,6 +2,7 @@
 
 use crate::auth::{agent, ipc::UnlockPolicy};
 use crate::config;
+use crate::log_debug;
 use crate::tui::{SessionManager, VaultUnlockAction, VaultUnlockState};
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use zeroize::Zeroize;
@@ -16,6 +17,7 @@ fn current_unlock_policy() -> UnlockPolicy {
 
 impl SessionManager {
     pub(crate) fn open_vault_unlock(&mut self, entry_name: String, action: VaultUnlockAction) {
+        log_debug!("Opening TUI password vault unlock prompt");
         self.quick_connect = None;
         self.vault_unlock = Some(VaultUnlockState::new(entry_name, action));
         self.mark_ui_dirty();
@@ -113,9 +115,11 @@ impl SessionManager {
 
         match unlock_result {
             Ok(_) => {
+                log_debug!("TUI password vault unlock succeeded");
                 self.complete_vault_unlock_action(action, Some(entry_name), None);
             }
             Err(agent::AgentError::InvalidMasterPassword) => {
+                log_debug!("TUI password vault unlock failed due to invalid master password");
                 prompt.attempts += 1;
                 if prompt.attempts >= prompt.max_attempts {
                     self.complete_vault_unlock_action(
@@ -131,6 +135,7 @@ impl SessionManager {
                 self.vault_unlock = Some(prompt);
             }
             Err(agent::AgentError::VaultNotInitialized) => {
+                log_debug!("TUI password vault unlock failed because the vault is not initialized");
                 self.complete_vault_unlock_action(
                     action,
                     None,
@@ -138,6 +143,7 @@ impl SessionManager {
                 );
             }
             Err(err) => {
+                log_debug!("TUI password vault unlock failed: {}", err);
                 self.complete_vault_unlock_action(
                     action,
                     None,

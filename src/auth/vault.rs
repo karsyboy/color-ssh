@@ -250,6 +250,10 @@ pub fn vault_exists() -> Result<bool, VaultError> {
     Ok(VaultPaths::resolve_default()?.metadata_path().is_file())
 }
 
+pub fn list_entries() -> Result<Vec<String>, VaultError> {
+    list_entries_with_paths(&VaultPaths::resolve_default()?)
+}
+
 pub fn initialize_vault(master_password: &str) -> Result<(), VaultError> {
     initialize_vault_with_paths(&VaultPaths::resolve_default()?, master_password)
 }
@@ -312,6 +316,40 @@ pub(crate) fn rotate_master_password_with_paths(paths: &VaultPaths, current_pass
     write_json_atomic(&metadata_path, &updated)?;
     set_restrictive_file_permissions(&metadata_path)?;
     Ok(())
+}
+
+pub(crate) fn list_entries_with_paths(paths: &VaultPaths) -> Result<Vec<String>, VaultError> {
+    if !paths.metadata_path().is_file() {
+        return Err(VaultError::VaultNotInitialized);
+    }
+
+    let entries_dir = paths.entries_dir();
+    if !entries_dir.exists() {
+        return Ok(Vec::new());
+    }
+    if !entries_dir.is_dir() {
+        return Err(VaultError::InvalidVaultFormat("entries path was not a directory".to_string()));
+    }
+
+    let mut entries = Vec::new();
+    for entry in fs::read_dir(entries_dir)? {
+        let entry = entry?;
+        let path = entry.path();
+        if !path.is_file() || path.extension().and_then(|extension| extension.to_str()) != Some("json") {
+            continue;
+        }
+
+        let Some(name) = path.file_stem().and_then(|stem| stem.to_str()) else {
+            return Err(VaultError::InvalidVaultFormat("entry file name was not valid UTF-8".to_string()));
+        };
+        if !validate_entry_name(name) {
+            return Err(VaultError::InvalidVaultFormat(format!("invalid entry file name: {name}")));
+        }
+        entries.push(name.to_string());
+    }
+
+    entries.sort_unstable();
+    Ok(entries)
 }
 
 fn build_metadata_from_data_key(master_password: &str, data_key: &[u8; DATA_KEY_LEN]) -> Result<VaultMetadata, VaultError> {

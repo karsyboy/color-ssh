@@ -99,6 +99,7 @@ Commands:
   init                 Initialize the password vault
   add                  Create or replace a password vault entry interactively
   remove               Remove a password vault entry
+  list                 List password vault entries
   unlock               Unlock the shared password vault
   lock                 Lock the shared password vault
   status               Show shared password vault status

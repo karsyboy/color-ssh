@@ -1,4 +1,4 @@
-use crate::command_path;
+use crate::{command_path, log_debug};
 use std::io;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -27,6 +27,7 @@ pub fn direct_backend() -> PasswordTransportBackend {
 
 pub fn configure_internal_askpass_env(command_env: &mut Vec<(String, String)>, entry_name: &str) -> io::Result<()> {
     let cossh_path = command_path::cossh_path()?;
+    log_debug!("Configuring internal askpass helper for vault entry '{}'", entry_name);
     command_env.push((SSH_ASKPASS_ENV.to_string(), cossh_path.to_string_lossy().into_owned()));
     command_env.push((SSH_ASKPASS_REQUIRE_ENV.to_string(), SSH_ASKPASS_FORCE.to_string()));
     command_env.push((INTERNAL_ASKPASS_MODE_ENV.to_string(), "1".to_string()));

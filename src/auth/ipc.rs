@@ -1,4 +1,5 @@
 use crate::auth::vault::VaultPaths;
+use crate::log_debug;
 #[cfg(unix)]
 use interprocess::local_socket::{GenericFilePath, ToFsName};
 #[cfg(windows)]
@@ -38,6 +39,12 @@ pub(crate) struct AgentEndpoint {
     identifier: String,
     #[cfg(unix)]
     socket_path: PathBuf,
+}
+
+impl AgentEndpoint {
+    fn debug_label(&self) -> &str {
+        &self.identifier
+    }
 }
 
 #[derive(Debug)]
@@ -91,6 +98,17 @@ pub enum AgentRequestPayload {
     Lock,
 }
 
+impl AgentRequestPayload {
+    pub fn debug_name(&self) -> &'static str {
+        match self {
+            Self::Status => "status",
+            Self::Unlock { .. } => "unlock",
+            Self::GetSecret { .. } => "get_secret",
+            Self::Lock => "lock",
+        }
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct AgentRequest {
     pub payload: AgentRequestPayload,
@@ -115,6 +133,7 @@ impl AgentResponse {
 
 pub fn bind_listener(paths: &VaultPaths) -> io::Result<ListenerBindResult> {
     remove_legacy_state_file(paths);
+    log_debug!("Binding password vault agent endpoint");
     match create_listener(paths) {
         Ok(listener) => Ok(ListenerBindResult::Bound(listener)),
         Err(err) if is_address_in_use(&err) => handle_bind_conflict(paths, err),
@@ -123,6 +142,7 @@ pub fn bind_listener(paths: &VaultPaths) -> io::Result<ListenerBindResult> {
 }
 
 pub fn send_request(paths: &VaultPaths, payload: AgentRequestPayload) -> io::Result<AgentResponse> {
+    log_debug!("Opening IPC request '{}' to password vault agent", payload.debug_name());
     let mut stream = connect(paths)?;
     let request = AgentRequest { payload };
     write_json_line(&mut stream, &request)?;
@@ -131,12 +151,14 @@ pub fn send_request(paths: &VaultPaths, payload: AgentRequestPayload) -> io::Res
 
 pub fn connect(paths: &VaultPaths) -> io::Result<LocalSocketStream> {
     let endpoint = agent_endpoint(paths);
+    log_debug!("Connecting to password vault agent endpoint '{}'", endpoint.debug_label());
     let stream = connect_to_endpoint(&endpoint)?;
     remove_legacy_state_file(paths);
     Ok(stream)
 }
 
 pub fn cleanup_endpoint(paths: &VaultPaths) -> io::Result<()> {
+    log_debug!("Cleaning password vault agent endpoint resources");
     remove_legacy_state_file(paths);
     cleanup_local_endpoint(paths)
 }
@@ -155,12 +177,14 @@ fn is_address_in_use(err: &io::Error) -> bool {
 
 fn handle_bind_conflict(paths: &VaultPaths, original_err: io::Error) -> io::Result<ListenerBindResult> {
     if connect(paths).is_ok() {
+        log_debug!("Password vault agent endpoint already has a live server");
         return Ok(ListenerBindResult::AlreadyRunning);
     }
 
     #[cfg(unix)]
     {
         if remove_stale_socket_file(paths)? {
+            log_debug!("Removed stale password vault agent Unix socket; retrying bind");
             return match create_listener(paths) {
                 Ok(listener) => Ok(ListenerBindResult::Bound(listener)),
                 Err(err) if is_address_in_use(&err) && connect(paths).is_ok() => Ok(ListenerBindResult::AlreadyRunning),
@@ -237,6 +261,7 @@ fn fnv1a_64(bytes: &[u8]) -> u64 {
 fn remove_legacy_state_file(paths: &VaultPaths) {
     let path = legacy_state_file_path(paths);
     if path.exists() {
+        log_debug!("Removing obsolete password vault agent state file '{}'", path.display());
         let _ = fs::remove_file(path);
     }
 }

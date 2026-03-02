@@ -61,3 +61,28 @@ fn rotate_master_password_rewraps_data_key() {
 
     let _ = fs::remove_dir_all(paths.base_dir());
 }
+
+#[test]
+fn list_entries_returns_sorted_entry_names() {
+    let paths = temp_paths("list_entries");
+    initialize_vault_with_paths(&paths, "master-pass").expect("initialize vault");
+    let unlocked = unlock_with_password_and_paths(&paths, "master-pass").expect("unlock vault");
+    unlocked.store_secret("z_last", "top-secret").expect("store z entry");
+    unlocked.store_secret("a_first", "top-secret").expect("store a entry");
+    unlocked.store_secret("middle_1", "top-secret").expect("store middle entry");
+
+    let entries = list_entries_with_paths(&paths).expect("list entries");
+    assert_eq!(entries, vec!["a_first".to_string(), "middle_1".to_string(), "z_last".to_string()]);
+
+    let _ = fs::remove_dir_all(paths.base_dir());
+}
+
+#[test]
+fn list_entries_requires_initialized_vault() {
+    let paths = temp_paths("list_uninitialized");
+
+    let result = list_entries_with_paths(&paths);
+    assert!(matches!(result, Err(VaultError::VaultNotInitialized)));
+
+    let _ = fs::remove_dir_all(paths.base_dir());
+}

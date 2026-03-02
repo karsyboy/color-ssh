@@ -136,6 +136,7 @@ fn current_unlock_policy() -> UnlockPolicy {
 fn unlock_agent_interactively(client: &agent::AgentClient) -> io::Result<()> {
     let policy = current_unlock_policy();
     for attempt in 1..=3 {
+        log_debug!("Prompting for password vault unlock (attempt {} of 3)", attempt);
         let mut master_password = rpassword::prompt_password("Enter vault master password: ")?;
         if master_password.is_empty() {
             master_password.zeroize();
@@ -145,10 +146,12 @@ fn unlock_agent_interactively(client: &agent::AgentClient) -> io::Result<()> {
         match client.unlock(&master_password, policy.clone()) {
             Ok(_) => {
                 master_password.zeroize();
+                log_debug!("Interactive password vault unlock succeeded");
                 return Ok(());
             }
             Err(agent::AgentError::InvalidMasterPassword) => {
                 master_password.zeroize();
+                log_debug!("Interactive password vault unlock failed due to invalid master password");
                 if attempt == 3 {
                     return Err(io::Error::new(
                         io::ErrorKind::PermissionDenied,
@@ -166,6 +169,7 @@ fn unlock_agent_interactively(client: &agent::AgentClient) -> io::Result<()> {
             }
             Err(err) => {
                 master_password.zeroize();
+                log_debug!("Interactive password vault unlock failed: {}", err);
                 return Err(io::Error::new(io::ErrorKind::PermissionDenied, err.to_string()));
             }
         }
@@ -181,18 +185,27 @@ fn build_ssh_command(args: &[String], explicit_pass_entry: Option<&str>) -> io::
     let mut command = build_plain_ssh_command(args);
     let auth_settings = config::auth_settings();
     if !auth_settings.direct_password_autologin {
+        log_debug!("Direct password auto-login disabled in auth settings");
         return Ok(command);
     }
 
+    let pass_entry_source = if explicit_pass_entry.is_some() {
+        "direct override"
+    } else {
+        "ssh config lookup"
+    };
     let Some(pass_entry_name) = explicit_pass_entry.map(|name| name.to_string()).or_else(|| {
         let destination = extract_ssh_destination(args)?;
         let hosts = crate::ssh_config::load_ssh_host_tree().ok()?.hosts;
         resolve_pass_entry_from_hosts(&destination, None, &hosts)
     }) else {
+        log_debug!("No password vault entry resolved for direct SSH launch");
         return Ok(command);
     };
+    log_debug!("Resolved password vault entry for direct SSH launch via {}", pass_entry_source);
 
     if !vault::validate_entry_name(&pass_entry_name) {
+        log_debug!("Resolved password vault entry name was invalid");
         command.fallback_notice = Some(
             "Password auto-login is unavailable because the requested password entry name is invalid; continuing with the standard SSH password prompt."
                 .to_string(),
@@ -204,6 +217,7 @@ fn build_ssh_command(args: &[String], explicit_pass_entry: Option<&str>) -> io::
     let mut secret = match client.get_secret(&pass_entry_name) {
         Ok(secret) => secret,
         Err(agent::AgentError::Locked) => {
+            log_debug!("Password vault was locked during direct SSH launch");
             if !io::stdin().is_terminal() {
                 return Err(io::Error::new(
                     io::ErrorKind::PermissionDenied,
@@ -211,11 +225,13 @@ fn build_ssh_command(args: &[String], explicit_pass_entry: Option<&str>) -> io::
                 ));
             }
             unlock_agent_interactively(&client)?;
+            log_debug!("Retrying password vault entry lookup after unlock");
             client
                 .get_secret(&pass_entry_name)
                 .map_err(|err| io::Error::new(io::ErrorKind::PermissionDenied, err.to_string()))?
         }
         Err(agent::AgentError::EntryNotFound) => {
+            log_debug!("Password vault entry '{}' was not found", pass_entry_name);
             command.fallback_notice = Some(format!(
                 "Password auto-login is unavailable because vault entry '{}' was not found; continuing with the standard SSH password prompt.",
                 pass_entry_name
@@ -223,6 +239,7 @@ fn build_ssh_command(args: &[String], explicit_pass_entry: Option<&str>) -> io::
             return Ok(command);
         }
         Err(agent::AgentError::VaultNotInitialized) => {
+            log_debug!("Password vault is not initialized during direct SSH launch");
             command.fallback_notice = Some(
                 "Password auto-login is unavailable because the password vault is not initialized; continuing with the standard SSH password prompt."
                     .to_string(),
@@ -230,6 +247,7 @@ fn build_ssh_command(args: &[String], explicit_pass_entry: Option<&str>) -> io::
             return Ok(command);
         }
         Err(err) => {
+            log_debug!("Password vault lookup failed during direct SSH launch: {}", err);
             command.fallback_notice = Some(format!(
                 "Password auto-login is unavailable because the password vault could not be queried ({err}); continuing with the standard SSH password prompt."
             ));
@@ -241,18 +259,21 @@ fn build_ssh_command(args: &[String], explicit_pass_entry: Option<&str>) -> io::
     match backend {
         transport::PasswordTransportBackend::UnsupportedPlatform => {
             secret.zeroize();
+            log_debug!("Password auto-login transport unsupported on this platform");
             command.fallback_notice = Some(transport::unsupported_transport_notice());
             Ok(command)
         }
         transport::PasswordTransportBackend::InternalAskpass => {
             if let Err(err) = transport::configure_internal_askpass_env(&mut command.env, &pass_entry_name) {
                 secret.zeroize();
+                log_debug!("Failed to configure internal askpass helper: {}", err);
                 command.fallback_notice = Some(format!(
                     "Password auto-login is unavailable because the internal askpass helper could not be configured ({err}); continuing with the standard SSH password prompt."
                 ));
                 return Ok(command);
             }
             secret.zeroize();
+            log_debug!("Configured internal askpass helper for direct SSH launch");
             Ok(command)
         }
     }

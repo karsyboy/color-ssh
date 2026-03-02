@@ -11,6 +11,7 @@ pub enum VaultCommand {
     Init,
     AddPass(String),
     RemovePass(String),
+    List,
     Unlock,
     Lock,
     Status,
@@ -133,6 +134,7 @@ fn build_cli_command() -> Command {
                             .value_parser(clap::builder::ValueParser::new(parse_pass_entry_arg)),
                     ),
                 )
+                .subcommand(Command::new("list").about("List password vault entries"))
                 .subcommand(Command::new("unlock").about("Unlock the shared password vault"))
                 .subcommand(Command::new("lock").about("Lock the shared password vault"))
                 .subcommand(Command::new("status").about("Show shared password vault status"))
@@ -172,6 +174,7 @@ fn parse_vault_command(matches: &clap::ArgMatches) -> Option<VaultCommand> {
         Some(("init", _)) => Some(VaultCommand::Init),
         Some(("add", add_pass_matches)) => add_pass_matches.get_one::<String>("name").cloned().map(VaultCommand::AddPass),
         Some(("remove", remove_pass_matches)) => remove_pass_matches.get_one::<String>("name").cloned().map(VaultCommand::RemovePass),
+        Some(("list", _)) => Some(VaultCommand::List),
         Some(("unlock", _)) => Some(VaultCommand::Unlock),
         Some(("lock", _)) => Some(VaultCommand::Lock),
         Some(("status", _)) => Some(VaultCommand::Status),
@@ -227,6 +230,7 @@ where
 /// - `vault init` - Initialize the password vault
 /// - `vault add <name>` - Create or update a password vault entry interactively
 /// - `vault remove <name>` - Remove a password vault entry
+/// - `vault list` - List current password vault entries
 /// - `vault unlock` - Unlock the shared password vault
 /// - `vault lock` - Lock the shared password vault
 /// - `vault status` - Show shared password vault status
@@ -240,6 +244,7 @@ where
 /// cossh -d                           # Launch interactive session manager with debug enabled
 /// cossh vault init                   # Initialize the password vault
 /// cossh vault add office_fw     # Create/update password vault entry
+/// cossh vault list                   # List password vault entries
 /// cossh vault unlock                 # Unlock the shared password vault
 /// cossh -d user@example.com          # Debug mode enabled
 /// cossh --pass-entry office_fw user@example.com

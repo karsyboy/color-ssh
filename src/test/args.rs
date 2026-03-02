@@ -78,6 +78,16 @@ fn parses_vault_add_pass_with_debug() {
 }
 
 #[test]
+fn parses_vault_list_mode() {
+    let cmd = build_cli_command();
+    let parsed = parse_main_args_from(&cmd, ["cossh", "vault", "list"]);
+
+    assert_eq!(parsed.vault_command, Some(VaultCommand::List));
+    assert!(!parsed.interactive);
+    assert!(parsed.ssh_args.is_empty());
+}
+
+#[test]
 fn parses_vault_init_unlock_and_status_modes() {
     let cmd = build_cli_command();
 
