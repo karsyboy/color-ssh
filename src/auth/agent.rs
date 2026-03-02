@@ -1,6 +1,7 @@
 use crate::auth::ipc::{self, AgentRequestPayload, AgentResponse, UnlockPolicy, VaultStatus};
 use crate::auth::vault::{self, UnlockedVault, VaultError, VaultPaths};
 use crate::command_path;
+use interprocess::local_socket::traits::Listener as _;
 use std::fmt;
 use std::io;
 use std::process::{Command, Stdio};
@@ -11,7 +12,7 @@ use zeroize::Zeroize;
 const AGENT_STARTUP_TIMEOUT: Duration = Duration::from_secs(2);
 const AGENT_STARTUP_POLL_INTERVAL: Duration = Duration::from_millis(50);
 
-pub use crate::auth::ipc::{AgentConnectionInfo, AgentRequest, UnlockPolicy as AgentUnlockPolicy, VaultStatus as AgentVaultStatus};
+pub use crate::auth::ipc::{AgentRequest, UnlockPolicy as AgentUnlockPolicy, VaultStatus as AgentVaultStatus};
 
 #[derive(Debug)]
 pub enum AgentError {
@@ -21,7 +22,6 @@ pub enum AgentError {
     EntryNotFound,
     InvalidMasterPassword,
     VaultNotInitialized,
-    Unauthorized,
     Protocol(String),
 }
 
@@ -34,7 +34,6 @@ impl fmt::Display for AgentError {
             Self::EntryNotFound => write!(f, "password vault entry was not found"),
             Self::InvalidMasterPassword => write!(f, "invalid master password"),
             Self::VaultNotInitialized => write!(f, "password vault is not initialized"),
-            Self::Unauthorized => write!(f, "password vault agent rejected the request"),
             Self::Protocol(message) => write!(f, "{message}"),
         }
     }
@@ -108,7 +107,6 @@ impl AgentClient {
         match ipc::send_request(&self.paths, payload.clone()) {
             Ok(response) => Ok(response),
             Err(first_err) if auto_start => {
-                let _ = ipc::remove_state_file(&self.paths);
                 self.spawn_server()?;
                 ipc::send_request(&self.paths, payload)
                     .map_err(|second_err| AgentError::Protocol(format!("failed to contact password vault agent after restart: {first_err}; {second_err}")))
@@ -232,25 +230,16 @@ impl AgentRuntime {
     }
 }
 
-struct StateFileGuard {
-    paths: VaultPaths,
-}
-
-impl Drop for StateFileGuard {
-    fn drop(&mut self) {
-        let _ = ipc::remove_state_file(&self.paths);
-    }
-}
-
 pub fn run_server() -> Result<(), AgentError> {
     let paths = VaultPaths::resolve_default()?;
-    let (listener, state) = ipc::bind_loopback_listener()?;
-    ipc::write_state(&paths, &state)?;
-    let _state_guard = StateFileGuard { paths: paths.clone() };
+    let listener = match ipc::bind_listener(&paths)? {
+        ipc::ListenerBindResult::Bound(listener) => listener,
+        ipc::ListenerBindResult::AlreadyRunning => return Ok(()),
+    };
     let mut runtime = AgentRuntime::new();
 
     loop {
-        let (mut stream, _) = match listener.accept() {
+        let mut stream = match listener.accept() {
             Ok(connection) => connection,
             Err(err) if err.kind() == io::ErrorKind::Interrupted => continue,
             Err(err) => return Err(AgentError::Io(err)),
@@ -270,20 +259,12 @@ pub fn run_server() -> Result<(), AgentError> {
         };
 
         runtime.expire_if_needed();
-        let response = handle_request(&paths, &state.token, &mut runtime, request);
+        let response = handle_request(&paths, &mut runtime, request);
         let _ = ipc::write_response(&mut stream, &response);
     }
 }
 
-fn handle_request(paths: &VaultPaths, expected_token: &str, runtime: &mut AgentRuntime, request: ipc::AgentRequest) -> AgentResponse {
-    if request.token != expected_token {
-        return AgentResponse::Error {
-            status: runtime.status(paths),
-            code: "unauthorized".to_string(),
-            message: "password vault agent rejected the request".to_string(),
-        };
-    }
-
+fn handle_request(paths: &VaultPaths, runtime: &mut AgentRuntime, request: ipc::AgentRequest) -> AgentResponse {
     match request.payload {
         AgentRequestPayload::Status => AgentResponse::Status { status: runtime.status(paths) },
         AgentRequestPayload::Lock => {
@@ -347,7 +328,6 @@ fn map_remote_error(code: &str, message: String) -> AgentError {
         "entry_not_found" => AgentError::EntryNotFound,
         "invalid_master_password" => AgentError::InvalidMasterPassword,
         "vault_not_initialized" => AgentError::VaultNotInitialized,
-        "unauthorized" => AgentError::Unauthorized,
         "invalid_entry_name" | "vault_error" => AgentError::Protocol(message),
         _ => AgentError::Protocol(message),
     }

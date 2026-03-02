@@ -16,7 +16,6 @@ const VAULT_METADATA_FILENAME: &str = "metadata.json";
 const VAULT_ENTRIES_DIRNAME: &str = "entries";
 const VAULT_DIRNAME: &str = "vault";
 const RUN_DIRNAME: &str = "run";
-const AGENT_STATE_FILENAME: &str = "agent-state.json";
 const DATA_KEY_LEN: usize = 32;
 const KDF_SALT_LEN: usize = 16;
 const WRAPPED_KEY_NONCE_LEN: usize = 24;
@@ -131,10 +130,6 @@ impl VaultPaths {
 
     pub fn run_dir(&self) -> PathBuf {
         self.base_dir.join(RUN_DIRNAME)
-    }
-
-    pub fn agent_state_path(&self) -> PathBuf {
-        self.run_dir().join(AGENT_STATE_FILENAME)
     }
 }
 

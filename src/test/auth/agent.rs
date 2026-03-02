@@ -23,22 +23,6 @@ fn runtime_expires_when_idle_timeout_elapses() {
 }
 
 #[test]
-fn handle_request_rejects_invalid_token() {
-    let paths = temp_paths("invalid_token");
-    initialize_vault_with_paths(&paths, "master-pass").expect("initialize vault");
-    let mut runtime = AgentRuntime::new();
-    let request = AgentRequest {
-        token: "wrong".to_string(),
-        payload: AgentRequestPayload::Status,
-    };
-
-    let response = handle_request(&paths, "expected", &mut runtime, request);
-    assert!(matches!(response, AgentResponse::Error { code, .. } if code == "unauthorized"));
-
-    let _ = fs::remove_dir_all(paths.base_dir());
-}
-
-#[test]
 fn handle_request_unlocks_and_fetches_secret() {
     let paths = temp_paths("unlock_fetch");
     initialize_vault_with_paths(&paths, "master-pass").expect("initialize vault");
@@ -47,20 +31,18 @@ fn handle_request_unlocks_and_fetches_secret() {
 
     let mut runtime = AgentRuntime::new();
     let unlock = AgentRequest {
-        token: "token".to_string(),
         payload: AgentRequestPayload::Unlock {
             master_password: "master-pass".to_string(),
             policy: UnlockPolicy::new(900, 28_800),
         },
     };
-    let unlock_response = handle_request(&paths, "token", &mut runtime, unlock);
+    let unlock_response = handle_request(&paths, &mut runtime, unlock);
     assert!(matches!(unlock_response, AgentResponse::Success { .. }));
 
     let get_secret = AgentRequest {
-        token: "token".to_string(),
         payload: AgentRequestPayload::GetSecret { name: "shared".to_string() },
     };
-    let response = handle_request(&paths, "token", &mut runtime, get_secret);
+    let response = handle_request(&paths, &mut runtime, get_secret);
     assert!(matches!(response, AgentResponse::Secret { secret, .. } if secret == "top-secret"));
 
     let _ = fs::remove_dir_all(paths.base_dir());
