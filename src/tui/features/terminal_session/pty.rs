@@ -14,6 +14,14 @@ use std::sync::{
 };
 use std::time::Instant;
 
+struct SshSessionLaunchOptions {
+    force_ssh_logging: bool,
+    initial_rows: u16,
+    initial_cols: u16,
+    pass_entry_override: Option<String>,
+    pass_fallback_notice: Option<String>,
+}
+
 fn modifier_parameter(modifiers: KeyModifiers) -> u8 {
     let mut param = 1u8;
     if modifiers.contains(KeyModifiers::SHIFT) {
@@ -169,18 +177,22 @@ impl SessionManager {
             }
         };
 
-        match client.get_secret(pass_key) {
-            Ok(_) => Some((Some(pass_key.to_string()), None)),
-            Err(agent::AgentError::Locked) => {
-                self.open_vault_unlock(pass_key.to_string(), action);
-                None
-            }
-            Err(agent::AgentError::EntryNotFound) => Some((
+        match client.entry_status(pass_key) {
+            Ok(entry_status) if entry_status.exists && entry_status.status.unlocked => Some((Some(pass_key.to_string()), None)),
+            Ok(entry_status) if !entry_status.exists => Some((
                 None,
                 Some(format!(
                     "Password auto-login is unavailable because vault entry '{}' was not found; continuing with the standard SSH password prompt.",
                     pass_key
                 )),
+            )),
+            Ok(_) => {
+                self.open_vault_unlock(pass_key.to_string(), action);
+                None
+            }
+            Err(agent::AgentError::VaultNotInitialized) => Some((
+                None,
+                Some("Password vault is not initialized. Run `cossh vault init` or `cossh vault add <name>` first.".to_string()),
             )),
             Err(err) => {
                 log_debug!("Password auto-login unavailable for host {}: {}", host.name, err);
@@ -223,7 +235,7 @@ impl SessionManager {
     fn open_host_tab(&mut self, host: SshHost, force_ssh_logging: bool) {
         log_debug!("Opening tab for host: {}", host.name);
         let action = VaultUnlockAction::OpenHostTab {
-            host: host.clone(),
+            host: Box::new(host.clone()),
             force_ssh_logging,
         };
         let Some((pass_entry_override, pass_fallback_notice)) = self.resolve_host_pass_password(&host, action) else {
@@ -245,16 +257,15 @@ impl SessionManager {
         let (initial_rows, initial_cols) = self.initial_pty_size();
 
         // Spawn SSH session
-        let session = match Self::spawn_ssh_session(
-            &host,
-            &tab_title,
-            history_buffer,
+        let session_launch_options = SshSessionLaunchOptions {
             force_ssh_logging,
             initial_rows,
             initial_cols,
             pass_entry_override,
             pass_fallback_notice,
-        ) {
+        };
+
+        let session = match Self::spawn_ssh_session(&host, &tab_title, history_buffer, session_launch_options) {
             Ok(session) => Some(session),
             Err(err) => {
                 log_error!("Failed to spawn SSH session: {}", err);
@@ -292,7 +303,7 @@ impl SessionManager {
     ) {
         match action {
             VaultUnlockAction::OpenHostTab { host, force_ssh_logging } => {
-                self.open_host_tab_with_auth(host, force_ssh_logging, pass_entry_override, pass_fallback_notice);
+                self.open_host_tab_with_auth(*host, force_ssh_logging, pass_entry_override, pass_fallback_notice);
             }
             VaultUnlockAction::ReconnectTab { tab_index } => {
                 self.reconnect_session_with_auth(tab_index, pass_entry_override, pass_fallback_notice);
@@ -302,17 +313,15 @@ impl SessionManager {
 
     // Spawn and wire a PTY-backed cossh process.
     /// Spawn an SSH session in a PTY
-    fn spawn_ssh_session(
-        host: &SshHost,
-        tab_title: &str,
-        history_buffer: usize,
-        force_ssh_logging: bool,
-        initial_rows: u16,
-        initial_cols: u16,
-        pass_entry_override: Option<String>,
-        pass_fallback_notice: Option<String>,
-    ) -> io::Result<SshSession> {
+    fn spawn_ssh_session(host: &SshHost, tab_title: &str, history_buffer: usize, launch_options: SshSessionLaunchOptions) -> io::Result<SshSession> {
         let pty_system = native_pty_system();
+        let SshSessionLaunchOptions {
+            force_ssh_logging,
+            initial_rows,
+            initial_cols,
+            pass_entry_override,
+            pass_fallback_notice,
+        } = launch_options;
         let rows = initial_rows.max(1);
         let cols = initial_cols.max(1);
 
@@ -466,16 +475,15 @@ impl SessionManager {
             tab_title,
             host.profile
         );
-        match Self::spawn_ssh_session(
-            &host,
-            &tab_title,
-            history_buffer,
+        let session_launch_options = SshSessionLaunchOptions {
             force_ssh_logging,
             initial_rows,
             initial_cols,
             pass_entry_override,
             pass_fallback_notice,
-        ) {
+        };
+
+        match Self::spawn_ssh_session(&host, &tab_title, history_buffer, session_launch_options) {
             Ok(session) => {
                 let tab = &mut self.tabs[tab_index];
                 tab.session = Some(session);

@@ -1,4 +1,5 @@
 use super::*;
+use crate::auth::secret::sensitive_string;
 use crate::auth::vault::VaultPaths;
 use std::fs;
 use std::io;
@@ -72,6 +73,27 @@ fn read_write_json_line_round_trip() {
     let decoded: AgentRequest = read_json_line(&mut reader).expect("read json line");
 
     assert_eq!(decoded, request);
+}
+
+#[test]
+fn secret_fields_are_redacted_in_debug_output() {
+    let payload = AgentRequestPayload::Unlock {
+        master_password: sensitive_string("master-pass"),
+        policy: UnlockPolicy::new(900, 28_800),
+    };
+    let response = AgentResponse::Secret {
+        status: VaultStatus::locked(true),
+        name: "shared".to_string(),
+        secret: sensitive_string("top-secret"),
+    };
+
+    let payload_debug = format!("{payload:?}");
+    let response_debug = format!("{response:?}");
+
+    assert!(!payload_debug.contains("master-pass"));
+    assert!(!response_debug.contains("top-secret"));
+    assert!(payload_debug.contains("[REDACTED]"));
+    assert!(response_debug.contains("[REDACTED]"));
 }
 
 #[cfg(unix)]

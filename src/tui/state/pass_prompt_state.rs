@@ -7,7 +7,7 @@ pub(crate) const VAULT_UNLOCK_MAX_ATTEMPTS: usize = 3;
 
 #[derive(Debug, Clone)]
 pub(crate) enum VaultUnlockAction {
-    OpenHostTab { host: SshHost, force_ssh_logging: bool },
+    OpenHostTab { host: Box<SshHost>, force_ssh_logging: bool },
     ReconnectTab { tab_index: usize },
 }
 

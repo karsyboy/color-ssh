@@ -1,5 +1,9 @@
 //! Quick-connect form state.
 
+type TextSelection = Option<(usize, usize)>;
+type TextCursorSelectionMut<'a> = (&'a mut String, &'a mut usize, &'a mut TextSelection);
+type TextCursorSelection<'a> = (&'a str, usize, TextSelection);
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum QuickConnectField {
     User,
@@ -76,7 +80,7 @@ impl QuickConnectState {
     }
 
     // Text-cursor editing helpers.
-    fn text_cursor_selection_mut(&mut self, field: QuickConnectField) -> Option<(&mut String, &mut usize, &mut Option<(usize, usize)>)> {
+    fn text_cursor_selection_mut(&mut self, field: QuickConnectField) -> Option<TextCursorSelectionMut<'_>> {
         match field {
             QuickConnectField::User => Some((&mut self.user, &mut self.user_cursor, &mut self.user_selection)),
             QuickConnectField::Host => Some((&mut self.host, &mut self.host_cursor, &mut self.host_selection)),
@@ -84,7 +88,7 @@ impl QuickConnectState {
         }
     }
 
-    fn text_cursor_selection(&self, field: QuickConnectField) -> Option<(&str, usize, Option<(usize, usize)>)> {
+    fn text_cursor_selection(&self, field: QuickConnectField) -> Option<TextCursorSelection<'_>> {
         match field {
             QuickConnectField::User => Some((self.user.as_str(), self.user_cursor, self.user_selection)),
             QuickConnectField::Host => Some((self.host.as_str(), self.host_cursor, self.host_selection)),

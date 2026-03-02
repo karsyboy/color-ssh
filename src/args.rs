@@ -21,8 +21,8 @@ pub enum VaultCommand {
 /// Parsed command-line arguments
 #[derive(Debug, Clone)]
 pub struct MainArgs {
-    /// Enable debug logging to file
-    pub debug: bool,
+    /// Debug verbosity requested on the CLI (`-d` safe, `-dd` raw).
+    pub debug_count: u8,
     /// Enable SSH session logging to file
     pub ssh_logging: bool,
     /// In test mode, ignore config logging settings and only honor CLI logging flags
@@ -77,8 +77,8 @@ fn build_cli_command() -> Command {
             Arg::new("debug")
                 .short('d')
                 .long("debug")
-                .help("Enable debug mode with detailed logging to ~/.color-ssh/logs/cossh.log")
-                .action(clap::ArgAction::SetTrue),
+                .help("Enable debug logging to ~/.color-ssh/logs/cossh.log; repeat (-dd) for raw terminal and argument tracing")
+                .action(clap::ArgAction::Count),
         )
         .arg(
             Arg::new("log")
@@ -150,8 +150,9 @@ fn build_cli_command() -> Command {
         .after_help(
             r"
 cossh                                              # Launch interactive session manager
-cossh -d                                           # Launch interactive session manager with debug enabled
-cossh -d user@example.com                          # Debug mode enabled
+cossh -d                                           # Launch interactive session manager with safe debug enabled
+cossh -dd user@example.com                         # Raw debug enabled (may log terminal content and secrets)
+cossh -d user@example.com                          # Safe debug enabled
 cossh --pass-entry office_fw user@example.com      # Override the password entry for this launch
 cossh -l user@example.com                          # SSH logging enabled
 cossh -l -P network user@firewall.example.com      # Use 'network' config profile
@@ -194,7 +195,7 @@ where
 
     // Retrieve SSH arguments to forward.
     let ssh_args: Vec<String> = matches.get_many::<String>("ssh_args").map(|vals| vals.cloned().collect()).unwrap_or_default();
-    let debug = matches.get_flag("debug");
+    let debug_count = matches.get_count("debug");
     let ssh_logging = matches.get_flag("log");
     let test_mode = matches.get_flag("test");
     let profile = matches.get_one::<String>("profile").cloned().filter(|profile_name| !profile_name.is_empty());
@@ -204,11 +205,11 @@ where
         .subcommand()
         .is_some_and(|(name, sub_matches)| name == "agent" && sub_matches.get_flag("serve"));
     let no_user_args = raw_args.len() <= 1;
-    let debug_only = debug && !ssh_logging && profile.is_none() && ssh_args.is_empty() && vault_command.is_none() && pass_entry.is_none();
+    let debug_only = debug_count > 0 && !ssh_logging && profile.is_none() && ssh_args.is_empty() && vault_command.is_none() && pass_entry.is_none();
     let interactive = (no_user_args || debug_only) && !agent_serve;
 
     MainArgs {
-        debug,
+        debug_count,
         ssh_logging,
         test_mode,
         interactive,
@@ -224,7 +225,8 @@ where
 /// Parses command-line arguments using clap.
 ///
 /// # Arguments Supported
-/// - `-d, --debug` - Enable debug mode with detailed logging
+/// - `-d, --debug` - Enable safe debug mode with detailed metadata logging
+/// - `-dd` - Enable raw-content debug tracing for troubleshooting
 /// - `-l, --log` - Enable SSH session logging
 /// - `-t, --test` - Ignore config logging settings and use only CLI `-d/-l` logging flags
 /// - `vault init` - Initialize the password vault
@@ -241,12 +243,13 @@ where
 /// # Examples
 /// ```text
 /// cossh                              # Launch interactive session manager (default when no args)
-/// cossh -d                           # Launch interactive session manager with debug enabled
+/// cossh -d                           # Launch interactive session manager with safe debug enabled
+/// cossh -dd user@example.com         # Raw debug enabled (may log terminal content and secrets)
 /// cossh vault init                   # Initialize the password vault
 /// cossh vault add office_fw     # Create/update password vault entry
 /// cossh vault list                   # List password vault entries
 /// cossh vault unlock                 # Unlock the shared password vault
-/// cossh -d user@example.com          # Debug mode enabled
+/// cossh -d user@example.com          # Safe debug enabled
 /// cossh --pass-entry office_fw user@example.com
 /// cossh -l user@example.com          # SSH logging enabled
 /// cossh -tld -P network localhost    # Test mode with CLI-controlled logging

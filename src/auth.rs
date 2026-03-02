@@ -1,8 +1,10 @@
 pub mod agent;
 pub mod ipc;
+pub mod secret;
 pub mod transport;
 pub mod vault;
 
+use crate::auth::secret::ExposeSecret;
 use crate::{args, config, log_debug};
 use std::process::ExitCode;
 use zeroize::Zeroize;
@@ -51,7 +53,7 @@ fn prompt_existing_master_password() -> std::result::Result<String, String> {
 }
 
 fn prompt_existing_master_password_with_label(label: &str) -> std::result::Result<String, String> {
-    let password = rpassword::prompt_password(&format!("Enter {label} vault master password: ")).map_err(|err| err.to_string())?;
+    let password = rpassword::prompt_password(format!("Enter {label} vault master password: ")).map_err(|err| err.to_string())?;
     if password.is_empty() {
         return Err("master password cannot be empty".to_string());
     }
@@ -423,7 +425,7 @@ pub fn run_internal_askpass() -> ExitCode {
         }
     };
 
-    let mut secret = match client.get_secret(&entry_name) {
+    let secret = match client.get_secret(&entry_name) {
         Ok(secret) => secret,
         Err(err) => {
             eprintln!("Failed to read password vault entry '{entry_name}': {err}");
@@ -437,11 +439,10 @@ pub fn run_internal_askpass() -> ExitCode {
         let stdout = std::io::stdout();
         let mut stdout = stdout.lock();
         stdout
-            .write_all(secret.as_bytes())
+            .write_all(secret.expose_secret().as_bytes())
             .and_then(|_| stdout.write_all(b"\n"))
             .and_then(|_| stdout.flush())
     };
-    secret.zeroize();
 
     match result {
         Ok(()) => {

@@ -1,3 +1,4 @@
+use crate::auth::secret::{SensitiveString, sensitive_string};
 use argon2::{Algorithm, Argon2, Params, Version};
 use base64::{Engine as _, engine::general_purpose::STANDARD as BASE64};
 use chacha20poly1305::aead::{Aead, Payload};
@@ -182,7 +183,7 @@ impl UnlockedVault {
         Ok(())
     }
 
-    pub fn get_secret(&self, name: &str) -> Result<String, VaultError> {
+    pub fn get_secret(&self, name: &str) -> Result<SensitiveString, VaultError> {
         if !validate_entry_name(name) {
             return Err(VaultError::InvalidEntryName);
         }
@@ -209,7 +210,7 @@ impl UnlockedVault {
         let cipher =
             XChaCha20Poly1305::new_from_slice(&self.data_key[..]).map_err(|err| VaultError::EncryptFailed(format!("invalid cipher key material: {err}")))?;
         let aad = entry_aad(name);
-        let mut plaintext = cipher
+        let plaintext = cipher
             .decrypt(
                 XNonce::from_slice(&nonce),
                 Payload {
@@ -218,10 +219,14 @@ impl UnlockedVault {
                 },
             )
             .map_err(|_| VaultError::InvalidMasterPassword)?;
-
-        let secret = String::from_utf8(plaintext.clone()).map_err(|_| VaultError::InvalidVaultFormat("entry plaintext was not valid UTF-8".to_string()))?;
-        plaintext.zeroize();
-        Ok(secret)
+        match String::from_utf8(plaintext) {
+            Ok(secret) => Ok(sensitive_string(secret)),
+            Err(err) => {
+                let mut invalid_bytes = err.into_bytes();
+                invalid_bytes.zeroize();
+                Err(VaultError::InvalidVaultFormat("entry plaintext was not valid UTF-8".to_string()))
+            }
+        }
     }
 
     pub fn remove_entry(&self, name: &str) -> Result<(), VaultError> {
@@ -252,6 +257,10 @@ pub fn vault_exists() -> Result<bool, VaultError> {
 
 pub fn list_entries() -> Result<Vec<String>, VaultError> {
     list_entries_with_paths(&VaultPaths::resolve_default()?)
+}
+
+pub fn entry_exists(name: &str) -> Result<bool, VaultError> {
+    entry_exists_with_paths(&VaultPaths::resolve_default()?, name)
 }
 
 pub fn initialize_vault(master_password: &str) -> Result<(), VaultError> {
@@ -350,6 +359,17 @@ pub(crate) fn list_entries_with_paths(paths: &VaultPaths) -> Result<Vec<String>,
 
     entries.sort_unstable();
     Ok(entries)
+}
+
+pub(crate) fn entry_exists_with_paths(paths: &VaultPaths, name: &str) -> Result<bool, VaultError> {
+    if !validate_entry_name(name) {
+        return Err(VaultError::InvalidEntryName);
+    }
+    if !paths.metadata_path().is_file() {
+        return Err(VaultError::VaultNotInitialized);
+    }
+
+    Ok(paths.entry_path(name)?.is_file())
 }
 
 fn build_metadata_from_data_key(master_password: &str, data_key: &[u8; DATA_KEY_LEN]) -> Result<VaultMetadata, VaultError> {

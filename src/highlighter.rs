@@ -1,4 +1,4 @@
-use crate::{debug_enabled, log_debug};
+use crate::{debug_enabled, log_debug, log_debug_raw};
 use once_cell::sync::Lazy;
 use regex::{Regex, RegexSet};
 use std::{borrow::Cow, fmt::Write as _, thread, time::Instant};
@@ -197,28 +197,27 @@ pub(crate) fn process_chunk_with_scratch<'a>(
             .map(|timings| top_rule_timing_summary(timings, 5))
             .unwrap_or_default();
 
-        log_debug!("[{:?}] Chunk[{:?}] 1:Raw chunk: {:?}", thread_id, chunk_id, chunk);
-        log_debug!("[{:?}] Chunk[{:?}] 2:Clean chunk: {:?}", thread_id, chunk_id, clean_chunk);
-        log_debug!("[{:?}] Chunk[{:?}] 3:Matches: {:?}", thread_id, chunk_id, scratch.matches);
         log_debug!(
-            "[{:?}] Chunk[{:?}] 4:Accepted matches: {}/{}",
+            "[{:?}] Chunk[{:?}] Summary: raw_len={} clean_len={} matches={} accepted={} ansi={} mapping={} prefilter_used={} build={}us prefilter={}us match={}us format={}us top_rules={}",
             thread_id,
             chunk_id,
+            chunk.len(),
+            clean_chunk.len(),
+            scratch.matches.len(),
             accepted_match_count,
-            scratch.matches.len()
-        );
-        log_debug!("[{:?}] Chunk[{:?}] 5:Highlighted chunk: {:?}", thread_id, chunk_id, scratch.highlighted);
-        log_debug!(
-            "[{:?}] Chunk[{:?}] 6:Timings build={}us prefilter={}us match={}us format={}us prefilter_used={} top_rules={}",
-            thread_id,
-            chunk_id,
+            has_ansi,
+            use_mapping,
+            match_stats.prefilter_used,
             build_elapsed_us,
             match_stats.prefilter_elapsed_us,
             total_match_elapsed_us,
             format_elapsed_us,
-            match_stats.prefilter_used,
             top_rules
         );
+        log_debug_raw!("[{:?}] Chunk[{:?}] 1:Raw chunk: {:?}", thread_id, chunk_id, chunk);
+        log_debug_raw!("[{:?}] Chunk[{:?}] 2:Clean chunk: {:?}", thread_id, chunk_id, clean_chunk);
+        log_debug_raw!("[{:?}] Chunk[{:?}] 3:Matches: {:?}", thread_id, chunk_id, scratch.matches);
+        log_debug_raw!("[{:?}] Chunk[{:?}] 4:Highlighted chunk: {:?}", thread_id, chunk_id, scratch.highlighted);
     }
 
     // Return borrowed output from scratch to avoid cloning the highlighted chunk.

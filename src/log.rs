@@ -9,8 +9,34 @@ pub use errors::LogError;
 use once_cell::sync::Lazy;
 use std::sync::{
     Arc,
-    atomic::{AtomicBool, Ordering},
+    atomic::{AtomicBool, AtomicU8, Ordering},
 };
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+#[repr(u8)]
+pub enum DebugVerbosity {
+    Off = 0,
+    Safe = 1,
+    Raw = 2,
+}
+
+impl DebugVerbosity {
+    pub fn from_count(count: u8) -> Self {
+        match count {
+            0 => Self::Off,
+            1 => Self::Safe,
+            _ => Self::Raw,
+        }
+    }
+
+    fn from_stored(value: u8) -> Self {
+        match value {
+            0 => Self::Off,
+            1 => Self::Safe,
+            _ => Self::Raw,
+        }
+    }
+}
 
 /// Sanitize session name for use in log filenames.
 pub fn sanitize_session_name(raw: &str) -> String {
@@ -34,7 +60,7 @@ pub fn sanitize_session_name(raw: &str) -> String {
 }
 
 // Global flags for enabling different logging types
-static DEBUG_MODE: AtomicBool = AtomicBool::new(false);
+static DEBUG_VERBOSITY: AtomicU8 = AtomicU8::new(DebugVerbosity::Off as u8);
 static SSH_LOGGING: AtomicBool = AtomicBool::new(false);
 
 // Global logger instance to avoid recreating loggers on every macro call
@@ -74,11 +100,17 @@ impl Logger {
 
     // Feature toggles.
     pub fn enable_debug(&self) {
-        DEBUG_MODE.store(true, Ordering::SeqCst);
+        self.enable_debug_with_verbosity(DebugVerbosity::Safe);
+    }
+
+    pub fn enable_debug_with_verbosity(&self, verbosity: DebugVerbosity) {
+        DEBUG_VERBOSITY.store(verbosity as u8, Ordering::SeqCst);
     }
 
     pub fn disable_debug(&self) {
-        if DEBUG_MODE.swap(false, Ordering::SeqCst) {
+        let was_enabled = self.is_debug_enabled();
+        DEBUG_VERBOSITY.store(DebugVerbosity::Off as u8, Ordering::SeqCst);
+        if was_enabled {
             let _ = self.debug_logger.flush();
         }
     }
@@ -92,8 +124,16 @@ impl Logger {
     }
 
     // State checks.
+    pub fn debug_verbosity(&self) -> DebugVerbosity {
+        DebugVerbosity::from_stored(DEBUG_VERBOSITY.load(Ordering::SeqCst))
+    }
+
     pub fn is_debug_enabled(&self) -> bool {
-        DEBUG_MODE.load(Ordering::SeqCst)
+        self.debug_verbosity() >= DebugVerbosity::Safe
+    }
+
+    pub fn is_raw_debug_enabled(&self) -> bool {
+        self.debug_verbosity() >= DebugVerbosity::Raw
     }
 
     pub fn is_ssh_logging_enabled(&self) -> bool {

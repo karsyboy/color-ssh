@@ -1,3 +1,4 @@
+use crate::auth::secret::{SensitiveString, serde_sensitive_string};
 use crate::auth::vault::VaultPaths;
 use crate::log_debug;
 #[cfg(unix)]
@@ -9,6 +10,7 @@ use serde::{Deserialize, Serialize};
 use std::fs;
 use std::io::{self, BufRead, BufReader, Read, Write};
 use std::path::{Path, PathBuf};
+use zeroize::Zeroizing;
 
 #[cfg(windows)]
 use interprocess::os::windows::local_socket::ListenerOptionsExt as _;
@@ -93,8 +95,17 @@ impl VaultStatus {
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum AgentRequestPayload {
     Status,
-    Unlock { master_password: String, policy: UnlockPolicy },
-    GetSecret { name: String },
+    Unlock {
+        #[serde(with = "serde_sensitive_string")]
+        master_password: SensitiveString,
+        policy: UnlockPolicy,
+    },
+    EntryStatus {
+        name: String,
+    },
+    GetSecret {
+        name: String,
+    },
     Lock,
 }
 
@@ -103,6 +114,7 @@ impl AgentRequestPayload {
         match self {
             Self::Status => "status",
             Self::Unlock { .. } => "unlock",
+            Self::EntryStatus { .. } => "entry_status",
             Self::GetSecret { .. } => "get_secret",
             Self::Lock => "lock",
         }
@@ -117,18 +129,46 @@ pub struct AgentRequest {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum AgentResponse {
-    Status { status: VaultStatus },
-    Secret { status: VaultStatus, name: String, secret: String },
-    Success { status: VaultStatus, message: String },
-    Error { status: VaultStatus, code: String, message: String },
+    Status {
+        status: VaultStatus,
+    },
+    EntryStatus {
+        status: VaultStatus,
+        name: String,
+        exists: bool,
+    },
+    Secret {
+        status: VaultStatus,
+        name: String,
+        #[serde(with = "serde_sensitive_string")]
+        secret: SensitiveString,
+    },
+    Success {
+        status: VaultStatus,
+        message: String,
+    },
+    Error {
+        status: VaultStatus,
+        code: String,
+        message: String,
+    },
 }
 
 impl AgentResponse {
     pub fn status(&self) -> &VaultStatus {
         match self {
-            Self::Status { status } | Self::Secret { status, .. } | Self::Success { status, .. } | Self::Error { status, .. } => status,
+            Self::Status { status }
+            | Self::EntryStatus { status, .. }
+            | Self::Secret { status, .. }
+            | Self::Success { status, .. }
+            | Self::Error { status, .. } => status,
         }
     }
+}
+
+#[derive(Serialize)]
+struct AgentRequestRef<'a> {
+    payload: &'a AgentRequestPayload,
 }
 
 pub fn bind_listener(paths: &VaultPaths) -> io::Result<ListenerBindResult> {
@@ -141,10 +181,10 @@ pub fn bind_listener(paths: &VaultPaths) -> io::Result<ListenerBindResult> {
     }
 }
 
-pub fn send_request(paths: &VaultPaths, payload: AgentRequestPayload) -> io::Result<AgentResponse> {
+pub fn send_request(paths: &VaultPaths, payload: &AgentRequestPayload) -> io::Result<AgentResponse> {
     log_debug!("Opening IPC request '{}' to password vault agent", payload.debug_name());
     let mut stream = connect(paths)?;
-    let request = AgentRequest { payload };
+    let request = AgentRequestRef { payload };
     write_json_line(&mut stream, &request)?;
     read_json_line(&mut stream)
 }
@@ -202,7 +242,7 @@ fn create_listener(paths: &VaultPaths) -> io::Result<LocalSocketListener> {
 }
 
 fn write_json_line<T: Serialize, W: Write>(stream: &mut W, value: &T) -> io::Result<()> {
-    let mut bytes = serde_json::to_vec(value).map_err(|err| io::Error::other(format!("failed to serialize IPC message: {err}")))?;
+    let mut bytes = Zeroizing::new(serde_json::to_vec(value).map_err(|err| io::Error::other(format!("failed to serialize IPC message: {err}")))?);
     bytes.push(b'\n');
     stream.write_all(&bytes)?;
     stream.flush()
@@ -210,7 +250,7 @@ fn write_json_line<T: Serialize, W: Write>(stream: &mut W, value: &T) -> io::Res
 
 fn read_json_line<T: for<'de> Deserialize<'de>, R: Read>(stream: &mut R) -> io::Result<T> {
     let mut reader = BufReader::new(stream);
-    let mut line = String::new();
+    let mut line = Zeroizing::new(String::new());
     reader.read_line(&mut line)?;
     serde_json::from_str(&line).map_err(|err| io::Error::other(format!("failed to parse IPC message: {err}")))
 }

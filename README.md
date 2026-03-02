@@ -71,7 +71,7 @@ Arguments:
   [ssh_args]...  SSH arguments to forward to the SSH command
 
 Options:
-  -d, --debug              Enable debug mode with detailed logging to ~/.color-ssh/logs/cossh.log
+  -d, --debug              Enable safe debug logging to ~/.color-ssh/logs/cossh.log; repeat (-dd) for raw terminal and argument tracing
   -l, --log                Enable SSH session logging to ~/.color-ssh/logs/ssh_sessions/
   -P, --profile <profile>  Specify a configuration profile to use
   -t, --test               Ignore config logging settings; only use CLI -d/-l logging flags
@@ -81,14 +81,21 @@ Options:
 
 
 cossh                                              # Launch interactive session manager
-cossh -d                                           # Launch interactive session manager with debug enabled
-cossh -d user@example.com                          # Debug mode enabled
+cossh -d                                           # Launch interactive session manager with safe debug enabled
+cossh -d user@example.com                          # Safe debug enabled
+cossh -dd user@example.com                         # Raw debug enabled (may log terminal content and secrets)
 cossh --pass-entry office_fw user@example.com      # Override the password entry for this launch
 cossh -l user@example.com                          # SSH logging enabled
 cossh -l -P network user@firewall.example.com      # Use 'network' config profile
 cossh -l user@host -p 2222                         # Both modes with SSH args
 cossh user@host -G                                 # Non-interactive command
 ```
+
+Notes:
+
+- `-d` enables safe debug logging and keeps terminal-content dumps disabled.
+- `-dd` enables raw debug logging for troubleshooting regex/highlighting issues and may capture terminal output, CLI arguments, and secrets in `~/.color-ssh/logs/cossh.log`.
+- `settings.debug_mode: true` in config enables safe debug only; raw debug is CLI-only.
 ### Vault Usage
 ```
 Manage the password vault

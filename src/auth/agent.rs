@@ -1,4 +1,5 @@
 use crate::auth::ipc::{self, AgentRequestPayload, AgentResponse, UnlockPolicy, VaultStatus};
+use crate::auth::secret::{ExposeSecret, SensitiveString, sensitive_string};
 use crate::auth::vault::{self, UnlockedVault, VaultError, VaultPaths};
 use crate::command_path;
 use crate::log_debug;
@@ -15,6 +16,12 @@ const AGENT_STARTUP_POLL_INTERVAL: Duration = Duration::from_millis(50);
 const AGENT_IDLE_SHUTDOWN_POLL_INTERVAL: Duration = Duration::from_millis(250);
 
 pub use crate::auth::ipc::{AgentRequest, UnlockPolicy as AgentUnlockPolicy, VaultStatus as AgentVaultStatus};
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AgentEntryStatus {
+    pub status: VaultStatus,
+    pub exists: bool,
+}
 
 #[derive(Debug)]
 pub enum AgentError {
@@ -84,7 +91,7 @@ impl AgentClient {
         );
         match self.request(
             AgentRequestPayload::Unlock {
-                master_password: master_password.to_string(),
+                master_password: sensitive_string(master_password),
                 policy,
             },
             true,
@@ -95,7 +102,16 @@ impl AgentClient {
         }
     }
 
-    pub fn get_secret(&self, name: &str) -> Result<String, AgentError> {
+    pub fn entry_status(&self, name: &str) -> Result<AgentEntryStatus, AgentError> {
+        log_debug!("Requesting password vault entry status '{}'", name);
+        match self.request(AgentRequestPayload::EntryStatus { name: name.to_string() }, true)? {
+            AgentResponse::EntryStatus { status, exists, .. } => Ok(AgentEntryStatus { status, exists }),
+            AgentResponse::Error { code, message, .. } => Err(map_remote_error(&code, message)),
+            response => Err(AgentError::Protocol(format!("unexpected entry-status response: {response:?}"))),
+        }
+    }
+
+    pub fn get_secret(&self, name: &str) -> Result<SensitiveString, AgentError> {
         log_debug!("Requesting password vault secret '{}'", name);
         match self.request(AgentRequestPayload::GetSecret { name: name.to_string() }, true)? {
             AgentResponse::Secret { secret, .. } => Ok(secret),
@@ -114,17 +130,18 @@ impl AgentClient {
     }
 
     fn request(&self, payload: AgentRequestPayload, auto_start: bool) -> Result<AgentResponse, AgentError> {
-        log_debug!("Sending password vault agent request '{}' (auto_start={})", payload.debug_name(), auto_start);
-        match ipc::send_request(&self.paths, payload.clone()) {
+        let payload_name = payload.debug_name();
+        log_debug!("Sending password vault agent request '{}' (auto_start={})", payload_name, auto_start);
+        match ipc::send_request(&self.paths, &payload) {
             Ok(response) => Ok(response),
             Err(first_err) if auto_start => {
                 log_debug!(
                     "Password vault agent request '{}' failed initially ({}); attempting auto-start",
-                    payload.debug_name(),
+                    payload_name,
                     first_err
                 );
                 self.spawn_server()?;
-                ipc::send_request(&self.paths, payload)
+                ipc::send_request(&self.paths, &payload)
                     .map_err(|second_err| AgentError::Protocol(format!("failed to contact password vault agent after restart: {first_err}; {second_err}")))
             }
             Err(err) => Err(AgentError::Io(err)),
@@ -149,7 +166,7 @@ impl AgentClient {
 
         let started_at = Instant::now();
         while started_at.elapsed() < AGENT_STARTUP_TIMEOUT {
-            if ipc::send_request(&self.paths, AgentRequestPayload::Status).is_ok() {
+            if ipc::send_request(&self.paths, &AgentRequestPayload::Status).is_ok() {
                 log_debug!("Password vault agent became ready in {:?}", started_at.elapsed());
                 return Ok(());
             }
@@ -350,7 +367,7 @@ fn handle_request(paths: &VaultPaths, runtime: &mut AgentRuntime, request: ipc::
                 message: "password vault locked".to_string(),
             }
         }
-        AgentRequestPayload::Unlock { master_password, policy } => match vault::unlock_with_password_and_paths(paths, &master_password) {
+        AgentRequestPayload::Unlock { master_password, policy } => match vault::unlock_with_password_and_paths(paths, master_password.expose_secret()) {
             Ok(unlocked) => {
                 runtime.unlock(unlocked.data_key_copy(), policy);
                 log_debug!("Password vault agent accepted unlock request");
@@ -359,6 +376,14 @@ fn handle_request(paths: &VaultPaths, runtime: &mut AgentRuntime, request: ipc::
                     message: "password vault unlocked".to_string(),
                 }
             }
+            Err(err) => agent_error_response(runtime, paths, err),
+        },
+        AgentRequestPayload::EntryStatus { name } => match vault::entry_exists_with_paths(paths, &name) {
+            Ok(exists) => AgentResponse::EntryStatus {
+                status: runtime.status(paths),
+                name,
+                exists,
+            },
             Err(err) => agent_error_response(runtime, paths, err),
         },
         AgentRequestPayload::GetSecret { name } => {

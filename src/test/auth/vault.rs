@@ -1,4 +1,5 @@
 use super::*;
+use crate::auth::secret::ExposeSecret;
 use std::fs;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -27,7 +28,7 @@ fn initialize_unlock_store_and_read_entry_round_trips() {
     unlocked.store_secret("shared", "top-secret").expect("store secret");
 
     let secret = unlocked.get_secret("shared").expect("get secret");
-    assert_eq!(secret, "top-secret");
+    assert_eq!(secret.expose_secret(), "top-secret");
 
     let _ = fs::remove_dir_all(paths.base_dir());
 }
@@ -57,7 +58,7 @@ fn rotate_master_password_rewraps_data_key() {
         Err(VaultError::InvalidMasterPassword)
     ));
     let unlocked = unlock_with_password_and_paths(&paths, "new-pass").expect("unlock with new password");
-    assert_eq!(unlocked.get_secret("shared").expect("read secret"), "top-secret");
+    assert_eq!(unlocked.get_secret("shared").expect("read secret").expose_secret(), "top-secret");
 
     let _ = fs::remove_dir_all(paths.base_dir());
 }
@@ -83,6 +84,19 @@ fn list_entries_requires_initialized_vault() {
 
     let result = list_entries_with_paths(&paths);
     assert!(matches!(result, Err(VaultError::VaultNotInitialized)));
+
+    let _ = fs::remove_dir_all(paths.base_dir());
+}
+
+#[test]
+fn entry_exists_reports_entry_presence_without_unlocking_secret_material() {
+    let paths = temp_paths("entry_exists");
+    initialize_vault_with_paths(&paths, "master-pass").expect("initialize vault");
+    let unlocked = unlock_with_password_and_paths(&paths, "master-pass").expect("unlock vault");
+    unlocked.store_secret("shared", "top-secret").expect("store secret");
+
+    assert!(entry_exists_with_paths(&paths, "shared").expect("entry exists"));
+    assert!(!entry_exists_with_paths(&paths, "missing").expect("missing entry should be false"));
 
     let _ = fs::remove_dir_all(paths.base_dir());
 }

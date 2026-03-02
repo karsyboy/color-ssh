@@ -1,6 +1,6 @@
 use crate::auth::{agent, ipc::UnlockPolicy, transport, vault};
 use crate::ssh_config::SshHost;
-use crate::{Result, command_path, config, highlighter, log, log_debug, log_error, log_info, log_warn};
+use crate::{Result, command_path, config, highlighter, log, log_debug, log_debug_raw, log_error, log_info, log_warn};
 use std::{
     io::IsTerminal,
     io::{self, Read, Write},
@@ -214,30 +214,8 @@ fn build_ssh_command(args: &[String], explicit_pass_entry: Option<&str>) -> io::
     }
 
     let client = agent::AgentClient::new().map_err(|err| io::Error::other(err.to_string()))?;
-    let mut secret = match client.get_secret(&pass_entry_name) {
-        Ok(secret) => secret,
-        Err(agent::AgentError::Locked) => {
-            log_debug!("Password vault was locked during direct SSH launch");
-            if !io::stdin().is_terminal() {
-                return Err(io::Error::new(
-                    io::ErrorKind::PermissionDenied,
-                    "password vault is locked; run `cossh vault unlock`",
-                ));
-            }
-            unlock_agent_interactively(&client)?;
-            log_debug!("Retrying password vault entry lookup after unlock");
-            client
-                .get_secret(&pass_entry_name)
-                .map_err(|err| io::Error::new(io::ErrorKind::PermissionDenied, err.to_string()))?
-        }
-        Err(agent::AgentError::EntryNotFound) => {
-            log_debug!("Password vault entry '{}' was not found", pass_entry_name);
-            command.fallback_notice = Some(format!(
-                "Password auto-login is unavailable because vault entry '{}' was not found; continuing with the standard SSH password prompt.",
-                pass_entry_name
-            ));
-            return Ok(command);
-        }
+    let entry_status = match client.entry_status(&pass_entry_name) {
+        Ok(status) => status,
         Err(agent::AgentError::VaultNotInitialized) => {
             log_debug!("Password vault is not initialized during direct SSH launch");
             command.fallback_notice = Some(
@@ -255,24 +233,59 @@ fn build_ssh_command(args: &[String], explicit_pass_entry: Option<&str>) -> io::
         }
     };
 
+    if !entry_status.exists {
+        log_debug!("Password vault entry '{}' was not found", pass_entry_name);
+        command.fallback_notice = Some(format!(
+            "Password auto-login is unavailable because vault entry '{}' was not found; continuing with the standard SSH password prompt.",
+            pass_entry_name
+        ));
+        return Ok(command);
+    }
+
+    if !entry_status.status.unlocked {
+        log_debug!("Password vault was locked during direct SSH launch");
+        if !io::stdin().is_terminal() {
+            return Err(io::Error::new(
+                io::ErrorKind::PermissionDenied,
+                "password vault is locked; run `cossh vault unlock`",
+            ));
+        }
+        unlock_agent_interactively(&client)?;
+        log_debug!("Retrying password vault entry lookup after unlock");
+        let entry_status = client
+            .entry_status(&pass_entry_name)
+            .map_err(|err| io::Error::new(io::ErrorKind::PermissionDenied, err.to_string()))?;
+        if !entry_status.exists {
+            log_debug!("Password vault entry '{}' was not found after unlock", pass_entry_name);
+            command.fallback_notice = Some(format!(
+                "Password auto-login is unavailable because vault entry '{}' was not found; continuing with the standard SSH password prompt.",
+                pass_entry_name
+            ));
+            return Ok(command);
+        }
+        if !entry_status.status.unlocked {
+            return Err(io::Error::new(
+                io::ErrorKind::PermissionDenied,
+                "password vault remains locked after unlock attempt",
+            ));
+        }
+    }
+
     let backend = transport::direct_backend();
     match backend {
         transport::PasswordTransportBackend::UnsupportedPlatform => {
-            secret.zeroize();
             log_debug!("Password auto-login transport unsupported on this platform");
             command.fallback_notice = Some(transport::unsupported_transport_notice());
             Ok(command)
         }
         transport::PasswordTransportBackend::InternalAskpass => {
             if let Err(err) = transport::configure_internal_askpass_env(&mut command.env, &pass_entry_name) {
-                secret.zeroize();
                 log_debug!("Failed to configure internal askpass helper: {}", err);
                 command.fallback_notice = Some(format!(
                     "Password auto-login is unavailable because the internal askpass helper could not be configured ({err}); continuing with the standard SSH password prompt."
                 ));
                 return Ok(command);
             }
-            secret.zeroize();
             log_debug!("Configured internal askpass helper for direct SSH launch");
             Ok(command)
         }
@@ -281,7 +294,14 @@ fn build_ssh_command(args: &[String], explicit_pass_entry: Option<&str>) -> io::
 
 /// Main process handler for SSH subprocess returns an exit code based on the SSH process status
 pub fn process_handler(process_args: Vec<String>, is_non_interactive: bool, explicit_pass_entry: Option<String>) -> Result<ExitCode> {
-    log_info!("Starting SSH process with args: {:?}", process_args);
+    log_info!(
+        "Starting SSH process: interactive={} ssh_arg_count={} explicit_pass_entry={} destination_resolved={}",
+        !is_non_interactive,
+        process_args.len(),
+        explicit_pass_entry.is_some(),
+        extract_ssh_destination(&process_args).is_some()
+    );
+    log_debug_raw!("Starting SSH process with args: {:?}", process_args);
     log_debug!("Non-interactive mode: {}", is_non_interactive);
 
     let command_spec = if is_non_interactive {
@@ -464,13 +484,13 @@ pub fn process_handler(process_args: Vec<String>, is_non_interactive: bool, expl
 
                 // Fast path: the common case where this read chunk is complete UTF-8
                 // and there are no carry-over bytes from a prior partial sequence.
-                if pending_utf8.is_empty() {
-                    if let Ok(valid_chunk) = std::str::from_utf8(&buffer[..bytes_read]) {
-                        if !emit_chunk(&tx, valid_chunk.to_string()) {
-                            break;
-                        }
-                        continue;
+                if pending_utf8.is_empty()
+                    && let Ok(valid_chunk) = std::str::from_utf8(&buffer[..bytes_read])
+                {
+                    if !emit_chunk(&tx, valid_chunk.to_string()) {
+                        break;
                     }
+                    continue;
                 }
 
                 pending_utf8.extend_from_slice(&buffer[..bytes_read]);
@@ -485,12 +505,12 @@ pub fn process_handler(process_args: Vec<String>, is_non_interactive: bool, expl
                         }
                         Err(err) => {
                             let valid_up_to = err.valid_up_to();
-                            if valid_up_to > 0 {
-                                if let Ok(valid) = std::str::from_utf8(&pending_utf8[..valid_up_to]) {
-                                    chunk.push_str(valid);
-                                    pending_utf8.drain(..valid_up_to);
-                                    continue;
-                                }
+                            if valid_up_to > 0
+                                && let Ok(valid) = std::str::from_utf8(&pending_utf8[..valid_up_to])
+                            {
+                                chunk.push_str(valid);
+                                pending_utf8.drain(..valid_up_to);
+                                continue;
                             }
                             if let Some(error_len) = err.error_len() {
                                 chunk.push('\u{FFFD}');
@@ -549,7 +569,13 @@ pub fn process_handler(process_args: Vec<String>, is_non_interactive: bool, expl
 
 /// Spawns an SSH process with the provided arguments and returns the child process
 fn spawn_ssh(command_spec: &PreparedSshCommand) -> std::io::Result<std::process::Child> {
-    log_debug!("Spawning {} with args: {:?}", command_spec.program, command_spec.args);
+    log_debug!(
+        "Spawning {}: arg_count={} env_override_count={}",
+        command_spec.program,
+        command_spec.args.len(),
+        command_spec.env.len()
+    );
+    log_debug_raw!("Spawning {} with args: {:?}", command_spec.program, command_spec.args);
 
     let mut command = command_from_spec(command_spec)?;
     command.stdin(Stdio::inherit()).stdout(Stdio::piped()).stderr(Stdio::inherit());
@@ -565,7 +591,13 @@ fn spawn_ssh(command_spec: &PreparedSshCommand) -> std::io::Result<std::process:
 
 /// Spawns SSH for non-interactive commands with direct stdout passthrough returns SSH exit code
 fn spawn_ssh_passthrough(command_spec: &PreparedSshCommand) -> Result<ExitCode> {
-    log_debug!("Spawning {} in passthrough mode with args: {:?}", command_spec.program, command_spec.args);
+    log_debug!(
+        "Spawning {} in passthrough mode: arg_count={} env_override_count={}",
+        command_spec.program,
+        command_spec.args.len(),
+        command_spec.env.len()
+    );
+    log_debug_raw!("Spawning {} in passthrough mode with args: {:?}", command_spec.program, command_spec.args);
 
     let mut child = command_from_spec(command_spec)?
         .stdin(Stdio::inherit())

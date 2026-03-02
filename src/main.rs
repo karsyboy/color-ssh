@@ -1,5 +1,6 @@
-use cossh::{Result, args, auth, config, log, log_debug, log_error, log_info, process, tui};
+use cossh::{Result, args, auth, config, log, log_debug, log_debug_raw, log_error, log_info, log_warn, process, tui};
 use std::process::ExitCode;
+use std::sync::Once;
 
 const APP_VERSION: &str = concat!("v", env!("CARGO_PKG_VERSION"));
 
@@ -32,12 +33,29 @@ fn extract_ssh_destination(ssh_args: &[String]) -> Option<String> {
     None
 }
 
-fn resolve_logging_settings(args: &args::MainArgs, debug_from_config: bool, ssh_log_from_config: bool) -> (bool, bool) {
-    if args.test_mode {
-        (args.debug, args.ssh_logging)
+fn resolve_logging_settings(args: &args::MainArgs, debug_from_config: bool, ssh_log_from_config: bool) -> (log::DebugVerbosity, bool) {
+    let cli_debug = log::DebugVerbosity::from_count(args.debug_count);
+    let config_debug = if debug_from_config {
+        log::DebugVerbosity::Safe
     } else {
-        (args.debug || debug_from_config, args.ssh_logging || ssh_log_from_config)
+        log::DebugVerbosity::Off
+    };
+    if args.test_mode {
+        (cli_debug, args.ssh_logging)
+    } else {
+        (cli_debug.max(config_debug), args.ssh_logging || ssh_log_from_config)
     }
+}
+
+fn emit_raw_debug_warning_once() {
+    static RAW_DEBUG_WARNING: Once = Once::new();
+    const RAW_DEBUG_WARNING_MESSAGE: &str =
+        "Raw debug logging is enabled and may capture terminal content, CLI arguments, and secrets in ~/.color-ssh/logs/cossh.log.";
+
+    RAW_DEBUG_WARNING.call_once(|| {
+        eprintln!("[color-ssh] {}", RAW_DEBUG_WARNING_MESSAGE);
+        log_warn!("{}", RAW_DEBUG_WARNING_MESSAGE);
+    });
 }
 
 fn main() -> Result<ExitCode> {
@@ -51,8 +69,8 @@ fn main() -> Result<ExitCode> {
 
     // Enable debug logging only when explicitly requested on CLI.
     // Config-based debug mode is applied after loading config.
-    if args.debug {
-        logger.enable_debug();
+    if args.debug_count > 0 {
+        logger.enable_debug_with_verbosity(log::DebugVerbosity::from_count(args.debug_count));
     }
     log_info!("color-ssh {} starting", APP_VERSION);
 
@@ -84,14 +102,19 @@ fn main() -> Result<ExitCode> {
             false
         };
         let (final_debug, _) = resolve_logging_settings(&args, debug_from_config, false);
-        if final_debug {
-            if !logger.is_debug_enabled() {
-                logger.enable_debug();
+        if final_debug >= log::DebugVerbosity::Safe {
+            if logger.debug_verbosity() != final_debug {
+                logger.enable_debug_with_verbosity(final_debug);
             }
-            if args.debug {
-                log_debug!("Debug mode enabled via CLI argument");
+            if final_debug >= log::DebugVerbosity::Raw {
+                emit_raw_debug_warning_once();
+            }
+            if args.debug_count >= 2 {
+                log_debug!("Raw debug mode enabled via CLI arguments");
+            } else if args.debug_count == 1 {
+                log_debug!("Safe debug mode enabled via CLI argument");
             } else {
-                log_debug!("Debug mode enabled via config file");
+                log_debug!("Safe debug mode enabled via config file");
             }
         } else {
             logger.disable_debug();
@@ -135,14 +158,19 @@ fn main() -> Result<ExitCode> {
     // Determine final logging mode
     let (final_debug, final_ssh_log) = resolve_logging_settings(&args, debug_from_config, ssh_log_from_config);
 
-    if final_debug {
-        if !logger.is_debug_enabled() {
-            logger.enable_debug();
+    if final_debug >= log::DebugVerbosity::Safe {
+        if logger.debug_verbosity() != final_debug {
+            logger.enable_debug_with_verbosity(final_debug);
         }
-        if args.debug {
-            log_debug!("Debug mode enabled via CLI argument");
+        if final_debug >= log::DebugVerbosity::Raw {
+            emit_raw_debug_warning_once();
+        }
+        if args.debug_count >= 2 {
+            log_debug!("Raw debug mode enabled via CLI arguments");
+        } else if args.debug_count == 1 {
+            log_debug!("Safe debug mode enabled via CLI argument");
         } else {
-            log_debug!("Debug mode enabled via config file");
+            log_debug!("Safe debug mode enabled via config file");
         }
     } else {
         log_debug!("Debug mode not requested, disabling after initial config load");
@@ -159,7 +187,17 @@ fn main() -> Result<ExitCode> {
         }
     }
 
-    log_debug!("Parsed arguments: {:?}", args);
+    log_debug!(
+        "Parsed arguments summary: interactive={} ssh_arg_count={} pass_entry_override={} vault_command={} profile_set={} agent_serve={} test_mode={}",
+        args.interactive,
+        args.ssh_args.len(),
+        args.pass_entry.is_some(),
+        args.vault_command.is_some(),
+        args.profile.is_some(),
+        args.agent_serve,
+        args.test_mode
+    );
+    log_debug_raw!("Parsed arguments: {:?}", args);
 
     if show_title {
         log_debug!("Banner display enabled in config, printing banner");

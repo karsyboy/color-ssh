@@ -201,7 +201,7 @@ impl SessionManager {
             Line::from(profile_list_spans),
             Line::from(vec![
                 Span::styled("SSH Logging: ", field_style(QuickConnectField::Logging, form.selected)),
-                Span::styled(format!("{}", logging_mark), value_style(QuickConnectField::Logging, form.selected)),
+                Span::styled(logging_mark.to_string(), value_style(QuickConnectField::Logging, form.selected)),
             ]),
             Line::from(""),
             Line::from(vec![

@@ -13,7 +13,7 @@ fn enters_interactive_mode_for_debug_only() {
     let cmd = build_cli_command();
     let parsed = parse_main_args_from(&cmd, ["cossh", "-d"]);
     assert!(parsed.interactive);
-    assert!(parsed.debug);
+    assert_eq!(parsed.debug_count, 1);
     assert!(parsed.ssh_args.is_empty());
 }
 
@@ -52,7 +52,7 @@ fn parses_test_mode_and_combined_short_flags() {
     let parsed = parse_main_args_from(&cmd, ["cossh", "-tld", "localhost"]);
 
     assert!(parsed.test_mode);
-    assert!(parsed.debug);
+    assert_eq!(parsed.debug_count, 1);
     assert!(parsed.ssh_logging);
     assert!(!parsed.interactive);
     assert_eq!(parsed.ssh_args, vec!["localhost".to_string()]);
@@ -73,8 +73,22 @@ fn parses_vault_add_pass_with_debug() {
     let cmd = build_cli_command();
     let parsed = parse_main_args_from(&cmd, ["cossh", "--debug", "vault", "add", "office_fw"]);
 
-    assert!(parsed.debug);
+    assert_eq!(parsed.debug_count, 1);
     assert_eq!(parsed.vault_command, Some(VaultCommand::AddPass("office_fw".to_string())));
+}
+
+#[test]
+fn parses_repeated_debug_flags_into_raw_debug_mode() {
+    let cmd = build_cli_command();
+
+    let parsed = parse_main_args_from(&cmd, ["cossh", "-dd", "user@example.com"]);
+    assert_eq!(parsed.debug_count, 2);
+
+    let parsed = parse_main_args_from(&cmd, ["cossh", "--debug", "--debug", "user@example.com"]);
+    assert_eq!(parsed.debug_count, 2);
+
+    let parsed = parse_main_args_from(&cmd, ["cossh", "-ddd", "user@example.com"]);
+    assert_eq!(parsed.debug_count, 3);
 }
 
 #[test]

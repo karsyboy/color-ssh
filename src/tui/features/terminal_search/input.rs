@@ -4,6 +4,9 @@ use crate::tui::SessionManager;
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use std::io;
 
+type SearchSelection = Option<(usize, usize)>;
+type TerminalSearchQueryMut<'a> = (&'a mut String, &'a mut usize, &'a mut SearchSelection);
+
 fn char_len(text: &str) -> usize {
     text.chars().count()
 }
@@ -55,7 +58,7 @@ fn delete_selection(text: &mut String, cursor: &mut usize, selection: &mut Optio
 }
 
 impl SessionManager {
-    fn terminal_search_query_mut(&mut self) -> Option<(&mut String, &mut usize, &mut Option<(usize, usize)>)> {
+    fn terminal_search_query_mut(&mut self) -> Option<TerminalSearchQueryMut<'_>> {
         let search = self.current_tab_search_mut()?;
         Some((&mut search.query, &mut search.query_cursor, &mut search.query_selection))
     }

@@ -1,5 +1,6 @@
 use super::*;
 use crate::auth::ipc::{AgentRequest, AgentRequestPayload, UnlockPolicy};
+use crate::auth::secret::{ExposeSecret, sensitive_string};
 use crate::auth::vault::{VaultPaths, initialize_vault_with_paths};
 use std::fs;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -40,7 +41,7 @@ fn handle_request_unlocks_and_fetches_secret() {
     let mut runtime = AgentRuntime::new();
     let unlock = AgentRequest {
         payload: AgentRequestPayload::Unlock {
-            master_password: "master-pass".to_string(),
+            master_password: sensitive_string("master-pass"),
             policy: UnlockPolicy::new(900, 28_800),
         },
     };
@@ -51,7 +52,28 @@ fn handle_request_unlocks_and_fetches_secret() {
         payload: AgentRequestPayload::GetSecret { name: "shared".to_string() },
     };
     let response = handle_request(&paths, &mut runtime, get_secret);
-    assert!(matches!(response, AgentResponse::Secret { secret, .. } if secret == "top-secret"));
+    assert!(matches!(response, AgentResponse::Secret { secret, .. } if secret.expose_secret() == "top-secret"));
+
+    let _ = fs::remove_dir_all(paths.base_dir());
+}
+
+#[test]
+fn handle_request_entry_status_reports_existing_entries_while_locked() {
+    let paths = temp_paths("entry_status");
+    initialize_vault_with_paths(&paths, "master-pass").expect("initialize vault");
+    let unlocked = vault::unlock_with_password_and_paths(&paths, "master-pass").expect("unlock vault");
+    unlocked.store_secret("shared", "top-secret").expect("store secret");
+
+    let mut runtime = AgentRuntime::new();
+    let response = handle_request(
+        &paths,
+        &mut runtime,
+        AgentRequest {
+            payload: AgentRequestPayload::EntryStatus { name: "shared".to_string() },
+        },
+    );
+
+    assert!(matches!(response, AgentResponse::EntryStatus { exists, status, .. } if exists && !status.unlocked));
 
     let _ = fs::remove_dir_all(paths.base_dir());
 }
