@@ -58,6 +58,11 @@ fn emit_raw_debug_warning_once() {
     });
 }
 
+fn initialize_config_for_vault_command(profile: Option<String>) -> Result<()> {
+    config::init_session_config(profile)?;
+    Ok(())
+}
+
 fn main() -> Result<ExitCode> {
     if auth::transport::is_internal_askpass_invocation() {
         return Ok(auth::run_internal_askpass());
@@ -83,6 +88,12 @@ fn main() -> Result<ExitCode> {
     }
 
     if let Some(vault_command) = args.vault_command.as_ref() {
+        if let Err(err) = initialize_config_for_vault_command(args.profile.clone()) {
+            log_error!("Failed to initialize config for vault command: {}", err);
+            eprintln!("Failed to initialize config: {err}");
+            let _ = logger.flush_debug();
+            std::process::exit(1);
+        }
         return Ok(auth::run_vault_command(vault_command));
     }
 

@@ -59,18 +59,32 @@ fn fallback_config() -> style::Config {
     }
 }
 
+fn replace_config(shared_config: &Arc<RwLock<style::Config>>, config: style::Config) {
+    match shared_config.write() {
+        Ok(mut guard) => *guard = config,
+        Err(poisoned) => {
+            let mut guard = poisoned.into_inner();
+            *guard = config;
+        }
+    }
+}
+
 /// Get a reference to the global configuration
 pub fn get_config() -> &'static Arc<RwLock<style::Config>> {
     SESSION_CONFIG.get_or_init(|| Arc::new(RwLock::new(fallback_config())))
 }
 
+fn install_config(config: style::Config) {
+    set_config_version(config.metadata.version);
+    replace_config(get_config(), config);
+}
+
 /// Loads and initializes the global configuration with an optional profile.
-/// Call this once in main.rs after parsing CLI args.
+/// If fallback config has already been created, it is replaced in-place.
 pub fn init_session_config(profile: Option<String>) -> Result<(), ConfigError> {
     let config_loader = loader::ConfigLoader::new(profile).map_err(ConfigError::IoError)?;
     let config = config_loader.load_config().map_err(ConfigError::IoError)?;
-    set_config_version(config.metadata.version);
-    SESSION_CONFIG.set(Arc::new(RwLock::new(config))).map_err(|_| ConfigError::AlreadyInitialized)?;
+    install_config(config);
     Ok(())
 }
 
@@ -100,3 +114,7 @@ pub(crate) fn current_config_version() -> u64 {
 pub(crate) fn set_config_version(version: u64) {
     CONFIG_VERSION.store(version, Ordering::Release);
 }
+
+#[cfg(test)]
+#[path = "test/config.rs"]
+mod tests;

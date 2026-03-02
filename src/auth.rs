@@ -71,6 +71,11 @@ fn prompt_entry_secret() -> std::result::Result<String, String> {
 
 fn unlock_policy_from_config() -> ipc::UnlockPolicy {
     let auth_settings = config::auth_settings();
+    log_debug!(
+        "Using vault unlock policy from config: idle={}s absolute={}s",
+        auth_settings.unlock_idle_timeout_seconds,
+        auth_settings.unlock_absolute_timeout_seconds
+    );
     ipc::UnlockPolicy::new(auth_settings.unlock_idle_timeout_seconds, auth_settings.unlock_absolute_timeout_seconds)
 }
 
