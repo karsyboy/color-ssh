@@ -19,9 +19,7 @@ settings:
   show_title: true
   debug_mode: false
   ssh_logging: true
-  direct_connect_pass_cache_ttl_seconds: 300
-  allow_remote_clipboard_write: false
-  remote_clipboard_max_bytes: 4096
+  pass_cache_ttl: 300
 
 # ============================================================================
 # INTERACTIVE SETTINGS SECTION (Optional)
@@ -32,6 +30,8 @@ interactive_settings:
   info_view: true
   host_view_size: 15
   info_view_size: 25
+  allow_remote_clipboard_write: false
+  remote_clipboard_max_bytes: 4096
 
 # ============================================================================
 # COLOR PALETTE

@@ -152,13 +152,13 @@ fn main() -> Result<ExitCode> {
     }
 
     // Get global settings from config
-    let (debug_from_config, ssh_log_from_config, show_title, direct_connect_pass_cache_ttl_seconds) = {
+    let (debug_from_config, ssh_log_from_config, show_title, pass_cache_ttl) = {
         match config::get_config().read() {
             Ok(config_guard) => (
                 config_guard.settings.debug_mode,
                 config_guard.settings.ssh_logging,
                 config_guard.settings.show_title,
-                config_guard.settings.direct_connect_pass_cache_ttl_seconds,
+                config_guard.settings.pass_cache_ttl,
             ),
             Err(poisoned) => {
                 log_error!("Configuration lock poisoned while reading global settings; continuing with recovered state");
@@ -167,7 +167,7 @@ fn main() -> Result<ExitCode> {
                     config_guard.settings.debug_mode,
                     config_guard.settings.ssh_logging,
                     config_guard.settings.show_title,
-                    config_guard.settings.direct_connect_pass_cache_ttl_seconds,
+                    config_guard.settings.pass_cache_ttl,
                 )
             }
         }
@@ -257,7 +257,7 @@ fn main() -> Result<ExitCode> {
         && let Some(pass_key) = pass_key_for_destination(&destination)
     {
         let mut pass_cache = PassCache::default();
-        let direct_connect_pass_cache_ttl = Duration::from_secs(direct_connect_pass_cache_ttl_seconds);
+        let direct_connect_pass_cache_ttl = Duration::from_secs(pass_cache_ttl);
         match pass::resolve_pass_key_for_direct_connect(&pass_key, &mut pass_cache, direct_connect_pass_cache_ttl) {
             PassResolveResult::Ready(password) => {
                 pass_password = Some(password);

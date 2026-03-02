@@ -102,7 +102,7 @@ If no configuration file is found the default configuration will be created at `
 
 Common `settings` keys:
 
-- `direct_connect_pass_cache_ttl_seconds`: cache `#_pass` direct-connect unlocks for this many seconds (`0` disables persistent cache).
+- `pass_cache_ttl`: cache `#_pass` direct-connect unlocks for this many seconds (`0` disables persistent cache).
 
 #### Color-SSH TUI Metadata in `~/.ssh/config`
 

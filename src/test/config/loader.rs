@@ -164,7 +164,7 @@ rules:
 }
 
 #[test]
-fn defaults_direct_connect_pass_cache_ttl_seconds_when_missing() {
+fn defaults_pass_cache_ttl_when_missing() {
     let yaml = r##"
 settings: {}
 interactive_settings: {}
@@ -174,14 +174,14 @@ rules: []
 "##;
 
     let parsed = serde_yml::from_str::<Config>(yaml).expect("settings should parse");
-    assert_eq!(parsed.settings.direct_connect_pass_cache_ttl_seconds, 300);
+    assert_eq!(parsed.settings.pass_cache_ttl, 300);
 }
 
 #[test]
-fn clamps_direct_connect_pass_cache_ttl_seconds_to_upper_bound() {
+fn clamps_pass_cache_ttl_to_upper_bound() {
     let yaml = r##"
 settings:
-  direct_connect_pass_cache_ttl_seconds: 999999
+  pass_cache_ttl: 999999
 interactive_settings: {}
 palette:
   ok_fg: "#00ff00"
@@ -189,5 +189,5 @@ rules: []
 "##;
 
     let parsed = serde_yml::from_str::<Config>(yaml).expect("settings should parse");
-    assert_eq!(parsed.settings.direct_connect_pass_cache_ttl_seconds, 86_400);
+    assert_eq!(parsed.settings.pass_cache_ttl, 86_400);
 }

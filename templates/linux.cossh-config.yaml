@@ -9,7 +9,7 @@ settings:
   show_title: true
   debug_mode: false
   ssh_logging: false
-  direct_connect_pass_cache_ttl_seconds: 300
+  pass_cache_ttl: 300
 
 # ============================================================================
 # INTERACTIVE SETTINGS SECTION (Optional)
