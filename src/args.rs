@@ -148,20 +148,12 @@ fn build_cli_command() -> Command {
         .after_help(
             r"
 cossh                                              # Launch interactive session manager
-cossh vault init                                   # Initialize the password vault
-cossh vault add office_fw                     # Create/update password vault entry 'office_fw'
-cossh vault remove office_fw                  # Remove password vault entry 'office_fw'
-cossh vault unlock                                 # Unlock the shared password vault
-cossh vault lock                                   # Lock the shared password vault
-cossh vault status                                 # Show password vault status
-cossh vault set-master-password                    # Create or rotate the vault master password
 cossh -d                                           # Launch interactive session manager with debug enabled
 cossh -d user@example.com                          # Debug mode enabled
 cossh --pass-entry office_fw user@example.com      # Override the password entry for this launch
 cossh -l user@example.com                          # SSH logging enabled
 cossh -l -P network user@firewall.example.com      # Use 'network' config profile
 cossh -l user@host -p 2222                         # Both modes with SSH args
-cossh -tld -P network localhost                    # Test mode: force logging from CLI flags only
 cossh user@host -G                                 # Non-interactive command
 ",
         )

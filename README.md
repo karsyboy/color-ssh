@@ -61,7 +61,11 @@ Shell completeion scripts are included for `fish` and `zsh`. For instructions se
 ## Usage
 
 ```bash
-Usage: cossh [OPTIONS] [ssh_args]...
+Usage: cossh [OPTIONS] [ssh_args]... [COMMAND]
+
+Commands:
+  vault  Manage the password vault
+  help   Print this message or the help of the given subcommand(s)
 
 Arguments:
   [ssh_args]...  SSH arguments to forward to the SSH command
@@ -71,25 +75,39 @@ Options:
   -l, --log                Enable SSH session logging to ~/.color-ssh/logs/ssh_sessions/
   -P, --profile <profile>  Specify a configuration profile to use
   -t, --test               Ignore config logging settings; only use CLI -d/-l logging flags
-      --pass-entry <name>  Override the password vault entry used for a direct launch
+      --pass-entry <name>  Override the password vault entry used for a direct SSH launch
   -h, --help               Print help
   -V, --version            Print version
 
 
 cossh                                              # Launch interactive session manager
-cossh vault init                                   # Initialize the password vault
-cossh vault add office_fw                     # Create/update password vault entry 'office_fw'
-cossh vault unlock                                 # Unlock the shared password vault
-cossh vault lock                                   # Lock the shared password vault
-cossh vault status                                 # Show password vault status
 cossh -d                                           # Launch interactive session manager with debug enabled
 cossh -d user@example.com                          # Debug mode enabled
-cossh --pass-entry office_fw user@example.com      # Force a password vault entry for this launch
+cossh --pass-entry office_fw user@example.com      # Override the password entry for this launch
 cossh -l user@example.com                          # SSH logging enabled
 cossh -l -P network user@firewall.example.com      # Use 'network' config profile
 cossh -l user@host -p 2222                         # Both modes with SSH args
-cossh -tld -P network localhost                    # Test mode: force logging from CLI flags only
 cossh user@host -G                                 # Non-interactive command
+```
+### Vault Usage
+```
+Manage the password vault
+
+Usage: cossh vault <COMMAND>
+
+Commands:
+  init                 Initialize the password vault
+  add                  Create or replace a password vault entry interactively
+  remove               Remove a password vault entry
+  unlock               Unlock the shared password vault
+  lock                 Lock the shared password vault
+  status               Show shared password vault status
+  set-master-password  Create or rotate the password vault master password
+  help                 Print this message or the help of the given subcommand(s)
+
+Options:
+  -h, --help     Print help
+  -V, --version  Print version
 ```
 
 
@@ -115,10 +133,6 @@ The interactive session manger supports metadata comments inside the SSH config 
 | `#_pass <name>` | Uses password vault entry `<name>` for password auto-login. |
 | `#_hidden <true\|yes\|1>` | Hides the host from the interactive host list. |
 
-`#_pass` works in both the TUI and direct launches. Unlock the vault once with `cossh vault unlock`, then protected hosts can reuse that unlock until the vault relocks.
-
-On macOS, Linux, and Windows builds of OpenSSH that honor `SSH_ASKPASS`, protected hosts use cossh's internal askpass helper for password transport.
-
 ```sshconfig
 Host switch01
     HostName switch01.example.com
@@ -129,38 +143,6 @@ Host switch01
 ```
 
 For more info on the TUI go here [TUI User Guide](docs/TUI_USER_GUIDE.md).
-
-#### Password Vault
-
-`cossh` now stores SSH passwords in a master-password-protected vault under `~/.color-ssh/vault/`.
-
-Typical flow:
-
-```bash
-cossh vault init
-cossh vault add office_fw
-cossh vault unlock
-cossh office-fw
-```
-
-- `vault init` explicitly initializes the master-password-protected vault.
-- `vault add <name>` prompts for the vault master password, creates the vault on first use, and stores the SSH password as entry `<name>`.
-- `vault unlock` starts or updates the background unlock agent so both TUI and direct launches can reuse the same unlocked session.
-- The unlock session relocks after the configured idle/absolute timeout.
-- `vault set-master-password` creates the master password on first use or rotates it later.
-- `vault remove <name>` removes a stored password entry.
-
-#### Auth Config
-
-Add this block to your config if you want to customize vault timeouts:
-
-```yaml
-auth_settings:
-  unlock_idle_timeout_seconds: 900
-  unlock_absolute_timeout_seconds: 28800
-  direct_password_autologin: true
-  tui_password_autologin: true
-```
 
 ## Uninstall
 
