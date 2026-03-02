@@ -23,7 +23,7 @@ pub struct MainArgs {
     pub is_non_interactive: bool,
     /// Launch interactive session manager TUI
     pub interactive: bool,
-    /// Add encrypted pass key file under ~/.color-ssh/keys/<name>.gpg
+    /// Add encrypted pass key file under ~/.color-ssh/keys/<name>.key
     pub add_pass: Option<String>,
 }
 
@@ -78,7 +78,7 @@ fn build_cli_command() -> Command {
         .arg(
             Arg::new("add_pass")
                 .long("add-pass")
-                .help("Create or replace ~/.color-ssh/keys/<name>.gpg interactively")
+                .help("Create or replace ~/.color-ssh/keys/<name>.key interactively")
                 .num_args(1)
                 .value_name("name")
                 .conflicts_with("ssh_args")
@@ -90,7 +90,7 @@ fn build_cli_command() -> Command {
         .after_help(
             r"
 cossh                                              # Launch interactive session manager
-cossh --add-pass office_fw                         # Create ~/.color-ssh/keys/office_fw.gpg
+cossh --add-pass office_fw                         # Create ~/.color-ssh/keys/office_fw.key
 cossh -d                                           # Launch interactive session manager with debug enabled
 cossh -d user@example.com                          # Debug mode enabled
 cossh -l user@example.com                          # SSH logging enabled
@@ -143,7 +143,7 @@ where
 /// - `-d, --debug` - Enable debug mode with detailed logging
 /// - `-l, --log` - Enable SSH session logging
 /// - `-t, --test` - Ignore config logging settings and use only CLI `-d/-l` logging flags
-/// - `--add-pass <name>` - Create `~/.color-ssh/keys/<name>.gpg` interactively
+/// - `--add-pass <name>` - Create `~/.color-ssh/keys/<name>.key` interactively
 /// - `ssh_args` - All remaining arguments are passed to SSH
 ///
 /// # Examples

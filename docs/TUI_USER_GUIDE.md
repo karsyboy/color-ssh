@@ -197,7 +197,7 @@ You can add metadata comments inside `~/.ssh/config` host blocks:
 | --- | --- |
 | `#_Desc <text>` | Description shown in host info pane |
 | `#_Profile <name>` | Uses profile `<name>.cossh-config.yaml` when opening that host |
-| `#_pass <name>` | Decrypts `~/.color-ssh/keys/<name>.gpg` and runs that host with password auto-login |
+| `#_pass <name>` | Decrypts `~/.color-ssh/keys/<name>.key` and runs that host with password auto-login |
 | `#_hidden <true\|yes\|1>` | Hides host from interactive host list |
 
 Example:
@@ -216,7 +216,7 @@ Additional behavior:
 
 - Host aliases containing `*` or `?` are not shown in the interactive host list.
 - Standard OpenSSH `Include` directives are supported and shown as folder nodes.
-- `#_pass` key files are read from `~/.color-ssh/keys/<name>.gpg`.
+- `#_pass` key files are read from `~/.color-ssh/keys/<name>.key`.
 - Decrypt/passphrase failures retry up to 3 times, then fall back to normal SSH prompting.
 - Successfully decrypted passwords are cached for the running color-ssh process.
 
@@ -230,9 +230,9 @@ cossh --add-pass lab_switch
 
 Flow:
 
-- If `~/.color-ssh/keys/lab_switch.gpg` exists, you are asked to confirm overwrite.
+- If `~/.color-ssh/keys/lab_switch.key` exists, you are asked to confirm overwrite.
 - You enter the SSH password twice with hidden prompts.
-- `gpg --symmetric` writes `~/.color-ssh/keys/lab_switch.gpg`.
+- The encrypted key file is written to `~/.color-ssh/keys/lab_switch.key`.
 - On success, use `#_pass lab_switch` in `~/.ssh/config`.
 
 ## TUI-Related Config Options
