@@ -18,8 +18,16 @@ fn runtime_expires_when_idle_timeout_elapses() {
     let mut runtime = AgentRuntime::new();
     runtime.unlock([7u8; 32], UnlockPolicy::new(1, 10));
     runtime.last_activity_at = Some(Instant::now() - Duration::from_secs(2));
-    runtime.expire_if_needed();
+    assert!(runtime.expire_if_needed());
     assert!(runtime.data_key.is_none());
+}
+
+#[test]
+fn runtime_does_not_expire_before_timeout() {
+    let mut runtime = AgentRuntime::new();
+    runtime.unlock([7u8; 32], UnlockPolicy::new(10, 20));
+    assert!(!runtime.expire_if_needed());
+    assert!(runtime.data_key.is_some());
 }
 
 #[test]
@@ -44,6 +52,29 @@ fn handle_request_unlocks_and_fetches_secret() {
     };
     let response = handle_request(&paths, &mut runtime, get_secret);
     assert!(matches!(response, AgentResponse::Secret { secret, .. } if secret == "top-secret"));
+
+    let _ = fs::remove_dir_all(paths.base_dir());
+}
+
+#[test]
+fn handle_request_lock_clears_runtime_state() {
+    let paths = temp_paths("lock_request");
+    let mut runtime = AgentRuntime::new();
+    runtime.unlock([9u8; 32], UnlockPolicy::new(900, 28_800));
+
+    let response = handle_request(
+        &paths,
+        &mut runtime,
+        AgentRequest {
+            payload: AgentRequestPayload::Lock,
+        },
+    );
+
+    assert!(matches!(response, AgentResponse::Success { .. }));
+    assert!(runtime.data_key.is_none());
+    assert!(runtime.unlocked_at.is_none());
+    assert!(runtime.last_activity_at.is_none());
+    assert!(runtime.policy.is_none());
 
     let _ = fs::remove_dir_all(paths.base_dir());
 }

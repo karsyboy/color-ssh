@@ -11,6 +11,7 @@ use zeroize::Zeroize;
 
 const AGENT_STARTUP_TIMEOUT: Duration = Duration::from_secs(2);
 const AGENT_STARTUP_POLL_INTERVAL: Duration = Duration::from_millis(50);
+const AGENT_IDLE_SHUTDOWN_POLL_INTERVAL: Duration = Duration::from_millis(250);
 
 pub use crate::auth::ipc::{AgentRequest, UnlockPolicy as AgentUnlockPolicy, VaultStatus as AgentVaultStatus};
 
@@ -160,24 +161,27 @@ impl AgentRuntime {
         }
     }
 
-    fn expire_if_needed(&mut self) {
+    fn expire_if_needed(&mut self) -> bool {
         let Some(policy) = &self.policy else {
-            return;
+            return false;
         };
         let Some(unlocked_at) = self.unlocked_at else {
             self.lock();
-            return;
+            return false;
         };
         let Some(last_activity_at) = self.last_activity_at else {
             self.lock();
-            return;
+            return false;
         };
 
         let idle_expired = last_activity_at.elapsed() >= Duration::from_secs(policy.unlock_idle_timeout_seconds);
         let absolute_expired = unlocked_at.elapsed() >= Duration::from_secs(policy.unlock_absolute_timeout_seconds);
         if idle_expired || absolute_expired {
             self.lock();
+            return true;
         }
+
+        false
     }
 
     fn status(&self, paths: &VaultPaths) -> VaultStatus {
@@ -230,17 +234,36 @@ impl AgentRuntime {
     }
 }
 
+struct EndpointGuard {
+    paths: VaultPaths,
+}
+
+impl Drop for EndpointGuard {
+    fn drop(&mut self) {
+        let _ = ipc::cleanup_endpoint(&self.paths);
+    }
+}
+
 pub fn run_server() -> Result<(), AgentError> {
     let paths = VaultPaths::resolve_default()?;
     let listener = match ipc::bind_listener(&paths)? {
         ipc::ListenerBindResult::Bound(listener) => listener,
         ipc::ListenerBindResult::AlreadyRunning => return Ok(()),
     };
+    let _endpoint_guard = EndpointGuard { paths: paths.clone() };
     let mut runtime = AgentRuntime::new();
 
     loop {
+        if runtime.expire_if_needed() {
+            return Ok(());
+        }
+
         let mut stream = match listener.accept() {
             Ok(connection) => connection,
+            Err(err) if err.kind() == io::ErrorKind::WouldBlock => {
+                thread::sleep(AGENT_IDLE_SHUTDOWN_POLL_INTERVAL);
+                continue;
+            }
             Err(err) if err.kind() == io::ErrorKind::Interrupted => continue,
             Err(err) => return Err(AgentError::Io(err)),
         };
@@ -258,9 +281,22 @@ pub fn run_server() -> Result<(), AgentError> {
             }
         };
 
-        runtime.expire_if_needed();
+        if runtime.expire_if_needed() {
+            let response = AgentResponse::Error {
+                status: runtime.status(&paths),
+                code: "locked".to_string(),
+                message: "password vault session expired".to_string(),
+            };
+            let _ = ipc::write_response(&mut stream, &response);
+            return Ok(());
+        }
+
+        let should_shutdown = matches!(&request.payload, AgentRequestPayload::Lock);
         let response = handle_request(&paths, &mut runtime, request);
         let _ = ipc::write_response(&mut stream, &response);
+        if should_shutdown {
+            return Ok(());
+        }
     }
 }
 

@@ -3,7 +3,7 @@ use crate::auth::vault::VaultPaths;
 use interprocess::local_socket::{GenericFilePath, ToFsName};
 #[cfg(windows)]
 use interprocess::local_socket::{GenericNamespaced, ToNsName};
-use interprocess::local_socket::{Listener as LocalSocketListener, ListenerOptions, Stream as LocalSocketStream, prelude::*};
+use interprocess::local_socket::{Listener as LocalSocketListener, ListenerNonblockingMode, ListenerOptions, Stream as LocalSocketStream, prelude::*};
 use serde::{Deserialize, Serialize};
 use std::fs;
 use std::io::{self, BufRead, BufReader, Read, Write};
@@ -136,6 +136,11 @@ pub fn connect(paths: &VaultPaths) -> io::Result<LocalSocketStream> {
     Ok(stream)
 }
 
+pub fn cleanup_endpoint(paths: &VaultPaths) -> io::Result<()> {
+    remove_legacy_state_file(paths);
+    cleanup_local_endpoint(paths)
+}
+
 pub fn read_request(stream: &mut LocalSocketStream) -> io::Result<AgentRequest> {
     read_json_line(stream)
 }
@@ -245,7 +250,7 @@ fn create_listener_for_endpoint(paths: &VaultPaths, endpoint: &AgentEndpoint) ->
     fs::create_dir_all(paths.run_dir())?;
     set_restrictive_directory_permissions(&paths.run_dir())?;
     let name = endpoint.socket_path.as_os_str().to_fs_name::<GenericFilePath>()?;
-    let listener = ListenerOptions::new().name(name).create_sync()?;
+    let listener = ListenerOptions::new().name(name).nonblocking(ListenerNonblockingMode::Accept).create_sync()?;
     set_restrictive_file_permissions(&endpoint.socket_path)?;
     Ok(listener)
 }
@@ -254,7 +259,11 @@ fn create_listener_for_endpoint(paths: &VaultPaths, endpoint: &AgentEndpoint) ->
 fn create_listener_for_endpoint(_paths: &VaultPaths, endpoint: &AgentEndpoint) -> io::Result<LocalSocketListener> {
     let name = endpoint.identifier.as_str().to_ns_name::<GenericNamespaced>()?;
     let security_descriptor = current_user_security_descriptor()?;
-    ListenerOptions::new().name(name).security_descriptor(security_descriptor).create_sync()
+    ListenerOptions::new()
+        .name(name)
+        .nonblocking(ListenerNonblockingMode::Accept)
+        .security_descriptor(security_descriptor)
+        .create_sync()
 }
 
 #[cfg(unix)]
@@ -289,6 +298,26 @@ fn remove_stale_socket_file(paths: &VaultPaths) -> io::Result<bool> {
 #[cfg(not(unix))]
 fn remove_stale_socket_file(_paths: &VaultPaths) -> io::Result<bool> {
     Ok(false)
+}
+
+#[cfg(unix)]
+fn cleanup_local_endpoint(paths: &VaultPaths) -> io::Result<()> {
+    let endpoint = agent_endpoint(paths);
+    if !endpoint.socket_path.exists() {
+        return Ok(());
+    }
+
+    let metadata = fs::symlink_metadata(&endpoint.socket_path)?;
+    if metadata.file_type().is_socket() {
+        fs::remove_file(endpoint.socket_path)?;
+    }
+
+    Ok(())
+}
+
+#[cfg(not(unix))]
+fn cleanup_local_endpoint(_paths: &VaultPaths) -> io::Result<()> {
+    Ok(())
 }
 
 #[cfg(unix)]
