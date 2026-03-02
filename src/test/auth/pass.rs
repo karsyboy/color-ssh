@@ -34,7 +34,7 @@ fn extract_password_uses_first_line_and_trims_line_endings_only() {
 fn pass_key_path_uses_color_ssh_keys_directory() {
     let path = pass_key_path("lab").expect("home dir");
     let rendered = path.to_string_lossy();
-    assert!(rendered.ends_with("/.color-ssh/keys/lab.key"));
+    assert!(rendered.ends_with("/.color-ssh/keys/lab.gpg"));
 }
 
 #[test]
@@ -59,6 +59,18 @@ fn decrypt_with_retry_stops_after_three_attempts() {
 
     assert_eq!(result, Err(PassFallbackReason::DecryptFailedAfterRetries));
     assert_eq!(attempts, 3);
+}
+
+#[test]
+fn decrypt_with_retry_missing_gpg_fails_immediately() {
+    let mut attempts = 0usize;
+    let result = decrypt_with_retry(Path::new("/tmp/ignored"), |_| {
+        attempts += 1;
+        Err(DecryptError::MissingGpg)
+    });
+
+    assert_eq!(result, Err(PassFallbackReason::MissingGpg));
+    assert_eq!(attempts, 1);
 }
 
 #[test]
@@ -120,7 +132,7 @@ fn parse_overwrite_confirmation_accepts_yes_values() {
 #[test]
 fn create_pass_key_with_hooks_declines_existing_file_without_encrypting() {
     let root = temp_path("overwrite_decline");
-    let output_path = root.join("keys").join("device.key");
+    let output_path = root.join("keys").join("device.gpg");
     fs::create_dir_all(output_path.parent().expect("parent")).expect("create keys");
     fs::write(&output_path, b"existing").expect("write existing");
 
@@ -147,7 +159,7 @@ fn create_pass_key_with_hooks_declines_existing_file_without_encrypting() {
 #[test]
 fn create_pass_key_with_hooks_passes_raw_password_bytes_without_newline() {
     let root = temp_path("create_success");
-    let output_path = root.join("keys").join("device.key");
+    let output_path = root.join("keys").join("device.gpg");
     let mut seen_payload = Vec::new();
 
     let result = create_pass_key_with_hooks(
@@ -175,7 +187,7 @@ fn create_pass_key_with_hooks_enforces_unix_permissions() {
     use std::os::unix::fs::PermissionsExt;
 
     let root = temp_path("permissions");
-    let output_path = root.join("keys").join("device.key");
+    let output_path = root.join("keys").join("device.gpg");
 
     create_pass_key_with_hooks(
         "device",
@@ -196,18 +208,4 @@ fn create_pass_key_with_hooks_enforces_unix_permissions() {
     assert_eq!(file_mode, 0o600);
 
     let _ = fs::remove_dir_all(root);
-}
-
-#[test]
-fn encrypt_payload_for_storage_round_trips_password_bytes() {
-    let encrypted = encrypt_payload_for_storage(b"top-secret", "enc-passphrase").expect("encrypt payload");
-    let decrypted = decrypt_payload_with_passphrase(&encrypted, "enc-passphrase").expect("decrypt payload");
-    assert_eq!(decrypted, b"top-secret");
-}
-
-#[test]
-fn decrypt_payload_with_wrong_passphrase_fails() {
-    let encrypted = encrypt_payload_for_storage(b"top-secret", "enc-passphrase").expect("encrypt payload");
-    let result = decrypt_payload_with_passphrase(&encrypted, "wrong");
-    assert_eq!(result, Err(DecryptWithPassphraseError::InvalidPassphrase));
 }

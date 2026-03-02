@@ -1,8 +1,4 @@
 use crate::{command_path, log_debug};
-use argon2::{Algorithm, Argon2, Params, Version};
-use chacha20poly1305::aead::{Aead, Payload};
-use chacha20poly1305::{ChaCha20Poly1305, KeyInit, Nonce};
-use getrandom::fill as random_fill;
 use std::collections::HashMap;
 use std::fmt;
 use std::fs;
@@ -12,20 +8,13 @@ use std::process::{Command, Stdio};
 use std::time::{Duration, Instant};
 use zeroize::{Zeroize, Zeroizing};
 
+const GPG_COMMAND: &str = "gpg";
 const PASS_TOOL_COMMAND: &str = "sshpass";
 const MAX_DECRYPT_ATTEMPTS: usize = 3;
+const GPG_PROBE_ARG: &str = "--version";
 const PASS_TOOL_PROBE_ARG: &str = "-V";
+const GPG_NO_SYMKEY_CACHE_ARG: &str = "--no-symkey-cache";
 const PASS_CACHE_TTL: Duration = Duration::from_secs(300);
-const PASS_KEY_EXTENSION: &str = "key";
-const PASS_KEY_MAGIC: &[u8; 4] = b"CSK1";
-const PASS_KEY_VERSION: u8 = 1;
-const PASS_KEY_SALT_LEN: usize = 16;
-const PASS_KEY_NONCE_LEN: usize = 12;
-const PASS_KEY_DERIVED_KEY_LEN: usize = 32;
-const PASS_KEY_AAD: &[u8] = b"color-ssh/pass-key/v1";
-const PASS_KEY_KDF_MEMORY_KIB: u32 = 64 * 1024;
-const PASS_KEY_KDF_TIME_COST: u32 = 3;
-const PASS_KEY_KDF_PARALLELISM: u32 = 1;
 
 #[derive(Debug, Clone)]
 struct CachedPassword {
@@ -46,6 +35,7 @@ impl CachedPassword {
 pub enum PassFallbackReason {
     InvalidPassKeyName,
     MissingKeyFile,
+    MissingGpg,
     MissingPassTool,
     DecryptFailedAfterRetries,
 }
@@ -74,12 +64,13 @@ pub enum PassPromptSubmitResult {
 pub enum PassCreateError {
     InvalidPassKeyName,
     MissingHomeDirectory,
+    MissingGpg,
     PasswordMismatch,
     EmptyPassword,
-    EncryptionPassphraseMismatch,
-    EmptyEncryptionPassphrase,
+    GpgPassphraseMismatch,
+    EmptyGpgPassphrase,
     OverwriteDeclined,
-    EncryptFailed(String),
+    GpgFailed(String),
     Io(io::Error),
 }
 
@@ -88,12 +79,13 @@ impl fmt::Display for PassCreateError {
         match self {
             Self::InvalidPassKeyName => write!(f, "invalid pass name; use only letters, numbers, '.', '_' or '-'"),
             Self::MissingHomeDirectory => write!(f, "could not determine home directory"),
+            Self::MissingGpg => write!(f, "gpg is required but was not found in PATH"),
             Self::PasswordMismatch => write!(f, "password confirmation did not match"),
             Self::EmptyPassword => write!(f, "password cannot be empty"),
-            Self::EncryptionPassphraseMismatch => write!(f, "encryption passphrase confirmation did not match"),
-            Self::EmptyEncryptionPassphrase => write!(f, "encryption passphrase cannot be empty"),
+            Self::GpgPassphraseMismatch => write!(f, "gpg passphrase confirmation did not match"),
+            Self::EmptyGpgPassphrase => write!(f, "gpg passphrase cannot be empty"),
             Self::OverwriteDeclined => write!(f, "existing key file was not overwritten"),
-            Self::EncryptFailed(message) => write!(f, "key encryption failed: {}", message),
+            Self::GpgFailed(message) => write!(f, "gpg encryption failed: {}", message),
             Self::Io(err) => write!(f, "{}", err),
         }
     }
@@ -110,6 +102,7 @@ impl From<io::Error> for PassCreateError {
 #[derive(Debug, Default, Clone)]
 pub struct PassCache {
     passwords: HashMap<String, CachedPassword>,
+    gpg_available: Option<bool>,
     pass_tool_available: Option<bool>,
 }
 
@@ -133,6 +126,10 @@ impl PassCache {
         self.insert(key, password.to_string());
     }
 
+    fn gpg_available(&mut self) -> bool {
+        cached_command_available(&mut self.gpg_available, GPG_COMMAND, GPG_PROBE_ARG)
+    }
+
     fn pass_tool_available(&mut self) -> bool {
         cached_command_available(&mut self.pass_tool_available, PASS_TOOL_COMMAND, PASS_TOOL_PROBE_ARG)
     }
@@ -141,11 +138,13 @@ impl PassCache {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum DecryptError {
     Retryable,
+    MissingGpg,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum DecryptWithPassphraseError {
     InvalidPassphrase,
+    MissingGpg,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -163,11 +162,14 @@ pub fn fallback_notice(reason: PassFallbackReason) -> String {
         PassFallbackReason::MissingKeyFile => {
             "Password auto-login unavailable because the configured key file was not found; falling back to standard SSH password prompt.".to_string()
         }
+        PassFallbackReason::MissingGpg => {
+            "Password auto-login unavailable because gpg is not available; falling back to standard SSH password prompt.".to_string()
+        }
         PassFallbackReason::MissingPassTool => {
             "Password auto-login unavailable because sshpass is not available; falling back to standard SSH password prompt.".to_string()
         }
         PassFallbackReason::DecryptFailedAfterRetries => {
-            "Password auto-login unavailable; key decryption failed after multiple attempts. Falling back to standard SSH password prompt.".to_string()
+            "Password auto-login unavailable; gpg decryption failed after multiple attempts. Falling back to standard SSH password prompt.".to_string()
         }
     }
 }
@@ -177,7 +179,7 @@ pub fn validate_pass_key_name(name: &str) -> bool {
 }
 
 pub fn pass_key_path(pass_key: &str) -> Option<PathBuf> {
-    dirs::home_dir().map(|home| home.join(".color-ssh").join("keys").join(format!("{pass_key}.{PASS_KEY_EXTENSION}")))
+    dirs::home_dir().map(|home| home.join(".color-ssh").join("keys").join(format!("{pass_key}.gpg")))
 }
 
 pub fn extract_password_from_plaintext(plaintext: &[u8]) -> Option<String> {
@@ -222,35 +224,90 @@ pub fn submit_tui_passphrase(pass_key: &str, passphrase: &str, cache: &mut PassC
                 PassPromptSubmitResult::Ready(password)
             }
             Err(DecryptWithPassphraseError::InvalidPassphrase) => PassPromptSubmitResult::InvalidPassphrase,
+            Err(DecryptWithPassphraseError::MissingGpg) => PassPromptSubmitResult::Fallback(PassFallbackReason::MissingGpg),
         },
     }
 }
 
 pub fn create_pass_key_interactive(pass_key: &str) -> Result<PathBuf, PassCreateError> {
     let output_path = pass_key_path(pass_key).ok_or(PassCreateError::MissingHomeDirectory)?;
+    if !command_available(GPG_COMMAND, GPG_PROBE_ARG) {
+        return Err(PassCreateError::MissingGpg);
+    }
 
     create_pass_key_with_hooks(
         pass_key,
         output_path,
         prompt_overwrite_existing_key,
         prompt_for_pass_password,
-        encrypt_payload_with_internal_cipher,
+        encrypt_payload_with_gpg,
     )
 }
 
 fn decrypt_pass_from_file(path: &Path) -> Result<String, DecryptError> {
-    let mut passphrase = prompt_for_decrypt_passphrase().map_err(|_| DecryptError::Retryable)?;
-    let result = decrypt_pass_from_file_with_passphrase(path, &passphrase).map_err(|_| DecryptError::Retryable);
-    passphrase.zeroize();
-    result
+    let mut command = gpg_decrypt_command().map_err(map_decrypt_spawn_error)?;
+    command
+        .arg("--quiet")
+        .arg("--decrypt")
+        .arg(path)
+        .stdin(Stdio::inherit())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::inherit());
+
+    let child = command.spawn().map_err(map_decrypt_spawn_error)?;
+    let mut output = child.wait_with_output().map_err(|_| DecryptError::Retryable)?;
+    if !output.status.success() {
+        output.stdout.zeroize();
+        output.stderr.zeroize();
+        return Err(DecryptError::Retryable);
+    }
+    let extracted = extract_password_from_plaintext(&output.stdout).ok_or(DecryptError::Retryable);
+    output.stdout.zeroize();
+    output.stderr.zeroize();
+    extracted
 }
 
 fn decrypt_pass_from_file_with_passphrase(path: &Path, passphrase: &str) -> Result<String, DecryptWithPassphraseError> {
-    let mut encrypted_payload = fs::read(path).map_err(|_| DecryptWithPassphraseError::InvalidPassphrase)?;
-    let mut decrypted_payload = decrypt_payload_with_passphrase(&encrypted_payload, passphrase)?;
-    encrypted_payload.zeroize();
-    let extracted = extract_password_from_plaintext(&decrypted_payload).ok_or(DecryptWithPassphraseError::InvalidPassphrase);
-    decrypted_payload.zeroize();
+    let mut command = gpg_decrypt_command().map_err(map_passphrase_spawn_error)?;
+    command
+        .arg("--quiet")
+        .arg("--batch")
+        .arg("--pinentry-mode")
+        .arg("loopback")
+        .arg("--passphrase-fd")
+        .arg("0")
+        .arg("--decrypt")
+        .arg(path)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
+
+    let mut child = command.spawn().map_err(map_passphrase_spawn_error)?;
+
+    let Some(mut stdin) = child.stdin.take() else {
+        return Err(DecryptWithPassphraseError::InvalidPassphrase);
+    };
+
+    let mut passphrase_bytes = passphrase.as_bytes().to_vec();
+    let write_result = (|| -> Result<(), DecryptWithPassphraseError> {
+        stdin.write_all(&passphrase_bytes).map_err(|_| DecryptWithPassphraseError::InvalidPassphrase)?;
+        stdin.write_all(b"\n").map_err(|_| DecryptWithPassphraseError::InvalidPassphrase)?;
+        Ok(())
+    })();
+    passphrase_bytes.zeroize();
+    write_result?;
+    drop(stdin);
+
+    let mut output = child.wait_with_output().map_err(|_| DecryptWithPassphraseError::InvalidPassphrase)?;
+    if !output.status.success() {
+        output.stdout.zeroize();
+        output.stderr.zeroize();
+        return Err(DecryptWithPassphraseError::InvalidPassphrase);
+    }
+
+    let extracted = extract_password_from_plaintext(&output.stdout).ok_or(DecryptWithPassphraseError::InvalidPassphrase);
+    output.stdout.zeroize();
+    output.stderr.zeroize();
     extracted
 }
 
@@ -263,6 +320,9 @@ fn preflight_pass_key(pass_key: &str, cache: &mut PassCache) -> PassPreflight {
     }
     if !cache.pass_tool_available() {
         return PassPreflight::Fallback(PassFallbackReason::MissingPassTool);
+    }
+    if !cache.gpg_available() {
+        return PassPreflight::Fallback(PassFallbackReason::MissingGpg);
     }
     let Some(key_path) = pass_key_path(pass_key) else {
         return PassPreflight::Fallback(PassFallbackReason::MissingKeyFile);
@@ -280,8 +340,9 @@ where
     for attempt in 1..=MAX_DECRYPT_ATTEMPTS {
         match decrypt_once(path) {
             Ok(password) => return Ok(password),
+            Err(DecryptError::MissingGpg) => return Err(PassFallbackReason::MissingGpg),
             Err(DecryptError::Retryable) => {
-                log_debug!("Pass key decrypt attempt {}/{} failed", attempt, MAX_DECRYPT_ATTEMPTS);
+                log_debug!("GPG decrypt attempt {}/{} failed", attempt, MAX_DECRYPT_ATTEMPTS);
             }
         }
     }
@@ -300,6 +361,11 @@ fn command_available(command: &str, probe_arg: &str) -> bool {
         .stderr(Stdio::null())
         .status()
         .is_ok()
+}
+
+fn gpg_decrypt_command() -> io::Result<Command> {
+    let command = Command::new(command_path::gpg_path()?);
+    Ok(command)
 }
 
 fn cached_command_available(cache: &mut Option<bool>, command: &str, probe_arg: &str) -> bool {
@@ -342,7 +408,7 @@ where
     encrypt_result?;
 
     if !output_path.is_file() {
-        return Err(PassCreateError::EncryptFailed("no encrypted file was created".to_string()));
+        return Err(PassCreateError::GpgFailed("no encrypted file was created".to_string()));
     }
 
     set_restrictive_file_permissions(&output_path)?;
@@ -393,119 +459,95 @@ fn prompt_for_pass_password() -> Result<String, PassCreateError> {
     confirm_password_entry(password, confirm_password)
 }
 
-fn encrypt_payload_with_internal_cipher(output_path: &Path, plaintext: &[u8]) -> Result<(), PassCreateError> {
-    let mut encryption_passphrase = prompt_for_encrypt_passphrase()?;
-    let mut encrypted_payload = encrypt_payload_for_storage(plaintext, &encryption_passphrase)?;
-    let write_result = fs::write(output_path, &encrypted_payload).map_err(PassCreateError::Io);
-    encrypted_payload.zeroize();
-    encryption_passphrase.zeroize();
-    write_result
+fn encrypt_payload_with_gpg(output_path: &Path, plaintext: &[u8]) -> Result<(), PassCreateError> {
+    let mut gpg_passphrase = prompt_for_encrypt_gpg_passphrase()?;
+
+    let mut command = Command::new(command_path::gpg_path().map_err(map_create_spawn_error)?);
+    command
+        .arg("--quiet")
+        .arg(GPG_NO_SYMKEY_CACHE_ARG)
+        .arg("--batch")
+        .arg("--pinentry-mode")
+        .arg("loopback")
+        .arg("--passphrase-fd")
+        .arg("0")
+        .arg("--symmetric")
+        .arg("--output")
+        .arg(output_path)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::null())
+        .stderr(Stdio::piped());
+
+    let result = (|| -> Result<(), PassCreateError> {
+        let mut child = command.spawn().map_err(map_create_spawn_error)?;
+
+        let Some(mut stdin) = child.stdin.take() else {
+            return Err(PassCreateError::Io(io::Error::other("failed to open gpg stdin")));
+        };
+        stdin.write_all(gpg_passphrase.as_bytes())?;
+        stdin.write_all(b"\n")?;
+        stdin.write_all(plaintext)?;
+        drop(stdin);
+
+        let mut output = child.wait_with_output()?;
+        if output.status.success() {
+            output.stdout.zeroize();
+            output.stderr.zeroize();
+            return Ok(());
+        }
+
+        let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
+        output.stdout.zeroize();
+        output.stderr.zeroize();
+        if stderr.is_empty() {
+            Err(PassCreateError::GpgFailed("unknown gpg error".to_string()))
+        } else {
+            Err(PassCreateError::GpgFailed(stderr))
+        }
+    })();
+    gpg_passphrase.zeroize();
+    result
 }
 
-fn prompt_for_encrypt_passphrase() -> Result<String, PassCreateError> {
-    let mut passphrase = rpassword::prompt_password("Enter key encryption passphrase: ")?;
-    let mut confirm = rpassword::prompt_password("Confirm key encryption passphrase: ")?;
+fn prompt_for_encrypt_gpg_passphrase() -> Result<String, PassCreateError> {
+    let mut passphrase = rpassword::prompt_password("Enter GPG passphrase for key encryption: ")?;
+    let mut confirm = rpassword::prompt_password("Confirm GPG passphrase: ")?;
     if passphrase.is_empty() {
         passphrase.zeroize();
         confirm.zeroize();
-        return Err(PassCreateError::EmptyEncryptionPassphrase);
+        return Err(PassCreateError::EmptyGpgPassphrase);
     }
     if passphrase != confirm {
         passphrase.zeroize();
         confirm.zeroize();
-        return Err(PassCreateError::EncryptionPassphraseMismatch);
+        return Err(PassCreateError::GpgPassphraseMismatch);
     }
     confirm.zeroize();
     Ok(passphrase)
 }
 
-fn prompt_for_decrypt_passphrase() -> io::Result<String> {
-    rpassword::prompt_password("Enter key passphrase: ")
+fn map_decrypt_spawn_error(err: io::Error) -> DecryptError {
+    if err.kind() == io::ErrorKind::NotFound {
+        DecryptError::MissingGpg
+    } else {
+        DecryptError::Retryable
+    }
 }
 
-fn encrypt_payload_for_storage(plaintext: &[u8], passphrase: &str) -> Result<Vec<u8>, PassCreateError> {
-    let mut salt = [0u8; PASS_KEY_SALT_LEN];
-    random_fill(&mut salt).map_err(|err| PassCreateError::EncryptFailed(format!("secure random generation failed: {err}")))?;
-    let mut nonce = [0u8; PASS_KEY_NONCE_LEN];
-    random_fill(&mut nonce).map_err(|err| PassCreateError::EncryptFailed(format!("secure random generation failed: {err}")))?;
-
-    let mut key = Zeroizing::new([0u8; PASS_KEY_DERIVED_KEY_LEN]);
-    derive_encryption_key(passphrase.as_bytes(), &salt, &mut key)?;
-    let cipher = ChaCha20Poly1305::new_from_slice(&key[..]).map_err(|err| PassCreateError::EncryptFailed(format!("invalid cipher key material: {err}")))?;
-    let ciphertext = cipher
-        .encrypt(
-            Nonce::from_slice(&nonce),
-            Payload {
-                msg: plaintext,
-                aad: PASS_KEY_AAD,
-            },
-        )
-        .map_err(|_| PassCreateError::EncryptFailed("failed to encrypt payload".to_string()))?;
-
-    let mut output = Vec::with_capacity(PASS_KEY_MAGIC.len() + 1 + PASS_KEY_SALT_LEN + PASS_KEY_NONCE_LEN + ciphertext.len());
-    output.extend_from_slice(PASS_KEY_MAGIC);
-    output.push(PASS_KEY_VERSION);
-    output.extend_from_slice(&salt);
-    output.extend_from_slice(&nonce);
-    output.extend_from_slice(&ciphertext);
-
-    salt.zeroize();
-    nonce.zeroize();
-    Ok(output)
+fn map_passphrase_spawn_error(err: io::Error) -> DecryptWithPassphraseError {
+    if err.kind() == io::ErrorKind::NotFound {
+        DecryptWithPassphraseError::MissingGpg
+    } else {
+        DecryptWithPassphraseError::InvalidPassphrase
+    }
 }
 
-fn decrypt_payload_with_passphrase(payload: &[u8], passphrase: &str) -> Result<Vec<u8>, DecryptWithPassphraseError> {
-    let fixed_prefix_len = PASS_KEY_MAGIC.len() + 1 + PASS_KEY_SALT_LEN + PASS_KEY_NONCE_LEN;
-    if payload.len() < fixed_prefix_len {
-        return Err(DecryptWithPassphraseError::InvalidPassphrase);
+fn map_create_spawn_error(err: io::Error) -> PassCreateError {
+    if err.kind() == io::ErrorKind::NotFound {
+        PassCreateError::MissingGpg
+    } else {
+        PassCreateError::Io(err)
     }
-
-    if &payload[..PASS_KEY_MAGIC.len()] != PASS_KEY_MAGIC {
-        return Err(DecryptWithPassphraseError::InvalidPassphrase);
-    }
-
-    let version = payload[PASS_KEY_MAGIC.len()];
-    if version != PASS_KEY_VERSION {
-        return Err(DecryptWithPassphraseError::InvalidPassphrase);
-    }
-
-    let salt_start = PASS_KEY_MAGIC.len() + 1;
-    let salt_end = salt_start + PASS_KEY_SALT_LEN;
-    let nonce_end = salt_end + PASS_KEY_NONCE_LEN;
-    let salt = &payload[salt_start..salt_end];
-    let nonce = &payload[salt_end..nonce_end];
-    let ciphertext = &payload[nonce_end..];
-
-    if ciphertext.is_empty() {
-        return Err(DecryptWithPassphraseError::InvalidPassphrase);
-    }
-
-    let mut key = Zeroizing::new([0u8; PASS_KEY_DERIVED_KEY_LEN]);
-    derive_encryption_key(passphrase.as_bytes(), salt, &mut key).map_err(|_| DecryptWithPassphraseError::InvalidPassphrase)?;
-    let cipher = ChaCha20Poly1305::new_from_slice(&key[..]).map_err(|_| DecryptWithPassphraseError::InvalidPassphrase)?;
-    cipher
-        .decrypt(
-            Nonce::from_slice(nonce),
-            Payload {
-                msg: ciphertext,
-                aad: PASS_KEY_AAD,
-            },
-        )
-        .map_err(|_| DecryptWithPassphraseError::InvalidPassphrase)
-}
-
-fn derive_encryption_key(passphrase: &[u8], salt: &[u8], key_output: &mut [u8; PASS_KEY_DERIVED_KEY_LEN]) -> Result<(), PassCreateError> {
-    let params = Params::new(
-        PASS_KEY_KDF_MEMORY_KIB,
-        PASS_KEY_KDF_TIME_COST,
-        PASS_KEY_KDF_PARALLELISM,
-        Some(PASS_KEY_DERIVED_KEY_LEN),
-    )
-    .map_err(|err| PassCreateError::EncryptFailed(format!("invalid key-derivation parameters: {err}")))?;
-    let argon2 = Argon2::new(Algorithm::Argon2id, Version::V0x13, params);
-    argon2
-        .hash_password_into(passphrase, salt, key_output)
-        .map_err(|err| PassCreateError::EncryptFailed(format!("failed to derive encryption key: {err}")))
 }
 
 #[cfg(unix)]
