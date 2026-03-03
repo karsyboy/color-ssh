@@ -59,7 +59,7 @@ impl SessionManager {
         };
 
         let width = full_area.width.clamp(44, 72);
-        let height = 7;
+        let height = 6;
         let area = Self::centered_rect(width, height, full_area);
 
         frame.render_widget(Clear, area);

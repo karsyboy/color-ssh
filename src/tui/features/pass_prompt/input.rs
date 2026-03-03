@@ -33,6 +33,32 @@ impl SessionManager {
         self.mark_ui_dirty();
     }
 
+    pub(crate) fn open_manual_vault_unlock_from_status(&mut self) {
+        log_debug!("Opening TUI password vault unlock prompt from vault status modal");
+        self.quick_connect = None;
+        self.vault_status_modal = None;
+        self.vault_unlock = Some(VaultUnlockState::new("shared".to_string(), VaultUnlockAction::UnlockVault).return_to_vault_status());
+        self.mark_ui_dirty();
+    }
+
+    fn restore_vault_status_modal(&mut self, message: Option<(String, bool)>) {
+        self.open_vault_status_modal();
+        if let Some((message, is_error)) = message {
+            if let Some(modal) = self.vault_status_modal.as_mut() {
+                modal.set_message(message, is_error);
+            }
+            self.mark_ui_dirty();
+        }
+    }
+
+    fn close_manual_vault_unlock_after_attempt_limit(&mut self, return_to_vault_status: bool) {
+        if return_to_vault_status {
+            self.restore_vault_status_modal(Some((MANUAL_VAULT_UNLOCK_RETRY_NOTICE.to_string(), true)));
+        } else {
+            self.mark_ui_dirty();
+        }
+    }
+
     pub(crate) fn open_vault_status_modal(&mut self) {
         log_debug!("Opening TUI vault status modal");
         self.quick_connect = None;
@@ -81,7 +107,7 @@ impl SessionManager {
                     self.vault_status_modal = None;
                     self.mark_ui_dirty();
                 } else {
-                    self.open_manual_vault_unlock();
+                    self.open_manual_vault_unlock_from_status();
                 }
             }
             KeyCode::Char('l') if !key.modifiers.contains(KeyModifiers::CONTROL) && !key.modifiers.contains(KeyModifiers::ALT) => {
@@ -111,7 +137,12 @@ impl SessionManager {
         match key.code {
             KeyCode::Esc => {
                 let action = prompt.action.clone();
+                let return_to_vault_status = prompt.return_to_vault_status;
                 self.vault_unlock = None;
+                if return_to_vault_status {
+                    self.restore_vault_status_modal(None);
+                    return;
+                }
                 let cancel_notice = (!action.is_manual_unlock()).then(|| VAULT_UNLOCK_CANCEL_NOTICE.to_string());
                 self.complete_vault_unlock_action(action, None, cancel_notice);
             }
@@ -176,6 +207,7 @@ impl SessionManager {
         let master_password = std::mem::take(&mut prompt.master_password);
         let action = prompt.action.clone();
         let entry_name = prompt.entry_name.clone();
+        let return_to_vault_status = prompt.return_to_vault_status;
         let client = match agent::AgentClient::new() {
             Ok(client) => client,
             Err(err) => {
@@ -221,6 +253,10 @@ impl SessionManager {
             Ok(status) => {
                 self.set_vault_status(status);
                 log_debug!("TUI password vault unlock succeeded");
+                if action.is_manual_unlock() && return_to_vault_status {
+                    self.restore_vault_status_modal(None);
+                    return;
+                }
                 let pass_entry_override = (!action.is_manual_unlock()).then_some(entry_name);
                 self.complete_vault_unlock_action(action, pass_entry_override, None);
             }
@@ -229,10 +265,7 @@ impl SessionManager {
                 prompt.attempts += 1;
                 if prompt.attempts >= prompt.max_attempts {
                     if action.is_manual_unlock() {
-                        prompt.error = Some(MANUAL_VAULT_UNLOCK_RETRY_NOTICE.to_string());
-                        prompt.attempts = 0;
-                        prompt.clear_master_password();
-                        self.vault_unlock = Some(prompt);
+                        self.close_manual_vault_unlock_after_attempt_limit(return_to_vault_status);
                         return;
                     }
                     self.complete_vault_unlock_action(

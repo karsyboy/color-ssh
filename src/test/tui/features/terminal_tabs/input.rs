@@ -115,6 +115,7 @@ fn handle_key_v_opens_manual_unlock_from_locked_vault_status_modal() {
     assert!(app.vault_status_modal.is_none());
     let prompt = app.vault_unlock.as_ref().expect("vault unlock state");
     assert!(matches!(prompt.action, VaultUnlockAction::UnlockVault));
+    assert!(prompt.return_to_vault_status);
 }
 
 #[test]

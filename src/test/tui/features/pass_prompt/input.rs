@@ -47,3 +47,49 @@ fn handle_vault_status_modal_key_l_reports_already_locked() {
     assert_eq!(modal.message.as_deref(), Some("Vault already locked."));
     assert!(!modal.message_is_error);
 }
+
+#[test]
+fn restore_vault_status_modal_sets_error_message() {
+    let mut app = SessionManager::new_for_tests();
+
+    app.restore_vault_status_modal(Some(("Vault unlock failed after multiple attempts. Try again.".to_string(), true)));
+
+    assert!(app.vault_unlock.is_none());
+    let modal = app.vault_status_modal.as_ref().expect("vault status modal");
+    assert_eq!(modal.message.as_deref(), Some("Vault unlock failed after multiple attempts. Try again."));
+    assert!(modal.message_is_error);
+}
+
+#[test]
+fn close_manual_vault_unlock_after_attempt_limit_closes_direct_unlock_prompt() {
+    let mut app = SessionManager::new_for_tests();
+    app.vault_unlock = Some(VaultUnlockState::new("shared".to_string(), VaultUnlockAction::UnlockVault));
+
+    app.vault_unlock = None;
+    app.close_manual_vault_unlock_after_attempt_limit(false);
+
+    assert!(app.vault_unlock.is_none());
+    assert!(app.vault_status_modal.is_none());
+}
+
+#[test]
+fn close_manual_vault_unlock_after_attempt_limit_restores_vault_status_modal() {
+    let mut app = SessionManager::new_for_tests();
+
+    app.close_manual_vault_unlock_after_attempt_limit(true);
+
+    let modal = app.vault_status_modal.as_ref().expect("vault status modal");
+    assert_eq!(modal.message.as_deref(), Some("Vault unlock failed after multiple attempts. Try again."));
+    assert!(modal.message_is_error);
+}
+
+#[test]
+fn handle_vault_unlock_escape_returns_to_vault_status_modal_when_requested() {
+    let mut app = SessionManager::new_for_tests();
+    app.vault_unlock = Some(VaultUnlockState::new("shared".to_string(), VaultUnlockAction::UnlockVault).return_to_vault_status());
+
+    app.handle_vault_unlock_key(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE));
+
+    assert!(app.vault_unlock.is_none());
+    assert!(app.vault_status_modal.is_some());
+}

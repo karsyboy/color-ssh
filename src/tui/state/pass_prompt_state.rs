@@ -61,6 +61,7 @@ pub(crate) struct VaultUnlockState {
     pub(crate) max_attempts: usize,
     pub(crate) error: Option<String>,
     pub(crate) action: VaultUnlockAction,
+    pub(crate) return_to_vault_status: bool,
 }
 
 impl VaultUnlockState {
@@ -73,7 +74,13 @@ impl VaultUnlockState {
             max_attempts: VAULT_UNLOCK_MAX_ATTEMPTS,
             error: None,
             action,
+            return_to_vault_status: false,
         }
+    }
+
+    pub(crate) fn return_to_vault_status(mut self) -> Self {
+        self.return_to_vault_status = true;
+        self
     }
 
     pub(crate) fn masked_master_password(&self) -> String {
