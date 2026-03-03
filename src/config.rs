@@ -34,13 +34,12 @@ use std::sync::{
 /// use cossh::config;
 ///
 /// // Read configuration using helper
-/// let config = config::get_config();
-/// let show_title = config.read().map(|guard| guard.settings.show_title).unwrap_or(true);
+/// let show_title = config::with_current_config("reading show_title", |cfg| cfg.settings.show_title);
 ///
 /// // Write configuration using helper
-/// if let Ok(mut guard) = config::get_config().write() {
-///     guard.metadata.session_name = "example".to_string();
-/// }
+/// config::with_current_config_mut("setting session name", |cfg| {
+///     cfg.metadata.session_name = "example".to_string();
+/// });
 /// ```
 pub static SESSION_CONFIG: OnceCell<Arc<RwLock<style::Config>>> = OnceCell::new();
 static CONFIG_VERSION: AtomicU64 = AtomicU64::new(0);
@@ -74,6 +73,32 @@ pub fn get_config() -> &'static Arc<RwLock<style::Config>> {
     SESSION_CONFIG.get_or_init(|| Arc::new(RwLock::new(fallback_config())))
 }
 
+/// Run a read-only closure against the current configuration, recovering from a
+/// poisoned lock and logging the context when necessary.
+pub fn with_current_config<T>(context: &str, with_config: impl FnOnce(&style::Config) -> T) -> T {
+    match get_config().read() {
+        Ok(config_guard) => with_config(&config_guard),
+        Err(poisoned) => {
+            crate::log_error!("Configuration lock poisoned while {}; continuing with recovered state", context);
+            let config_guard = poisoned.into_inner();
+            with_config(&config_guard)
+        }
+    }
+}
+
+/// Run a mutable closure against the current configuration, recovering from a
+/// poisoned lock and logging the context when necessary.
+pub fn with_current_config_mut<T>(context: &str, with_config: impl FnOnce(&mut style::Config) -> T) -> T {
+    match get_config().write() {
+        Ok(mut config_guard) => with_config(&mut config_guard),
+        Err(poisoned) => {
+            crate::log_error!("Configuration lock poisoned while {}; continuing with recovered state", context);
+            let mut config_guard = poisoned.into_inner();
+            with_config(&mut config_guard)
+        }
+    }
+}
+
 fn install_config(config: style::Config) {
     set_config_version(config.metadata.version);
     replace_config(get_config(), config);
@@ -101,10 +126,7 @@ pub(crate) fn history_buffer_for_profile(profile: Option<&str>) -> Option<usize>
 }
 
 pub fn auth_settings() -> style::AuthSettings {
-    match get_config().read() {
-        Ok(config_guard) => config_guard.auth_settings.clone(),
-        Err(poisoned) => poisoned.into_inner().auth_settings.clone(),
-    }
+    with_current_config("reading auth settings", |cfg| cfg.auth_settings.clone())
 }
 
 pub(crate) fn current_config_version() -> u64 {

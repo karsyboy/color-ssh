@@ -8,6 +8,7 @@
 //! - `src/test/args.rs`
 //! - `src/test/main.rs`
 //! - `src/test/process.rs`
+//! - `src/test/ssh_args.rs`
 //!
 //! Highlighter:
 //! - `src/test/highlighter.rs`

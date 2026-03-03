@@ -5,6 +5,7 @@ pub mod config;
 pub mod highlighter;
 pub mod log;
 pub mod process;
+pub mod ssh_args;
 pub mod ssh_config;
 pub mod tui;
 

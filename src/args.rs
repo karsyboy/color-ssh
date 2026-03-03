@@ -3,6 +3,7 @@
 //! Parses CLI arguments using the clap library and provides structured access
 //! to user-provided options.
 
+use crate::ssh_args;
 use clap::{Arg, Command};
 use std::ffi::OsString;
 
@@ -162,10 +163,6 @@ cossh user@host -G                                 # Non-interactive command
         )
 }
 
-fn detect_non_interactive_ssh_args(ssh_args: &[String]) -> bool {
-    ssh_args.iter().any(|arg| matches!(arg.as_str(), "-G" | "-V" | "-O" | "-Q"))
-}
-
 fn parse_vault_command(matches: &clap::ArgMatches) -> Option<VaultCommand> {
     let ("vault", vault_matches) = matches.subcommand()? else {
         return None;
@@ -214,7 +211,7 @@ where
         test_mode,
         interactive,
         profile,
-        is_non_interactive: detect_non_interactive_ssh_args(&ssh_args),
+        is_non_interactive: ssh_args::is_non_interactive_ssh_invocation(&ssh_args),
         ssh_args,
         vault_command,
         pass_entry,

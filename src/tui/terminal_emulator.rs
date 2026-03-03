@@ -90,16 +90,12 @@ impl ParserEventListener {
     }
 
     fn remote_clipboard_policy() -> (bool, usize) {
-        let config_guard = match config::get_config().read() {
-            Ok(guard) => guard,
-            Err(poisoned) => poisoned.into_inner(),
-        };
-
-        if let Some(interactive) = config_guard.interactive_settings.as_ref() {
-            return (interactive.allow_remote_clipboard_write, interactive.remote_clipboard_max_bytes);
-        }
-
-        (false, 4096)
+        config::with_current_config("reading remote clipboard policy", |cfg| {
+            cfg.interactive_settings
+                .as_ref()
+                .map(|interactive| (interactive.allow_remote_clipboard_write, interactive.remote_clipboard_max_bytes))
+                .unwrap_or((false, 4096))
+        })
     }
 
     fn allow_remote_clipboard_write(text: &str, max_bytes: usize) -> bool {

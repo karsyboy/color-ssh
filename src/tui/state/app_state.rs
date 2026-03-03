@@ -9,13 +9,13 @@ use crate::auth::{
     ipc::{self, VaultStatus, VaultStatusEvent, VaultStatusEventKind},
     vault::VaultPaths,
 };
-use crate::ssh_config::{FolderId, SshHost, TreeFolder, load_ssh_host_tree};
+use crate::ssh_config::{FolderId, SshHost, SshHostTreeModel, TreeFolder, load_ssh_host_tree};
 use crate::{config, log_debug, log_error, log_warn};
 use notify::{Event, RecommendedWatcher, RecursiveMode, Watcher};
 use ratatui::layout::Rect;
 use std::fs;
 use std::sync::atomic::Ordering as AtomicOrdering;
-use std::sync::mpsc::{self, Receiver, TryRecvError};
+use std::sync::mpsc::{self, Receiver};
 use std::{
     collections::{HashMap, HashSet},
     io,
@@ -24,6 +24,7 @@ use std::{
 
 pub(crate) const HOST_PANEL_MIN_WIDTH: u16 = 15;
 pub(crate) const HOST_PANEL_MAX_WIDTH: u16 = 80;
+const DEFAULT_TERMINAL_SIZE: (u16, u16) = (100, 30);
 
 struct VaultStatusEventWatcher {
     _watcher: RecommendedWatcher,
@@ -97,6 +98,65 @@ impl VaultStatusEventWatcher {
             paths,
         })
     }
+}
+
+#[derive(Debug, Clone, Copy)]
+struct SessionManagerConfig {
+    history_buffer: usize,
+    host_tree_uncollapsed: bool,
+    host_info_visible: bool,
+    host_view_size_percent: u16,
+    info_view_size_percent: u16,
+    quick_connect_default_ssh_logging: bool,
+}
+
+impl Default for SessionManagerConfig {
+    fn default() -> Self {
+        Self {
+            history_buffer: 1000,
+            host_tree_uncollapsed: false,
+            host_info_visible: true,
+            host_view_size_percent: 25,
+            info_view_size_percent: 40,
+            quick_connect_default_ssh_logging: false,
+        }
+    }
+}
+
+impl SessionManagerConfig {
+    fn load() -> Self {
+        config::with_current_config("reading interactive session settings", |cfg| {
+            let mut session_config = Self {
+                quick_connect_default_ssh_logging: cfg.settings.ssh_logging,
+                ..Self::default()
+            };
+
+            if let Some(interactive) = cfg.interactive_settings.as_ref() {
+                session_config.history_buffer = interactive.history_buffer;
+                session_config.host_tree_uncollapsed = interactive.host_tree_uncollapsed;
+                session_config.host_info_visible = interactive.info_view;
+                session_config.host_view_size_percent = interactive.host_view_size;
+                session_config.info_view_size_percent = interactive.info_view_size;
+            }
+
+            session_config
+        })
+    }
+}
+
+struct AppStateInit {
+    hosts: Vec<SshHost>,
+    host_tree_root: TreeFolder,
+    collapsed_folders: HashSet<FolderId>,
+    history_buffer: usize,
+    host_panel_width: u16,
+    host_panel_default_percent: u16,
+    host_info_height: u16,
+    host_info_visible: bool,
+    quick_connect_default_ssh_logging: bool,
+    last_terminal_size: (u16, u16),
+    vault_status: VaultStatus,
+    vault_status_events: Option<VaultStatusEventWatcher>,
 }
 
 /// Connection request emitted when exiting the session manager into a direct `cossh` run.
@@ -293,21 +353,7 @@ impl AppState {
     }
 
     pub(crate) fn apply_vault_status_notifications(&mut self) {
-        let mut saw_event = false;
-        let mut paths = None;
-        if let Some(watcher) = &self.vault_status_events {
-            loop {
-                match watcher.receiver.try_recv() {
-                    Ok(()) => saw_event = true,
-                    Err(TryRecvError::Empty) | Err(TryRecvError::Disconnected) => break,
-                }
-            }
-            if saw_event {
-                paths = Some(watcher.paths.clone());
-            }
-        }
-
-        if let Some(paths) = paths {
+        if let Some(paths) = self.take_pending_vault_status_paths() {
             match ipc::read_vault_status_event(&paths) {
                 Ok(event) => self.handle_vault_status_notification(event),
                 Err(err) => log_debug!("Failed to read password vault status notification: {}", err),
@@ -316,81 +362,61 @@ impl AppState {
     }
 
     // Construction.
-    /// Create a new AppState instance.
-    pub(crate) fn new() -> io::Result<Self> {
-        log_debug!("Initializing session manager");
+    fn fallback_host_tree_root() -> TreeFolder {
+        TreeFolder {
+            id: 0,
+            name: "config".to_string(),
+            path: std::path::PathBuf::from("~/.ssh/config"),
+            children: Vec::new(),
+            host_indices: Vec::new(),
+        }
+    }
 
-        let tree_model = load_ssh_host_tree().unwrap_or_else(|err| {
+    fn load_host_tree_model() -> SshHostTreeModel {
+        load_ssh_host_tree().unwrap_or_else(|err| {
             log_error!("Failed to load SSH hosts: {}", err);
-            let fallback_root = TreeFolder {
-                id: 0,
-                name: "config".to_string(),
-                path: std::path::PathBuf::from("~/.ssh/config"),
-                children: Vec::new(),
-                host_indices: Vec::new(),
-            };
-            crate::ssh_config::SshHostTreeModel {
-                root: fallback_root,
+            SshHostTreeModel {
+                root: Self::fallback_host_tree_root(),
                 hosts: Vec::new(),
             }
-        });
-        let hosts = tree_model.hosts;
-        let host_search_index = Self::build_host_search_index(&hosts);
-        let host_tree_root = tree_model.root;
-        let (history_buffer, host_tree_uncollapsed, host_info_visible, host_view_size_percent, info_view_size_percent) = config::SESSION_CONFIG
-            .get()
-            .and_then(|config_lock| {
-                config_lock.read().ok().and_then(|cfg| {
-                    cfg.interactive_settings.as_ref().map(|interactive| {
-                        (
-                            interactive.history_buffer,
-                            interactive.host_tree_uncollapsed,
-                            interactive.info_view,
-                            interactive.host_view_size,
-                            interactive.info_view_size,
-                        )
-                    })
-                })
-            })
-            .unwrap_or((1000, false, true, 25, 40));
+        })
+    }
 
-        let quick_connect_default_ssh_logging = config::SESSION_CONFIG
-            .get()
-            .and_then(|config_lock| config_lock.read().ok().map(|cfg| cfg.settings.ssh_logging))
-            .unwrap_or(false);
+    fn build_collapsed_folders(host_tree_root: &TreeFolder, host_tree_uncollapsed: bool) -> HashSet<FolderId> {
+        let mut collapsed_folders = HashSet::new();
+        if !host_tree_uncollapsed {
+            Self::collect_descendant_folder_ids(host_tree_root, &mut collapsed_folders);
+        }
+        collapsed_folders
+    }
 
-        let (term_width, term_height) = crossterm::terminal::size().unwrap_or((100, 30));
-        let host_panel_width = Self::clamp_host_panel_width_for_terminal(((term_width as u32 * host_view_size_percent as u32) / 100) as u16, term_width);
+    fn compute_host_info_height(term_height: u16, info_view_size_percent: u16) -> u16 {
         let content_height = term_height.saturating_sub(2);
         let mut host_info_height = ((content_height as u32 * info_view_size_percent as u32) / 100) as u16;
         host_info_height = host_info_height.max(3);
         if content_height > 4 {
             host_info_height = host_info_height.min(content_height.saturating_sub(4));
         }
+        host_info_height
+    }
 
-        let mut collapsed_folders = HashSet::new();
-        if !host_tree_uncollapsed {
-            Self::collect_descendant_folder_ids(&host_tree_root, &mut collapsed_folders);
-        }
-
-        log_debug!("Loaded {} SSH hosts", hosts.len());
-
-        let initial_vault_status = Self::load_vault_status();
+    fn build_from_init(init: AppStateInit) -> Self {
+        let host_search_index = Self::build_host_search_index(&init.hosts);
         let now = Instant::now();
         let mut app = Self {
-            hosts,
+            hosts: init.hosts,
             host_search_index,
-            host_tree_root,
+            host_tree_root: init.host_tree_root,
             visible_host_rows: Vec::new(),
             selected_host_row: 0,
             host_match_scores: HashMap::new(),
-            collapsed_folders,
+            collapsed_folders: init.collapsed_folders,
             host_list_area: Rect::default(),
             host_info_area: Rect::default(),
             host_scroll_offset: 0,
-            host_panel_width,
-            host_panel_default_percent: host_view_size_percent,
-            host_info_height,
+            host_panel_width: init.host_panel_width,
+            host_panel_default_percent: init.host_panel_default_percent,
+            host_info_height: init.host_info_height,
             search_query: String::new(),
             search_query_cursor: 0,
             search_query_selection: None,
@@ -413,90 +439,85 @@ impl AppState {
             is_dragging_host_info_divider: false,
             dragging_tab: None,
             tab_scroll_offset: 0,
-            history_buffer,
+            history_buffer: init.history_buffer,
             host_panel_visible: true,
-            host_info_visible,
+            host_info_visible: init.host_info_visible,
             quick_connect: None,
             vault_unlock: None,
             vault_status_modal: None,
-            vault_status: initial_vault_status,
-            quick_connect_default_ssh_logging,
-            last_terminal_size: (term_width, term_height),
+            vault_status: init.vault_status,
+            quick_connect_default_ssh_logging: init.quick_connect_default_ssh_logging,
+            last_terminal_size: init.last_terminal_size,
             ui_dirty: true,
             last_draw_at: now,
             last_seen_render_epoch: 0,
             last_vault_status_refresh_at: now,
-            vault_status_events: VaultStatusEventWatcher::new(),
+            vault_status_events: init.vault_status_events,
         };
 
         app.update_filtered_hosts();
-        Ok(app)
+        app
+    }
+
+    fn take_pending_vault_status_paths(&self) -> Option<VaultPaths> {
+        let watcher = self.vault_status_events.as_ref()?;
+        let mut saw_event = false;
+
+        while let Ok(()) = watcher.receiver.try_recv() {
+            saw_event = true;
+        }
+
+        saw_event.then(|| watcher.paths.clone())
+    }
+
+    /// Create a new AppState instance.
+    pub(crate) fn new() -> io::Result<Self> {
+        log_debug!("Initializing session manager");
+
+        let tree_model = Self::load_host_tree_model();
+        let session_config = SessionManagerConfig::load();
+        let host_count = tree_model.hosts.len();
+        let host_tree_root = tree_model.root;
+        let collapsed_folders = Self::build_collapsed_folders(&host_tree_root, session_config.host_tree_uncollapsed);
+        let (term_width, term_height) = crossterm::terminal::size().unwrap_or(DEFAULT_TERMINAL_SIZE);
+        let host_panel_width =
+            Self::clamp_host_panel_width_for_terminal(((term_width as u32 * session_config.host_view_size_percent as u32) / 100) as u16, term_width);
+
+        log_debug!("Loaded {} SSH hosts", host_count);
+
+        Ok(Self::build_from_init(AppStateInit {
+            hosts: tree_model.hosts,
+            host_tree_root,
+            collapsed_folders,
+            history_buffer: session_config.history_buffer,
+            host_panel_width,
+            host_panel_default_percent: session_config.host_view_size_percent,
+            host_info_height: Self::compute_host_info_height(term_height, session_config.info_view_size_percent),
+            host_info_visible: session_config.host_info_visible,
+            quick_connect_default_ssh_logging: session_config.quick_connect_default_ssh_logging,
+            last_terminal_size: (term_width, term_height),
+            vault_status: Self::load_vault_status(),
+            vault_status_events: VaultStatusEventWatcher::new(),
+        }))
     }
 
     // Test scaffolding.
     #[cfg(test)]
     pub(crate) fn new_for_tests() -> Self {
-        let host_tree_root = TreeFolder {
-            id: 0,
-            name: "config".to_string(),
-            path: std::path::PathBuf::from("~/.ssh/config"),
-            children: Vec::new(),
-            host_indices: Vec::new(),
-        };
-
-        let mut app = Self {
+        Self::build_from_init(AppStateInit {
             hosts: Vec::new(),
-            host_search_index: Vec::new(),
-            host_tree_root,
-            visible_host_rows: Vec::new(),
-            selected_host_row: 0,
-            host_match_scores: HashMap::new(),
+            host_tree_root: Self::fallback_host_tree_root(),
             collapsed_folders: HashSet::new(),
-            search_query: String::new(),
-            search_query_cursor: 0,
-            search_query_selection: None,
-            search_mode: false,
-            should_exit: false,
-            selected_host_to_connect: None,
-            host_list_area: Rect::default(),
-            host_info_area: Rect::default(),
-            host_scroll_offset: 0,
+            history_buffer: 1000,
             host_panel_width: 25,
             host_panel_default_percent: 25,
             host_info_height: 10,
-            tabs: Vec::new(),
-            selected_tab: 0,
-            focus_on_manager: true,
-            selection_start: None,
-            selection_end: None,
-            is_selecting: false,
-            selection_dragged: false,
-            tab_content_area: Rect::default(),
-            tab_bar_area: Rect::default(),
-            host_panel_area: Rect::default(),
-            last_click: None,
-            is_dragging_divider: false,
-            is_dragging_host_scrollbar: false,
-            is_dragging_host_info_divider: false,
-            dragging_tab: None,
-            tab_scroll_offset: 0,
-            history_buffer: 1000,
-            host_panel_visible: true,
             host_info_visible: true,
-            quick_connect: None,
-            vault_unlock: None,
-            vault_status_modal: None,
             vault_status: VaultStatus::locked(false),
             quick_connect_default_ssh_logging: false,
-            last_terminal_size: (100, 30),
-            ui_dirty: true,
-            last_draw_at: Instant::now(),
-            last_seen_render_epoch: 0,
-            last_vault_status_refresh_at: Instant::now(),
+            last_terminal_size: DEFAULT_TERMINAL_SIZE,
             vault_status_events: None,
-        };
-        app.update_filtered_hosts();
-        app
+        })
     }
 }
 

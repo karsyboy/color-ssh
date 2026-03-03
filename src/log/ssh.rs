@@ -339,13 +339,7 @@ fn get_ssh_log_path() -> Result<PathBuf, LogError> {
 
     create_private_directory(&log_dir)?;
 
-    let session_name = match crate::config::get_config().read() {
-        Ok(config_guard) => config_guard.metadata.session_name.clone(),
-        Err(poisoned) => {
-            eprintln!("Configuration lock poisoned while reading SSH session name; continuing with recovered state");
-            poisoned.into_inner().metadata.session_name.clone()
-        }
-    };
+    let session_name = crate::config::with_current_config("reading SSH session name", |cfg| cfg.metadata.session_name.clone());
     let sanitized = sanitize_session_name(&session_name);
     Ok(log_dir.join(format!("{sanitized}.log")))
 }
@@ -367,10 +361,7 @@ fn open_private_append_file(path: &Path) -> Result<File, LogError> {
 }
 
 fn current_secret_patterns() -> Vec<Regex> {
-    crate::config::SESSION_CONFIG
-        .get()
-        .and_then(|config| config.read().ok().map(|config_guard| config_guard.metadata.compiled_secret_patterns.clone()))
-        .unwrap_or_default()
+    crate::config::with_current_config("reading SSH secret patterns", |cfg| cfg.metadata.compiled_secret_patterns.clone())
 }
 
 fn sanitize_line<'a>(line: &'a str, secret_patterns: &[Regex]) -> Cow<'a, str> {

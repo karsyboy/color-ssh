@@ -16,15 +16,9 @@ impl SessionManager {
         let mut profiles: HashSet<String> = HashSet::new();
         profiles.insert("default".to_string());
 
-        let config_dir = config::SESSION_CONFIG
-            .get()
-            .and_then(|config_lock| {
-                config_lock
-                    .read()
-                    .ok()
-                    .map(|cfg| cfg.metadata.config_path.parent().map(|config_path| config_path.to_path_buf()))
-            })
-            .flatten();
+        let config_dir = config::with_current_config("reading config directory for quick connect profiles", |cfg| {
+            cfg.metadata.config_path.parent().map(|config_path| config_path.to_path_buf())
+        });
 
         if let Some(config_dir) = config_dir
             && let Ok(entries) = fs::read_dir(config_dir)

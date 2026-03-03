@@ -1,6 +1,6 @@
 use crate::auth::{self, agent, ipc::UnlockPolicy, secret::ExposeSecret, transport, vault};
 use crate::ssh_config::SshHost;
-use crate::{Result, command_path, config, highlighter, log, log_debug, log_debug_raw, log_error, log_info, log_warn};
+use crate::{Result, command_path, config, highlighter, log, log_debug, log_debug_raw, log_error, log_info, log_warn, ssh_args};
 use std::{
     io::IsTerminal,
     io::{self, Read, Write},
@@ -66,6 +66,43 @@ struct PreparedSshCommand {
     fallback_notice: Option<String>,
 }
 
+#[derive(Debug, Default)]
+struct HighlightRuleCache {
+    rules: Vec<highlighter::CompiledHighlightRule>,
+    rule_set: Option<regex::RegexSet>,
+    version: u64,
+}
+
+impl HighlightRuleCache {
+    fn load() -> Self {
+        let (rules, rule_set) = config::with_current_config("loading highlight rules", |cfg| {
+            (cfg.metadata.compiled_rules.clone(), cfg.metadata.compiled_rule_set.clone())
+        });
+
+        Self {
+            rules,
+            rule_set,
+            version: config::current_config_version(),
+        }
+    }
+
+    fn refresh_if_changed(&mut self) {
+        let current_version = config::current_config_version();
+        if current_version == self.version {
+            return;
+        }
+
+        let (rules, rule_set) = config::with_current_config("reloading highlight rules", |cfg| {
+            (cfg.metadata.compiled_rules.clone(), cfg.metadata.compiled_rule_set.clone())
+        });
+        self.rules = rules;
+        self.rule_set = rule_set;
+        self.version = current_version;
+
+        log_debug!("Rules updated due to config reload (version {})", self.version);
+    }
+}
+
 fn build_plain_ssh_command(args: &[String]) -> PreparedSshCommand {
     PreparedSshCommand {
         program: "ssh".to_string(),
@@ -83,28 +120,6 @@ fn command_from_spec(spec: &PreparedSshCommand) -> io::Result<Command> {
         command.env(key, value);
     }
     Ok(command)
-}
-
-fn extract_ssh_destination(ssh_args: &[String]) -> Option<String> {
-    let flags_with_args = [
-        "-b", "-B", "-c", "-D", "-E", "-e", "-F", "-I", "-i", "-J", "-L", "-l", "-m", "-O", "-o", "-p", "-P", "-Q", "-R", "-S", "-w", "-W",
-    ];
-
-    let mut skip_next = false;
-    for arg in ssh_args {
-        if skip_next {
-            skip_next = false;
-            continue;
-        }
-        if arg.starts_with('-') {
-            if flags_with_args.contains(&arg.as_str()) {
-                skip_next = true;
-            }
-            continue;
-        }
-        return Some(arg.split_once('@').map_or_else(|| arg.clone(), |(_, host)| host.to_string()));
-    }
-    None
 }
 
 fn resolve_pass_entry_from_hosts(destination: &str, explicit_entry: Option<&str>, hosts: &[SshHost]) -> Option<String> {
@@ -189,7 +204,7 @@ fn build_ssh_command(args: &[String], explicit_pass_entry: Option<&str>) -> io::
         "ssh config lookup"
     };
     let Some(pass_entry_name) = explicit_pass_entry.map(|name| name.to_string()).or_else(|| {
-        let destination = extract_ssh_destination(args)?;
+        let destination = ssh_args::extract_destination_host(args)?;
         let hosts = crate::ssh_config::load_ssh_host_tree().ok()?.hosts;
         resolve_pass_entry_from_hosts(&destination, None, &hosts)
     }) else {
@@ -294,7 +309,7 @@ pub fn process_handler(process_args: Vec<String>, is_non_interactive: bool, expl
         !is_non_interactive,
         process_args.len(),
         explicit_pass_entry.is_some(),
-        extract_ssh_destination(&process_args).is_some()
+        ssh_args::extract_destination_host(&process_args).is_some()
     );
     log_debug_raw!("Starting SSH process with args: {:?}", process_args);
     log_debug!("Non-interactive mode: {}", is_non_interactive);
@@ -342,22 +357,7 @@ pub fn process_handler(process_args: Vec<String>, is_non_interactive: bool, expl
             let mut chunk_id = 0;
             let mut highlight_scratch = highlighter::HighlightScratch::default();
             let mut color_state = highlighter::AnsiColorState::default();
-
-            // Cache rules and track config version for hot-reload support.
-            let (mut cached_rules, mut cached_rule_set, mut cached_version) = {
-                let config_guard = match config::get_config().read() {
-                    Ok(config_guard) => config_guard,
-                    Err(poisoned) => {
-                        log_error!("Configuration lock poisoned while loading highlight rules; continuing with recovered state");
-                        poisoned.into_inner()
-                    }
-                };
-                (
-                    config_guard.metadata.compiled_rules.clone(),
-                    config_guard.metadata.compiled_rule_set.clone(),
-                    config::current_config_version(),
-                )
-            };
+            let mut highlight_rules = HighlightRuleCache::load();
             let stdout = io::stdout();
             let mut stdout = stdout.lock();
             let mut pending_stdout_bytes = 0usize;
@@ -365,28 +365,14 @@ pub fn process_handler(process_args: Vec<String>, is_non_interactive: bool, expl
             loop {
                 match rx.recv_timeout(STDOUT_FLUSH_INTERVAL) {
                     Ok(chunk) => {
-                        // Check if config has been reloaded and update rules if needed.
-                        let current_version = config::current_config_version();
-                        if current_version != cached_version {
-                            let config_guard = match config::get_config().read() {
-                                Ok(config_guard) => config_guard,
-                                Err(poisoned) => {
-                                    log_error!("Configuration lock poisoned while reloading highlight rules; continuing with recovered state");
-                                    poisoned.into_inner()
-                                }
-                            };
-                            cached_rules = config_guard.metadata.compiled_rules.clone();
-                            cached_rule_set = config_guard.metadata.compiled_rule_set.clone();
-                            cached_version = current_version;
-                            log_debug!("Rules updated due to config reload (version {})", cached_version);
-                        }
+                        highlight_rules.refresh_if_changed();
 
                         let raw_chunk = chunk.as_str();
                         let processed_chunk = highlighter::process_chunk_with_scratch(
                             raw_chunk,
                             chunk_id,
-                            &cached_rules,
-                            cached_rule_set.as_ref(),
+                            &highlight_rules.rules,
+                            highlight_rules.rule_set.as_ref(),
                             reset_color,
                             &mut color_state,
                             &mut highlight_scratch,

@@ -185,35 +185,33 @@ impl ConfigLoader {
     /// Loads and applies new configuration.
     pub(crate) fn reload_config(self) -> Result<(), String> {
         log_info!("Reloading configuration...");
-        let mut current_config = match super::get_config().write() {
-            Ok(config_guard) => config_guard,
-            Err(poisoned) => {
-                log_error!("Configuration lock poisoned during reload; continuing with recovered state");
-                poisoned.into_inner()
-            }
-        };
-
         let mut new_config = self.load_config().map_err(|err| {
             log_warn!("Failed to reload configuration: {}", err);
             err.to_string()
         })?;
 
-        // Preserve session name across reloads
-        new_config.metadata.session_name = current_config.metadata.session_name.clone();
-        // Increment version to signal config change to active threads
-        new_config.metadata.version = current_config.metadata.version.wrapping_add(1);
+        let (rule_count, secret_count, config_version) = super::with_current_config_mut("reloading configuration", |current_config| {
+            // Preserve session name across reloads.
+            new_config.metadata.session_name = current_config.metadata.session_name.clone();
+            // Increment version to signal config change to active threads.
+            new_config.metadata.version = current_config.metadata.version.wrapping_add(1);
 
-        *current_config = new_config;
+            *current_config = new_config;
 
-        let rule_count = current_config.metadata.compiled_rules.len();
-        let secret_count = current_config.metadata.compiled_secret_patterns.len();
+            (
+                current_config.metadata.compiled_rules.len(),
+                current_config.metadata.compiled_secret_patterns.len(),
+                current_config.metadata.version,
+            )
+        });
+
         log_info!("Reloaded {} highlight rules", rule_count);
         if secret_count > 0 {
             log_info!("Reloaded {} secret redaction patterns", secret_count);
         }
 
-        super::set_config_version(current_config.metadata.version);
-        log_info!("Configuration reloaded successfully (version {})", current_config.metadata.version);
+        super::set_config_version(config_version);
+        log_info!("Configuration reloaded successfully (version {})", config_version);
 
         Ok(())
     }

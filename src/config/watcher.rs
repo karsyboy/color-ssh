@@ -39,13 +39,7 @@ pub fn config_watcher(profile: Option<String>) -> Option<RecommendedWatcher> {
 
     log_debug!("Initializing configuration file watcher");
 
-    let config_path = match super::get_config().read() {
-        Ok(config_guard) => config_guard.metadata.config_path.clone(),
-        Err(poisoned) => {
-            log_error!("Configuration lock poisoned while starting watcher; continuing with recovered state");
-            poisoned.into_inner().metadata.config_path.clone()
-        }
-    };
+    let config_path = super::with_current_config("starting watcher", |cfg| cfg.metadata.config_path.clone());
     let config_file_name = config_path.file_name().and_then(|segment| segment.to_str()).unwrap_or("").to_string();
 
     // Clone for use in the closure
