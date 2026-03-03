@@ -28,17 +28,18 @@ impl Drop for RawModeGuard {
 
 pub(crate) fn prompt_hidden_secret(prompt: &str) -> io::Result<SensitiveString> {
     let mut stderr = io::stderr().lock();
+    stderr.write_all(b"\r")?;
     stderr.write_all(prompt.as_bytes())?;
     stderr.flush()?;
 
-    let _raw_mode = RawModeGuard::enter()?;
+    let _raw_mode: RawModeGuard = RawModeGuard::enter()?;
     let mut buffer = SensitiveBuffer::new();
 
     loop {
         match event::read()? {
             Event::Key(key) if matches!(key.kind, KeyEventKind::Press | KeyEventKind::Repeat) => match key.code {
                 KeyCode::Enter => {
-                    stderr.write_all(b"\n")?;
+                    stderr.write_all(b"\r\n")?;
                     stderr.flush()?;
                     return buffer
                         .into_sensitive_string()
@@ -49,7 +50,7 @@ pub(crate) fn prompt_hidden_secret(prompt: &str) -> io::Result<SensitiveString> 
                     let _ = buffer.backspace_char(cursor);
                 }
                 KeyCode::Char('c') if key.modifiers.contains(KeyModifiers::CONTROL) => {
-                    stderr.write_all(b"\n")?;
+                    stderr.write_all(b"\r\n")?;
                     stderr.flush()?;
                     return Err(io::Error::new(io::ErrorKind::Interrupted, "input canceled"));
                 }
