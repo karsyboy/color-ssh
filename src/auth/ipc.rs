@@ -8,10 +8,12 @@ use std::fs;
 use std::io::{self, BufRead, BufReader, Read, Write};
 use std::os::unix::fs::{FileTypeExt, PermissionsExt};
 use std::path::{Path, PathBuf};
+use std::time::{SystemTime, UNIX_EPOCH};
 use zeroize::Zeroizing;
 
 const AGENT_ENDPOINT_PREFIX: &str = "cossh-agent-v2-";
 const LEGACY_AGENT_STATE_FILENAME: &str = "agent-state.json";
+const VAULT_STATUS_EVENT_FILENAME: &str = "vault-events";
 const UNIX_SOCKET_MODE: u32 = 0o600;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -68,6 +70,20 @@ impl VaultStatus {
             absolute_timeout_at_epoch_seconds: None,
         }
     }
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum VaultStatusEventKind {
+    Locked,
+    Unlocked,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct VaultStatusEvent {
+    pub kind: VaultStatusEventKind,
+    pub status: VaultStatus,
+    pub event_id: u128,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -193,6 +209,29 @@ pub fn cleanup_endpoint(paths: &VaultPaths) -> io::Result<()> {
     cleanup_local_endpoint(paths)
 }
 
+pub fn broadcast_vault_status_event(paths: &VaultPaths, kind: VaultStatusEventKind, status: VaultStatus) -> io::Result<()> {
+    let run_dir = paths.run_dir();
+    fs::create_dir_all(&run_dir)?;
+    set_restrictive_directory_permissions(&run_dir)?;
+
+    let event_id = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map_err(|err| io::Error::other(format!("failed to derive vault status event timestamp: {err}")))?
+        .as_nanos();
+    let path = vault_status_event_file_path(paths);
+    let event = VaultStatusEvent { kind, status, event_id };
+    let bytes = serde_json::to_vec(&event).map_err(|err| io::Error::other(format!("failed to serialize vault status event: {err}")))?;
+    fs::write(&path, bytes)?;
+    set_restrictive_file_permissions(&path)?;
+    Ok(())
+}
+
+pub fn read_vault_status_event(paths: &VaultPaths) -> io::Result<VaultStatusEvent> {
+    let path = vault_status_event_file_path(paths);
+    let bytes = fs::read(path)?;
+    serde_json::from_slice(&bytes).map_err(|err| io::Error::other(format!("failed to parse vault status event: {err}")))
+}
+
 pub fn read_request(stream: &mut LocalSocketStream) -> io::Result<AgentRequest> {
     read_json_line(stream)
 }
@@ -248,6 +287,10 @@ fn agent_endpoint(paths: &VaultPaths) -> AgentEndpoint {
         socket_path: paths.run_dir().join(format!("{identifier}.sock")),
         identifier,
     }
+}
+
+pub(crate) fn vault_status_event_file_path(paths: &VaultPaths) -> PathBuf {
+    paths.run_dir().join(VAULT_STATUS_EVENT_FILENAME)
 }
 
 fn endpoint_seed(paths: &VaultPaths) -> String {

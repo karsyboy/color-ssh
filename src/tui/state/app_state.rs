@@ -4,11 +4,18 @@ use super::host_browser_state::{HostSearchEntry, HostTreeRow};
 use super::pass_prompt_state::{VaultStatusModalState, VaultUnlockState};
 use super::quick_connect_state::QuickConnectState;
 use super::tab_state::{HostTab, TerminalSearchState};
-use crate::auth::{agent, ipc::VaultStatus};
+use crate::auth::{
+    agent,
+    ipc::{self, VaultStatus, VaultStatusEvent, VaultStatusEventKind},
+    vault::VaultPaths,
+};
 use crate::ssh_config::{FolderId, SshHost, TreeFolder, load_ssh_host_tree};
-use crate::{config, log_debug, log_error};
+use crate::{config, log_debug, log_error, log_warn};
+use notify::{Event, RecommendedWatcher, RecursiveMode, Watcher};
 use ratatui::layout::Rect;
+use std::fs;
 use std::sync::atomic::Ordering as AtomicOrdering;
+use std::sync::mpsc::{self, Receiver, TryRecvError};
 use std::{
     collections::{HashMap, HashSet},
     io,
@@ -17,6 +24,80 @@ use std::{
 
 pub(crate) const HOST_PANEL_MIN_WIDTH: u16 = 15;
 pub(crate) const HOST_PANEL_MAX_WIDTH: u16 = 80;
+
+struct VaultStatusEventWatcher {
+    _watcher: RecommendedWatcher,
+    receiver: Receiver<()>,
+    paths: VaultPaths,
+}
+
+fn event_targets_vault_status_marker(event: &Event, marker_name: &str) -> bool {
+    event.paths.iter().any(|path| {
+        path.file_name()
+            .and_then(|segment| segment.to_str())
+            .map(|name| name == marker_name)
+            .unwrap_or(false)
+    })
+}
+
+fn should_forward_vault_status_event(event: &Event, marker_name: &str) -> bool {
+    (event.kind.is_modify() || event.kind.is_create()) && event_targets_vault_status_marker(event, marker_name)
+}
+
+impl VaultStatusEventWatcher {
+    fn new() -> Option<Self> {
+        let paths = match VaultPaths::resolve_default() {
+            Ok(paths) => paths,
+            Err(err) => {
+                log_debug!("Skipping vault status watcher setup: {}", err);
+                return None;
+            }
+        };
+
+        let run_dir = paths.run_dir();
+        if let Err(err) = fs::create_dir_all(&run_dir) {
+            log_warn!("Failed to create vault run directory for status watcher: {}", err);
+            return None;
+        }
+
+        let marker_name = match ipc::vault_status_event_file_path(&paths).file_name().and_then(|segment| segment.to_str()) {
+            Some(name) => name.to_string(),
+            None => {
+                log_warn!("Failed to determine vault status marker name");
+                return None;
+            }
+        };
+
+        let (tx, rx) = mpsc::channel();
+        let mut watcher = match RecommendedWatcher::new(
+            move |res| {
+                if let Ok(event) = res
+                    && should_forward_vault_status_event(&event, &marker_name)
+                {
+                    let _ = tx.send(());
+                }
+            },
+            notify::Config::default(),
+        ) {
+            Ok(watcher) => watcher,
+            Err(err) => {
+                log_warn!("Vault status watcher disabled: {}", err);
+                return None;
+            }
+        };
+
+        if let Err(err) = watcher.watch(&run_dir, RecursiveMode::NonRecursive) {
+            log_warn!("Failed to watch vault run directory '{}': {}", run_dir.display(), err);
+            return None;
+        }
+
+        Some(Self {
+            _watcher: watcher,
+            receiver: rx,
+            paths,
+        })
+    }
+}
 
 /// Connection request emitted when exiting the session manager into a direct `cossh` run.
 #[derive(Debug, Clone)]
@@ -76,6 +157,7 @@ pub(crate) struct AppState {
     pub(crate) last_draw_at: Instant,
     pub(crate) last_seen_render_epoch: u64,
     pub(crate) last_vault_status_refresh_at: Instant,
+    vault_status_events: Option<VaultStatusEventWatcher>,
 }
 
 impl AppState {
@@ -188,13 +270,49 @@ impl AppState {
     }
 
     pub(crate) fn refresh_vault_status_if_stale(&mut self, refresh_interval: Duration) {
-        if !self.focus_on_manager && self.vault_unlock.is_none() {
+        if self.vault_status_modal.is_none() {
             return;
         }
         if self.last_vault_status_refresh_at.elapsed() < refresh_interval {
             return;
         }
         self.refresh_vault_status();
+    }
+
+    pub(crate) fn handle_vault_status_notification(&mut self, event: VaultStatusEvent) {
+        log_debug!("Received password vault status notification: {:?}", event.kind);
+        self.set_vault_status(event.status);
+        if let Some(modal) = self.vault_status_modal.as_mut() {
+            let message = match event.kind {
+                VaultStatusEventKind::Locked => "Vault locked.",
+                VaultStatusEventKind::Unlocked => "Vault unlocked.",
+            };
+            modal.set_message(message.to_string(), false);
+            self.mark_ui_dirty();
+        }
+    }
+
+    pub(crate) fn apply_vault_status_notifications(&mut self) {
+        let mut saw_event = false;
+        let mut paths = None;
+        if let Some(watcher) = &self.vault_status_events {
+            loop {
+                match watcher.receiver.try_recv() {
+                    Ok(()) => saw_event = true,
+                    Err(TryRecvError::Empty) | Err(TryRecvError::Disconnected) => break,
+                }
+            }
+            if saw_event {
+                paths = Some(watcher.paths.clone());
+            }
+        }
+
+        if let Some(paths) = paths {
+            match ipc::read_vault_status_event(&paths) {
+                Ok(event) => self.handle_vault_status_notification(event),
+                Err(err) => log_debug!("Failed to read password vault status notification: {}", err),
+            }
+        }
     }
 
     // Construction.
@@ -308,6 +426,7 @@ impl AppState {
             last_draw_at: now,
             last_seen_render_epoch: 0,
             last_vault_status_refresh_at: now,
+            vault_status_events: VaultStatusEventWatcher::new(),
         };
 
         app.update_filtered_hosts();
@@ -374,6 +493,7 @@ impl AppState {
             last_draw_at: Instant::now(),
             last_seen_render_epoch: 0,
             last_vault_status_refresh_at: Instant::now(),
+            vault_status_events: None,
         };
         app.update_filtered_hosts();
         app

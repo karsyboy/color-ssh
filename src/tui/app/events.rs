@@ -81,10 +81,11 @@ fn should_mark_ui_dirty_for_key(app: &SessionManager, key: &KeyEvent) -> bool {
 pub(crate) fn run_app(terminal: &mut DefaultTerminal, app: &mut SessionManager) -> io::Result<()> {
     const EVENT_POLL_INTERVAL: Duration = Duration::from_millis(50);
     const RENDER_HEARTBEAT: Duration = Duration::from_millis(250);
-    const VAULT_STATUS_POLL_INTERVAL: Duration = Duration::from_secs(1);
+    const VAULT_STATUS_MODAL_POLL_INTERVAL: Duration = Duration::from_secs(1);
 
     loop {
-        app.refresh_vault_status_if_stale(VAULT_STATUS_POLL_INTERVAL);
+        app.apply_vault_status_notifications();
+        app.refresh_vault_status_if_stale(VAULT_STATUS_MODAL_POLL_INTERVAL);
 
         if app.should_draw(RENDER_HEARTBEAT) {
             terminal.draw(|frame| app.draw(frame))?;

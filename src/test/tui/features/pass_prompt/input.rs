@@ -1,5 +1,5 @@
 use super::*;
-use crate::auth::ipc::VaultStatus;
+use crate::auth::ipc::{VaultStatus, VaultStatusEvent, VaultStatusEventKind};
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
 #[test]
@@ -45,6 +45,58 @@ fn handle_vault_status_modal_key_l_reports_already_locked() {
 
     let modal = app.vault_status_modal.as_ref().expect("vault status modal");
     assert_eq!(modal.message.as_deref(), Some("Vault already locked."));
+    assert!(!modal.message_is_error);
+}
+
+#[test]
+fn handle_vault_status_notification_marks_modal_locked() {
+    let mut app = SessionManager::new_for_tests();
+    app.vault_status_modal = Some(VaultStatusModalState::new());
+    let status = VaultStatus {
+        vault_exists: true,
+        unlocked: true,
+        unlock_expires_in_seconds: Some(300),
+        idle_timeout_seconds: Some(900),
+        absolute_timeout_seconds: Some(28_800),
+        absolute_timeout_at_epoch_seconds: Some(1_700_000_000),
+    };
+    app.vault_status = status.clone();
+
+    app.handle_vault_status_notification(VaultStatusEvent {
+        kind: VaultStatusEventKind::Locked,
+        status: VaultStatus::locked(true),
+        event_id: 1,
+    });
+
+    assert_eq!(app.vault_status, VaultStatus::locked(true));
+    let modal = app.vault_status_modal.as_ref().expect("vault status modal");
+    assert_eq!(modal.message.as_deref(), Some("Vault locked."));
+    assert!(!modal.message_is_error);
+}
+
+#[test]
+fn handle_vault_status_notification_marks_modal_unlocked() {
+    let mut app = SessionManager::new_for_tests();
+    app.vault_status_modal = Some(VaultStatusModalState::new());
+    app.vault_status = VaultStatus::locked(true);
+
+    let unlocked_status = VaultStatus {
+        vault_exists: true,
+        unlocked: true,
+        unlock_expires_in_seconds: Some(300),
+        idle_timeout_seconds: Some(900),
+        absolute_timeout_seconds: Some(28_800),
+        absolute_timeout_at_epoch_seconds: Some(1_700_000_000),
+    };
+    app.handle_vault_status_notification(VaultStatusEvent {
+        kind: VaultStatusEventKind::Unlocked,
+        status: unlocked_status.clone(),
+        event_id: 2,
+    });
+
+    assert_eq!(app.vault_status, unlocked_status);
+    let modal = app.vault_status_modal.as_ref().expect("vault status modal");
+    assert_eq!(modal.message.as_deref(), Some("Vault unlocked."));
     assert!(!modal.message_is_error);
 }
 

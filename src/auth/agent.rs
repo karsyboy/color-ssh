@@ -1,4 +1,4 @@
-use crate::auth::ipc::{self, AgentRequestPayload, AgentResponse, UnlockPolicy, VaultStatus};
+use crate::auth::ipc::{self, AgentRequestPayload, AgentResponse, UnlockPolicy, VaultStatus, VaultStatusEventKind};
 use crate::auth::secret::{ExposeSecret, SensitiveString, sensitive_string};
 use crate::auth::vault::{self, UnlockedVault, VaultError, VaultPaths};
 use crate::command_path;
@@ -284,7 +284,7 @@ impl AgentRuntime {
     }
 
     fn unlock(&mut self, data_key: [u8; 32], policy: UnlockPolicy) {
-        self.lock();
+        let _ = self.lock();
         log_debug!(
             "Password vault runtime unlocked with idle={}s absolute={}s",
             policy.unlock_idle_timeout_seconds,
@@ -301,7 +301,7 @@ impl AgentRuntime {
         self.last_activity_at = Some(Instant::now());
     }
 
-    fn lock(&mut self) {
+    fn lock(&mut self) -> bool {
         let was_unlocked = self.data_key.is_some();
         if let Some(mut data_key) = self.data_key.take() {
             data_key.zeroize();
@@ -318,6 +318,7 @@ impl AgentRuntime {
         if lease_count > 0 {
             log_debug!("Cleared {} outstanding askpass token(s)", lease_count);
         }
+        was_unlocked
     }
 
     fn unlocked_vault(&self, paths: &VaultPaths) -> Option<UnlockedVault> {
@@ -385,6 +386,7 @@ pub fn run_server() -> Result<(), AgentError> {
 
     loop {
         if runtime.expire_if_needed() {
+            broadcast_vault_status_event(&paths, VaultStatusEventKind::Locked, runtime.status(&paths));
             log_debug!("Password vault agent exiting after session expiry");
             return Ok(());
         }
@@ -413,6 +415,7 @@ pub fn run_server() -> Result<(), AgentError> {
         };
 
         if runtime.expire_if_needed() {
+            broadcast_vault_status_event(&paths, VaultStatusEventKind::Locked, runtime.status(&paths));
             let response = AgentResponse::Error {
                 status: runtime.status(&paths),
                 code: "locked".to_string(),
@@ -438,7 +441,9 @@ fn handle_request(paths: &VaultPaths, runtime: &mut AgentRuntime, request: ipc::
     match request.payload {
         AgentRequestPayload::Status => AgentResponse::Status { status: runtime.status(paths) },
         AgentRequestPayload::Lock => {
-            runtime.lock();
+            if runtime.lock() {
+                broadcast_vault_status_event(paths, VaultStatusEventKind::Locked, runtime.status(paths));
+            }
             AgentResponse::Success {
                 status: runtime.status(paths),
                 message: "password vault locked".to_string(),
@@ -448,8 +453,10 @@ fn handle_request(paths: &VaultPaths, runtime: &mut AgentRuntime, request: ipc::
             Ok(unlocked) => {
                 runtime.unlock(unlocked.data_key_copy(), policy);
                 log_debug!("Password vault agent accepted unlock request");
+                let status = runtime.status(paths);
+                broadcast_vault_status_event(paths, VaultStatusEventKind::Unlocked, status.clone());
                 AgentResponse::Success {
-                    status: runtime.status(paths),
+                    status,
                     message: "password vault unlocked".to_string(),
                 }
             }
@@ -522,6 +529,12 @@ fn handle_request(paths: &VaultPaths, runtime: &mut AgentRuntime, request: ipc::
                 Err(err) => agent_error_response(runtime, paths, err),
             }
         }
+    }
+}
+
+fn broadcast_vault_status_event(paths: &VaultPaths, kind: VaultStatusEventKind, status: VaultStatus) {
+    if let Err(err) = ipc::broadcast_vault_status_event(paths, kind, status) {
+        log_debug!("Failed to broadcast password vault status event: {}", err);
     }
 }
 

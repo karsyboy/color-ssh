@@ -1,5 +1,5 @@
 use super::*;
-use crate::auth::ipc::{AgentRequest, AgentRequestPayload, UnlockPolicy};
+use crate::auth::ipc::{AgentRequest, AgentRequestPayload, UnlockPolicy, VaultStatusEventKind};
 use crate::auth::secret::{ExposeSecret, sensitive_string};
 use crate::auth::vault::{VaultPaths, initialize_vault_with_paths};
 use std::fs;
@@ -93,6 +93,31 @@ fn handle_request_unlocks_and_fetches_secret() {
     };
     let response = handle_request(&paths, &mut runtime, get_secret);
     assert!(matches!(response, AgentResponse::Secret { secret, .. } if secret.expose_secret() == "top-secret"));
+
+    let _ = fs::remove_dir_all(paths.base_dir());
+}
+
+#[test]
+fn handle_request_unlock_broadcasts_unlocked_event() {
+    let paths = temp_paths("unlock_broadcast");
+    initialize_vault_with_paths(&paths, "master-pass").expect("initialize vault");
+
+    let mut runtime = AgentRuntime::new();
+    let response = handle_request(
+        &paths,
+        &mut runtime,
+        AgentRequest {
+            payload: AgentRequestPayload::Unlock {
+                master_password: sensitive_string("master-pass"),
+                policy: UnlockPolicy::new(900, 28_800),
+            },
+        },
+    );
+
+    assert!(matches!(response, AgentResponse::Success { .. }));
+    let event = ipc::read_vault_status_event(&paths).expect("read vault status event");
+    assert_eq!(event.kind, VaultStatusEventKind::Unlocked);
+    assert!(event.status.unlocked);
 
     let _ = fs::remove_dir_all(paths.base_dir());
 }
@@ -226,6 +251,28 @@ fn handle_request_lock_clears_runtime_state() {
     assert!(runtime.last_activity_at.is_none());
     assert!(runtime.absolute_timeout_at.is_none());
     assert!(runtime.policy.is_none());
+
+    let _ = fs::remove_dir_all(paths.base_dir());
+}
+
+#[test]
+fn handle_request_lock_broadcasts_locked_event() {
+    let paths = temp_paths("lock_broadcast");
+    let mut runtime = AgentRuntime::new();
+    runtime.unlock([9u8; 32], UnlockPolicy::new(900, 28_800));
+
+    let response = handle_request(
+        &paths,
+        &mut runtime,
+        AgentRequest {
+            payload: AgentRequestPayload::Lock,
+        },
+    );
+
+    assert!(matches!(response, AgentResponse::Success { .. }));
+    let event = ipc::read_vault_status_event(&paths).expect("read vault status event");
+    assert_eq!(event.kind, VaultStatusEventKind::Locked);
+    assert!(!event.status.unlocked);
 
     let _ = fs::remove_dir_all(paths.base_dir());
 }

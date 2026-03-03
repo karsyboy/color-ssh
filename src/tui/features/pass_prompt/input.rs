@@ -63,6 +63,7 @@ impl SessionManager {
         log_debug!("Opening TUI vault status modal");
         self.quick_connect = None;
         self.vault_unlock = None;
+        self.refresh_vault_status();
         self.vault_status_modal = Some(VaultStatusModalState::new());
         self.mark_ui_dirty();
     }
