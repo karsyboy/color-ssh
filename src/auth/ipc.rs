@@ -22,13 +22,15 @@ use std::os::unix::fs::{FileTypeExt, PermissionsExt};
 #[cfg(windows)]
 use widestring::U16CString;
 #[cfg(windows)]
-use windows_sys::Win32::Foundation::{GetLastError, PSID};
+use windows_sys::Win32::Foundation::{CloseHandle, GetLastError, HANDLE, LocalFree};
 #[cfg(windows)]
-use windows_sys::Win32::Security::{ConvertSidToStringSidW, GetTokenInformation, OpenProcessToken, TOKEN_QUERY, TOKEN_USER, TokenUser};
+use windows_sys::Win32::Security::Authorization::ConvertSidToStringSidW;
 #[cfg(windows)]
-use windows_sys::Win32::System::Memory::LocalFree;
+use windows_sys::Win32::Security::{GetTokenInformation, PSID, TOKEN_QUERY, TOKEN_USER, TokenUser};
 #[cfg(windows)]
-use windows_sys::Win32::System::Threading::GetCurrentProcess;
+use windows_sys::Win32::System::Threading::{GetCurrentProcess, OpenProcessToken};
+#[cfg(windows)]
+use windows_sys::core::PWSTR;
 
 const AGENT_ENDPOINT_PREFIX: &str = "cossh-agent-v2-";
 const LEGACY_AGENT_STATE_FILENAME: &str = "agent-state.json";
@@ -428,17 +430,17 @@ fn current_user_security_descriptor() -> io::Result<SecurityDescriptor> {
 
 #[cfg(windows)]
 fn current_user_sid_string() -> io::Result<String> {
-    let mut token_handle = 0isize;
+    let mut token_handle: HANDLE = std::ptr::null_mut();
     let open_ok = unsafe { OpenProcessToken(GetCurrentProcess(), TOKEN_QUERY, &mut token_handle) };
     if open_ok == 0 {
         return Err(io::Error::other(format!("failed to open process token: {}", unsafe { GetLastError() })));
     }
 
-    struct HandleGuard(isize);
+    struct HandleGuard(HANDLE);
     impl Drop for HandleGuard {
         fn drop(&mut self) {
             unsafe {
-                windows_sys::Win32::Foundation::CloseHandle(self.0);
+                CloseHandle(self.0);
             }
         }
     }
@@ -465,21 +467,24 @@ fn current_user_sid_string() -> io::Result<String> {
 
 #[cfg(windows)]
 fn sid_to_string(sid: PSID) -> io::Result<String> {
-    let mut sid_ptr = std::ptr::null_mut();
+    let mut sid_ptr: PWSTR = std::ptr::null_mut();
     let convert_ok = unsafe { ConvertSidToStringSidW(sid, &mut sid_ptr) };
     if convert_ok == 0 {
         return Err(io::Error::other(format!("failed to convert SID to string: {}", unsafe { GetLastError() })));
     }
+    if sid_ptr.is_null() {
+        return Err(io::Error::other("failed to convert SID to string: null pointer returned"));
+    }
 
-    struct LocalAllocGuard(*mut core::ffi::c_void);
+    struct LocalAllocGuard(PWSTR);
     impl Drop for LocalAllocGuard {
         fn drop(&mut self) {
             unsafe {
-                LocalFree(self.0 as isize);
+                LocalFree(self.0.cast());
             }
         }
     }
-    let _guard = LocalAllocGuard(sid_ptr.cast());
+    let _guard = LocalAllocGuard(sid_ptr);
 
     let mut len = 0usize;
     unsafe {
