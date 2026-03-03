@@ -160,11 +160,11 @@ impl SessionManager {
                 Span::styled(if self.vault_status.unlocked { "Unlocked" } else { "Locked" }, status_style),
             ]),
             Line::from(vec![
-                Span::styled("Time Left: ", label_style),
+                Span::styled("Ideal Timeout: ", label_style),
                 Span::styled(format_vault_time_left(self.vault_status.unlock_expires_in_seconds), value_style),
             ]),
             Line::from(vec![
-                Span::styled("Absolute Session Timeout: ", label_style),
+                Span::styled("Session Timeout: ", label_style),
                 Span::styled(format_vault_timeout_at(self.vault_status.absolute_timeout_at_epoch_seconds), value_style),
             ]),
             modal

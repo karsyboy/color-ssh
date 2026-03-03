@@ -415,10 +415,10 @@ fn run_vault_status_cli() -> ExitCode {
             println!("Vault Exist: {}", status.vault_exists);
             println!("Unlocked: {}", status.unlocked);
             if let Some(expires) = status.unlock_expires_in_seconds {
-                println!("Ideal Session Timeout: {}", format_hms_duration(expires));
+                println!("Ideal Timeout: {}", format_hms_duration(expires));
             }
             if let Some(absolute_timeout_at_epoch_seconds) = status.absolute_timeout_at_epoch_seconds {
-                println!("Absolute Session Timeout: {}", format_local_timeout_at(absolute_timeout_at_epoch_seconds));
+                println!("Session Timeout: {}", format_local_timeout_at(absolute_timeout_at_epoch_seconds));
             }
             ExitCode::SUCCESS
         }
