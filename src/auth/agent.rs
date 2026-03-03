@@ -209,6 +209,7 @@ struct AgentRuntime {
     data_key: Option<[u8; 32]>,
     unlocked_at: Option<Instant>,
     last_activity_at: Option<Instant>,
+    absolute_timeout_at: Option<SystemTime>,
     policy: Option<UnlockPolicy>,
     askpass_leases: Vec<AskpassLease>,
 }
@@ -219,6 +220,7 @@ impl AgentRuntime {
             data_key: None,
             unlocked_at: None,
             last_activity_at: None,
+            absolute_timeout_at: None,
             policy: None,
             askpass_leases: Vec::new(),
         }
@@ -266,10 +268,10 @@ impl AgentRuntime {
         let idle_remaining = Duration::from_secs(policy.unlock_idle_timeout_seconds).saturating_sub(last_activity_at.elapsed());
         let absolute_remaining = Duration::from_secs(policy.unlock_absolute_timeout_seconds).saturating_sub(unlocked_at.elapsed());
         let expires_in_seconds = idle_remaining.min(absolute_remaining).as_secs();
-        let absolute_timeout_at_epoch_seconds = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .ok()
-            .and_then(|now| now.as_secs().checked_add(absolute_remaining.as_secs()));
+        let absolute_timeout_at_epoch_seconds = self
+            .absolute_timeout_at
+            .and_then(|absolute_timeout_at| absolute_timeout_at.duration_since(UNIX_EPOCH).ok())
+            .map(|absolute_timeout_at| absolute_timeout_at.as_secs());
 
         VaultStatus {
             vault_exists,
@@ -291,6 +293,7 @@ impl AgentRuntime {
         self.data_key = Some(data_key);
         self.unlocked_at = Some(Instant::now());
         self.last_activity_at = self.unlocked_at;
+        self.absolute_timeout_at = SystemTime::now().checked_add(Duration::from_secs(policy.unlock_absolute_timeout_seconds));
         self.policy = Some(policy);
     }
 
@@ -307,6 +310,7 @@ impl AgentRuntime {
         self.askpass_leases.clear();
         self.unlocked_at = None;
         self.last_activity_at = None;
+        self.absolute_timeout_at = None;
         self.policy = None;
         if was_unlocked {
             log_debug!("Password vault runtime key material zeroized");

@@ -48,6 +48,23 @@ fn runtime_status_reports_absolute_timeout_timestamp() {
 }
 
 #[test]
+fn runtime_status_keeps_absolute_timeout_timestamp_stable() {
+    let paths = temp_paths("stable_absolute_timeout");
+    let mut runtime = AgentRuntime::new();
+    let fixed_timeout_at = UNIX_EPOCH + Duration::from_secs(1_700_000_000);
+
+    runtime.unlock([7u8; 32], UnlockPolicy::new(900, 3_600));
+    runtime.absolute_timeout_at = Some(fixed_timeout_at);
+    runtime.unlocked_at = Some(Instant::now() - Duration::from_secs(17));
+
+    let first = runtime.status(&paths);
+    let second = runtime.status(&paths);
+
+    assert_eq!(first.absolute_timeout_at_epoch_seconds, Some(1_700_000_000));
+    assert_eq!(second.absolute_timeout_at_epoch_seconds, Some(1_700_000_000));
+}
+
+#[test]
 fn handle_request_unlocks_and_fetches_secret() {
     let paths = temp_paths("unlock_fetch");
     initialize_vault_with_paths(&paths, "master-pass").expect("initialize vault");
@@ -207,6 +224,7 @@ fn handle_request_lock_clears_runtime_state() {
     assert!(runtime.data_key.is_none());
     assert!(runtime.unlocked_at.is_none());
     assert!(runtime.last_activity_at.is_none());
+    assert!(runtime.absolute_timeout_at.is_none());
     assert!(runtime.policy.is_none());
 
     let _ = fs::remove_dir_all(paths.base_dir());
