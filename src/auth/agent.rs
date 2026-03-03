@@ -14,8 +14,9 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use zeroize::Zeroize;
 
 const AGENT_STARTUP_TIMEOUT: Duration = Duration::from_secs(2);
-const AGENT_STARTUP_POLL_INTERVAL: Duration = Duration::from_millis(50);
-const AGENT_IDLE_SHUTDOWN_POLL_INTERVAL: Duration = Duration::from_millis(250);
+const AGENT_STARTUP_POLL_INTERVAL: Duration = Duration::from_millis(10);
+const AGENT_IDLE_SHUTDOWN_POLL_INTERVAL_MIN: Duration = Duration::from_millis(5);
+const AGENT_IDLE_SHUTDOWN_POLL_INTERVAL_MAX: Duration = Duration::from_millis(250);
 const ASKPASS_TOKEN_TTL: Duration = Duration::from_secs(60);
 const ASKPASS_TOKEN_BYTES: usize = 32;
 
@@ -360,6 +361,10 @@ impl AgentRuntime {
     }
 }
 
+fn next_idle_shutdown_poll_interval(current: Duration) -> Duration {
+    current.saturating_mul(2).min(AGENT_IDLE_SHUTDOWN_POLL_INTERVAL_MAX)
+}
+
 struct EndpointGuard {
     paths: VaultPaths,
 }
@@ -383,6 +388,7 @@ pub fn run_server() -> Result<(), AgentError> {
     log_debug!("Password vault agent server started");
     let _endpoint_guard = EndpointGuard { paths: paths.clone() };
     let mut runtime = AgentRuntime::new();
+    let mut idle_poll_interval = AGENT_IDLE_SHUTDOWN_POLL_INTERVAL_MIN;
 
     loop {
         if runtime.expire_if_needed() {
@@ -392,9 +398,13 @@ pub fn run_server() -> Result<(), AgentError> {
         }
 
         let mut stream = match listener.accept() {
-            Ok(connection) => connection,
+            Ok(connection) => {
+                idle_poll_interval = AGENT_IDLE_SHUTDOWN_POLL_INTERVAL_MIN;
+                connection
+            }
             Err(err) if err.kind() == io::ErrorKind::WouldBlock => {
-                thread::sleep(AGENT_IDLE_SHUTDOWN_POLL_INTERVAL);
+                thread::sleep(idle_poll_interval);
+                idle_poll_interval = next_idle_shutdown_poll_interval(idle_poll_interval);
                 continue;
             }
             Err(err) if err.kind() == io::ErrorKind::Interrupted => continue,

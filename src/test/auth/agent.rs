@@ -32,6 +32,17 @@ fn runtime_does_not_expire_before_timeout() {
 }
 
 #[test]
+fn idle_shutdown_poll_interval_backs_off_and_caps() {
+    let first = next_idle_shutdown_poll_interval(AGENT_IDLE_SHUTDOWN_POLL_INTERVAL_MIN);
+    let second = next_idle_shutdown_poll_interval(first);
+    let capped = next_idle_shutdown_poll_interval(AGENT_IDLE_SHUTDOWN_POLL_INTERVAL_MAX);
+
+    assert_eq!(first, Duration::from_millis(10));
+    assert_eq!(second, Duration::from_millis(20));
+    assert_eq!(capped, AGENT_IDLE_SHUTDOWN_POLL_INTERVAL_MAX);
+}
+
+#[test]
 fn runtime_status_reports_absolute_timeout_timestamp() {
     let paths = temp_paths("status_absolute_timeout");
     let mut runtime = AgentRuntime::new();
