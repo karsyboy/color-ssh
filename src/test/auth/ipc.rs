@@ -3,13 +3,10 @@ use crate::auth::secret::sensitive_string;
 use crate::auth::vault::VaultPaths;
 use std::fs;
 use std::io;
+use std::os::unix::fs::PermissionsExt;
+use std::os::unix::net::UnixListener;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
-
-#[cfg(unix)]
-use std::os::unix::fs::PermissionsExt;
-#[cfg(unix)]
-use std::os::unix::net::UnixListener;
 
 static TEST_COUNTER: AtomicU64 = AtomicU64::new(0);
 
@@ -26,7 +23,6 @@ fn endpoint_derivation_is_deterministic() {
     let right = agent_endpoint(&paths);
 
     assert_eq!(left.identifier, right.identifier);
-    #[cfg(unix)]
     assert_eq!(left.socket_path, right.socket_path);
 }
 
@@ -40,8 +36,7 @@ fn different_base_dirs_produce_different_endpoints() {
 
 #[test]
 fn bind_listener_ignores_and_removes_legacy_state_file() {
-    #[cfg(unix)]
-    if !unix_socket_bind_allowed() {
+    if !local_socket_bind_allowed() {
         return;
     }
 
@@ -56,7 +51,6 @@ fn bind_listener_ignores_and_removes_legacy_state_file() {
 
     assert!(!legacy_state_file_path(&paths).exists());
     drop(listener);
-    #[cfg(unix)]
     let _ = fs::remove_file(agent_endpoint(&paths).socket_path);
     let _ = fs::remove_dir_all(paths.base_dir());
 }
@@ -105,8 +99,7 @@ fn secret_fields_are_redacted_in_debug_output() {
     assert!(response_debug.contains("[REDACTED]"));
 }
 
-#[cfg(unix)]
-fn unix_socket_bind_allowed() -> bool {
+fn local_socket_bind_allowed() -> bool {
     let paths = temp_paths("socket_probe");
     fs::create_dir_all(paths.run_dir()).expect("create run dir for socket probe");
     let path = paths.run_dir().join("probe.sock");
@@ -123,14 +116,13 @@ fn unix_socket_bind_allowed() -> bool {
     allowed
 }
 
-#[cfg(unix)]
 #[test]
-fn unix_socket_round_trip_uses_run_dir_and_private_mode() {
-    if !unix_socket_bind_allowed() {
+fn local_socket_round_trip_uses_run_dir_and_private_mode() {
+    if !local_socket_bind_allowed() {
         return;
     }
 
-    let paths = temp_paths("unix_round_trip");
+    let paths = temp_paths("local_socket_round_trip");
     let endpoint = agent_endpoint(&paths);
     let listener = match bind_listener(&paths).expect("bind listener") {
         ListenerBindResult::Bound(listener) => listener,
@@ -148,10 +140,9 @@ fn unix_socket_round_trip_uses_run_dir_and_private_mode() {
     let _ = fs::remove_dir_all(paths.base_dir());
 }
 
-#[cfg(unix)]
 #[test]
-fn unix_stale_socket_file_is_reclaimed() {
-    if !unix_socket_bind_allowed() {
+fn stale_socket_file_is_reclaimed() {
+    if !local_socket_bind_allowed() {
         return;
     }
 
@@ -175,10 +166,9 @@ fn unix_stale_socket_file_is_reclaimed() {
     let _ = fs::remove_dir_all(paths.base_dir());
 }
 
-#[cfg(unix)]
 #[test]
-fn unix_active_listener_is_not_replaced() {
-    if !unix_socket_bind_allowed() {
+fn active_listener_is_not_replaced() {
+    if !local_socket_bind_allowed() {
         return;
     }
 
@@ -194,25 +184,4 @@ fn unix_active_listener_is_not_replaced() {
     drop(listener);
     let _ = fs::remove_file(agent_endpoint(&paths).socket_path);
     let _ = fs::remove_dir_all(paths.base_dir());
-}
-
-#[cfg(windows)]
-#[test]
-fn windows_endpoint_name_is_deterministic() {
-    let paths = temp_paths("windows_name");
-    let left = agent_endpoint(&paths);
-    let right = agent_endpoint(&paths);
-    assert_eq!(left.identifier, right.identifier);
-}
-
-#[cfg(windows)]
-#[test]
-fn windows_listener_accepts_same_user_connections() {
-    let paths = temp_paths("windows_round_trip");
-    let listener = match bind_listener(&paths).expect("bind listener") {
-        ListenerBindResult::Bound(listener) => listener,
-        ListenerBindResult::AlreadyRunning => panic!("unexpected existing listener"),
-    };
-    let _client = connect(&paths).expect("connect to listener");
-    drop(listener);
 }

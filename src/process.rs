@@ -265,36 +265,26 @@ fn build_ssh_command(args: &[String], explicit_pass_entry: Option<&str>) -> io::
         }
     }
 
-    let backend = transport::direct_backend();
-    match backend {
-        transport::PasswordTransportBackend::UnsupportedPlatform => {
-            log_debug!("Password auto-login transport unsupported on this platform");
-            command.fallback_notice = Some(transport::unsupported_transport_notice());
-            Ok(command)
+    let askpass_token = match client.authorize_askpass(&pass_entry_name) {
+        Ok(token) => token,
+        Err(err) => {
+            log_debug!("Failed to authorize internal askpass token: {}", err);
+            command.fallback_notice = Some(format!(
+                "Password auto-login is unavailable because a vault access token could not be issued ({err}); continuing with the standard SSH password prompt."
+            ));
+            return Ok(command);
         }
-        transport::PasswordTransportBackend::InternalAskpass => {
-            let askpass_token = match client.authorize_askpass(&pass_entry_name) {
-                Ok(token) => token,
-                Err(err) => {
-                    log_debug!("Failed to authorize internal askpass token: {}", err);
-                    command.fallback_notice = Some(format!(
-                        "Password auto-login is unavailable because a vault access token could not be issued ({err}); continuing with the standard SSH password prompt."
-                    ));
-                    return Ok(command);
-                }
-            };
+    };
 
-            if let Err(err) = transport::configure_internal_askpass_env(&mut command.env, askpass_token.expose_secret()) {
-                log_debug!("Failed to configure internal askpass helper: {}", err);
-                command.fallback_notice = Some(format!(
-                    "Password auto-login is unavailable because the internal askpass helper could not be configured ({err}); continuing with the standard SSH password prompt."
-                ));
-                return Ok(command);
-            }
-            log_debug!("Configured internal askpass helper for direct SSH launch");
-            Ok(command)
-        }
+    if let Err(err) = transport::configure_internal_askpass_env(&mut command.env, askpass_token.expose_secret()) {
+        log_debug!("Failed to configure internal askpass helper: {}", err);
+        command.fallback_notice = Some(format!(
+            "Password auto-login is unavailable because the internal askpass helper could not be configured ({err}); continuing with the standard SSH password prompt."
+        ));
+        return Ok(command);
     }
+    log_debug!("Configured internal askpass helper for direct SSH launch");
+    Ok(command)
 }
 
 /// Main process handler for SSH subprocess returns an exit code based on the SSH process status

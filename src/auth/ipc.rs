@@ -1,47 +1,22 @@
 use crate::auth::secret::{SensitiveString, serde_sensitive_string};
 use crate::auth::vault::VaultPaths;
 use crate::log_debug;
-#[cfg(unix)]
 use interprocess::local_socket::{GenericFilePath, ToFsName};
-#[cfg(windows)]
-use interprocess::local_socket::{GenericNamespaced, ToNsName};
 use interprocess::local_socket::{Listener as LocalSocketListener, ListenerNonblockingMode, ListenerOptions, Stream as LocalSocketStream, prelude::*};
 use serde::{Deserialize, Serialize};
 use std::fs;
 use std::io::{self, BufRead, BufReader, Read, Write};
+use std::os::unix::fs::{FileTypeExt, PermissionsExt};
 use std::path::{Path, PathBuf};
 use zeroize::Zeroizing;
 
-#[cfg(windows)]
-use interprocess::os::windows::local_socket::ListenerOptionsExt as _;
-#[cfg(windows)]
-use interprocess::os::windows::security_descriptor::SecurityDescriptor;
-#[cfg(unix)]
-use std::os::unix::fs::{FileTypeExt, PermissionsExt};
-
-#[cfg(windows)]
-use widestring::U16CString;
-#[cfg(windows)]
-use windows_sys::Win32::Foundation::{CloseHandle, GetLastError, HANDLE, LocalFree};
-#[cfg(windows)]
-use windows_sys::Win32::Security::Authorization::ConvertSidToStringSidW;
-#[cfg(windows)]
-use windows_sys::Win32::Security::{GetTokenInformation, PSID, TOKEN_QUERY, TOKEN_USER, TokenUser};
-#[cfg(windows)]
-use windows_sys::Win32::System::Threading::{GetCurrentProcess, OpenProcessToken};
-#[cfg(windows)]
-use windows_sys::core::PWSTR;
-
 const AGENT_ENDPOINT_PREFIX: &str = "cossh-agent-v2-";
 const LEGACY_AGENT_STATE_FILENAME: &str = "agent-state.json";
-
-#[cfg(unix)]
 const UNIX_SOCKET_MODE: u32 = 0o600;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct AgentEndpoint {
     identifier: String,
-    #[cfg(unix)]
     socket_path: PathBuf,
 }
 
@@ -234,16 +209,13 @@ fn handle_bind_conflict(paths: &VaultPaths, original_err: io::Error) -> io::Resu
         return Ok(ListenerBindResult::AlreadyRunning);
     }
 
-    #[cfg(unix)]
-    {
-        if remove_stale_socket_file(paths)? {
-            log_debug!("Removed stale password vault agent Unix socket; retrying bind");
-            return match create_listener(paths) {
-                Ok(listener) => Ok(ListenerBindResult::Bound(listener)),
-                Err(err) if is_address_in_use(&err) && connect(paths).is_ok() => Ok(ListenerBindResult::AlreadyRunning),
-                Err(err) => Err(err),
-            };
-        }
+    if remove_stale_socket_file(paths)? {
+        log_debug!("Removed stale password vault agent socket file; retrying bind");
+        return match create_listener(paths) {
+            Ok(listener) => Ok(ListenerBindResult::Bound(listener)),
+            Err(err) if is_address_in_use(&err) && connect(paths).is_ok() => Ok(ListenerBindResult::AlreadyRunning),
+            Err(err) => Err(err),
+        };
     }
 
     Err(original_err)
@@ -271,7 +243,6 @@ fn read_json_line<T: for<'de> Deserialize<'de>, R: Read>(stream: &mut R) -> io::
 fn agent_endpoint(paths: &VaultPaths) -> AgentEndpoint {
     let identifier = format!("{AGENT_ENDPOINT_PREFIX}{:016x}", fnv1a_64(endpoint_seed(paths).as_bytes()));
     AgentEndpoint {
-        #[cfg(unix)]
         socket_path: paths.run_dir().join(format!("{identifier}.sock")),
         identifier,
     }
@@ -323,7 +294,6 @@ fn legacy_state_file_path(paths: &VaultPaths) -> PathBuf {
     paths.run_dir().join(LEGACY_AGENT_STATE_FILENAME)
 }
 
-#[cfg(unix)]
 fn create_listener_for_endpoint(paths: &VaultPaths, endpoint: &AgentEndpoint) -> io::Result<LocalSocketListener> {
     fs::create_dir_all(paths.run_dir())?;
     set_restrictive_directory_permissions(&paths.run_dir())?;
@@ -333,13 +303,11 @@ fn create_listener_for_endpoint(paths: &VaultPaths, endpoint: &AgentEndpoint) ->
     Ok(listener)
 }
 
-#[cfg(unix)]
 fn connect_to_endpoint(endpoint: &AgentEndpoint) -> io::Result<LocalSocketStream> {
     let name = endpoint.socket_path.as_os_str().to_fs_name::<GenericFilePath>()?;
     LocalSocketStream::connect(name)
 }
 
-#[cfg(unix)]
 fn remove_stale_socket_file(paths: &VaultPaths) -> io::Result<bool> {
     let endpoint = agent_endpoint(paths);
     let socket_path = endpoint.socket_path;
@@ -356,7 +324,6 @@ fn remove_stale_socket_file(paths: &VaultPaths) -> io::Result<bool> {
     Ok(false)
 }
 
-#[cfg(unix)]
 fn cleanup_local_endpoint(paths: &VaultPaths) -> io::Result<()> {
     let endpoint = agent_endpoint(paths);
     if !endpoint.socket_path.exists() {
@@ -371,113 +338,14 @@ fn cleanup_local_endpoint(paths: &VaultPaths) -> io::Result<()> {
     Ok(())
 }
 
-#[cfg(unix)]
 fn set_restrictive_directory_permissions(path: &Path) -> io::Result<()> {
     fs::set_permissions(path, fs::Permissions::from_mode(0o700))?;
     Ok(())
 }
 
-#[cfg(unix)]
 fn set_restrictive_file_permissions(path: &Path) -> io::Result<()> {
     fs::set_permissions(path, fs::Permissions::from_mode(UNIX_SOCKET_MODE))?;
     Ok(())
-}
-
-#[cfg(not(unix))]
-fn cleanup_local_endpoint(_paths: &VaultPaths) -> io::Result<()> {
-    Ok(())
-}
-
-#[cfg(windows)]
-fn create_listener_for_endpoint(_paths: &VaultPaths, endpoint: &AgentEndpoint) -> io::Result<LocalSocketListener> {
-    let name = endpoint.identifier.as_str().to_ns_name::<GenericNamespaced>()?;
-    let security_descriptor = current_user_security_descriptor()?;
-    ListenerOptions::new()
-        .name(name)
-        .nonblocking(ListenerNonblockingMode::Accept)
-        .security_descriptor(security_descriptor)
-        .create_sync()
-}
-
-#[cfg(windows)]
-fn connect_to_endpoint(endpoint: &AgentEndpoint) -> io::Result<LocalSocketStream> {
-    let name = endpoint.identifier.as_str().to_ns_name::<GenericNamespaced>()?;
-    LocalSocketStream::connect(name)
-}
-
-#[cfg(windows)]
-fn current_user_security_descriptor() -> io::Result<SecurityDescriptor> {
-    let sid = current_user_sid_string()?;
-    let descriptor = format!("D:P(A;;GA;;;{sid})");
-    let descriptor = U16CString::from_str(&descriptor).map_err(|err| io::Error::other(format!("failed to encode security descriptor: {err}")))?;
-    SecurityDescriptor::deserialize(descriptor.as_ucstr())
-}
-
-#[cfg(windows)]
-fn current_user_sid_string() -> io::Result<String> {
-    let mut token_handle: HANDLE = std::ptr::null_mut();
-    let open_ok = unsafe { OpenProcessToken(GetCurrentProcess(), TOKEN_QUERY, &mut token_handle) };
-    if open_ok == 0 {
-        return Err(io::Error::other(format!("failed to open process token: {}", unsafe { GetLastError() })));
-    }
-
-    struct HandleGuard(HANDLE);
-    impl Drop for HandleGuard {
-        fn drop(&mut self) {
-            unsafe {
-                CloseHandle(self.0);
-            }
-        }
-    }
-    let _guard = HandleGuard(token_handle);
-
-    let mut required_size = 0u32;
-    unsafe {
-        GetTokenInformation(token_handle, TokenUser, std::ptr::null_mut(), 0, &mut required_size);
-    }
-    if required_size == 0 {
-        return Err(io::Error::other("failed to determine token information size"));
-    }
-
-    let mut buffer = vec![0u8; required_size as usize];
-    let token_user_ptr = buffer.as_mut_ptr().cast();
-    let token_ok = unsafe { GetTokenInformation(token_handle, TokenUser, token_user_ptr, required_size, &mut required_size) };
-    if token_ok == 0 {
-        return Err(io::Error::other(format!("failed to read token information: {}", unsafe { GetLastError() })));
-    }
-
-    let token_user = unsafe { &*(token_user_ptr as *const TOKEN_USER) };
-    sid_to_string(token_user.User.Sid)
-}
-
-#[cfg(windows)]
-fn sid_to_string(sid: PSID) -> io::Result<String> {
-    let mut sid_ptr: PWSTR = std::ptr::null_mut();
-    let convert_ok = unsafe { ConvertSidToStringSidW(sid, &mut sid_ptr) };
-    if convert_ok == 0 {
-        return Err(io::Error::other(format!("failed to convert SID to string: {}", unsafe { GetLastError() })));
-    }
-    if sid_ptr.is_null() {
-        return Err(io::Error::other("failed to convert SID to string: null pointer returned"));
-    }
-
-    struct LocalAllocGuard(PWSTR);
-    impl Drop for LocalAllocGuard {
-        fn drop(&mut self) {
-            unsafe {
-                LocalFree(self.0.cast());
-            }
-        }
-    }
-    let _guard = LocalAllocGuard(sid_ptr);
-
-    let mut len = 0usize;
-    unsafe {
-        while *sid_ptr.add(len) != 0 {
-            len += 1;
-        }
-        String::from_utf16(&std::slice::from_raw_parts(sid_ptr, len)).map_err(|err| io::Error::other(format!("failed to decode SID string: {err}")))
-    }
 }
 
 #[cfg(test)]

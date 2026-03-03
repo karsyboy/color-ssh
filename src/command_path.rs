@@ -1,15 +1,11 @@
 use once_cell::sync::OnceCell;
+use std::os::unix::fs::{MetadataExt, PermissionsExt};
 use std::{
     fs, io,
     path::{Path, PathBuf},
 };
 
-#[cfg(unix)]
-use std::os::unix::fs::{MetadataExt, PermissionsExt};
-
-#[cfg(unix)]
 const EXECUTE_BITS: u32 = 0o111;
-#[cfg(unix)]
 const WORLD_WRITABLE_BIT: u32 = 0o002;
 
 #[derive(Debug, Clone)]
@@ -94,16 +90,12 @@ fn validate_executable_path(path: &Path, label: &str) -> io::Result<PathBuf> {
         ));
     }
 
-    #[cfg(unix)]
-    {
-        validate_unix_executable_security(&canonical, &metadata, label)?;
-    }
+    validate_executable_security(&canonical, &metadata, label)?;
 
     Ok(canonical)
 }
 
-#[cfg(unix)]
-fn validate_unix_executable_security(path: &Path, metadata: &fs::Metadata, label: &str) -> io::Result<()> {
+fn validate_executable_security(path: &Path, metadata: &fs::Metadata, label: &str) -> io::Result<()> {
     let mode = metadata.permissions().mode();
     if mode & WORLD_WRITABLE_BIT != 0 {
         return Err(io::Error::new(

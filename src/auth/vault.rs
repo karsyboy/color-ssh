@@ -508,7 +508,6 @@ fn entry_aad(name: &str) -> String {
     format!("{}{}", String::from_utf8_lossy(ENTRY_AAD_PREFIX), name)
 }
 
-#[cfg(unix)]
 fn set_restrictive_directory_permissions(path: &Path) -> Result<(), VaultError> {
     use std::os::unix::fs::PermissionsExt;
 
@@ -516,21 +515,10 @@ fn set_restrictive_directory_permissions(path: &Path) -> Result<(), VaultError> 
     Ok(())
 }
 
-#[cfg(not(unix))]
-fn set_restrictive_directory_permissions(_path: &Path) -> Result<(), VaultError> {
-    Ok(())
-}
-
-#[cfg(unix)]
 fn set_restrictive_file_permissions(path: &Path) -> Result<(), VaultError> {
     use std::os::unix::fs::PermissionsExt;
 
     fs::set_permissions(path, fs::Permissions::from_mode(0o600))?;
-    Ok(())
-}
-
-#[cfg(not(unix))]
-fn set_restrictive_file_permissions(_path: &Path) -> Result<(), VaultError> {
     Ok(())
 }
 

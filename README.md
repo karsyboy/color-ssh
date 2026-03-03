@@ -18,6 +18,8 @@
 
 **Color SSH** (`cossh`) is a Rust-based wrapper for SSH that enhances your terminal experience with real-time syntax highlighting and session logging. Built for network engineers, system administrators, and anyone who works with devices that have basic shells.
 
+`color-ssh` supports Linux and macOS. Windows users should run it through WSL.
+
 ![cossh_example](./.resources/cossh_example.png)
 
 ## Features
@@ -37,7 +39,7 @@
 - SSH
 
 ### Pre-built Binaries (Recommended)
-Download the latest release from [GitHub Releases](https://github.com/karsyboy/color-ssh/releases/) for your platform.
+Download the latest release from [GitHub Releases](https://github.com/karsyboy/color-ssh/releases/).
 
 ### Cargo
 ```bash

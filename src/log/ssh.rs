@@ -10,6 +10,7 @@ use super::{LogError, formatter::LogFormatter, sanitize_session_name};
 use chrono::Local;
 use once_cell::sync::Lazy;
 use regex::Regex;
+use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
 use std::{
     borrow::Cow,
     fs::{self, File, OpenOptions},
@@ -23,16 +24,11 @@ use std::{
     time::{Duration, Instant},
 };
 
-#[cfg(unix)]
-use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
-
 const SSH_LOG_FLUSH_BYTES: usize = 64 * 1024;
 const SSH_LOG_FLUSH_INTERVAL: Duration = Duration::from_millis(100);
 // 1024 * ~8KiB chunks ~= ~8MiB bounded backlog.
 const SSH_LOG_QUEUE_CAPACITY: usize = 1024;
-#[cfg(unix)]
 const PRIVATE_LOG_DIR_MODE: u32 = 0o700;
-#[cfg(unix)]
 const PRIVATE_LOG_FILE_MODE: u32 = 0o600;
 
 enum SshLogCommand {
@@ -363,11 +359,8 @@ fn open_private_append_file(path: &Path) -> Result<File, LogError> {
     let mut options = OpenOptions::new();
     options
         .create(true) // Create if missing.
-        .append(true); // Preserve existing logs.
-    #[cfg(unix)]
-    {
-        options.mode(PRIVATE_LOG_FILE_MODE);
-    }
+        .append(true) // Preserve existing logs.
+        .mode(PRIVATE_LOG_FILE_MODE);
     let file = options.open(path)?;
     set_private_file_permissions(path)?;
     Ok(file)
@@ -438,25 +431,13 @@ fn should_flush(pending_bytes: usize, elapsed_since_flush: Duration) -> bool {
     pending_bytes >= SSH_LOG_FLUSH_BYTES || elapsed_since_flush >= SSH_LOG_FLUSH_INTERVAL
 }
 
-#[cfg(unix)]
 fn set_private_directory_permissions(path: &Path) -> Result<(), LogError> {
     fs::set_permissions(path, fs::Permissions::from_mode(PRIVATE_LOG_DIR_MODE))?;
     Ok(())
 }
 
-#[cfg(not(unix))]
-fn set_private_directory_permissions(_path: &Path) -> Result<(), LogError> {
-    Ok(())
-}
-
-#[cfg(unix)]
 fn set_private_file_permissions(path: &Path) -> Result<(), LogError> {
     fs::set_permissions(path, fs::Permissions::from_mode(PRIVATE_LOG_FILE_MODE))?;
-    Ok(())
-}
-
-#[cfg(not(unix))]
-fn set_private_file_permissions(_path: &Path) -> Result<(), LogError> {
     Ok(())
 }
 

@@ -1,9 +1,6 @@
 use super::{create_private_directory, open_private_append_file, should_flush};
-use std::time::Duration;
-
-#[cfg(unix)]
 use std::os::unix::fs::PermissionsExt;
-#[cfg(unix)]
+use std::time::Duration;
 use std::{
     fs,
     path::PathBuf,
@@ -17,13 +14,11 @@ fn should_flush_on_size_or_interval() {
     assert!(should_flush(1, Duration::from_millis(100)));
 }
 
-#[cfg(unix)]
 fn temp_path(prefix: &str) -> PathBuf {
     let unique = SystemTime::now().duration_since(UNIX_EPOCH).expect("clock should be after epoch").as_nanos();
     std::env::temp_dir().join(format!("cossh-log-debug-{prefix}-{unique}"))
 }
 
-#[cfg(unix)]
 #[test]
 fn private_directory_and_file_permissions_are_restrictive() {
     let root = temp_path("permissions");

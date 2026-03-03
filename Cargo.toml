@@ -45,16 +45,6 @@ alacritty_terminal = "0.25.1"
 which = "8.0.0"
 zeroize = "1.8.2"
 
-[target.'cfg(windows)'.dependencies]
-windows-sys = { version = "0.61.2", features = [
-    "Win32_Foundation",
-    "Win32_Security",
-    "Win32_Security_Authorization",
-    "Win32_System_Memory",
-    "Win32_System_Threading",
-] }
-widestring = "1.2.1"
-
 [profile.release]
 lto = "thin"
 codegen-units = 1

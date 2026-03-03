@@ -5,13 +5,11 @@ use super::{
 use regex::Regex;
 use std::{
     fs,
+    os::unix::fs::PermissionsExt,
     path::PathBuf,
     sync::{Arc, mpsc},
     time::{Duration, SystemTime, UNIX_EPOCH},
 };
-
-#[cfg(unix)]
-use std::os::unix::fs::PermissionsExt;
 
 fn temp_log_path() -> PathBuf {
     let unique = SystemTime::now().duration_since(UNIX_EPOCH).expect("clock should be after epoch").as_nanos();
@@ -138,7 +136,6 @@ fn worker_flush_writes_partial_tail_without_newline() {
     let _ = fs::remove_file(log_path);
 }
 
-#[cfg(unix)]
 #[test]
 fn private_directory_and_file_permissions_are_restrictive() {
     let root = std::env::temp_dir().join(format!(
