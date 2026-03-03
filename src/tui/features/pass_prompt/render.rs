@@ -119,7 +119,7 @@ impl SessionManager {
     }
 
     pub(crate) fn render_vault_status_modal(&self, frame: &mut Frame, full_area: Rect) {
-        let Some(_modal) = &self.vault_status_modal else {
+        let Some(modal) = &self.vault_status_modal else {
             return;
         };
 
@@ -142,7 +142,17 @@ impl SessionManager {
             Style::default().fg(theme::ansi_red()).add_modifier(Modifier::BOLD)
         };
         let value_style = Style::default().fg(theme::ansi_bright_white()).add_modifier(Modifier::BOLD);
+        let message_style = if modal.message_is_error {
+            Style::default().fg(theme::ansi_red()).add_modifier(Modifier::BOLD)
+        } else {
+            Style::default().fg(theme::ansi_green()).add_modifier(Modifier::BOLD)
+        };
         let hint_style = Style::default().fg(theme::ansi_bright_black());
+        let hint_text = if self.vault_status.unlocked {
+            "[l] Lock  |  [Enter / Esc / v] Close"
+        } else {
+            "[Enter / Esc / v] Close"
+        };
 
         let lines = vec![
             Line::from(vec![
@@ -157,8 +167,11 @@ impl SessionManager {
                 Span::styled("Absolute Session Timeout: ", label_style),
                 Span::styled(format_vault_timeout_at(self.vault_status.absolute_timeout_at_epoch_seconds), value_style),
             ]),
-            Line::from(""),
-            Line::from(vec![Span::styled("[Enter] Close  |  [Esc] Close  |  [v] Close", hint_style)]),
+            modal
+                .message
+                .as_ref()
+                .map_or_else(|| Line::from(""), |message| Line::from(vec![Span::styled(message.clone(), message_style)])),
+            Line::from(vec![Span::styled(hint_text, hint_style)]),
         ];
 
         frame.render_widget(Paragraph::new(lines), inner);

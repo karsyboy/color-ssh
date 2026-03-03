@@ -41,15 +41,63 @@ impl SessionManager {
         self.mark_ui_dirty();
     }
 
+    fn apply_vault_status_modal_lock_result(&mut self, result: Result<crate::auth::ipc::VaultStatus, agent::AgentError>) {
+        let fallback_vault_exists = self.vault_status.vault_exists;
+
+        match result {
+            Ok(status) => {
+                self.set_vault_status(status);
+                if let Some(modal) = self.vault_status_modal.as_mut() {
+                    modal.set_message("Vault locked.".to_string(), false);
+                }
+            }
+            Err(agent::AgentError::Io(_)) => {
+                self.set_vault_status(crate::auth::ipc::VaultStatus::locked(fallback_vault_exists));
+                if let Some(modal) = self.vault_status_modal.as_mut() {
+                    modal.set_message("Vault already locked.".to_string(), false);
+                }
+            }
+            Err(err) => {
+                if let Some(modal) = self.vault_status_modal.as_mut() {
+                    modal.set_message(format!("Failed to lock vault: {err}"), true);
+                }
+            }
+        }
+        self.mark_ui_dirty();
+    }
+
     pub(crate) fn handle_vault_status_modal_key(&mut self, key: KeyEvent) {
         if self.vault_status_modal.is_none() {
             return;
         }
 
         match key.code {
-            KeyCode::Esc | KeyCode::Enter | KeyCode::Char('v') => {
+            KeyCode::Esc | KeyCode::Enter => {
                 self.vault_status_modal = None;
                 self.mark_ui_dirty();
+            }
+            KeyCode::Char('v') if !key.modifiers.contains(KeyModifiers::CONTROL) && !key.modifiers.contains(KeyModifiers::ALT) => {
+                if self.vault_status.unlocked {
+                    self.vault_status_modal = None;
+                    self.mark_ui_dirty();
+                } else {
+                    self.open_manual_vault_unlock();
+                }
+            }
+            KeyCode::Char('l') if !key.modifiers.contains(KeyModifiers::CONTROL) && !key.modifiers.contains(KeyModifiers::ALT) => {
+                if !self.vault_status.unlocked {
+                    if let Some(modal) = self.vault_status_modal.as_mut() {
+                        modal.set_message("Vault already locked.".to_string(), false);
+                    }
+                    self.mark_ui_dirty();
+                    return;
+                }
+
+                let result = match agent::AgentClient::new() {
+                    Ok(client) => client.lock(),
+                    Err(err) => Err(err),
+                };
+                self.apply_vault_status_modal_lock_result(result);
             }
             _ => {}
         }
@@ -232,3 +280,7 @@ impl SessionManager {
         }
     }
 }
+
+#[cfg(test)]
+#[path = "../../../test/tui/features/pass_prompt/input.rs"]
+mod tests;

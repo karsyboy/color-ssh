@@ -5,11 +5,22 @@ use crate::ssh_config::SshHost;
 
 pub(crate) const VAULT_UNLOCK_MAX_ATTEMPTS: usize = 3;
 
-pub(crate) struct VaultStatusModalState;
+pub(crate) struct VaultStatusModalState {
+    pub(crate) message: Option<String>,
+    pub(crate) message_is_error: bool,
+}
 
 impl VaultStatusModalState {
     pub(crate) fn new() -> Self {
-        Self
+        Self {
+            message: None,
+            message_is_error: false,
+        }
+    }
+
+    pub(crate) fn set_message(&mut self, message: String, is_error: bool) {
+        self.message = Some(message);
+        self.message_is_error = is_error;
     }
 }
 
