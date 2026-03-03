@@ -1,6 +1,6 @@
 //! Terminal-tabs and root layout rendering.
 
-use crate::tui::SessionManager;
+use crate::tui::AppState;
 use crate::tui::features::selection::extract::is_cell_in_selection;
 use crate::tui::features::terminal_search::render_highlight::build_search_row_ranges;
 use crate::tui::terminal_emulator;
@@ -47,7 +47,7 @@ fn draw_horizontal_rule(frame: &mut Frame, y: u16, x: u16, width: u16, style: St
     }
 }
 
-impl SessionManager {
+impl AppState {
     // Root frame composition.
     /// Render the full UI.
     pub(crate) fn draw(&mut self, frame: &mut Frame) {

@@ -1,8 +1,8 @@
 //! Host browser mouse helpers.
 
-use crate::tui::SessionManager;
+use crate::tui::AppState;
 
-impl SessionManager {
+impl AppState {
     // Scrollbar geometry.
     pub(crate) fn host_scrollbar_x(&self) -> Option<u16> {
         let area = self.host_list_area;

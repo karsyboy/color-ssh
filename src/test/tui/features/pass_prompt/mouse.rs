@@ -5,7 +5,7 @@ use crossterm::event::{KeyModifiers, MouseButton, MouseEvent, MouseEventKind};
 
 #[test]
 fn vault_unlock_modal_action_hit_detects_submit_and_close() {
-    let mut app = SessionManager::new_for_tests();
+    let mut app = AppState::new_for_tests();
     app.vault_unlock = Some(VaultUnlockState::new("shared".to_string(), VaultUnlockAction::UnlockVault));
 
     let (_, inner_area) = app.vault_unlock_modal_layout().expect("vault unlock modal layout");
@@ -19,7 +19,7 @@ fn vault_unlock_modal_action_hit_detects_submit_and_close() {
 
 #[test]
 fn vault_status_modal_action_hit_detects_unlock_and_close_when_locked() {
-    let mut app = SessionManager::new_for_tests();
+    let mut app = AppState::new_for_tests();
     app.vault_status_modal = Some(VaultStatusModalState::new());
     app.vault_status = VaultStatus::locked(true);
 
@@ -33,7 +33,7 @@ fn vault_status_modal_action_hit_detects_unlock_and_close_when_locked() {
 
 #[test]
 fn vault_status_modal_action_hit_detects_lock_and_close_when_unlocked() {
-    let mut app = SessionManager::new_for_tests();
+    let mut app = AppState::new_for_tests();
     app.vault_status_modal = Some(VaultStatusModalState::new());
     app.vault_status = VaultStatus {
         vault_exists: true,
@@ -54,7 +54,7 @@ fn vault_status_modal_action_hit_detects_lock_and_close_when_unlocked() {
 
 #[test]
 fn handle_vault_unlock_mouse_close_returns_to_vault_status_modal() {
-    let mut app = SessionManager::new_for_tests();
+    let mut app = AppState::new_for_tests();
     app.vault_unlock = Some(VaultUnlockState::new("shared".to_string(), VaultUnlockAction::UnlockVault).return_to_vault_status());
 
     let (_, inner_area) = app.vault_unlock_modal_layout().expect("vault unlock modal layout");
@@ -75,7 +75,7 @@ fn handle_vault_unlock_mouse_close_returns_to_vault_status_modal() {
 
 #[test]
 fn handle_vault_status_modal_mouse_unlock_opens_unlock_prompt() {
-    let mut app = SessionManager::new_for_tests();
+    let mut app = AppState::new_for_tests();
     app.vault_status_modal = Some(VaultStatusModalState::new());
     app.vault_status = VaultStatus::locked(true);
 

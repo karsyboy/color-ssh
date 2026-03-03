@@ -3,7 +3,7 @@
 //! Parses CLI arguments using the clap library and provides structured access
 //! to user-provided options.
 
-use crate::ssh_args;
+use crate::{ssh_args, validation};
 use clap::{Arg, Command};
 use std::ffi::OsString;
 
@@ -44,30 +44,6 @@ pub struct MainArgs {
     pub agent_serve: bool,
 }
 
-fn is_valid_profile_name(name: &str) -> bool {
-    !name.is_empty() && name.chars().all(|ch| ch.is_ascii_alphanumeric() || matches!(ch, '_' | '-'))
-}
-
-fn parse_profile_arg(value: &str) -> Result<String, String> {
-    let trimmed = value.trim();
-    if !is_valid_profile_name(trimmed) {
-        return Err("invalid profile name: use only letters, numbers, '_' or '-'".to_string());
-    }
-    Ok(trimmed.to_string())
-}
-
-fn is_valid_pass_entry_name(name: &str) -> bool {
-    !name.is_empty() && name.chars().all(|ch| ch.is_ascii_alphanumeric() || matches!(ch, '.' | '_' | '-'))
-}
-
-fn parse_pass_entry_arg(value: &str) -> Result<String, String> {
-    let trimmed = value.trim();
-    if !is_valid_pass_entry_name(trimmed) {
-        return Err("invalid pass entry name: use only letters, numbers, '.', '_' or '-'".to_string());
-    }
-    Ok(trimmed.to_string())
-}
-
 fn build_cli_command() -> Command {
     Command::new("cossh")
         .version(concat!("v", env!("CARGO_PKG_VERSION")))
@@ -93,7 +69,7 @@ fn build_cli_command() -> Command {
                 .short('P')
                 .long("profile")
                 .help("Specify a configuration profile to use")
-                .value_parser(clap::builder::ValueParser::new(parse_profile_arg))
+                .value_parser(clap::builder::ValueParser::new(validation::parse_profile_name))
                 .num_args(1)
                 .required(false),
         )
@@ -110,7 +86,7 @@ fn build_cli_command() -> Command {
                 .help("Override the password vault entry used for a direct SSH launch")
                 .num_args(1)
                 .value_name("name")
-                .value_parser(clap::builder::ValueParser::new(parse_pass_entry_arg)),
+                .value_parser(clap::builder::ValueParser::new(validation::parse_vault_entry_name)),
         )
         .arg(Arg::new("ssh_args").help("SSH arguments to forward to the SSH command").num_args(1..))
         .subcommand(
@@ -124,7 +100,7 @@ fn build_cli_command() -> Command {
                         Arg::new("name")
                             .help("Password entry name")
                             .required(true)
-                            .value_parser(clap::builder::ValueParser::new(parse_pass_entry_arg)),
+                            .value_parser(clap::builder::ValueParser::new(validation::parse_vault_entry_name)),
                     ),
                 )
                 .subcommand(
@@ -132,7 +108,7 @@ fn build_cli_command() -> Command {
                         Arg::new("name")
                             .help("Password entry name")
                             .required(true)
-                            .value_parser(clap::builder::ValueParser::new(parse_pass_entry_arg)),
+                            .value_parser(clap::builder::ValueParser::new(validation::parse_vault_entry_name)),
                     ),
                 )
                 .subcommand(Command::new("list").about("List password vault entries"))

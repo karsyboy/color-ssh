@@ -1,7 +1,7 @@
 //! Host browser rendering.
 
 use crate::tui::ui::theme;
-use crate::tui::{HostTreeRowKind, SessionManager};
+use crate::tui::{AppState, HostTreeRowKind};
 use ratatui::{
     Frame,
     layout::Rect,
@@ -10,7 +10,7 @@ use ratatui::{
     widgets::{List, ListItem, ListState, Paragraph, Wrap},
 };
 
-impl SessionManager {
+impl AppState {
     // Host list panel.
     pub(crate) fn render_host_list(&mut self, frame: &mut Frame, area: Rect) {
         if area.height == 0 {

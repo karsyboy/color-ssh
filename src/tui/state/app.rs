@@ -2,10 +2,10 @@
 
 mod init;
 
-use super::host_browser_state::{HostSearchEntry, HostTreeRow};
-use super::pass_prompt_state::{VaultStatusModalState, VaultUnlockState};
-use super::quick_connect_state::QuickConnectState;
-use super::tab_state::{HostTab, TerminalSearchState};
+use super::host_browser::{HostSearchEntry, HostTreeRow};
+use super::quick_connect::QuickConnectState;
+use super::tabs::{HostTab, TerminalSearchState};
+use super::vault::{VaultStatusModalState, VaultUnlockState};
 use crate::auth::ipc::{self, VaultStatus, VaultStatusEvent, VaultStatusEventKind};
 use crate::log_debug;
 use crate::ssh_config::{FolderId, SshHost, TreeFolder};
@@ -288,8 +288,6 @@ impl AppState {
         Self::build_from_init(init::test_app_state_init())
     }
 }
-
-pub(crate) type SessionManager = AppState;
 
 #[cfg(test)]
 #[path = "../../test/tui/state/app_state.rs"]

@@ -1,7 +1,7 @@
 //! Quick-connect modal rendering.
 
 use crate::tui::ui::theme;
-use crate::tui::{QuickConnectField, SessionManager};
+use crate::tui::{AppState, QuickConnectField};
 use ratatui::{
     Frame,
     layout::Rect,
@@ -77,7 +77,7 @@ fn build_edit_value_spans(
     spans
 }
 
-impl SessionManager {
+impl AppState {
     // Modal rendering.
     pub(crate) fn render_quick_connect_modal(&self, frame: &mut Frame, full_area: Rect) {
         let Some(form) = &self.quick_connect else {

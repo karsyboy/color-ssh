@@ -3,7 +3,7 @@
 use crate::auth::agent;
 use crate::ssh_config::SshHost;
 use crate::tui::terminal_emulator::Parser;
-use crate::tui::{HostTab, SessionManager, SshSession, TerminalSearchState, VaultUnlockAction};
+use crate::tui::{AppState, HostTab, SshSession, TerminalSearchState, VaultUnlockAction};
 use crate::{command_path, debug_enabled, log_debug, log_error};
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use portable_pty::{CommandBuilder, PtySize, native_pty_system};
@@ -143,7 +143,7 @@ pub(crate) fn encode_key_event_bytes(key: KeyEvent) -> Option<Vec<u8>> {
     Some(bytes)
 }
 
-impl SessionManager {
+impl AppState {
     // PTY sizing / config helpers.
     fn initial_pty_size(&self) -> (u16, u16) {
         let rows = self.tab_content_area.height.max(1);

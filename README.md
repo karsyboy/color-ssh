@@ -24,11 +24,11 @@
 
 ## Features
 
-- Session Manger TUI
+- Session manager TUI
 - Syntax highlighting
 - Session logging
 - Configuration hot reload
-- Mutliple Profile Support
+- Multiple profile support
 - Configurable rules using regex matching
 - Shared password vault unlock for TUI and direct mode
 
@@ -57,7 +57,7 @@ cargo build --release
 ```
 
 ### Shell Completion
-Shell completeion scripts are included for `fish` and `zsh`. For instructions see the [Shell Completion README](shell-completion/README.md).
+Shell completion scripts are included for `fish` and `zsh`. For instructions see the [Shell Completion README](shell-completion/README.md).
 
 
 ## Usage
@@ -127,14 +127,15 @@ Options:
 
 Configuration files are looked for in the following order:
 
-1. **Current directory**: `./[profile].cossh-config.yaml`
-2. **Home directory**: `~/.color-ssh/[profile].cossh-config.yaml`
+1. **Color SSH config directory**: `~/.color-ssh/[profile].cossh-config.yaml`
+2. **Home directory**: `~/[profile].cossh-config.yaml`
+3. **Current directory**: `./[profile].cossh-config.yaml`
 
 If no configuration file is found the default configuration will be created at `~/.color-ssh/cossh-config.yaml`.
 
 #### Color-SSH TUI Metadata in `~/.ssh/config`
 
-The interactive session manger supports metadata comments inside the SSH config file.
+The interactive session manager supports metadata comments inside the SSH config file.
 
 | Tag | What it does |
 | --- | --- |
@@ -185,7 +186,7 @@ rm -rf ~/.config/color-ssh/
 For instructions see the [Shell Completion README](shell-completion/README.md).
 
 ## Support
-If you need help, have an issue, or just want to make a sugestion / request a feature please open an [issue](https://github.com/karsyboy/color-ssh/issues/new). 
+If you need help, have an issue, or want to request a feature, open an [issue](https://github.com/karsyboy/color-ssh/issues/new).
 
 ## Special Thanks
 
@@ -194,4 +195,4 @@ Thanks to the following projects for the inspiration behind Color SSH.
 - [Chromaterm](https://github.com/hSaria/ChromaTerm)
 - [netcli-highlight](https://github.com/danielmacuare/netcli-highlight)
 
-Also thank you to [Alacritty](https://github.com/alacritty/alacritty) for the terminal create that is being used to render the terminal in the TUI
+Also thank you to [Alacritty](https://github.com/alacritty/alacritty) for the terminal crate used to render the terminal in the TUI.

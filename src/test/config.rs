@@ -1,5 +1,5 @@
 use super::*;
-use crate::config::style::{AuthSettings, Config, Metadata, Settings};
+use crate::config::{AuthSettings, Config, Metadata, Settings};
 use std::collections::HashMap;
 use std::sync::{Arc, RwLock};
 

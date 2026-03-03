@@ -1,5 +1,6 @@
 //! Interactive SSH output streaming and highlighting.
 
+use super::exit::map_exit_code;
 use crate::{Result, config, highlighter, log, log_debug, log_error};
 use std::io::{self, Read, Write};
 use std::process::{Child, ExitCode};
@@ -27,6 +28,110 @@ impl OutputChunk {
             Self::Owned(chunk) => chunk.as_str(),
             Self::Shared(chunk) => chunk.as_str(),
         }
+    }
+}
+
+#[derive(Debug)]
+struct StdoutFlushState {
+    pending_bytes: usize,
+    last_flush_at: Instant,
+}
+
+impl StdoutFlushState {
+    fn new() -> Self {
+        Self {
+            pending_bytes: 0,
+            last_flush_at: Instant::now(),
+        }
+    }
+
+    fn record_write(&mut self, bytes_written: usize) {
+        self.pending_bytes = self.pending_bytes.saturating_add(bytes_written);
+    }
+
+    fn flush_if_needed(&mut self, stdout: &mut impl Write, raw_chunk: &str, processed_chunk: &str) -> io::Result<()> {
+        let immediate_flush = should_flush_immediately(raw_chunk, processed_chunk);
+        if immediate_flush || self.pending_bytes >= STDOUT_FLUSH_BYTES || self.last_flush_at.elapsed() >= STDOUT_FLUSH_INTERVAL {
+            stdout.flush()?;
+            self.pending_bytes = 0;
+            self.last_flush_at = Instant::now();
+        }
+        Ok(())
+    }
+
+    fn flush_on_idle(&mut self, stdout: &mut impl Write) -> io::Result<()> {
+        if self.pending_bytes > 0 && self.last_flush_at.elapsed() >= STDOUT_FLUSH_INTERVAL {
+            stdout.flush()?;
+            self.pending_bytes = 0;
+            self.last_flush_at = Instant::now();
+        }
+        Ok(())
+    }
+}
+
+#[derive(Debug)]
+struct Utf8ChunkDecoder {
+    pending_utf8: Vec<u8>,
+}
+
+impl Utf8ChunkDecoder {
+    fn with_capacity(capacity: usize) -> Self {
+        Self {
+            pending_utf8: Vec::with_capacity(capacity),
+        }
+    }
+
+    fn decode_read(&mut self, bytes: &[u8]) -> Option<String> {
+        if self.pending_utf8.is_empty()
+            && let Ok(valid_chunk) = std::str::from_utf8(bytes)
+        {
+            return Some(valid_chunk.to_string());
+        }
+
+        self.pending_utf8.extend_from_slice(bytes);
+        self.take_decoded_chunk()
+    }
+
+    fn finish(&mut self) -> Option<String> {
+        if self.pending_utf8.is_empty() {
+            None
+        } else {
+            let chunk = String::from_utf8_lossy(&self.pending_utf8).to_string();
+            self.pending_utf8.clear();
+            Some(chunk)
+        }
+    }
+
+    fn take_decoded_chunk(&mut self) -> Option<String> {
+        let mut chunk = String::new();
+
+        loop {
+            match std::str::from_utf8(&self.pending_utf8) {
+                Ok(valid) => {
+                    chunk.push_str(valid);
+                    self.pending_utf8.clear();
+                    break;
+                }
+                Err(err) => {
+                    let valid_up_to = err.valid_up_to();
+                    if valid_up_to > 0
+                        && let Ok(valid) = std::str::from_utf8(&self.pending_utf8[..valid_up_to])
+                    {
+                        chunk.push_str(valid);
+                        self.pending_utf8.drain(..valid_up_to);
+                        continue;
+                    }
+                    if let Some(error_len) = err.error_len() {
+                        chunk.push('\u{FFFD}');
+                        self.pending_utf8.drain(..error_len);
+                        continue;
+                    }
+                    break;
+                }
+            }
+        }
+
+        (!chunk.is_empty()).then_some(chunk)
     }
 }
 
@@ -92,8 +197,7 @@ fn spawn_output_processor(rx: Receiver<OutputChunk>) -> io::Result<thread::JoinH
         let mut highlight_rules = HighlightRuleCache::load();
         let stdout = io::stdout();
         let mut stdout = stdout.lock();
-        let mut pending_stdout_bytes = 0usize;
-        let mut last_stdout_flush = Instant::now();
+        let mut flush_state = StdoutFlushState::new();
 
         loop {
             match rx.recv_timeout(STDOUT_FLUSH_INTERVAL) {
@@ -116,26 +220,16 @@ fn spawn_output_processor(rx: Receiver<OutputChunk>) -> io::Result<thread::JoinH
                         break;
                     }
 
-                    pending_stdout_bytes = pending_stdout_bytes.saturating_add(processed_chunk.len());
-                    let immediate_flush = should_flush_immediately(raw_chunk, &processed_chunk);
-                    if immediate_flush || pending_stdout_bytes >= STDOUT_FLUSH_BYTES || last_stdout_flush.elapsed() >= STDOUT_FLUSH_INTERVAL {
-                        if let Err(err) = stdout.flush() {
-                            log_error!("Failed to flush stdout: {}", err);
-                            break;
-                        }
-                        pending_stdout_bytes = 0;
-                        last_stdout_flush = Instant::now();
+                    flush_state.record_write(processed_chunk.len());
+                    if let Err(err) = flush_state.flush_if_needed(&mut stdout, raw_chunk, &processed_chunk) {
+                        log_error!("Failed to flush stdout: {}", err);
+                        break;
                     }
                 }
                 Err(RecvTimeoutError::Timeout) => {
-                    // Flush idle prompt/output fragments (e.g. sudo password prompts).
-                    if pending_stdout_bytes > 0 && last_stdout_flush.elapsed() >= STDOUT_FLUSH_INTERVAL {
-                        if let Err(err) = stdout.flush() {
-                            log_error!("Failed to flush stdout on idle timeout: {}", err);
-                            break;
-                        }
-                        pending_stdout_bytes = 0;
-                        last_stdout_flush = Instant::now();
+                    if let Err(err) = flush_state.flush_on_idle(&mut stdout) {
+                        log_error!("Failed to flush stdout on idle timeout: {}", err);
+                        break;
                     }
                 }
                 Err(RecvTimeoutError::Disconnected) => break,
@@ -149,7 +243,7 @@ fn spawn_output_processor(rx: Receiver<OutputChunk>) -> io::Result<thread::JoinH
     })
 }
 
-fn emit_chunk(tx: &SyncSender<OutputChunk>, chunk: String) -> bool {
+fn send_output_chunk(tx: &SyncSender<OutputChunk>, chunk: String) -> bool {
     if chunk.is_empty() {
         return true;
     }
@@ -186,7 +280,7 @@ pub(super) fn run_interactive_ssh(mut child: Child) -> Result<ExitCode> {
     })?;
 
     let mut buffer = [0; 8192];
-    let mut pending_utf8: Vec<u8> = Vec::with_capacity(buffer.len());
+    let mut decoder = Utf8ChunkDecoder::with_capacity(buffer.len());
     let mut total_bytes = 0;
 
     log_debug!("Starting to read SSH output...");
@@ -194,63 +288,19 @@ pub(super) fn run_interactive_ssh(mut child: Child) -> Result<ExitCode> {
     loop {
         match stdout.read(&mut buffer) {
             Ok(0) => {
-                if !pending_utf8.is_empty() {
-                    let chunk = String::from_utf8_lossy(&pending_utf8).to_string();
-                    pending_utf8.clear();
-                    let _ = emit_chunk(&tx, chunk);
+                if let Some(chunk) = decoder.finish() {
+                    let _ = send_output_chunk(&tx, chunk);
                 }
                 log_debug!("EOF reached (total bytes read: {})", total_bytes);
                 break;
             }
             Ok(bytes_read) => {
                 total_bytes += bytes_read;
-
-                // Fast path: the common case where this read chunk is complete UTF-8
-                // and there are no carry-over bytes from a prior partial sequence.
-                if pending_utf8.is_empty()
-                    && let Ok(valid_chunk) = std::str::from_utf8(&buffer[..bytes_read])
-                {
-                    if !emit_chunk(&tx, valid_chunk.to_string()) {
-                        break;
-                    }
+                let Some(chunk) = decoder.decode_read(&buffer[..bytes_read]) else {
                     continue;
-                }
+                };
 
-                pending_utf8.extend_from_slice(&buffer[..bytes_read]);
-
-                let mut chunk = String::new();
-                loop {
-                    match std::str::from_utf8(&pending_utf8) {
-                        Ok(valid) => {
-                            chunk.push_str(valid);
-                            pending_utf8.clear();
-                            break;
-                        }
-                        Err(err) => {
-                            let valid_up_to = err.valid_up_to();
-                            if valid_up_to > 0
-                                && let Ok(valid) = std::str::from_utf8(&pending_utf8[..valid_up_to])
-                            {
-                                chunk.push_str(valid);
-                                pending_utf8.drain(..valid_up_to);
-                                continue;
-                            }
-                            if let Some(error_len) = err.error_len() {
-                                chunk.push('\u{FFFD}');
-                                pending_utf8.drain(..error_len);
-                                continue;
-                            }
-                            // Incomplete UTF-8 sequence at the end; wait for next read.
-                            break;
-                        }
-                    }
-                }
-
-                if chunk.is_empty() {
-                    continue;
-                }
-
-                if !emit_chunk(&tx, chunk) {
+                if !send_output_chunk(&tx, chunk) {
                     break;
                 }
             }
@@ -283,5 +333,5 @@ pub(super) fn run_interactive_ssh(mut child: Child) -> Result<ExitCode> {
     let exit_code = status.code().unwrap_or(1);
     log_debug!("Interactive SSH process exited with raw code: {}", exit_code);
 
-    Ok(super::map_exit_code(status.success(), status.code()))
+    Ok(map_exit_code(status.success(), status.code()))
 }

@@ -1,4 +1,5 @@
 use crate::auth::secret::{SensitiveString, sensitive_string};
+use crate::validation::validate_vault_entry_name;
 use argon2::{Algorithm, Argon2, Params, Version};
 use base64::{Engine as _, engine::general_purpose::STANDARD as BASE64};
 use chacha20poly1305::aead::{Aead, Payload};
@@ -123,7 +124,7 @@ impl VaultPaths {
     }
 
     pub fn entry_path(&self, name: &str) -> Result<PathBuf, VaultError> {
-        if !validate_entry_name(name) {
+        if !validate_vault_entry_name(name) {
             return Err(VaultError::InvalidEntryName);
         }
         Ok(self.entries_dir().join(format!("{name}.json")))
@@ -149,7 +150,7 @@ impl UnlockedVault {
     }
 
     pub fn store_secret(&self, name: &str, secret: &str) -> Result<(), VaultError> {
-        if !validate_entry_name(name) {
+        if !validate_vault_entry_name(name) {
             return Err(VaultError::InvalidEntryName);
         }
 
@@ -184,7 +185,7 @@ impl UnlockedVault {
     }
 
     pub fn get_secret(&self, name: &str) -> Result<SensitiveString, VaultError> {
-        if !validate_entry_name(name) {
+        if !validate_vault_entry_name(name) {
             return Err(VaultError::InvalidEntryName);
         }
 
@@ -245,10 +246,6 @@ impl UnlockedVault {
     pub(crate) fn data_key_copy(&self) -> [u8; DATA_KEY_LEN] {
         *self.data_key
     }
-}
-
-pub fn validate_entry_name(name: &str) -> bool {
-    !name.is_empty() && name.chars().all(|ch| ch.is_ascii_alphanumeric() || matches!(ch, '.' | '_' | '-'))
 }
 
 pub fn vault_exists() -> Result<bool, VaultError> {
@@ -351,7 +348,7 @@ pub(crate) fn list_entries_with_paths(paths: &VaultPaths) -> Result<Vec<String>,
         let Some(name) = path.file_stem().and_then(|stem| stem.to_str()) else {
             return Err(VaultError::InvalidVaultFormat("entry file name was not valid UTF-8".to_string()));
         };
-        if !validate_entry_name(name) {
+        if !validate_vault_entry_name(name) {
             return Err(VaultError::InvalidVaultFormat(format!("invalid entry file name: {name}")));
         }
         entries.push(name.to_string());
@@ -362,7 +359,7 @@ pub(crate) fn list_entries_with_paths(paths: &VaultPaths) -> Result<Vec<String>,
 }
 
 pub(crate) fn entry_exists_with_paths(paths: &VaultPaths, name: &str) -> Result<bool, VaultError> {
-    if !validate_entry_name(name) {
+    if !validate_vault_entry_name(name) {
         return Err(VaultError::InvalidEntryName);
     }
     if !paths.metadata_path().is_file() {

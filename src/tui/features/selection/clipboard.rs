@@ -4,7 +4,7 @@
 //! This works in most modern terminals: Konsole, Kitty, Alacritty, Wezterm, foot, etc.
 
 use super::extract::extract_selection_text;
-use crate::tui::SessionManager;
+use crate::tui::AppState;
 use crossterm::clipboard::CopyToClipboard;
 use crossterm::execute;
 use std::io::{Write, stdout};
@@ -15,7 +15,7 @@ fn copy_to_clipboard(text: &str) {
     let _ = stdout().flush();
 }
 
-impl SessionManager {
+impl AppState {
     // Selection export.
     /// Copy the current text selection to clipboard
     pub(crate) fn copy_selection_to_clipboard(&self) {

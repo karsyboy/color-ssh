@@ -7,7 +7,7 @@ mod terminal_emulator;
 mod ui;
 
 pub(crate) use state::{
-    AppState, ConnectRequest, HostTab, HostTreeRow, HostTreeRowKind, QuickConnectField, QuickConnectState, SessionManager, SshSession, TerminalSearchState,
+    AppState, ConnectRequest, HostTab, HostTreeRow, HostTreeRowKind, QuickConnectField, QuickConnectState, SshSession, TerminalSearchState,
     VaultStatusModalState, VaultUnlockAction, VaultUnlockState,
 };
 

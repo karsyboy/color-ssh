@@ -4,7 +4,7 @@ use crate::auth::secret::ExposeSecret;
 use crate::auth::{agent, ipc::UnlockPolicy};
 use crate::config;
 use crate::log_debug;
-use crate::tui::{SessionManager, VaultStatusModalState, VaultUnlockAction, VaultUnlockState};
+use crate::tui::{AppState, VaultStatusModalState, VaultUnlockAction, VaultUnlockState};
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
 const VAULT_UNLOCK_CANCEL_NOTICE: &str = "Password vault unlock canceled; falling back to the standard SSH password prompt.";
@@ -16,7 +16,7 @@ fn current_unlock_policy() -> UnlockPolicy {
     UnlockPolicy::new(auth_settings.unlock_idle_timeout_seconds, auth_settings.unlock_absolute_timeout_seconds)
 }
 
-impl SessionManager {
+impl AppState {
     pub(crate) fn open_vault_unlock(&mut self, entry_name: String, action: VaultUnlockAction) {
         log_debug!("Opening TUI password vault unlock prompt");
         self.quick_connect = None;

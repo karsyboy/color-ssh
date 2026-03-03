@@ -2,18 +2,21 @@ pub mod args;
 pub mod auth;
 mod command_path;
 pub mod config;
-pub mod highlighter;
+mod highlighter;
 pub mod log;
-pub mod process;
+mod process;
 pub mod runtime;
 pub mod ssh_args;
 pub mod ssh_config;
 pub mod tui;
+mod validation;
 
 #[cfg(test)]
 mod test;
 
 use std::io;
+
+pub use runtime::run;
 
 /// Result type alias for color-ssh operations
 pub type Result<T> = std::result::Result<T, Error>;

@@ -1,6 +1,6 @@
 //! Terminal-search keyboard handling.
 
-use crate::tui::SessionManager;
+use crate::tui::AppState;
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use std::io;
 
@@ -57,7 +57,7 @@ fn delete_selection(text: &mut String, cursor: &mut usize, selection: &mut Optio
     true
 }
 
-impl SessionManager {
+impl AppState {
     fn terminal_search_query_mut(&mut self) -> Option<TerminalSearchQueryMut<'_>> {
         let search = self.current_tab_search_mut()?;
         Some((&mut search.query, &mut search.query_cursor, &mut search.query_selection))

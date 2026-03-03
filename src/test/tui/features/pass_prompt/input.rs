@@ -4,7 +4,7 @@ use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
 #[test]
 fn apply_vault_status_modal_lock_result_marks_modal_locked_on_success() {
-    let mut app = SessionManager::new_for_tests();
+    let mut app = AppState::new_for_tests();
     app.vault_status_modal = Some(VaultStatusModalState::new());
     app.vault_status = VaultStatus {
         vault_exists: true,
@@ -25,7 +25,7 @@ fn apply_vault_status_modal_lock_result_marks_modal_locked_on_success() {
 
 #[test]
 fn apply_vault_status_modal_lock_result_stores_error_message_on_failure() {
-    let mut app = SessionManager::new_for_tests();
+    let mut app = AppState::new_for_tests();
     app.vault_status_modal = Some(VaultStatusModalState::new());
 
     app.apply_vault_status_modal_lock_result(Err(agent::AgentError::Protocol("boom".to_string())));
@@ -37,7 +37,7 @@ fn apply_vault_status_modal_lock_result_stores_error_message_on_failure() {
 
 #[test]
 fn handle_vault_status_modal_key_l_reports_already_locked() {
-    let mut app = SessionManager::new_for_tests();
+    let mut app = AppState::new_for_tests();
     app.vault_status_modal = Some(VaultStatusModalState::new());
     app.vault_status = VaultStatus::locked(true);
 
@@ -50,7 +50,7 @@ fn handle_vault_status_modal_key_l_reports_already_locked() {
 
 #[test]
 fn handle_vault_status_notification_marks_modal_locked() {
-    let mut app = SessionManager::new_for_tests();
+    let mut app = AppState::new_for_tests();
     app.vault_status_modal = Some(VaultStatusModalState::new());
     let status = VaultStatus {
         vault_exists: true,
@@ -76,7 +76,7 @@ fn handle_vault_status_notification_marks_modal_locked() {
 
 #[test]
 fn handle_vault_status_notification_marks_modal_unlocked() {
-    let mut app = SessionManager::new_for_tests();
+    let mut app = AppState::new_for_tests();
     app.vault_status_modal = Some(VaultStatusModalState::new());
     app.vault_status = VaultStatus::locked(true);
 
@@ -102,7 +102,7 @@ fn handle_vault_status_notification_marks_modal_unlocked() {
 
 #[test]
 fn restore_vault_status_modal_sets_error_message() {
-    let mut app = SessionManager::new_for_tests();
+    let mut app = AppState::new_for_tests();
 
     app.restore_vault_status_modal(Some(("Vault unlock failed after multiple attempts. Try again.".to_string(), true)));
 
@@ -114,7 +114,7 @@ fn restore_vault_status_modal_sets_error_message() {
 
 #[test]
 fn close_manual_vault_unlock_after_attempt_limit_closes_direct_unlock_prompt() {
-    let mut app = SessionManager::new_for_tests();
+    let mut app = AppState::new_for_tests();
     app.vault_unlock = Some(VaultUnlockState::new("shared".to_string(), VaultUnlockAction::UnlockVault));
 
     app.vault_unlock = None;
@@ -126,7 +126,7 @@ fn close_manual_vault_unlock_after_attempt_limit_closes_direct_unlock_prompt() {
 
 #[test]
 fn close_manual_vault_unlock_after_attempt_limit_restores_vault_status_modal() {
-    let mut app = SessionManager::new_for_tests();
+    let mut app = AppState::new_for_tests();
 
     app.close_manual_vault_unlock_after_attempt_limit(true);
 
@@ -137,7 +137,7 @@ fn close_manual_vault_unlock_after_attempt_limit_restores_vault_status_modal() {
 
 #[test]
 fn handle_vault_unlock_escape_returns_to_vault_status_modal_when_requested() {
-    let mut app = SessionManager::new_for_tests();
+    let mut app = AppState::new_for_tests();
     app.vault_unlock = Some(VaultUnlockState::new("shared".to_string(), VaultUnlockAction::UnlockVault).return_to_vault_status());
 
     app.handle_vault_unlock_key(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE));

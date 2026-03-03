@@ -1,10 +1,10 @@
 //! Terminal-search indexing and viewport sync.
 
-use crate::tui::SessionManager;
+use crate::tui::AppState;
 use crate::{debug_enabled, log_debug};
 use std::time::Instant;
 
-impl SessionManager {
+impl AppState {
     // Rebuild match list from current query.
     pub(crate) fn update_terminal_search(&mut self) {
         if self.tabs.is_empty() || self.selected_tab >= self.tabs.len() {

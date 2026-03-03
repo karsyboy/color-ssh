@@ -2,7 +2,7 @@
 
 use crate::tui::state::{HOST_PANEL_MAX_WIDTH, HOST_PANEL_MIN_WIDTH};
 use crate::tui::terminal_emulator;
-use crate::tui::{HostTreeRowKind, SessionManager};
+use crate::tui::{AppState, HostTreeRowKind};
 use crossterm::event::{self, KeyModifiers, MouseButton, MouseEventKind};
 use std::io;
 use std::time::Instant;
@@ -19,7 +19,7 @@ fn force_local_selection(modifiers: KeyModifiers) -> bool {
     modifiers.intersects(KeyModifiers::ALT | KeyModifiers::SHIFT)
 }
 
-impl SessionManager {
+impl AppState {
     // Top-level mouse routing for host panel, tab bar, and terminal area.
     /// Handle mouse events.
     pub(crate) fn handle_mouse(&mut self, mouse: event::MouseEvent) -> io::Result<()> {

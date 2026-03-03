@@ -1,4 +1,4 @@
-use super::SessionManager;
+use super::AppState;
 use crate::auth::ipc::VaultStatus;
 use crate::ssh_config::TreeFolder;
 use crate::tui::{HostTreeRow, HostTreeRowKind};
@@ -9,12 +9,12 @@ use std::path::PathBuf;
 #[test]
 fn calculates_span_width_using_unicode_display_width() {
     let spans = vec![Span::raw("a界"), Span::raw("x")];
-    assert_eq!(SessionManager::spans_display_width(&spans), 4);
+    assert_eq!(AppState::spans_display_width(&spans), 4);
 }
 
 #[test]
 fn manager_status_bar_shows_locked_vault_state() {
-    let mut app = SessionManager::new_for_tests();
+    let mut app = AppState::new_for_tests();
     app.host_tree_root.children.push(TreeFolder {
         id: 1,
         name: "K-Ops".to_string(),
@@ -41,7 +41,7 @@ fn manager_status_bar_shows_locked_vault_state() {
 
 #[test]
 fn manager_status_bar_shows_unlocked_vault_state() {
-    let mut app = SessionManager::new_for_tests();
+    let mut app = AppState::new_for_tests();
     app.vault_status = VaultStatus {
         vault_exists: true,
         unlocked: true,

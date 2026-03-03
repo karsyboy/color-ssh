@@ -1,5 +1,6 @@
 use super::*;
 use crate::auth::secret::ExposeSecret;
+use crate::validation::validate_vault_entry_name;
 use std::fs;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -14,10 +15,10 @@ fn temp_paths(prefix: &str) -> VaultPaths {
 
 #[test]
 fn validate_entry_name_allows_safe_characters_only() {
-    assert!(validate_entry_name("shared"));
-    assert!(validate_entry_name("ok_1.2-3"));
-    assert!(!validate_entry_name("../bad"));
-    assert!(!validate_entry_name("with space"));
+    assert!(validate_vault_entry_name("shared"));
+    assert!(validate_vault_entry_name("ok_1.2-3"));
+    assert!(!validate_vault_entry_name("../bad"));
+    assert!(!validate_vault_entry_name("with space"));
 }
 
 #[test]

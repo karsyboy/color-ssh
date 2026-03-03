@@ -1,11 +1,12 @@
 //! SSH command construction and process spawning.
 
-use super::map_exit_code;
-use crate::auth::{self, agent, ipc::UnlockPolicy, secret::ExposeSecret, transport, vault};
+use super::exit::map_exit_code;
+use crate::auth::{self, agent, ipc::UnlockPolicy, secret::ExposeSecret, transport};
 use crate::command_path;
 use crate::config;
 use crate::ssh_args;
 use crate::ssh_config::SshHost;
+use crate::validation::validate_vault_entry_name;
 use crate::{Result, log_debug, log_debug_raw, log_error, log_info};
 use std::io::{self, IsTerminal};
 use std::process::{Child, Command, ExitCode, Stdio};
@@ -128,7 +129,7 @@ pub(super) fn build_ssh_command(args: &[String], explicit_pass_entry: Option<&st
     };
     log_debug!("Resolved password vault entry for direct SSH launch via {}", pass_entry_source);
 
-    if !vault::validate_entry_name(&pass_entry_name) {
+    if !validate_vault_entry_name(&pass_entry_name) {
         log_debug!("Resolved password vault entry name was invalid");
         command.fallback_notice = Some(
             "Password auto-login is unavailable because the requested password entry name is invalid; continuing with the standard SSH password prompt."

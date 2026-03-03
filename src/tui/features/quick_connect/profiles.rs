@@ -1,16 +1,12 @@
 //! Quick-connect profile discovery.
 
-use crate::config;
-use crate::tui::SessionManager;
+use crate::tui::AppState;
+use crate::{config, validation};
 use std::cmp::Ordering;
 use std::collections::HashSet;
 use std::fs;
 
-fn is_valid_profile_name(name: &str) -> bool {
-    !name.is_empty() && name.chars().all(|ch| ch.is_ascii_alphanumeric() || matches!(ch, '_' | '-'))
-}
-
-impl SessionManager {
+impl AppState {
     // Scan config directory for profile-specific config filenames.
     pub(crate) fn discover_quick_connect_profiles(&self) -> Vec<String> {
         let mut profiles: HashSet<String> = HashSet::new();
@@ -35,7 +31,7 @@ impl SessionManager {
                 }
 
                 if let Some(profile_name) = filename.strip_suffix(".cossh-config.yaml")
-                    && is_valid_profile_name(profile_name)
+                    && validation::validate_profile_name(profile_name)
                 {
                     profiles.insert(profile_name.to_string());
                 }

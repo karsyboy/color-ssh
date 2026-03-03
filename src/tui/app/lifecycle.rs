@@ -1,6 +1,6 @@
 //! TUI bootstrap and teardown lifecycle.
 
-use super::events::run_app;
+use super::event_loop::run_app;
 use crate::tui::AppState;
 use crate::{command_path, log_debug, log_error};
 use crossterm::{

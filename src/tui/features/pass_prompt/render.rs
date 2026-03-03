@@ -1,6 +1,6 @@
 //! Password vault unlock modal rendering.
 
-use crate::tui::SessionManager;
+use crate::tui::AppState;
 use crate::tui::ui::theme;
 use chrono::{Local, TimeZone};
 use ratatui::{
@@ -64,7 +64,7 @@ fn vault_status_hint_text(unlocked: bool) -> String {
     }
 }
 
-impl SessionManager {
+impl AppState {
     pub(crate) fn render_vault_unlock_modal(&self, frame: &mut Frame, _full_area: Rect) {
         let Some(prompt) = &self.vault_unlock else {
             return;

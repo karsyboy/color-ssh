@@ -1,4 +1,4 @@
-use super::{SessionManager, force_local_selection};
+use super::{AppState, force_local_selection};
 use crate::auth::ipc::VaultStatus;
 use crate::ssh_config::SshHost;
 use crate::tui::terminal_emulator::MouseProtocolEncoding;
@@ -6,8 +6,8 @@ use crate::tui::{HostTab, TerminalSearchState, VaultStatusModalState, VaultUnloc
 use crossterm::event::{KeyModifiers, MouseButton, MouseEvent, MouseEventKind};
 use ratatui::layout::Rect;
 
-fn app_with_tabs(titles: &[&str]) -> SessionManager {
-    let mut app = SessionManager::new_for_tests();
+fn app_with_tabs(titles: &[&str]) -> AppState {
+    let mut app = AppState::new_for_tests();
     app.host_panel_visible = false;
     app.host_panel_area = Rect::default();
     app.host_list_area = Rect::default();
@@ -28,8 +28,8 @@ fn app_with_tabs(titles: &[&str]) -> SessionManager {
 
 #[test]
 fn encode_mouse_event_bytes_sgr_press_and_release() {
-    let press = SessionManager::encode_mouse_event_bytes(MouseProtocolEncoding::Sgr, 0, 10, 5, false);
-    let release = SessionManager::encode_mouse_event_bytes(MouseProtocolEncoding::Sgr, 0, 10, 5, true);
+    let press = AppState::encode_mouse_event_bytes(MouseProtocolEncoding::Sgr, 0, 10, 5, false);
+    let release = AppState::encode_mouse_event_bytes(MouseProtocolEncoding::Sgr, 0, 10, 5, true);
 
     assert_eq!(press, b"\x1b[<0;10;5M".to_vec());
     assert_eq!(release, b"\x1b[<0;10;5m".to_vec());
@@ -37,7 +37,7 @@ fn encode_mouse_event_bytes_sgr_press_and_release() {
 
 #[test]
 fn encode_mouse_event_bytes_default_clamps_large_coords() {
-    let bytes = SessionManager::encode_mouse_event_bytes(MouseProtocolEncoding::Default, 0, 500, 900, false);
+    let bytes = AppState::encode_mouse_event_bytes(MouseProtocolEncoding::Default, 0, 500, 900, false);
     assert_eq!(bytes, vec![0x1b, b'[', b'M', 32, 255, 255]);
 }
 
@@ -204,7 +204,7 @@ fn right_click_copies_and_clears_existing_selection() {
 
 #[test]
 fn handle_mouse_routes_clicks_to_vault_status_modal_actions() {
-    let mut app = SessionManager::new_for_tests();
+    let mut app = AppState::new_for_tests();
     app.vault_status_modal = Some(VaultStatusModalState::new());
     app.vault_status = VaultStatus::locked(true);
 
@@ -225,7 +225,7 @@ fn handle_mouse_routes_clicks_to_vault_status_modal_actions() {
 
 #[test]
 fn handle_mouse_routes_clicks_to_vault_unlock_modal_actions() {
-    let mut app = SessionManager::new_for_tests();
+    let mut app = AppState::new_for_tests();
     app.vault_unlock = Some(VaultUnlockState::new("shared".to_string(), VaultUnlockAction::UnlockVault).return_to_vault_status());
 
     let (_, inner_area) = app.vault_unlock_modal_layout().expect("vault unlock modal layout");

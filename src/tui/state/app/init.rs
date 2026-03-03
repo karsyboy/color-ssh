@@ -87,7 +87,7 @@ impl VaultStatusEventWatcher {
 }
 
 #[derive(Debug, Clone, Copy)]
-struct SessionManagerConfig {
+struct AppStateConfig {
     history_buffer: usize,
     host_tree_uncollapsed: bool,
     host_info_visible: bool,
@@ -96,7 +96,7 @@ struct SessionManagerConfig {
     quick_connect_default_ssh_logging: bool,
 }
 
-impl Default for SessionManagerConfig {
+impl Default for AppStateConfig {
     fn default() -> Self {
         Self {
             history_buffer: 1000,
@@ -109,7 +109,7 @@ impl Default for SessionManagerConfig {
     }
 }
 
-impl SessionManagerConfig {
+impl AppStateConfig {
     fn load() -> Self {
         config::with_current_config("reading interactive session settings", |cfg| {
             let mut session_config = Self {
@@ -204,7 +204,7 @@ pub(super) fn load_vault_status() -> VaultStatus {
 
 pub(super) fn load_app_state_init() -> AppStateInit {
     let tree_model = load_host_tree_model();
-    let session_config = SessionManagerConfig::load();
+    let session_config = AppStateConfig::load();
     let host_count = tree_model.hosts.len();
     let host_tree_root = tree_model.root;
     let collapsed_folders = build_collapsed_folders(&host_tree_root, session_config.host_tree_uncollapsed);

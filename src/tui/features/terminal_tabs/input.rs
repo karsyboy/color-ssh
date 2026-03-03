@@ -1,7 +1,7 @@
 //! Keyboard input handling and PTY write helpers.
 
 use crate::log_error;
-use crate::tui::SessionManager;
+use crate::tui::AppState;
 use crate::tui::features::terminal_session::pty::encode_key_event_bytes;
 use crate::tui::ui::theme::display_width;
 use crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
@@ -23,7 +23,7 @@ fn encode_paste_bytes(pasted: &str, bracketed: bool) -> Vec<u8> {
     out
 }
 
-impl SessionManager {
+impl AppState {
     // Selection/focus helpers.
     pub(crate) fn clear_selection_state(&mut self) {
         self.selection_start = None;

@@ -16,7 +16,7 @@ fn host_tab(title: &str) -> HostTab {
 
 #[test]
 fn handle_key_ctrl_q_sets_should_exit() {
-    let mut app = SessionManager::new_for_tests();
+    let mut app = AppState::new_for_tests();
     let key = KeyEvent::new(KeyCode::Char('q'), KeyModifiers::CONTROL);
     app.handle_key(key).expect("handle_key should succeed");
     assert!(app.should_exit);
@@ -24,7 +24,7 @@ fn handle_key_ctrl_q_sets_should_exit() {
 
 #[test]
 fn handle_key_ctrl_q_does_not_exit_in_terminal_view() {
-    let mut app = SessionManager::new_for_tests();
+    let mut app = AppState::new_for_tests();
     app.tabs.push(host_tab("test-host"));
     app.selected_tab = 0;
     app.focus_on_manager = false;
@@ -36,7 +36,7 @@ fn handle_key_ctrl_q_does_not_exit_in_terminal_view() {
 
 #[test]
 fn handle_key_ctrl_left_reorders_selected_tab_left() {
-    let mut app = SessionManager::new_for_tests();
+    let mut app = AppState::new_for_tests();
     app.tabs.push(host_tab("one"));
     app.tabs.push(host_tab("two"));
     app.tabs.push(host_tab("three"));
@@ -53,7 +53,7 @@ fn handle_key_ctrl_left_reorders_selected_tab_left() {
 
 #[test]
 fn handle_key_ctrl_right_reorders_selected_tab_right() {
-    let mut app = SessionManager::new_for_tests();
+    let mut app = AppState::new_for_tests();
     app.tabs.push(host_tab("one"));
     app.tabs.push(host_tab("two"));
     app.tabs.push(host_tab("three"));
@@ -70,7 +70,7 @@ fn handle_key_ctrl_right_reorders_selected_tab_right() {
 
 #[test]
 fn handle_paste_routes_to_quick_connect_form_when_modal_open() {
-    let mut app = SessionManager::new_for_tests();
+    let mut app = AppState::new_for_tests();
     let mut form = QuickConnectState::new(false, vec!["default".to_string()]);
     form.selected = QuickConnectField::User;
     app.quick_connect = Some(form);
@@ -83,7 +83,7 @@ fn handle_paste_routes_to_quick_connect_form_when_modal_open() {
 
 #[test]
 fn handle_paste_routes_to_vault_unlock_when_modal_open() {
-    let mut app = SessionManager::new_for_tests();
+    let mut app = AppState::new_for_tests();
     app.vault_unlock = Some(VaultUnlockState::new("shared".to_string(), VaultUnlockAction::ReconnectTab { tab_index: 0 }));
 
     app.handle_paste("secret\n".to_string()).expect("paste should succeed");
@@ -94,7 +94,7 @@ fn handle_paste_routes_to_vault_unlock_when_modal_open() {
 
 #[test]
 fn handle_key_closes_vault_status_modal() {
-    let mut app = SessionManager::new_for_tests();
+    let mut app = AppState::new_for_tests();
     app.vault_status_modal = Some(VaultStatusModalState::new());
     app.vault_status.unlocked = true;
 
@@ -106,7 +106,7 @@ fn handle_key_closes_vault_status_modal() {
 
 #[test]
 fn handle_key_v_opens_manual_unlock_from_locked_vault_status_modal() {
-    let mut app = SessionManager::new_for_tests();
+    let mut app = AppState::new_for_tests();
     app.vault_status_modal = Some(VaultStatusModalState::new());
 
     app.handle_key(KeyEvent::new(KeyCode::Char('v'), KeyModifiers::NONE))
@@ -120,7 +120,7 @@ fn handle_key_v_opens_manual_unlock_from_locked_vault_status_modal() {
 
 #[test]
 fn handle_paste_is_ignored_while_vault_status_modal_is_open() {
-    let mut app = SessionManager::new_for_tests();
+    let mut app = AppState::new_for_tests();
     app.vault_status_modal = Some(VaultStatusModalState::new());
 
     app.handle_paste("ignored".to_string()).expect("paste should succeed");
@@ -137,7 +137,7 @@ fn encode_paste_bytes_wraps_bracketed_payload_when_enabled() {
 
 #[test]
 fn alt_c_copies_and_clears_selection() {
-    let mut app = SessionManager::new_for_tests();
+    let mut app = AppState::new_for_tests();
     app.tabs.push(host_tab("copy-target"));
     app.selected_tab = 0;
     app.focus_on_manager = false;

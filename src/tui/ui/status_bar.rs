@@ -1,6 +1,6 @@
 //! Global status bar rendering.
 
-use crate::tui::SessionManager;
+use crate::tui::AppState;
 use crate::tui::ui::theme::{self, display_width};
 use ratatui::{
     Frame,
@@ -83,7 +83,7 @@ fn build_edit_value_spans(
     spans
 }
 
-impl SessionManager {
+impl AppState {
     // Entry point.
     pub(crate) fn render_global_status_bar(&self, frame: &mut Frame, area: Rect) {
         if area.width == 0 || area.height == 0 {

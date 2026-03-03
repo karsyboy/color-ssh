@@ -1,5 +1,5 @@
-use super::command::{build_plain_ssh_command, resolve_pass_entry_from_hosts};
-use super::map_exit_code;
+use super::exit::map_exit_code;
+use super::launch::{build_plain_ssh_command, resolve_pass_entry_from_hosts};
 use super::stream::{requires_immediate_terminal_flush, should_flush_immediately};
 use crate::ssh_config::SshHost;
 use std::process::ExitCode;

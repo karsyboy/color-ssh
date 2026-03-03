@@ -1,10 +1,10 @@
-use super::SessionManager;
+use super::AppState;
 use crate::ssh_config::SshHost;
 use crate::tui::{HostTab, TerminalSearchState};
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
-fn app_with_active_search() -> SessionManager {
-    let mut app = SessionManager::new_for_tests();
+fn app_with_active_search() -> AppState {
+    let mut app = AppState::new_for_tests();
     app.tabs.push(HostTab {
         host: SshHost::new("test-host".to_string()),
         title: "test-host".to_string(),

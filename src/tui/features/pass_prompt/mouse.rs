@@ -1,6 +1,6 @@
 //! Password vault modal mouse handling.
 
-use crate::tui::SessionManager;
+use crate::tui::AppState;
 use crossterm::event::{self, KeyCode, KeyEvent, KeyModifiers, MouseButton, MouseEventKind};
 use ratatui::layout::Rect;
 
@@ -32,7 +32,7 @@ fn vault_status_close_label(unlocked: bool) -> &'static str {
     if unlocked { "[Enter/Esc/v] Close" } else { "[Enter/Esc] Close" }
 }
 
-impl SessionManager {
+impl AppState {
     pub(crate) fn handle_vault_unlock_mouse(&mut self, mouse: event::MouseEvent) {
         if !matches!(mouse.kind, MouseEventKind::Down(MouseButton::Left)) {
             return;

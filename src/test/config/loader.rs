@@ -1,5 +1,6 @@
-use super::{ColorType, compile_rule_set, compile_rules, compile_secret_patterns, hex_to_ansi, is_valid_hex_color, is_valid_profile_name};
-use crate::config::style::{AuthSettings, Config, HighlightRule, Metadata, Settings};
+use super::{ColorType, compile_rule_set, compile_rules, compile_secret_patterns, hex_to_ansi, is_valid_hex_color};
+use crate::config::{AuthSettings, Config, HighlightRule, Metadata, Settings};
+use crate::validation::validate_profile_name;
 use std::collections::HashMap;
 
 fn base_config() -> Config {
@@ -23,12 +24,12 @@ fn validates_hex_color_format() {
 
 #[test]
 fn validates_profile_name_format() {
-    assert!(is_valid_profile_name("prod"));
-    assert!(is_valid_profile_name("prod_2"));
-    assert!(is_valid_profile_name("prod-2"));
-    assert!(!is_valid_profile_name("../prod"));
-    assert!(!is_valid_profile_name("prod/main"));
-    assert!(!is_valid_profile_name("prod.main"));
+    assert!(validate_profile_name("prod"));
+    assert!(validate_profile_name("prod_2"));
+    assert!(validate_profile_name("prod-2"));
+    assert!(!validate_profile_name("../prod"));
+    assert!(!validate_profile_name("prod/main"));
+    assert!(!validate_profile_name("prod.main"));
 }
 
 #[test]

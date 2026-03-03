@@ -1,9 +1,9 @@
-use super::SessionManager;
+use super::AppState;
 use crate::ssh_config::SshHost;
 use crate::tui::{HostTab, TerminalSearchState};
 
-fn app_with_tab_titles(titles: &[&str]) -> SessionManager {
-    let mut app = SessionManager::new_for_tests();
+fn app_with_tab_titles(titles: &[&str]) -> AppState {
+    let mut app = AppState::new_for_tests();
     for title in titles {
         app.tabs.push(HostTab {
             host: SshHost::new((*title).to_string()),

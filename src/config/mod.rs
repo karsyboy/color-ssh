@@ -11,10 +11,12 @@
 
 mod errors;
 mod loader;
-mod style;
+mod paths;
+mod schema;
 mod watcher;
 
 pub use errors::ConfigError;
+pub use schema::{AuthSettings, Config, HighlightRule, InteractiveSettings, Metadata, Settings};
 pub use watcher::config_watcher;
 
 use once_cell::sync::OnceCell;
@@ -41,24 +43,24 @@ use std::sync::{
 ///     cfg.metadata.session_name = "example".to_string();
 /// });
 /// ```
-pub static SESSION_CONFIG: OnceCell<Arc<RwLock<style::Config>>> = OnceCell::new();
+pub static SESSION_CONFIG: OnceCell<Arc<RwLock<Config>>> = OnceCell::new();
 static CONFIG_VERSION: AtomicU64 = AtomicU64::new(0);
 
-fn fallback_config() -> style::Config {
-    style::Config {
-        settings: style::Settings::default(),
-        auth_settings: style::AuthSettings::default(),
+fn fallback_config() -> Config {
+    Config {
+        settings: Settings::default(),
+        auth_settings: AuthSettings::default(),
         interactive_settings: None,
         palette: std::collections::HashMap::new(),
         rules: Vec::new(),
-        metadata: style::Metadata {
+        metadata: Metadata {
             session_name: "session".to_string(),
             ..Default::default()
         },
     }
 }
 
-fn replace_config(shared_config: &Arc<RwLock<style::Config>>, config: style::Config) {
+fn replace_config(shared_config: &Arc<RwLock<Config>>, config: Config) {
     match shared_config.write() {
         Ok(mut guard) => *guard = config,
         Err(poisoned) => {
@@ -69,13 +71,13 @@ fn replace_config(shared_config: &Arc<RwLock<style::Config>>, config: style::Con
 }
 
 /// Get a reference to the global configuration
-pub fn get_config() -> &'static Arc<RwLock<style::Config>> {
+pub fn get_config() -> &'static Arc<RwLock<Config>> {
     SESSION_CONFIG.get_or_init(|| Arc::new(RwLock::new(fallback_config())))
 }
 
 /// Run a read-only closure against the current configuration, recovering from a
 /// poisoned lock and logging the context when necessary.
-pub fn with_current_config<T>(context: &str, with_config: impl FnOnce(&style::Config) -> T) -> T {
+pub fn with_current_config<T>(context: &str, with_config: impl FnOnce(&Config) -> T) -> T {
     match get_config().read() {
         Ok(config_guard) => with_config(&config_guard),
         Err(poisoned) => {
@@ -88,7 +90,7 @@ pub fn with_current_config<T>(context: &str, with_config: impl FnOnce(&style::Co
 
 /// Run a mutable closure against the current configuration, recovering from a
 /// poisoned lock and logging the context when necessary.
-pub fn with_current_config_mut<T>(context: &str, with_config: impl FnOnce(&mut style::Config) -> T) -> T {
+pub fn with_current_config_mut<T>(context: &str, with_config: impl FnOnce(&mut Config) -> T) -> T {
     match get_config().write() {
         Ok(mut config_guard) => with_config(&mut config_guard),
         Err(poisoned) => {
@@ -99,7 +101,7 @@ pub fn with_current_config_mut<T>(context: &str, with_config: impl FnOnce(&mut s
     }
 }
 
-fn install_config(config: style::Config) {
+fn install_config(config: Config) {
     set_config_version(config.metadata.version);
     replace_config(get_config(), config);
 }
@@ -125,7 +127,7 @@ pub(crate) fn history_buffer_for_profile(profile: Option<&str>) -> Option<usize>
     config.interactive_settings.map(|interactive| interactive.history_buffer)
 }
 
-pub fn auth_settings() -> style::AuthSettings {
+pub fn auth_settings() -> AuthSettings {
     with_current_config("reading auth settings", |cfg| cfg.auth_settings.clone())
 }
 
@@ -138,5 +140,5 @@ pub(crate) fn set_config_version(version: u64) {
 }
 
 #[cfg(test)]
-#[path = "test/config.rs"]
+#[path = "../test/config.rs"]
 mod tests;

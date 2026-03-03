@@ -1,6 +1,6 @@
 //! Host browser keyboard handling.
 
-use crate::tui::{ConnectRequest, HostTreeRowKind, SessionManager};
+use crate::tui::{AppState, ConnectRequest, HostTreeRowKind};
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use std::io;
 
@@ -54,7 +54,7 @@ fn delete_selection(text: &mut String, cursor: &mut usize, selection: &mut Optio
     true
 }
 
-impl SessionManager {
+impl AppState {
     fn clear_host_search_query(&mut self) {
         self.search_query.clear();
         self.search_query_cursor = 0;

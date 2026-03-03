@@ -1,11 +1,11 @@
-use super::SessionManager;
+use super::AppState;
 use crate::auth::ipc::VaultStatus;
 use crate::tui::VaultUnlockAction;
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
 #[test]
 fn paste_inserts_host_search_text_at_cursor() {
-    let mut app = SessionManager::new_for_tests();
+    let mut app = AppState::new_for_tests();
     app.search_mode = true;
     app.search_query = "core-router".to_string();
     app.search_query_cursor = 4;
@@ -20,7 +20,7 @@ fn paste_inserts_host_search_text_at_cursor() {
 
 #[test]
 fn host_search_supports_middle_insert_and_delete() {
-    let mut app = SessionManager::new_for_tests();
+    let mut app = AppState::new_for_tests();
     app.search_mode = true;
     app.search_query = "admn".to_string();
     app.search_query_cursor = 3;
@@ -36,7 +36,7 @@ fn host_search_supports_middle_insert_and_delete() {
 
 #[test]
 fn manager_v_shortcut_opens_manual_vault_unlock_when_locked() {
-    let mut app = SessionManager::new_for_tests();
+    let mut app = AppState::new_for_tests();
     app.vault_status = VaultStatus::locked(true);
 
     app.handle_manager_key(KeyEvent::new(KeyCode::Char('v'), KeyModifiers::NONE))
@@ -48,7 +48,7 @@ fn manager_v_shortcut_opens_manual_vault_unlock_when_locked() {
 
 #[test]
 fn manager_v_shortcut_opens_status_modal_when_vault_is_already_unlocked() {
-    let mut app = SessionManager::new_for_tests();
+    let mut app = AppState::new_for_tests();
     app.vault_status = VaultStatus {
         vault_exists: true,
         unlocked: true,

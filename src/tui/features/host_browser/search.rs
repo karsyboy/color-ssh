@@ -2,7 +2,7 @@
 
 use crate::ssh_config::{FolderId, TreeFolder};
 use crate::tui::state::HostSearchEntry;
-use crate::tui::{HostTreeRow, HostTreeRowKind, SessionManager};
+use crate::tui::{AppState, HostTreeRow, HostTreeRowKind};
 use std::collections::HashMap;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -120,7 +120,7 @@ fn compute_match_scores(search_entries: &[HostSearchEntry], query_lower: &str) -
     match_scores
 }
 
-impl SessionManager {
+impl AppState {
     // Row identity helpers.
     fn row_key_from_kind(kind: HostTreeRowKind) -> HostRowKey {
         match kind {

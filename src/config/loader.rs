@@ -7,20 +7,11 @@
 //! - Compiling regex patterns from rules
 //! - Hot-reloading configuration changes
 
-use super::style::Config;
+use super::{Config, paths};
 use crate::highlighter::CompiledHighlightRule;
-use crate::{debug_enabled, log_debug, log_error, log_info, log_warn};
+use crate::{debug_enabled, log_debug, log_info, log_warn};
 use regex::{Regex, RegexSet};
-use std::{
-    path::PathBuf,
-    {env, fs, io},
-};
-
-const DEFAULT_CONFIG_FILENAME: &str = "cossh-config.yaml";
-
-fn is_valid_profile_name(name: &str) -> bool {
-    !name.is_empty() && name.chars().all(|ch| ch.is_ascii_alphanumeric() || matches!(ch, '_' | '-'))
-}
+use std::{fs, io, path::PathBuf};
 
 pub(crate) struct ConfigLoader {
     config_path: PathBuf,
@@ -29,101 +20,8 @@ pub(crate) struct ConfigLoader {
 impl ConfigLoader {
     // Construction / path discovery.
     pub(crate) fn new(profile: Option<String>) -> Result<Self, io::Error> {
-        let config_path = Self::find_config_path(&profile)?;
+        let config_path = paths::resolve_config_path(profile.as_deref())?;
         Ok(Self { config_path })
-    }
-
-    /// Find the configuration file in standard locations
-    fn find_config_path(profile: &Option<String>) -> Result<PathBuf, io::Error> {
-        log_debug!("Searching for configuration file...");
-        let normalized_profile = match profile.as_deref().map(str::trim) {
-            Some(profile_name) if !profile_name.is_empty() => {
-                if !is_valid_profile_name(profile_name) {
-                    return Err(io::Error::new(
-                        io::ErrorKind::InvalidInput,
-                        format!("Invalid profile name '{}': use only letters, numbers, '_' or '-'", profile_name),
-                    ));
-                }
-                Some(profile_name.to_string())
-            }
-            _ => None,
-        };
-        let config_filename = match &normalized_profile {
-            Some(profile_name) => format!("{}.cossh-config.yaml", profile_name),
-            None => DEFAULT_CONFIG_FILENAME.to_string(),
-        };
-
-        // Check first possible location: ~/.color-ssh/{config_filename}
-        if let Some(home_dir) = dirs::home_dir() {
-            let cossh_dir_path = home_dir.join(".color-ssh").join(&config_filename);
-            log_debug!("Checking: {:?}", cossh_dir_path);
-            if cossh_dir_path.exists() {
-                log_info!("Found config at: {:?}", cossh_dir_path);
-                return Ok(cossh_dir_path);
-            }
-        }
-
-        // Check second possible location: ~/{config_filename}
-        if let Some(home_dir) = dirs::home_dir() {
-            let home_dir_path = home_dir.join(&config_filename);
-            log_debug!("Checking: {:?}", home_dir_path);
-            if home_dir_path.exists() {
-                log_info!("Found config at: {:?}", home_dir_path);
-                return Ok(home_dir_path);
-            }
-        }
-
-        // Check third possible location: current working directory
-        let current_dir = env::current_dir().map_err(|err| {
-            log_warn!("Failed to get current directory: {}", err);
-            io::Error::new(io::ErrorKind::NotFound, format!("Failed to get current directory: {}", err))
-        })?;
-        let current_dir_path = current_dir.join(&config_filename);
-        log_debug!("Checking: {:?}", current_dir_path);
-        if current_dir_path.exists() {
-            log_info!("Found config at: {:?}", current_dir_path);
-            return Ok(current_dir_path);
-        }
-
-        // If a profile was specified but no file found, error out
-        if let Some(profile_name) = normalized_profile {
-            let err_msg = format!(
-                "Configuration profile '{}' not found. Please ensure the file exists in one of the standard locations.",
-                profile_name
-            );
-            log_warn!("{}", err_msg);
-            return Err(io::Error::new(io::ErrorKind::NotFound, err_msg));
-        }
-
-        // No profile specified and no config files exist; try to create a default configuration.
-        log_warn!("No config file found, creating default configuration");
-        match Self::create_default_config() {
-            Ok(path) => Ok(path),
-            Err(err) => {
-                log_error!("Failed to create default configuration file: {}", err);
-                Err(err)
-            }
-        }
-    }
-
-    /// Create a default configuration file if none exists
-    fn create_default_config() -> io::Result<PathBuf> {
-        let home_dir = dirs::home_dir().ok_or_else(|| io::Error::new(io::ErrorKind::NotFound, "Failed to get home directory"))?;
-        let cossh_dir = home_dir.join(".color-ssh");
-        let config_path = cossh_dir.join(DEFAULT_CONFIG_FILENAME);
-
-        // Create the .cossh directory if it does not exist
-        if !cossh_dir.exists() {
-            log_debug!("Creating directory: {:?}", cossh_dir);
-            fs::create_dir(&cossh_dir)?;
-        }
-
-        // Create the configuration file with sample content
-        let config_content = include_str!("../../templates/default.cossh-config.yaml");
-        fs::write(&config_path, config_content)?;
-        log_info!("Default configuration file created at: {:?}", config_path);
-
-        Ok(config_path)
     }
 
     // Initial load and compile pipeline.
