@@ -384,22 +384,7 @@ fn set_restrictive_file_permissions(path: &Path) -> io::Result<()> {
 }
 
 #[cfg(not(unix))]
-fn remove_stale_socket_file(_paths: &VaultPaths) -> io::Result<bool> {
-    Ok(false)
-}
-
-#[cfg(not(unix))]
 fn cleanup_local_endpoint(_paths: &VaultPaths) -> io::Result<()> {
-    Ok(())
-}
-
-#[cfg(not(unix))]
-fn set_restrictive_directory_permissions(_path: &Path) -> io::Result<()> {
-    Ok(())
-}
-
-#[cfg(not(unix))]
-fn set_restrictive_file_permissions(_path: &Path) -> io::Result<()> {
     Ok(())
 }
 
