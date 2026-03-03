@@ -178,15 +178,22 @@ impl SessionManager {
         };
 
         match client.entry_status(pass_key) {
-            Ok(entry_status) if entry_status.exists && entry_status.status.unlocked => Some((Some(pass_key.to_string()), None)),
-            Ok(entry_status) if !entry_status.exists => Some((
-                None,
-                Some(format!(
-                    "Password auto-login is unavailable because vault entry '{}' was not found; continuing with the standard SSH password prompt.",
-                    pass_key
-                )),
-            )),
-            Ok(_) => {
+            Ok(entry_status) => {
+                let exists = entry_status.exists;
+                let unlocked = entry_status.status.unlocked;
+                self.set_vault_status(entry_status.status);
+                if exists && unlocked {
+                    return Some((Some(pass_key.to_string()), None));
+                }
+                if !exists {
+                    return Some((
+                        None,
+                        Some(format!(
+                            "Password auto-login is unavailable because vault entry '{}' was not found; continuing with the standard SSH password prompt.",
+                            pass_key
+                        )),
+                    ));
+                }
                 self.open_vault_unlock(pass_key.to_string(), action);
                 None
             }
@@ -302,6 +309,7 @@ impl SessionManager {
         pass_fallback_notice: Option<String>,
     ) {
         match action {
+            VaultUnlockAction::UnlockVault => {}
             VaultUnlockAction::OpenHostTab { host, force_ssh_logging } => {
                 self.open_host_tab_with_auth(*host, force_ssh_logging, pass_entry_override, pass_fallback_notice);
             }

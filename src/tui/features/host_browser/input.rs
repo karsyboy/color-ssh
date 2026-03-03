@@ -263,6 +263,11 @@ impl SessionManager {
             KeyCode::Char('q') if self.focus_on_manager && key.modifiers.is_empty() => {
                 self.open_quick_connect_modal();
             }
+            KeyCode::Char('v') if self.focus_on_manager && key.modifiers.is_empty() => {
+                if !self.vault_status.unlocked {
+                    self.open_manual_vault_unlock();
+                }
+            }
             KeyCode::Char('i') if self.focus_on_manager && key.modifiers.is_empty() => {
                 self.host_info_visible = !self.host_info_visible;
                 self.is_dragging_host_info_divider = false;

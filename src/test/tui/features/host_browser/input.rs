@@ -1,4 +1,6 @@
 use super::SessionManager;
+use crate::auth::ipc::VaultStatus;
+use crate::tui::VaultUnlockAction;
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
 #[test]
@@ -30,4 +32,33 @@ fn host_search_supports_middle_insert_and_delete() {
     app.handle_search_key(KeyEvent::new(KeyCode::Left, KeyModifiers::NONE)).expect("left");
     app.handle_search_key(KeyEvent::new(KeyCode::Delete, KeyModifiers::NONE)).expect("delete");
     assert_eq!(app.search_query, "admn");
+}
+
+#[test]
+fn manager_v_shortcut_opens_manual_vault_unlock_when_locked() {
+    let mut app = SessionManager::new_for_tests();
+    app.vault_status = VaultStatus::locked(true);
+
+    app.handle_manager_key(KeyEvent::new(KeyCode::Char('v'), KeyModifiers::NONE))
+        .expect("vault unlock shortcut");
+
+    let prompt = app.vault_unlock.as_ref().expect("vault unlock prompt");
+    assert!(matches!(prompt.action, VaultUnlockAction::UnlockVault));
+}
+
+#[test]
+fn manager_v_shortcut_is_ignored_when_vault_is_already_unlocked() {
+    let mut app = SessionManager::new_for_tests();
+    app.vault_status = VaultStatus {
+        vault_exists: true,
+        unlocked: true,
+        unlock_expires_in_seconds: Some(300),
+        idle_timeout_seconds: Some(900),
+        absolute_timeout_seconds: Some(28_800),
+    };
+
+    app.handle_manager_key(KeyEvent::new(KeyCode::Char('v'), KeyModifiers::NONE))
+        .expect("vault unlock shortcut");
+
+    assert!(app.vault_unlock.is_none());
 }

@@ -65,8 +65,8 @@ impl SessionManager {
 
         let mut lines = vec![
             Line::from(vec![
-                Span::styled("Entry: ", label_style),
-                Span::styled(prompt.entry_name.clone(), value_style),
+                Span::styled(prompt.action.prompt_target_label(), label_style),
+                Span::styled(prompt.action.prompt_target_value(&prompt.entry_name).to_string(), value_style),
                 Span::styled("  ", label_style),
                 Span::styled("Attempts: ", label_style),
                 Span::styled(format!("{}", prompt.remaining_attempts()), value_style),
@@ -84,10 +84,7 @@ impl SessionManager {
             lines.push(Line::from(""));
         }
 
-        lines.push(Line::from(vec![Span::styled(
-            "[Enter] Unlock  |  [Esc] Continue without auto-login",
-            hint_style,
-        )]));
+        lines.push(Line::from(vec![Span::styled(prompt.action.prompt_hint(), hint_style)]));
 
         frame.render_widget(Paragraph::new(lines), inner);
     }

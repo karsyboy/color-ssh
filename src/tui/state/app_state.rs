@@ -4,6 +4,7 @@ use super::host_browser_state::{HostSearchEntry, HostTreeRow};
 use super::pass_prompt_state::VaultUnlockState;
 use super::quick_connect_state::QuickConnectState;
 use super::tab_state::{HostTab, TerminalSearchState};
+use crate::auth::{agent, ipc::VaultStatus};
 use crate::ssh_config::{FolderId, SshHost, TreeFolder, load_ssh_host_tree};
 use crate::{config, log_debug, log_error};
 use ratatui::layout::Rect;
@@ -67,11 +68,13 @@ pub(crate) struct AppState {
     pub(crate) host_info_visible: bool,
     pub(crate) quick_connect: Option<QuickConnectState>,
     pub(crate) vault_unlock: Option<VaultUnlockState>,
+    pub(crate) vault_status: VaultStatus,
     pub(crate) quick_connect_default_ssh_logging: bool,
     pub(crate) last_terminal_size: (u16, u16),
     pub(crate) ui_dirty: bool,
     pub(crate) last_draw_at: Instant,
     pub(crate) last_seen_render_epoch: u64,
+    pub(crate) last_vault_status_refresh_at: Instant,
 }
 
 impl AppState {
@@ -160,6 +163,39 @@ impl AppState {
         self.tabs.get_mut(self.selected_tab).map(|tab| &mut tab.terminal_search)
     }
 
+    fn load_vault_status() -> VaultStatus {
+        agent::AgentClient::new()
+            .and_then(|client| client.status())
+            .unwrap_or_else(|_| VaultStatus::locked(false))
+    }
+
+    pub(crate) fn set_vault_status(&mut self, status: VaultStatus) {
+        self.last_vault_status_refresh_at = Instant::now();
+        if self.vault_status != status {
+            self.vault_status = status;
+            self.mark_ui_dirty();
+        }
+    }
+
+    pub(crate) fn refresh_vault_status(&mut self) {
+        let status = Self::load_vault_status();
+        self.last_vault_status_refresh_at = Instant::now();
+        if self.vault_status != status {
+            self.vault_status = status;
+            self.mark_ui_dirty();
+        }
+    }
+
+    pub(crate) fn refresh_vault_status_if_stale(&mut self, refresh_interval: Duration) {
+        if !self.focus_on_manager && self.vault_unlock.is_none() {
+            return;
+        }
+        if self.last_vault_status_refresh_at.elapsed() < refresh_interval {
+            return;
+        }
+        self.refresh_vault_status();
+    }
+
     // Construction.
     /// Create a new AppState instance.
     pub(crate) fn new() -> io::Result<Self> {
@@ -220,6 +256,8 @@ impl AppState {
 
         log_debug!("Loaded {} SSH hosts", hosts.len());
 
+        let initial_vault_status = Self::load_vault_status();
+        let now = Instant::now();
         let mut app = Self {
             hosts,
             host_search_index,
@@ -261,11 +299,13 @@ impl AppState {
             host_info_visible,
             quick_connect: None,
             vault_unlock: None,
+            vault_status: initial_vault_status,
             quick_connect_default_ssh_logging,
             last_terminal_size: (term_width, term_height),
             ui_dirty: true,
-            last_draw_at: Instant::now(),
+            last_draw_at: now,
             last_seen_render_epoch: 0,
+            last_vault_status_refresh_at: now,
         };
 
         app.update_filtered_hosts();
@@ -324,11 +364,13 @@ impl AppState {
             host_info_visible: true,
             quick_connect: None,
             vault_unlock: None,
+            vault_status: VaultStatus::locked(false),
             quick_connect_default_ssh_logging: false,
             last_terminal_size: (100, 30),
             ui_dirty: true,
             last_draw_at: Instant::now(),
             last_seen_render_epoch: 0,
+            last_vault_status_refresh_at: Instant::now(),
         };
         app.update_filtered_hosts();
         app

@@ -7,8 +7,31 @@ pub(crate) const VAULT_UNLOCK_MAX_ATTEMPTS: usize = 3;
 
 #[derive(Debug, Clone)]
 pub(crate) enum VaultUnlockAction {
+    UnlockVault,
     OpenHostTab { host: Box<SshHost>, force_ssh_logging: bool },
     ReconnectTab { tab_index: usize },
+}
+
+impl VaultUnlockAction {
+    pub(crate) fn is_manual_unlock(&self) -> bool {
+        matches!(self, Self::UnlockVault)
+    }
+
+    pub(crate) fn prompt_target_label(&self) -> &'static str {
+        if self.is_manual_unlock() { "Vault: " } else { "Entry: " }
+    }
+
+    pub(crate) fn prompt_target_value<'a>(&self, entry_name: &'a str) -> &'a str {
+        if self.is_manual_unlock() { "Shared session" } else { entry_name }
+    }
+
+    pub(crate) fn prompt_hint(&self) -> &'static str {
+        if self.is_manual_unlock() {
+            "[Enter] Unlock  |  [Esc] Cancel"
+        } else {
+            "[Enter] Unlock  |  [Esc] Continue without auto-login"
+        }
+    }
 }
 
 pub(crate) struct VaultUnlockState {

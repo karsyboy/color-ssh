@@ -9,6 +9,7 @@ use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
 const VAULT_UNLOCK_CANCEL_NOTICE: &str = "Password vault unlock canceled; falling back to the standard SSH password prompt.";
 const VAULT_UNLOCK_RETRY_NOTICE: &str = "Invalid master password. Try again.";
+const MANUAL_VAULT_UNLOCK_RETRY_NOTICE: &str = "Vault unlock failed after multiple attempts. Try again.";
 
 fn current_unlock_policy() -> UnlockPolicy {
     let auth_settings = config::auth_settings();
@@ -23,6 +24,13 @@ impl SessionManager {
         self.mark_ui_dirty();
     }
 
+    pub(crate) fn open_manual_vault_unlock(&mut self) {
+        log_debug!("Opening TUI password vault unlock prompt from host view");
+        self.quick_connect = None;
+        self.vault_unlock = Some(VaultUnlockState::new("shared".to_string(), VaultUnlockAction::UnlockVault));
+        self.mark_ui_dirty();
+    }
+
     pub(crate) fn handle_vault_unlock_key(&mut self, key: KeyEvent) {
         let Some(prompt) = self.vault_unlock.as_mut() else {
             return;
@@ -32,7 +40,8 @@ impl SessionManager {
             KeyCode::Esc => {
                 let action = prompt.action.clone();
                 self.vault_unlock = None;
-                self.complete_vault_unlock_action(action, None, Some(VAULT_UNLOCK_CANCEL_NOTICE.to_string()));
+                let cancel_notice = (!action.is_manual_unlock()).then(|| VAULT_UNLOCK_CANCEL_NOTICE.to_string());
+                self.complete_vault_unlock_action(action, None, cancel_notice);
             }
             KeyCode::Enter => {
                 self.submit_vault_unlock();
@@ -98,6 +107,12 @@ impl SessionManager {
         let client = match agent::AgentClient::new() {
             Ok(client) => client,
             Err(err) => {
+                if action.is_manual_unlock() {
+                    prompt.error = Some(format!("Password vault agent could not be started ({err})."));
+                    prompt.clear_master_password();
+                    self.vault_unlock = Some(prompt);
+                    return;
+                }
                 self.complete_vault_unlock_action(
                     action,
                     None,
@@ -112,6 +127,12 @@ impl SessionManager {
         let master_password = match master_password.into_sensitive_string() {
             Ok(master_password) => master_password,
             Err(err) => {
+                if action.is_manual_unlock() {
+                    prompt.error = Some(format!("Password vault input could not be processed ({err})."));
+                    prompt.clear_master_password();
+                    self.vault_unlock = Some(prompt);
+                    return;
+                }
                 self.complete_vault_unlock_action(
                     action,
                     None,
@@ -125,14 +146,23 @@ impl SessionManager {
         let unlock_result = client.unlock(master_password.expose_secret(), current_unlock_policy());
 
         match unlock_result {
-            Ok(_) => {
+            Ok(status) => {
+                self.set_vault_status(status);
                 log_debug!("TUI password vault unlock succeeded");
-                self.complete_vault_unlock_action(action, Some(entry_name), None);
+                let pass_entry_override = (!action.is_manual_unlock()).then_some(entry_name);
+                self.complete_vault_unlock_action(action, pass_entry_override, None);
             }
             Err(agent::AgentError::InvalidMasterPassword) => {
                 log_debug!("TUI password vault unlock failed due to invalid master password");
                 prompt.attempts += 1;
                 if prompt.attempts >= prompt.max_attempts {
+                    if action.is_manual_unlock() {
+                        prompt.error = Some(MANUAL_VAULT_UNLOCK_RETRY_NOTICE.to_string());
+                        prompt.attempts = 0;
+                        prompt.clear_master_password();
+                        self.vault_unlock = Some(prompt);
+                        return;
+                    }
                     self.complete_vault_unlock_action(
                         action,
                         None,
@@ -147,6 +177,12 @@ impl SessionManager {
             }
             Err(agent::AgentError::VaultNotInitialized) => {
                 log_debug!("TUI password vault unlock failed because the vault is not initialized");
+                if action.is_manual_unlock() {
+                    prompt.error = Some("Password vault is not initialized. Run `cossh vault init` or `cossh vault add <name>` first.".to_string());
+                    prompt.clear_master_password();
+                    self.vault_unlock = Some(prompt);
+                    return;
+                }
                 self.complete_vault_unlock_action(
                     action,
                     None,
@@ -155,6 +191,12 @@ impl SessionManager {
             }
             Err(err) => {
                 log_debug!("TUI password vault unlock failed: {}", err);
+                if action.is_manual_unlock() {
+                    prompt.error = Some(format!("Password vault could not be unlocked ({err})."));
+                    prompt.clear_master_password();
+                    self.vault_unlock = Some(prompt);
+                    return;
+                }
                 self.complete_vault_unlock_action(
                     action,
                     None,

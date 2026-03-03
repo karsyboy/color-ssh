@@ -158,14 +158,30 @@ impl SessionManager {
         None
     }
 
+    fn vault_status_spans(&self) -> [Span<'static>; 3] {
+        let (icon, icon_color) = if self.vault_status.unlocked {
+            (" ", theme::ansi_green())
+        } else {
+            (" ", theme::ansi_red())
+        };
+
+        [
+            Span::styled(icon, Style::default().fg(icon_color).add_modifier(Modifier::BOLD)),
+            Span::styled("V", Style::default().fg(theme::ansi_bright_white()).add_modifier(Modifier::UNDERLINED)),
+            Span::styled("ault", Style::default().fg(theme::ansi_bright_white())),
+        ]
+    }
+
     // Host browser context.
     fn build_manager_status_spans(&self) -> (Vec<Span<'static>>, Vec<Span<'static>>) {
         let host_name = self.selected_host_name().unwrap_or_else(|| "none".to_string());
         let mut left = vec![
             Span::styled("Host", Style::default().fg(theme::ansi_cyan()).add_modifier(Modifier::BOLD)),
             Self::context_split_indicator(),
-            Span::styled(host_name, Style::default().fg(theme::ansi_bright_white())),
         ];
+        left.extend(self.vault_status_spans());
+        left.push(Self::context_split_indicator());
+        left.push(Span::styled(host_name, Style::default().fg(theme::ansi_bright_white())));
         if !self.search_query.is_empty() {
             left.push(Self::context_split_indicator());
             left.push(Span::styled("filter:", Style::default().fg(theme::ansi_bright_black())));
