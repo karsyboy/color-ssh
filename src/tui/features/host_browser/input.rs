@@ -264,7 +264,9 @@ impl SessionManager {
                 self.open_quick_connect_modal();
             }
             KeyCode::Char('v') if self.focus_on_manager && key.modifiers.is_empty() => {
-                if !self.vault_status.unlocked {
+                if self.vault_status.unlocked {
+                    self.open_vault_status_modal();
+                } else {
                     self.open_manual_vault_unlock();
                 }
             }

@@ -47,7 +47,7 @@ fn manager_v_shortcut_opens_manual_vault_unlock_when_locked() {
 }
 
 #[test]
-fn manager_v_shortcut_is_ignored_when_vault_is_already_unlocked() {
+fn manager_v_shortcut_opens_status_modal_when_vault_is_already_unlocked() {
     let mut app = SessionManager::new_for_tests();
     app.vault_status = VaultStatus {
         vault_exists: true,
@@ -55,10 +55,12 @@ fn manager_v_shortcut_is_ignored_when_vault_is_already_unlocked() {
         unlock_expires_in_seconds: Some(300),
         idle_timeout_seconds: Some(900),
         absolute_timeout_seconds: Some(28_800),
+        absolute_timeout_at_epoch_seconds: Some(1_700_000_000),
     };
 
     app.handle_manager_key(KeyEvent::new(KeyCode::Char('v'), KeyModifiers::NONE))
         .expect("vault unlock shortcut");
 
     assert!(app.vault_unlock.is_none());
+    assert!(app.vault_status_modal.is_some());
 }

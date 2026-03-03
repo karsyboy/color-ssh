@@ -5,6 +5,14 @@ use crate::ssh_config::SshHost;
 
 pub(crate) const VAULT_UNLOCK_MAX_ATTEMPTS: usize = 3;
 
+pub(crate) struct VaultStatusModalState;
+
+impl VaultStatusModalState {
+    pub(crate) fn new() -> Self {
+        Self
+    }
+}
+
 #[derive(Debug, Clone)]
 pub(crate) enum VaultUnlockAction {
     UnlockVault,

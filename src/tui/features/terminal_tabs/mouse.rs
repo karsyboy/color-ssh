@@ -27,6 +27,10 @@ impl SessionManager {
             return Ok(());
         }
 
+        if self.vault_status_modal.is_some() {
+            return Ok(());
+        }
+
         if self.quick_connect.is_some() {
             self.handle_quick_connect_mouse(mouse);
             return Ok(());

@@ -41,6 +41,9 @@ fn resolve_action(app: &SessionManager) -> AppAction {
     if app.vault_unlock.is_some() {
         return AppAction::Tab(TabAction::HandleKey);
     }
+    if app.vault_status_modal.is_some() {
+        return AppAction::Tab(TabAction::HandleKey);
+    }
     if app.quick_connect.is_some() {
         return AppAction::QuickConnect(QuickConnectAction::HandleKey);
     }
@@ -59,8 +62,12 @@ fn resolve_action(app: &SessionManager) -> AppAction {
 fn should_mark_ui_dirty_for_key(app: &SessionManager, key: &KeyEvent) -> bool {
     let terminal_view_active = !app.focus_on_manager && !app.tabs.is_empty() && app.selected_tab < app.tabs.len();
     let terminal_search_active = app.current_tab_search().map(|search_state| search_state.active).unwrap_or(false);
-    let direct_terminal_input =
-        terminal_view_active && !terminal_search_active && app.quick_connect.is_none() && app.vault_unlock.is_none() && !app.search_mode;
+    let direct_terminal_input = terminal_view_active
+        && !terminal_search_active
+        && app.quick_connect.is_none()
+        && app.vault_unlock.is_none()
+        && app.vault_status_modal.is_none()
+        && !app.search_mode;
 
     // Forwarded terminal typing/paste characters don't need eager UI invalidation.
     // PTY output updates render_epoch and drives redraws.

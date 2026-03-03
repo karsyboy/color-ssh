@@ -59,7 +59,7 @@ Manager keybindings:
 | `c` | Collapse/expand all folders (when no filter is active) |
 | `i` | Toggle host info pane |
 | `q` | Open Quick Connect modal |
-| `v` | Unlock the shared password vault |
+| `v` | Unlock the shared password vault, or view its status if already unlocked |
 | `Ctrl+F` | Start host search mode |
 | `Ctrl+Left` / `Ctrl+Right` | Resize host panel width |
 | `Shift+Tab` | Switch focus to terminal tabs |

@@ -170,6 +170,7 @@ impl SessionManager {
         self.render_global_status_bar(frame, status_area);
         self.render_quick_connect_modal(frame, size);
         self.render_vault_unlock_modal(frame, size);
+        self.render_vault_status_modal(frame, size);
     }
 
     // Terminal-pane composition.

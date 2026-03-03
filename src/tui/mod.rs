@@ -8,7 +8,7 @@ mod ui;
 
 pub(crate) use state::{
     AppState, ConnectRequest, HostTab, HostTreeRow, HostTreeRowKind, QuickConnectField, QuickConnectState, SessionManager, SshSession, TerminalSearchState,
-    VaultUnlockAction, VaultUnlockState,
+    VaultStatusModalState, VaultUnlockAction, VaultUnlockState,
 };
 
 pub use app::run_session_manager;

@@ -1,7 +1,7 @@
 //! Core TUI state and initialization.
 
 use super::host_browser_state::{HostSearchEntry, HostTreeRow};
-use super::pass_prompt_state::VaultUnlockState;
+use super::pass_prompt_state::{VaultStatusModalState, VaultUnlockState};
 use super::quick_connect_state::QuickConnectState;
 use super::tab_state::{HostTab, TerminalSearchState};
 use crate::auth::{agent, ipc::VaultStatus};
@@ -68,6 +68,7 @@ pub(crate) struct AppState {
     pub(crate) host_info_visible: bool,
     pub(crate) quick_connect: Option<QuickConnectState>,
     pub(crate) vault_unlock: Option<VaultUnlockState>,
+    pub(crate) vault_status_modal: Option<VaultStatusModalState>,
     pub(crate) vault_status: VaultStatus,
     pub(crate) quick_connect_default_ssh_logging: bool,
     pub(crate) last_terminal_size: (u16, u16),
@@ -299,6 +300,7 @@ impl AppState {
             host_info_visible,
             quick_connect: None,
             vault_unlock: None,
+            vault_status_modal: None,
             vault_status: initial_vault_status,
             quick_connect_default_ssh_logging,
             last_terminal_size: (term_width, term_height),
@@ -364,6 +366,7 @@ impl AppState {
             host_info_visible: true,
             quick_connect: None,
             vault_unlock: None,
+            vault_status_modal: None,
             vault_status: VaultStatus::locked(false),
             quick_connect_default_ssh_logging: false,
             last_terminal_size: (100, 30),

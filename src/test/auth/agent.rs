@@ -32,6 +32,22 @@ fn runtime_does_not_expire_before_timeout() {
 }
 
 #[test]
+fn runtime_status_reports_absolute_timeout_timestamp() {
+    let paths = temp_paths("status_absolute_timeout");
+    let mut runtime = AgentRuntime::new();
+    let before = SystemTime::now().duration_since(UNIX_EPOCH).expect("clock drift").as_secs();
+
+    runtime.unlock([7u8; 32], UnlockPolicy::new(900, 3_600));
+
+    let status = runtime.status(&paths);
+    let absolute_timeout_at = status.absolute_timeout_at_epoch_seconds.expect("absolute timeout timestamp");
+
+    assert_eq!(status.absolute_timeout_seconds, Some(3_600));
+    assert!(absolute_timeout_at >= before + 3_595);
+    assert!(absolute_timeout_at <= before + 3_605);
+}
+
+#[test]
 fn handle_request_unlocks_and_fetches_secret() {
     let paths = temp_paths("unlock_fetch");
     initialize_vault_with_paths(&paths, "master-pass").expect("initialize vault");

@@ -10,7 +10,7 @@ use std::fmt;
 use std::io;
 use std::process::{Command, Stdio};
 use std::thread;
-use std::time::{Duration, Instant};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use zeroize::Zeroize;
 
 const AGENT_STARTUP_TIMEOUT: Duration = Duration::from_secs(2);
@@ -266,6 +266,10 @@ impl AgentRuntime {
         let idle_remaining = Duration::from_secs(policy.unlock_idle_timeout_seconds).saturating_sub(last_activity_at.elapsed());
         let absolute_remaining = Duration::from_secs(policy.unlock_absolute_timeout_seconds).saturating_sub(unlocked_at.elapsed());
         let expires_in_seconds = idle_remaining.min(absolute_remaining).as_secs();
+        let absolute_timeout_at_epoch_seconds = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .ok()
+            .and_then(|now| now.as_secs().checked_add(absolute_remaining.as_secs()));
 
         VaultStatus {
             vault_exists,
@@ -273,6 +277,7 @@ impl AgentRuntime {
             unlock_expires_in_seconds: self.data_key.map(|_| expires_in_seconds),
             idle_timeout_seconds: Some(policy.unlock_idle_timeout_seconds),
             absolute_timeout_seconds: Some(policy.unlock_absolute_timeout_seconds),
+            absolute_timeout_at_epoch_seconds: self.data_key.and(absolute_timeout_at_epoch_seconds),
         }
     }
 

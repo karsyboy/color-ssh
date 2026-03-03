@@ -1,6 +1,6 @@
 use super::*;
 use crate::ssh_config::SshHost;
-use crate::tui::{HostTab, QuickConnectField, QuickConnectState, TerminalSearchState, VaultUnlockAction, VaultUnlockState};
+use crate::tui::{HostTab, QuickConnectField, QuickConnectState, TerminalSearchState, VaultStatusModalState, VaultUnlockAction, VaultUnlockState};
 
 fn host_tab(title: &str) -> HostTab {
     HostTab {
@@ -90,6 +90,27 @@ fn handle_paste_routes_to_vault_unlock_when_modal_open() {
 
     let prompt = app.vault_unlock.as_ref().expect("vault unlock state");
     assert_eq!(prompt.master_password.as_str().expect("secret buffer utf8"), "secret");
+}
+
+#[test]
+fn handle_key_closes_vault_status_modal() {
+    let mut app = SessionManager::new_for_tests();
+    app.vault_status_modal = Some(VaultStatusModalState::new());
+
+    app.handle_key(KeyEvent::new(KeyCode::Char('v'), KeyModifiers::NONE))
+        .expect("handle_key should succeed");
+
+    assert!(app.vault_status_modal.is_none());
+}
+
+#[test]
+fn handle_paste_is_ignored_while_vault_status_modal_is_open() {
+    let mut app = SessionManager::new_for_tests();
+    app.vault_status_modal = Some(VaultStatusModalState::new());
+
+    app.handle_paste("ignored".to_string()).expect("paste should succeed");
+
+    assert!(app.vault_status_modal.is_some());
 }
 
 #[test]

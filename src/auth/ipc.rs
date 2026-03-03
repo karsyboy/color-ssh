@@ -54,6 +54,7 @@ pub struct VaultStatus {
     pub unlock_expires_in_seconds: Option<u64>,
     pub idle_timeout_seconds: Option<u64>,
     pub absolute_timeout_seconds: Option<u64>,
+    pub absolute_timeout_at_epoch_seconds: Option<u64>,
 }
 
 impl VaultStatus {
@@ -64,6 +65,7 @@ impl VaultStatus {
             unlock_expires_in_seconds: None,
             idle_timeout_seconds: None,
             absolute_timeout_seconds: None,
+            absolute_timeout_at_epoch_seconds: None,
         }
     }
 }

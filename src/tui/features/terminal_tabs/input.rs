@@ -120,6 +120,11 @@ impl SessionManager {
             return Ok(());
         }
 
+        if self.vault_status_modal.is_some() {
+            self.handle_vault_status_modal_key(key);
+            return Ok(());
+        }
+
         if self.quick_connect.is_some() {
             self.handle_quick_connect_key(key);
             return Ok(());
@@ -143,6 +148,10 @@ impl SessionManager {
 
         if self.vault_unlock.is_some() {
             self.handle_vault_unlock_paste(&pasted);
+            return Ok(());
+        }
+
+        if self.vault_status_modal.is_some() {
             return Ok(());
         }
 

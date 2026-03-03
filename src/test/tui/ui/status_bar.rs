@@ -48,6 +48,7 @@ fn manager_status_bar_shows_unlocked_vault_state() {
         unlock_expires_in_seconds: Some(300),
         idle_timeout_seconds: Some(900),
         absolute_timeout_seconds: Some(28_800),
+        absolute_timeout_at_epoch_seconds: Some(1_700_000_000),
     };
 
     let (left, _) = app.build_manager_status_spans();

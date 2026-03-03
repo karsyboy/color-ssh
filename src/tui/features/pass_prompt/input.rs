@@ -4,7 +4,7 @@ use crate::auth::secret::ExposeSecret;
 use crate::auth::{agent, ipc::UnlockPolicy};
 use crate::config;
 use crate::log_debug;
-use crate::tui::{SessionManager, VaultUnlockAction, VaultUnlockState};
+use crate::tui::{SessionManager, VaultStatusModalState, VaultUnlockAction, VaultUnlockState};
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
 const VAULT_UNLOCK_CANCEL_NOTICE: &str = "Password vault unlock canceled; falling back to the standard SSH password prompt.";
@@ -20,6 +20,7 @@ impl SessionManager {
     pub(crate) fn open_vault_unlock(&mut self, entry_name: String, action: VaultUnlockAction) {
         log_debug!("Opening TUI password vault unlock prompt");
         self.quick_connect = None;
+        self.vault_status_modal = None;
         self.vault_unlock = Some(VaultUnlockState::new(entry_name, action));
         self.mark_ui_dirty();
     }
@@ -27,8 +28,31 @@ impl SessionManager {
     pub(crate) fn open_manual_vault_unlock(&mut self) {
         log_debug!("Opening TUI password vault unlock prompt from host view");
         self.quick_connect = None;
+        self.vault_status_modal = None;
         self.vault_unlock = Some(VaultUnlockState::new("shared".to_string(), VaultUnlockAction::UnlockVault));
         self.mark_ui_dirty();
+    }
+
+    pub(crate) fn open_vault_status_modal(&mut self) {
+        log_debug!("Opening TUI vault status modal");
+        self.quick_connect = None;
+        self.vault_unlock = None;
+        self.vault_status_modal = Some(VaultStatusModalState::new());
+        self.mark_ui_dirty();
+    }
+
+    pub(crate) fn handle_vault_status_modal_key(&mut self, key: KeyEvent) {
+        if self.vault_status_modal.is_none() {
+            return;
+        }
+
+        match key.code {
+            KeyCode::Esc | KeyCode::Enter | KeyCode::Char('v') => {
+                self.vault_status_modal = None;
+                self.mark_ui_dirty();
+            }
+            _ => {}
+        }
     }
 
     pub(crate) fn handle_vault_unlock_key(&mut self, key: KeyEvent) {

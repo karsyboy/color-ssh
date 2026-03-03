@@ -6,6 +6,7 @@ pub mod vault;
 
 use crate::auth::secret::{ExposeSecret, SensitiveBuffer, SensitiveString};
 use crate::{args, config, log_debug};
+use chrono::{Local, TimeZone};
 use crossterm::event::{self, Event, KeyCode, KeyEventKind, KeyModifiers};
 use crossterm::terminal::{disable_raw_mode, enable_raw_mode};
 use std::io::{self, Write};
@@ -113,6 +114,21 @@ fn prompt_existing_master_password_with_label(label: &str) -> std::result::Resul
         return Err("master password cannot be empty".to_string());
     }
     Ok(password)
+}
+
+fn format_hms_duration(total_seconds: u64) -> String {
+    let hours = total_seconds / 3600;
+    let minutes = (total_seconds % 3600) / 60;
+    let seconds = total_seconds % 60;
+    format!("{hours:02}:{minutes:02}:{seconds:02}")
+}
+
+fn format_local_timeout_at(epoch_seconds: u64) -> String {
+    Local
+        .timestamp_opt(epoch_seconds as i64, 0)
+        .single()
+        .map(|datetime| datetime.format("%a %m-%d-%Y %I:%M:%S %p").to_string())
+        .unwrap_or_else(|| "n/a".to_string())
 }
 
 fn prompt_entry_secret() -> std::result::Result<SensitiveString, String> {
@@ -390,15 +406,19 @@ fn run_vault_status_cli() -> ExitCode {
     match client.status() {
         Ok(status) => {
             log_debug!(
-                "Password vault status: exists={}, unlocked={}, expires_in={:?}",
+                "Password vault status: exists={}, unlocked={}, expires_in={:?}, absolute_timeout={:?}",
                 status.vault_exists,
                 status.unlocked,
-                status.unlock_expires_in_seconds
+                status.unlock_expires_in_seconds,
+                status.absolute_timeout_seconds
             );
-            println!("vault_exists: {}", status.vault_exists);
-            println!("unlocked: {}", status.unlocked);
+            println!("Vault Exist: {}", status.vault_exists);
+            println!("Unlocked: {}", status.unlocked);
             if let Some(expires) = status.unlock_expires_in_seconds {
-                println!("unlock_expires_in_seconds: {}", expires);
+                println!("Ideal Session Timeout: {}", format_hms_duration(expires));
+            }
+            if let Some(absolute_timeout_at_epoch_seconds) = status.absolute_timeout_at_epoch_seconds {
+                println!("Absolute Session Timeout: {}", format_local_timeout_at(absolute_timeout_at_epoch_seconds));
             }
             ExitCode::SUCCESS
         }
