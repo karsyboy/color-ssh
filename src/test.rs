@@ -6,7 +6,7 @@
 //!
 //! CLI and process:
 //! - `src/test/args.rs`
-//! - `src/test/main.rs`
+//! - `src/test/runtime.rs`
 //! - `src/test/process.rs`
 //! - `src/test/ssh_args.rs`
 //!

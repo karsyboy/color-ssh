@@ -1,6 +1,6 @@
-use super::resolve_logging_settings;
-use cossh::args::MainArgs;
-use cossh::log::DebugVerbosity;
+use super::{DebugModeSource, debug_mode_source, resolve_logging_settings};
+use crate::args::MainArgs;
+use crate::log::DebugVerbosity;
 
 #[test]
 fn test_mode_uses_only_cli_logging_flags() {
@@ -27,6 +27,22 @@ fn normal_mode_merges_cli_and_config_logging_flags() {
 
     let args = base_args(0, false, false);
     assert_eq!(resolve_logging_settings(&args, false, false), (DebugVerbosity::Off, false));
+}
+
+#[test]
+fn debug_mode_source_prefers_cli_modes() {
+    let args = base_args(2, false, false);
+    assert_eq!(debug_mode_source(&args, true), Some(DebugModeSource::CliRaw));
+
+    let args = base_args(1, false, false);
+    assert_eq!(debug_mode_source(&args, true), Some(DebugModeSource::CliSafe));
+}
+
+#[test]
+fn debug_mode_source_uses_config_only_without_cli_debug() {
+    let args = base_args(0, false, false);
+    assert_eq!(debug_mode_source(&args, true), Some(DebugModeSource::ConfigSafe));
+    assert_eq!(debug_mode_source(&args, false), None);
 }
 
 fn base_args(debug_count: u8, ssh_logging: bool, test_mode: bool) -> MainArgs {
