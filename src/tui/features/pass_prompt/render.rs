@@ -151,7 +151,7 @@ impl SessionManager {
         let hint_text = if self.vault_status.unlocked {
             "[l] Lock  |  [Enter / Esc / v] Close"
         } else {
-            "[Enter / Esc / v] Close"
+            "[v] Unlock  |  [Enter / Esc] Close"
         };
 
         let lines = vec![

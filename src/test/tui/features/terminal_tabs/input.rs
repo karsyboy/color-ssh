@@ -96,11 +96,25 @@ fn handle_paste_routes_to_vault_unlock_when_modal_open() {
 fn handle_key_closes_vault_status_modal() {
     let mut app = SessionManager::new_for_tests();
     app.vault_status_modal = Some(VaultStatusModalState::new());
+    app.vault_status.unlocked = true;
 
     app.handle_key(KeyEvent::new(KeyCode::Char('v'), KeyModifiers::NONE))
         .expect("handle_key should succeed");
 
     assert!(app.vault_status_modal.is_none());
+}
+
+#[test]
+fn handle_key_v_opens_manual_unlock_from_locked_vault_status_modal() {
+    let mut app = SessionManager::new_for_tests();
+    app.vault_status_modal = Some(VaultStatusModalState::new());
+
+    app.handle_key(KeyEvent::new(KeyCode::Char('v'), KeyModifiers::NONE))
+        .expect("handle_key should succeed");
+
+    assert!(app.vault_status_modal.is_none());
+    let prompt = app.vault_unlock.as_ref().expect("vault unlock state");
+    assert!(matches!(prompt.action, VaultUnlockAction::UnlockVault));
 }
 
 #[test]
