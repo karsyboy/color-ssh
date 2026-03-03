@@ -1,7 +1,8 @@
 use super::{SessionManager, force_local_selection};
+use crate::auth::ipc::VaultStatus;
 use crate::ssh_config::SshHost;
 use crate::tui::terminal_emulator::MouseProtocolEncoding;
-use crate::tui::{HostTab, TerminalSearchState};
+use crate::tui::{HostTab, TerminalSearchState, VaultStatusModalState, VaultUnlockAction, VaultUnlockState};
 use crossterm::event::{KeyModifiers, MouseButton, MouseEvent, MouseEventKind};
 use ratatui::layout::Rect;
 
@@ -199,4 +200,45 @@ fn right_click_copies_and_clears_existing_selection() {
     assert!(app.selection_start.is_none());
     assert!(app.selection_end.is_none());
     assert!(!app.selection_dragged);
+}
+
+#[test]
+fn handle_mouse_routes_clicks_to_vault_status_modal_actions() {
+    let mut app = SessionManager::new_for_tests();
+    app.vault_status_modal = Some(VaultStatusModalState::new());
+    app.vault_status = VaultStatus::locked(true);
+
+    let (_, inner_area) = app.vault_status_modal_layout().expect("vault status modal layout");
+    let click = MouseEvent {
+        kind: MouseEventKind::Down(MouseButton::Left),
+        column: inner_area.x,
+        row: inner_area.y + 4,
+        modifiers: KeyModifiers::NONE,
+    };
+
+    app.handle_mouse(click).expect("mouse handling");
+
+    assert!(app.vault_status_modal.is_none());
+    let prompt = app.vault_unlock.as_ref().expect("vault unlock state");
+    assert!(matches!(prompt.action, VaultUnlockAction::UnlockVault));
+}
+
+#[test]
+fn handle_mouse_routes_clicks_to_vault_unlock_modal_actions() {
+    let mut app = SessionManager::new_for_tests();
+    app.vault_unlock = Some(VaultUnlockState::new("shared".to_string(), VaultUnlockAction::UnlockVault).return_to_vault_status());
+
+    let (_, inner_area) = app.vault_unlock_modal_layout().expect("vault unlock modal layout");
+    let close_col = inner_area.x + "[Enter] Unlock".chars().count() as u16 + "  |  ".chars().count() as u16;
+    let click = MouseEvent {
+        kind: MouseEventKind::Down(MouseButton::Left),
+        column: close_col,
+        row: inner_area.y + 3,
+        modifiers: KeyModifiers::NONE,
+    };
+
+    app.handle_mouse(click).expect("mouse handling");
+
+    assert!(app.vault_unlock.is_none());
+    assert!(app.vault_status_modal.is_some());
 }

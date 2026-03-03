@@ -52,22 +52,33 @@ fn format_vault_timeout_at(epoch_seconds: Option<u64>) -> String {
         .unwrap_or_else(|| "n/a".to_string())
 }
 
+fn action_separator() -> &'static str {
+    "  |  "
+}
+
+fn vault_status_hint_text(unlocked: bool) -> String {
+    if unlocked {
+        format!("[l] Lock{}[Enter/Esc/v] Close", action_separator())
+    } else {
+        format!("[v] Unlock{}[Enter/Esc] Close", action_separator())
+    }
+}
+
 impl SessionManager {
-    pub(crate) fn render_vault_unlock_modal(&self, frame: &mut Frame, full_area: Rect) {
+    pub(crate) fn render_vault_unlock_modal(&self, frame: &mut Frame, _full_area: Rect) {
         let Some(prompt) = &self.vault_unlock else {
             return;
         };
 
-        let width = full_area.width.clamp(44, 72);
-        let height = 6;
-        let area = Self::centered_rect(width, height, full_area);
+        let Some((area, inner)) = self.vault_unlock_modal_layout() else {
+            return;
+        };
 
         frame.render_widget(Clear, area);
         let block = Block::default()
             .borders(Borders::ALL)
             .border_style(Style::default().fg(theme::ansi_cyan()))
             .title(" Unlock Password Vault ");
-        let inner = block.inner(area);
         frame.render_widget(block, area);
 
         let label_style = Style::default().fg(theme::ansi_bright_black());
@@ -113,26 +124,33 @@ impl SessionManager {
             lines.push(Line::from(""));
         }
 
-        lines.push(Line::from(vec![Span::styled(prompt.action.prompt_hint(), hint_style)]));
+        lines.push(Line::from(vec![Span::styled(
+            format!(
+                "{}{}{}",
+                prompt.action.prompt_submit_hint(),
+                action_separator(),
+                prompt.action.prompt_cancel_hint()
+            ),
+            hint_style,
+        )]));
 
         frame.render_widget(Paragraph::new(lines), inner);
     }
 
-    pub(crate) fn render_vault_status_modal(&self, frame: &mut Frame, full_area: Rect) {
+    pub(crate) fn render_vault_status_modal(&self, frame: &mut Frame, _full_area: Rect) {
         let Some(modal) = &self.vault_status_modal else {
             return;
         };
 
-        let width = full_area.width.clamp(52, 80);
-        let height = 7;
-        let area = Self::centered_rect(width, height, full_area);
+        let Some((area, inner)) = self.vault_status_modal_layout() else {
+            return;
+        };
 
         frame.render_widget(Clear, area);
         let block = Block::default()
             .borders(Borders::ALL)
             .border_style(Style::default().fg(theme::ansi_cyan()))
             .title(" Password Vault Status ");
-        let inner = block.inner(area);
         frame.render_widget(block, area);
 
         let label_style = Style::default().fg(theme::ansi_bright_black());
@@ -148,11 +166,7 @@ impl SessionManager {
             Style::default().fg(theme::ansi_green()).add_modifier(Modifier::BOLD)
         };
         let hint_style = Style::default().fg(theme::ansi_bright_black());
-        let hint_text = if self.vault_status.unlocked {
-            "[l] Lock  |  [Enter / Esc / v] Close"
-        } else {
-            "[v] Unlock  |  [Enter / Esc] Close"
-        };
+        let hint_text = vault_status_hint_text(self.vault_status.unlocked);
 
         let lines = vec![
             Line::from(vec![

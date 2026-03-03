@@ -44,11 +44,15 @@ impl VaultUnlockAction {
         if self.is_manual_unlock() { "Shared session" } else { entry_name }
     }
 
-    pub(crate) fn prompt_hint(&self) -> &'static str {
+    pub(crate) fn prompt_submit_hint(&self) -> &'static str {
+        "[Enter] Unlock"
+    }
+
+    pub(crate) fn prompt_cancel_hint(&self) -> &'static str {
         if self.is_manual_unlock() {
-            "[Enter] Unlock  |  [Esc] Cancel"
+            "[Esc] Cancel"
         } else {
-            "[Enter] Unlock  |  [Esc] Continue without auto-login"
+            "[Esc] Continue without auto-login"
         }
     }
 }

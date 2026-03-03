@@ -24,10 +24,12 @@ impl SessionManager {
     /// Handle mouse events.
     pub(crate) fn handle_mouse(&mut self, mouse: event::MouseEvent) -> io::Result<()> {
         if self.vault_unlock.is_some() {
+            self.handle_vault_unlock_mouse(mouse);
             return Ok(());
         }
 
         if self.vault_status_modal.is_some() {
+            self.handle_vault_status_modal_mouse(mouse);
             return Ok(());
         }
 
