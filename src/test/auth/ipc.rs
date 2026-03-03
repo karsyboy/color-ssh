@@ -65,7 +65,9 @@ fn bind_listener_ignores_and_removes_legacy_state_file() {
 fn read_write_json_line_round_trip() {
     let mut buffer = Vec::new();
     let request = AgentRequest {
-        payload: AgentRequestPayload::GetSecret { name: "edge".to_string() },
+        payload: AgentRequestPayload::GetSecret {
+            token: sensitive_string("edge-token"),
+        },
     };
 
     write_json_line(&mut buffer, &request).expect("write json line");
@@ -81,6 +83,10 @@ fn secret_fields_are_redacted_in_debug_output() {
         master_password: sensitive_string("master-pass"),
         policy: UnlockPolicy::new(900, 28_800),
     };
+    let authorized = AgentResponse::AskpassAuthorized {
+        status: VaultStatus::locked(true),
+        token: sensitive_string("lease-token"),
+    };
     let response = AgentResponse::Secret {
         status: VaultStatus::locked(true),
         name: "shared".to_string(),
@@ -88,11 +94,14 @@ fn secret_fields_are_redacted_in_debug_output() {
     };
 
     let payload_debug = format!("{payload:?}");
+    let authorized_debug = format!("{authorized:?}");
     let response_debug = format!("{response:?}");
 
     assert!(!payload_debug.contains("master-pass"));
+    assert!(!authorized_debug.contains("lease-token"));
     assert!(!response_debug.contains("top-secret"));
     assert!(payload_debug.contains("[REDACTED]"));
+    assert!(authorized_debug.contains("[REDACTED]"));
     assert!(response_debug.contains("[REDACTED]"));
 }
 

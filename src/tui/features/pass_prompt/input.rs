@@ -1,11 +1,11 @@
 //! Password vault unlock keyboard handling.
 
+use crate::auth::secret::ExposeSecret;
 use crate::auth::{agent, ipc::UnlockPolicy};
 use crate::config;
 use crate::log_debug;
 use crate::tui::{SessionManager, VaultUnlockAction, VaultUnlockState};
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
-use zeroize::Zeroize;
 
 const VAULT_UNLOCK_CANCEL_NOTICE: &str = "Password vault unlock canceled; falling back to the standard SSH password prompt.";
 const VAULT_UNLOCK_RETRY_NOTICE: &str = "Invalid master password. Try again.";
@@ -92,13 +92,12 @@ impl SessionManager {
             return;
         };
 
-        let mut master_password = std::mem::take(&mut prompt.master_password);
+        let master_password = std::mem::take(&mut prompt.master_password);
         let action = prompt.action.clone();
         let entry_name = prompt.entry_name.clone();
         let client = match agent::AgentClient::new() {
             Ok(client) => client,
             Err(err) => {
-                master_password.zeroize();
                 self.complete_vault_unlock_action(
                     action,
                     None,
@@ -110,8 +109,20 @@ impl SessionManager {
             }
         };
 
-        let unlock_result = client.unlock(&master_password, current_unlock_policy());
-        master_password.zeroize();
+        let master_password = match master_password.into_sensitive_string() {
+            Ok(master_password) => master_password,
+            Err(err) => {
+                self.complete_vault_unlock_action(
+                    action,
+                    None,
+                    Some(format!(
+                        "Password auto-login is unavailable because the password vault input could not be processed ({err}); continuing with the standard SSH password prompt."
+                    )),
+                );
+                return;
+            }
+        };
+        let unlock_result = client.unlock(master_password.expose_secret(), current_unlock_policy());
 
         match unlock_result {
             Ok(_) => {

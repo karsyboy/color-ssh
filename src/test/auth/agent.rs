@@ -48,11 +48,106 @@ fn handle_request_unlocks_and_fetches_secret() {
     let unlock_response = handle_request(&paths, &mut runtime, unlock);
     assert!(matches!(unlock_response, AgentResponse::Success { .. }));
 
+    let authorize = AgentRequest {
+        payload: AgentRequestPayload::AuthorizeAskpass { name: "shared".to_string() },
+    };
+    let token = match handle_request(&paths, &mut runtime, authorize) {
+        AgentResponse::AskpassAuthorized { token, .. } => token,
+        other => panic!("unexpected authorize response: {other:?}"),
+    };
     let get_secret = AgentRequest {
-        payload: AgentRequestPayload::GetSecret { name: "shared".to_string() },
+        payload: AgentRequestPayload::GetSecret { token },
     };
     let response = handle_request(&paths, &mut runtime, get_secret);
     assert!(matches!(response, AgentResponse::Secret { secret, .. } if secret.expose_secret() == "top-secret"));
+
+    let _ = fs::remove_dir_all(paths.base_dir());
+}
+
+#[test]
+fn askpass_tokens_are_single_use() {
+    let paths = temp_paths("single_use_token");
+    initialize_vault_with_paths(&paths, "master-pass").expect("initialize vault");
+    let unlocked = vault::unlock_with_password_and_paths(&paths, "master-pass").expect("unlock vault");
+    unlocked.store_secret("shared", "top-secret").expect("store secret");
+
+    let mut runtime = AgentRuntime::new();
+    runtime.unlock(unlocked.data_key_copy(), UnlockPolicy::new(900, 28_800));
+
+    let token = match handle_request(
+        &paths,
+        &mut runtime,
+        AgentRequest {
+            payload: AgentRequestPayload::AuthorizeAskpass { name: "shared".to_string() },
+        },
+    ) {
+        AgentResponse::AskpassAuthorized { token, .. } => token,
+        other => panic!("unexpected authorize response: {other:?}"),
+    };
+
+    let first = handle_request(
+        &paths,
+        &mut runtime,
+        AgentRequest {
+            payload: AgentRequestPayload::GetSecret { token: token.clone() },
+        },
+    );
+    assert!(matches!(first, AgentResponse::Secret { .. }));
+
+    let second = handle_request(
+        &paths,
+        &mut runtime,
+        AgentRequest {
+            payload: AgentRequestPayload::GetSecret { token },
+        },
+    );
+    assert!(matches!(second, AgentResponse::Error { code, .. } if code == "invalid_or_expired_askpass_token"));
+
+    let _ = fs::remove_dir_all(paths.base_dir());
+}
+
+#[test]
+fn runtime_expiry_clears_outstanding_askpass_tokens() {
+    let paths = temp_paths("expired_token");
+    initialize_vault_with_paths(&paths, "master-pass").expect("initialize vault");
+    let unlocked = vault::unlock_with_password_and_paths(&paths, "master-pass").expect("unlock vault");
+    unlocked.store_secret("shared", "top-secret").expect("store secret");
+
+    let mut runtime = AgentRuntime::new();
+    runtime.unlock([5u8; 32], UnlockPolicy::new(1, 1));
+    let token = runtime.issue_askpass_token("shared").expect("issue askpass token");
+    runtime.last_activity_at = Some(Instant::now() - Duration::from_secs(2));
+
+    assert!(runtime.expire_if_needed());
+    assert!(runtime.askpass_leases.is_empty());
+
+    let response = handle_request(
+        &paths,
+        &mut runtime,
+        AgentRequest {
+            payload: AgentRequestPayload::GetSecret { token },
+        },
+    );
+    assert!(matches!(response, AgentResponse::Error { code, .. } if code == "locked"));
+
+    let _ = fs::remove_dir_all(paths.base_dir());
+}
+
+#[test]
+fn authorize_askpass_requires_an_unlocked_runtime() {
+    let paths = temp_paths("authorize_locked");
+    initialize_vault_with_paths(&paths, "master-pass").expect("initialize vault");
+
+    let mut runtime = AgentRuntime::new();
+    let response = handle_request(
+        &paths,
+        &mut runtime,
+        AgentRequest {
+            payload: AgentRequestPayload::AuthorizeAskpass { name: "shared".to_string() },
+        },
+    );
+
+    assert!(matches!(response, AgentResponse::Error { code, .. } if code == "locked"));
 
     let _ = fs::remove_dir_all(paths.base_dir());
 }
@@ -107,6 +202,10 @@ fn map_remote_error_preserves_expected_codes() {
     assert!(matches!(
         map_remote_error("invalid_master_password", "bad".to_string()),
         AgentError::InvalidMasterPassword
+    ));
+    assert!(matches!(
+        map_remote_error("invalid_or_expired_askpass_token", "expired".to_string()),
+        AgentError::InvalidOrExpiredAskpassToken
     ));
     assert!(matches!(
         map_remote_error("vault_not_initialized", "missing".to_string()),

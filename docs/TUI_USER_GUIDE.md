@@ -222,6 +222,9 @@ Additional behavior:
 - `#_pass` entries are read from the password vault under `~/.color-ssh/vault/`.
 - If the vault is locked, the TUI prompts once for the master password and reuses that unlock for later protected hosts until the session relocks.
 - On macOS, Linux, and Windows builds of OpenSSH that honor `SSH_ASKPASS`, password auto-login uses cossh's internal askpass helper.
+- Each auto-login launch now uses a short-lived, single-use token instead of exposing a reusable vault entry lookup to the askpass process.
+- The askpass helper only returns secrets for prompts that look like standard password prompts.
+- Nonstandard, localized, passphrase, OTP, PIN, or host-verification prompts fall back to the normal OpenSSH prompt instead of auto-login.
 
 ### Create a `#_pass` Vault Entry
 

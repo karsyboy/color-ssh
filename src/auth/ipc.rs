@@ -30,7 +30,7 @@ use windows_sys::Win32::System::Memory::LocalFree;
 #[cfg(windows)]
 use windows_sys::Win32::System::Threading::GetCurrentProcess;
 
-const AGENT_ENDPOINT_PREFIX: &str = "cossh-agent-v1-";
+const AGENT_ENDPOINT_PREFIX: &str = "cossh-agent-v2-";
 const LEGACY_AGENT_STATE_FILENAME: &str = "agent-state.json";
 
 #[cfg(unix)]
@@ -100,11 +100,15 @@ pub enum AgentRequestPayload {
         master_password: SensitiveString,
         policy: UnlockPolicy,
     },
+    AuthorizeAskpass {
+        name: String,
+    },
     EntryStatus {
         name: String,
     },
     GetSecret {
-        name: String,
+        #[serde(with = "serde_sensitive_string")]
+        token: SensitiveString,
     },
     Lock,
 }
@@ -114,6 +118,7 @@ impl AgentRequestPayload {
         match self {
             Self::Status => "status",
             Self::Unlock { .. } => "unlock",
+            Self::AuthorizeAskpass { .. } => "authorize_askpass",
             Self::EntryStatus { .. } => "entry_status",
             Self::GetSecret { .. } => "get_secret",
             Self::Lock => "lock",
@@ -137,6 +142,11 @@ pub enum AgentResponse {
         name: String,
         exists: bool,
     },
+    AskpassAuthorized {
+        status: VaultStatus,
+        #[serde(with = "serde_sensitive_string")]
+        token: SensitiveString,
+    },
     Secret {
         status: VaultStatus,
         name: String,
@@ -159,6 +169,7 @@ impl AgentResponse {
         match self {
             Self::Status { status }
             | Self::EntryStatus { status, .. }
+            | Self::AskpassAuthorized { status, .. }
             | Self::Secret { status, .. }
             | Self::Success { status, .. }
             | Self::Error { status, .. } => status,
@@ -250,9 +261,9 @@ fn write_json_line<T: Serialize, W: Write>(stream: &mut W, value: &T) -> io::Res
 
 fn read_json_line<T: for<'de> Deserialize<'de>, R: Read>(stream: &mut R) -> io::Result<T> {
     let mut reader = BufReader::new(stream);
-    let mut line = Zeroizing::new(String::new());
-    reader.read_line(&mut line)?;
-    serde_json::from_str(&line).map_err(|err| io::Error::other(format!("failed to parse IPC message: {err}")))
+    let mut line = Zeroizing::new(Vec::new());
+    reader.read_until(b'\n', &mut line)?;
+    serde_json::from_slice(&line).map_err(|err| io::Error::other(format!("failed to parse IPC message: {err}")))
 }
 
 fn agent_endpoint(paths: &VaultPaths) -> AgentEndpoint {

@@ -3,6 +3,8 @@ use crate::auth::secret::{ExposeSecret, SensitiveString, sensitive_string};
 use crate::auth::vault::{self, UnlockedVault, VaultError, VaultPaths};
 use crate::command_path;
 use crate::log_debug;
+use base64::{Engine as _, engine::general_purpose::URL_SAFE_NO_PAD};
+use getrandom::fill as random_fill;
 use interprocess::local_socket::traits::Listener as _;
 use std::fmt;
 use std::io;
@@ -14,6 +16,8 @@ use zeroize::Zeroize;
 const AGENT_STARTUP_TIMEOUT: Duration = Duration::from_secs(2);
 const AGENT_STARTUP_POLL_INTERVAL: Duration = Duration::from_millis(50);
 const AGENT_IDLE_SHUTDOWN_POLL_INTERVAL: Duration = Duration::from_millis(250);
+const ASKPASS_TOKEN_TTL: Duration = Duration::from_secs(60);
+const ASKPASS_TOKEN_BYTES: usize = 32;
 
 pub use crate::auth::ipc::{AgentRequest, UnlockPolicy as AgentUnlockPolicy, VaultStatus as AgentVaultStatus};
 
@@ -30,6 +34,7 @@ pub enum AgentError {
     Locked,
     EntryNotFound,
     InvalidMasterPassword,
+    InvalidOrExpiredAskpassToken,
     VaultNotInitialized,
     Protocol(String),
 }
@@ -42,6 +47,7 @@ impl fmt::Display for AgentError {
             Self::Locked => write!(f, "password vault is locked"),
             Self::EntryNotFound => write!(f, "password vault entry was not found"),
             Self::InvalidMasterPassword => write!(f, "invalid master password"),
+            Self::InvalidOrExpiredAskpassToken => write!(f, "invalid or expired askpass token"),
             Self::VaultNotInitialized => write!(f, "password vault is not initialized"),
             Self::Protocol(message) => write!(f, "{message}"),
         }
@@ -111,9 +117,23 @@ impl AgentClient {
         }
     }
 
-    pub fn get_secret(&self, name: &str) -> Result<SensitiveString, AgentError> {
-        log_debug!("Requesting password vault secret '{}'", name);
-        match self.request(AgentRequestPayload::GetSecret { name: name.to_string() }, true)? {
+    pub fn authorize_askpass(&self, name: &str) -> Result<SensitiveString, AgentError> {
+        log_debug!("Requesting internal askpass authorization for '{}'", name);
+        match self.request(AgentRequestPayload::AuthorizeAskpass { name: name.to_string() }, true)? {
+            AgentResponse::AskpassAuthorized { token, .. } => Ok(token),
+            AgentResponse::Error { code, message, .. } => Err(map_remote_error(&code, message)),
+            response => Err(AgentError::Protocol(format!("unexpected askpass authorization response: {response:?}"))),
+        }
+    }
+
+    pub fn get_secret(&self, token: &str) -> Result<SensitiveString, AgentError> {
+        log_debug!("Requesting password vault secret using askpass token");
+        match self.request(
+            AgentRequestPayload::GetSecret {
+                token: sensitive_string(token),
+            },
+            true,
+        )? {
             AgentResponse::Secret { secret, .. } => Ok(secret),
             AgentResponse::Error { code, message, .. } => Err(map_remote_error(&code, message)),
             response => Err(AgentError::Protocol(format!("unexpected get-secret response: {response:?}"))),
@@ -159,7 +179,7 @@ impl AgentClient {
             .stdout(Stdio::null())
             .stderr(Stdio::null())
             .env_remove(crate::auth::transport::INTERNAL_ASKPASS_MODE_ENV)
-            .env_remove(crate::auth::transport::INTERNAL_ASKPASS_ENTRY_ENV)
+            .env_remove(crate::auth::transport::INTERNAL_ASKPASS_TOKEN_ENV)
             .env_remove("SSH_ASKPASS")
             .env_remove("SSH_ASKPASS_REQUIRE");
         command.spawn()?;
@@ -178,11 +198,19 @@ impl AgentClient {
 }
 
 #[derive(Debug)]
+struct AskpassLease {
+    token: SensitiveString,
+    entry_name: String,
+    expires_at: Instant,
+}
+
+#[derive(Debug)]
 struct AgentRuntime {
     data_key: Option<[u8; 32]>,
     unlocked_at: Option<Instant>,
     last_activity_at: Option<Instant>,
     policy: Option<UnlockPolicy>,
+    askpass_leases: Vec<AskpassLease>,
 }
 
 impl AgentRuntime {
@@ -192,6 +220,7 @@ impl AgentRuntime {
             unlocked_at: None,
             last_activity_at: None,
             policy: None,
+            askpass_leases: Vec::new(),
         }
     }
 
@@ -269,16 +298,55 @@ impl AgentRuntime {
         if let Some(mut data_key) = self.data_key.take() {
             data_key.zeroize();
         }
+        let lease_count = self.askpass_leases.len();
+        self.askpass_leases.clear();
         self.unlocked_at = None;
         self.last_activity_at = None;
         self.policy = None;
         if was_unlocked {
             log_debug!("Password vault runtime key material zeroized");
         }
+        if lease_count > 0 {
+            log_debug!("Cleared {} outstanding askpass token(s)", lease_count);
+        }
     }
 
     fn unlocked_vault(&self, paths: &VaultPaths) -> Option<UnlockedVault> {
         self.data_key.map(|data_key| UnlockedVault::from_data_key(paths.clone(), data_key))
+    }
+
+    fn issue_askpass_token(&mut self, entry_name: &str) -> Result<SensitiveString, AgentError> {
+        self.prune_expired_askpass_leases();
+        let mut token_bytes = [0u8; ASKPASS_TOKEN_BYTES];
+        random_fill(&mut token_bytes).map_err(|err| AgentError::Protocol(format!("failed to generate askpass token: {err}")))?;
+        let token = SensitiveString::from_owned_string(URL_SAFE_NO_PAD.encode(token_bytes));
+        token_bytes.zeroize();
+
+        self.askpass_leases.push(AskpassLease {
+            token: token.clone(),
+            entry_name: entry_name.to_string(),
+            expires_at: Instant::now() + ASKPASS_TOKEN_TTL,
+        });
+        log_debug!("Issued askpass token for entry '{}'", entry_name);
+        Ok(token)
+    }
+
+    fn take_askpass_entry(&mut self, token: &str) -> Option<String> {
+        self.prune_expired_askpass_leases();
+        let index = self.askpass_leases.iter().position(|lease| lease.token.expose_secret() == token)?;
+        let lease = self.askpass_leases.swap_remove(index);
+        log_debug!("Consumed askpass token for entry '{}'", lease.entry_name);
+        Some(lease.entry_name)
+    }
+
+    fn prune_expired_askpass_leases(&mut self) {
+        let before = self.askpass_leases.len();
+        let now = Instant::now();
+        self.askpass_leases.retain(|lease| lease.expires_at > now);
+        let removed = before.saturating_sub(self.askpass_leases.len());
+        if removed > 0 {
+            log_debug!("Expired {} askpass token(s)", removed);
+        }
     }
 }
 
@@ -378,6 +446,37 @@ fn handle_request(paths: &VaultPaths, runtime: &mut AgentRuntime, request: ipc::
             }
             Err(err) => agent_error_response(runtime, paths, err),
         },
+        AgentRequestPayload::AuthorizeAskpass { name } => {
+            let Some(_unlocked) = runtime.unlocked_vault(paths) else {
+                return AgentResponse::Error {
+                    status: runtime.status(paths),
+                    code: "locked".to_string(),
+                    message: "password vault is locked".to_string(),
+                };
+            };
+            match vault::entry_exists_with_paths(paths, &name) {
+                Ok(true) => match runtime.issue_askpass_token(&name) {
+                    Ok(token) => {
+                        runtime.touch();
+                        AgentResponse::AskpassAuthorized {
+                            status: runtime.status(paths),
+                            token,
+                        }
+                    }
+                    Err(err) => AgentResponse::Error {
+                        status: runtime.status(paths),
+                        code: "askpass_token_error".to_string(),
+                        message: err.to_string(),
+                    },
+                },
+                Ok(false) => AgentResponse::Error {
+                    status: runtime.status(paths),
+                    code: "entry_not_found".to_string(),
+                    message: "password vault entry was not found".to_string(),
+                },
+                Err(err) => agent_error_response(runtime, paths, err),
+            }
+        }
         AgentRequestPayload::EntryStatus { name } => match vault::entry_exists_with_paths(paths, &name) {
             Ok(exists) => AgentResponse::EntryStatus {
                 status: runtime.status(paths),
@@ -386,12 +485,19 @@ fn handle_request(paths: &VaultPaths, runtime: &mut AgentRuntime, request: ipc::
             },
             Err(err) => agent_error_response(runtime, paths, err),
         },
-        AgentRequestPayload::GetSecret { name } => {
+        AgentRequestPayload::GetSecret { token } => {
             let Some(unlocked) = runtime.unlocked_vault(paths) else {
                 return AgentResponse::Error {
                     status: runtime.status(paths),
                     code: "locked".to_string(),
                     message: "password vault is locked".to_string(),
+                };
+            };
+            let Some(name) = runtime.take_askpass_entry(token.expose_secret()) else {
+                return AgentResponse::Error {
+                    status: runtime.status(paths),
+                    code: "invalid_or_expired_askpass_token".to_string(),
+                    message: "invalid or expired askpass token".to_string(),
                 };
             };
             match unlocked.get_secret(&name) {
@@ -430,8 +536,9 @@ fn map_remote_error(code: &str, message: String) -> AgentError {
         "locked" => AgentError::Locked,
         "entry_not_found" => AgentError::EntryNotFound,
         "invalid_master_password" => AgentError::InvalidMasterPassword,
+        "invalid_or_expired_askpass_token" => AgentError::InvalidOrExpiredAskpassToken,
         "vault_not_initialized" => AgentError::VaultNotInitialized,
-        "invalid_entry_name" | "vault_error" => AgentError::Protocol(message),
+        "invalid_entry_name" | "vault_error" | "askpass_token_error" => AgentError::Protocol(message),
         _ => AgentError::Protocol(message),
     }
 }

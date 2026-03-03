@@ -4,29 +4,83 @@ pub mod secret;
 pub mod transport;
 pub mod vault;
 
-use crate::auth::secret::ExposeSecret;
+use crate::auth::secret::{ExposeSecret, SensitiveBuffer, SensitiveString};
 use crate::{args, config, log_debug};
+use crossterm::event::{self, Event, KeyCode, KeyEventKind, KeyModifiers};
+use crossterm::terminal::{disable_raw_mode, enable_raw_mode};
+use std::io::{self, Write};
 use std::process::ExitCode;
-use zeroize::Zeroize;
 
-fn confirm_hidden_value(prompt: &str, confirm_prompt: &str, empty_message: &str, mismatch_message: &str) -> std::result::Result<String, String> {
-    let mut value = rpassword::prompt_password(prompt).map_err(|err| err.to_string())?;
-    let mut confirm = rpassword::prompt_password(confirm_prompt).map_err(|err| err.to_string())?;
-    if value.is_empty() {
-        value.zeroize();
-        confirm.zeroize();
+struct RawModeGuard;
+
+impl RawModeGuard {
+    fn enter() -> io::Result<Self> {
+        enable_raw_mode()?;
+        Ok(Self)
+    }
+}
+
+impl Drop for RawModeGuard {
+    fn drop(&mut self) {
+        let _ = disable_raw_mode();
+    }
+}
+
+pub(crate) fn prompt_hidden_secret(prompt: &str) -> io::Result<SensitiveString> {
+    let mut stderr = io::stderr().lock();
+    stderr.write_all(prompt.as_bytes())?;
+    stderr.flush()?;
+
+    let _raw_mode = RawModeGuard::enter()?;
+    let mut buffer = SensitiveBuffer::new();
+
+    loop {
+        match event::read()? {
+            Event::Key(key) if matches!(key.kind, KeyEventKind::Press | KeyEventKind::Repeat) => match key.code {
+                KeyCode::Enter => {
+                    stderr.write_all(b"\n")?;
+                    stderr.flush()?;
+                    return buffer
+                        .into_sensitive_string()
+                        .map_err(|err| io::Error::new(io::ErrorKind::InvalidData, format!("failed to decode hidden input: {err}")));
+                }
+                KeyCode::Backspace => {
+                    let cursor = buffer.char_len();
+                    let _ = buffer.backspace_char(cursor);
+                }
+                KeyCode::Char('c') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                    stderr.write_all(b"\n")?;
+                    stderr.flush()?;
+                    return Err(io::Error::new(io::ErrorKind::Interrupted, "input canceled"));
+                }
+                KeyCode::Char(ch) if !key.modifiers.contains(KeyModifiers::CONTROL) && !key.modifiers.contains(KeyModifiers::ALT) => {
+                    buffer.insert_char(buffer.char_len(), ch);
+                }
+                _ => {}
+            },
+            Event::Paste(pasted) => {
+                for ch in pasted.chars().filter(|ch| *ch != '\n' && *ch != '\r') {
+                    buffer.insert_char(buffer.char_len(), ch);
+                }
+            }
+            _ => {}
+        }
+    }
+}
+
+fn confirm_hidden_value(prompt: &str, confirm_prompt: &str, empty_message: &str, mismatch_message: &str) -> std::result::Result<SensitiveString, String> {
+    let value = prompt_hidden_secret(prompt).map_err(|err| err.to_string())?;
+    let confirm = prompt_hidden_secret(confirm_prompt).map_err(|err| err.to_string())?;
+    if value.expose_secret().is_empty() {
         return Err(empty_message.to_string());
     }
     if value != confirm {
-        value.zeroize();
-        confirm.zeroize();
         return Err(mismatch_message.to_string());
     }
-    confirm.zeroize();
     Ok(value)
 }
 
-fn prompt_new_master_password() -> std::result::Result<String, String> {
+fn prompt_new_master_password() -> std::result::Result<SensitiveString, String> {
     confirm_hidden_value(
         "Enter vault master password: ",
         "Confirm vault master password: ",
@@ -35,7 +89,7 @@ fn prompt_new_master_password() -> std::result::Result<String, String> {
     )
 }
 
-fn prompt_new_master_password_with_label(label: &str) -> std::result::Result<String, String> {
+fn prompt_new_master_password_with_label(label: &str) -> std::result::Result<SensitiveString, String> {
     confirm_hidden_value(
         &format!("Enter {label} vault master password: "),
         &format!("Confirm {label} vault master password: "),
@@ -44,23 +98,23 @@ fn prompt_new_master_password_with_label(label: &str) -> std::result::Result<Str
     )
 }
 
-fn prompt_existing_master_password() -> std::result::Result<String, String> {
-    let password = rpassword::prompt_password("Enter vault master password: ").map_err(|err| err.to_string())?;
-    if password.is_empty() {
+fn prompt_existing_master_password() -> std::result::Result<SensitiveString, String> {
+    let password = prompt_hidden_secret("Enter vault master password: ").map_err(|err| err.to_string())?;
+    if password.expose_secret().is_empty() {
         return Err("master password cannot be empty".to_string());
     }
     Ok(password)
 }
 
-fn prompt_existing_master_password_with_label(label: &str) -> std::result::Result<String, String> {
-    let password = rpassword::prompt_password(format!("Enter {label} vault master password: ")).map_err(|err| err.to_string())?;
-    if password.is_empty() {
+fn prompt_existing_master_password_with_label(label: &str) -> std::result::Result<SensitiveString, String> {
+    let password = prompt_hidden_secret(&format!("Enter {label} vault master password: ")).map_err(|err| err.to_string())?;
+    if password.expose_secret().is_empty() {
         return Err("master password cannot be empty".to_string());
     }
     Ok(password)
 }
 
-fn prompt_entry_secret() -> std::result::Result<String, String> {
+fn prompt_entry_secret() -> std::result::Result<SensitiveString, String> {
     confirm_hidden_value(
         "Enter SSH password to store: ",
         "Confirm SSH password: ",
@@ -92,7 +146,7 @@ fn vault_command_name(vault_command: &args::VaultCommand) -> &'static str {
     }
 }
 
-fn initialize_vault_if_needed() -> std::result::Result<Option<String>, String> {
+fn initialize_vault_if_needed() -> std::result::Result<Option<SensitiveString>, String> {
     if vault::vault_exists().map_err(|err| err.to_string())? {
         log_debug!("Password vault already initialized");
         return Ok(None);
@@ -101,9 +155,7 @@ fn initialize_vault_if_needed() -> std::result::Result<Option<String>, String> {
     log_debug!("Password vault not initialized; starting first-run setup");
     println!("Password vault is not initialized. Starting first-run setup.");
     let password = prompt_new_master_password()?;
-    if let Err(err) = vault::initialize_vault(&password) {
-        let mut password = password;
-        password.zeroize();
+    if let Err(err) = vault::initialize_vault(password.expose_secret()) {
         return Err(err.to_string());
     }
     println!("Password vault initialized.");
@@ -117,27 +169,22 @@ fn require_initialized_vault() -> std::result::Result<(), String> {
     }
 }
 
-fn resolve_master_password(initial_password: Option<String>) -> std::result::Result<String, String> {
+fn resolve_master_password(initial_password: Option<SensitiveString>) -> std::result::Result<SensitiveString, String> {
     match initial_password {
         Some(password) => Ok(password),
         None => prompt_existing_master_password(),
     }
 }
 
-fn unlock_vault_for_cli(initial_password: Option<String>) -> std::result::Result<vault::UnlockedVault, String> {
-    let mut master_password = resolve_master_password(initial_password)?;
-    let result = vault::unlock_with_password(&master_password).map_err(|err| err.to_string());
-    master_password.zeroize();
-    result
+fn unlock_vault_for_cli(initial_password: Option<SensitiveString>) -> std::result::Result<vault::UnlockedVault, String> {
+    let master_password = resolve_master_password(initial_password)?;
+    vault::unlock_with_password(master_password.expose_secret()).map_err(|err| err.to_string())
 }
 
 fn run_vault_init_cli() -> ExitCode {
     log_debug!("Running `cossh vault init`");
     match initialize_vault_if_needed() {
-        Ok(Some(mut password)) => {
-            password.zeroize();
-            ExitCode::SUCCESS
-        }
+        Ok(Some(_password)) => ExitCode::SUCCESS,
         Ok(None) => {
             println!("Password vault is already initialized");
             ExitCode::SUCCESS
@@ -167,7 +214,7 @@ fn run_add_pass_cli(pass_name: &str) -> ExitCode {
         }
     };
 
-    let mut secret = match prompt_entry_secret() {
+    let secret = match prompt_entry_secret() {
         Ok(secret) => secret,
         Err(err) => {
             eprintln!("Failed to capture SSH password: {err}");
@@ -175,8 +222,7 @@ fn run_add_pass_cli(pass_name: &str) -> ExitCode {
         }
     };
 
-    let result = unlocked.store_secret(pass_name, &secret);
-    secret.zeroize();
+    let result = unlocked.store_secret(pass_name, secret.expose_secret());
 
     match result {
         Ok(()) => {
@@ -256,7 +302,7 @@ fn run_unlock_cli() -> ExitCode {
         }
     };
 
-    let mut master_password = match resolve_master_password(initial_password) {
+    let master_password = match resolve_master_password(initial_password) {
         Ok(password) => password,
         Err(err) => {
             eprintln!("Failed to unlock password vault: {err}");
@@ -267,14 +313,12 @@ fn run_unlock_cli() -> ExitCode {
     let client = match agent::AgentClient::new() {
         Ok(client) => client,
         Err(err) => {
-            master_password.zeroize();
             eprintln!("Failed to start password vault agent: {err}");
             return ExitCode::from(1);
         }
     };
 
-    let result = client.unlock(&master_password, unlock_policy_from_config());
-    master_password.zeroize();
+    let result = client.unlock(master_password.expose_secret(), unlock_policy_from_config());
 
     match result {
         Ok(status) => {
@@ -374,32 +418,28 @@ fn run_set_master_password_cli() -> ExitCode {
         }
     };
 
-    if let Some(mut password) = initial_password {
-        password.zeroize();
+    if let Some(_password) = initial_password {
         log_debug!("Password vault initialized with a new master password");
         println!("Password vault master password set");
         return ExitCode::SUCCESS;
     }
 
-    let mut current_password = match prompt_existing_master_password_with_label("current") {
+    let current_password = match prompt_existing_master_password_with_label("current") {
         Ok(password) => password,
         Err(err) => {
             eprintln!("Failed to capture current master password: {err}");
             return ExitCode::from(1);
         }
     };
-    let mut new_password = match prompt_new_master_password_with_label("new") {
+    let new_password = match prompt_new_master_password_with_label("new") {
         Ok(password) => password,
         Err(err) => {
-            current_password.zeroize();
             eprintln!("Failed to capture new master password: {err}");
             return ExitCode::from(1);
         }
     };
 
-    let result = vault::rotate_master_password(&current_password, &new_password);
-    current_password.zeroize();
-    new_password.zeroize();
+    let result = vault::rotate_master_password(current_password.expose_secret(), new_password.expose_secret());
 
     match result {
         Ok(()) => {
@@ -417,10 +457,19 @@ fn run_set_master_password_cli() -> ExitCode {
 
 pub fn run_internal_askpass() -> ExitCode {
     log_debug!("Handling internal askpass invocation");
-    let Some(entry_name) = transport::internal_askpass_entry() else {
-        eprintln!("Missing internal askpass entry");
+    let prompt = transport::internal_askpass_prompt();
+    let prompt_decision = transport::classify_internal_askpass_prompt(prompt.as_deref());
+    log_debug!("Internal askpass prompt decision: {:?}", prompt_decision);
+    if prompt_decision != transport::AskpassPromptDecision::Allow {
+        eprintln!("Password auto-login is unavailable for this SSH prompt.");
+        return ExitCode::from(1);
+    }
+
+    let Some(token) = transport::internal_askpass_token() else {
+        eprintln!("Missing internal askpass token");
         return ExitCode::from(1);
     };
+    let token = SensitiveString::from_owned_string(token);
 
     let client = match agent::AgentClient::new() {
         Ok(client) => client,
@@ -430,10 +479,10 @@ pub fn run_internal_askpass() -> ExitCode {
         }
     };
 
-    let secret = match client.get_secret(&entry_name) {
+    let secret = match client.get_secret(token.expose_secret()) {
         Ok(secret) => secret,
         Err(err) => {
-            eprintln!("Failed to read password vault entry '{entry_name}': {err}");
+            eprintln!("Failed to read password vault entry: {err}");
             return ExitCode::from(1);
         }
     };

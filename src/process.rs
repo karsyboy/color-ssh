@@ -1,4 +1,4 @@
-use crate::auth::{agent, ipc::UnlockPolicy, transport, vault};
+use crate::auth::{self, agent, ipc::UnlockPolicy, secret::ExposeSecret, transport, vault};
 use crate::ssh_config::SshHost;
 use crate::{Result, command_path, config, highlighter, log, log_debug, log_debug_raw, log_error, log_info, log_warn};
 use std::{
@@ -12,7 +12,6 @@ use std::{
     thread,
     time::{Duration, Instant},
 };
-use zeroize::Zeroize;
 
 const STDOUT_FLUSH_BYTES: usize = 32 * 1024;
 const STDOUT_FLUSH_INTERVAL: Duration = Duration::from_millis(25);
@@ -137,20 +136,17 @@ fn unlock_agent_interactively(client: &agent::AgentClient) -> io::Result<()> {
     let policy = current_unlock_policy();
     for attempt in 1..=3 {
         log_debug!("Prompting for password vault unlock (attempt {} of 3)", attempt);
-        let mut master_password = rpassword::prompt_password("Enter vault master password: ")?;
-        if master_password.is_empty() {
-            master_password.zeroize();
+        let master_password = auth::prompt_hidden_secret("Enter vault master password: ")?;
+        if master_password.expose_secret().is_empty() {
             return Err(io::Error::new(io::ErrorKind::PermissionDenied, "master password cannot be empty"));
         }
 
-        match client.unlock(&master_password, policy.clone()) {
+        match client.unlock(master_password.expose_secret(), policy.clone()) {
             Ok(_) => {
-                master_password.zeroize();
                 log_debug!("Interactive password vault unlock succeeded");
                 return Ok(());
             }
             Err(agent::AgentError::InvalidMasterPassword) => {
-                master_password.zeroize();
                 log_debug!("Interactive password vault unlock failed due to invalid master password");
                 if attempt == 3 {
                     return Err(io::Error::new(
@@ -161,14 +157,12 @@ fn unlock_agent_interactively(client: &agent::AgentClient) -> io::Result<()> {
                 eprintln!("Invalid master password. Try again.");
             }
             Err(agent::AgentError::VaultNotInitialized) => {
-                master_password.zeroize();
                 return Err(io::Error::new(
                     io::ErrorKind::NotFound,
                     "password vault is not initialized; run `cossh vault init` or `cossh vault add <name>`",
                 ));
             }
             Err(err) => {
-                master_password.zeroize();
                 log_debug!("Interactive password vault unlock failed: {}", err);
                 return Err(io::Error::new(io::ErrorKind::PermissionDenied, err.to_string()));
             }
@@ -279,7 +273,18 @@ fn build_ssh_command(args: &[String], explicit_pass_entry: Option<&str>) -> io::
             Ok(command)
         }
         transport::PasswordTransportBackend::InternalAskpass => {
-            if let Err(err) = transport::configure_internal_askpass_env(&mut command.env, &pass_entry_name) {
+            let askpass_token = match client.authorize_askpass(&pass_entry_name) {
+                Ok(token) => token,
+                Err(err) => {
+                    log_debug!("Failed to authorize internal askpass token: {}", err);
+                    command.fallback_notice = Some(format!(
+                        "Password auto-login is unavailable because a vault access token could not be issued ({err}); continuing with the standard SSH password prompt."
+                    ));
+                    return Ok(command);
+                }
+            };
+
+            if let Err(err) = transport::configure_internal_askpass_env(&mut command.env, askpass_token.expose_secret()) {
                 log_debug!("Failed to configure internal askpass helper: {}", err);
                 command.fallback_notice = Some(format!(
                     "Password auto-login is unavailable because the internal askpass helper could not be configured ({err}); continuing with the standard SSH password prompt."

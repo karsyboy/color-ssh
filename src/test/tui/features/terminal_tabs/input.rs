@@ -89,7 +89,7 @@ fn handle_paste_routes_to_vault_unlock_when_modal_open() {
     app.handle_paste("secret\n".to_string()).expect("paste should succeed");
 
     let prompt = app.vault_unlock.as_ref().expect("vault unlock state");
-    assert_eq!(prompt.master_password, "secret");
+    assert_eq!(prompt.master_password.as_str().expect("secret buffer utf8"), "secret");
 }
 
 #[test]
