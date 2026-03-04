@@ -97,7 +97,7 @@ cossh --migrate                                           # Import ~/.ssh/config
 
 ## Documentation
 
-The full user wiki lives in [Here](https://github.com/karsyboy/color-ssh/wiki).
+The full user wiki lives in [here](https://github.com/karsyboy/color-ssh/wiki).
 
 ## Configuration
 
@@ -136,9 +136,6 @@ Use this once to import your existing OpenSSH host entries into the YAML invento
 ```bash
 cossh --migrate
 ```
-
-
-For more info go here [TUI User Guide](docs/tui-guide.md).
 
 ## Uninstall
 
