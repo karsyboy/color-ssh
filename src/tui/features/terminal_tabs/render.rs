@@ -10,7 +10,7 @@ use ratatui::{
     layout::{Constraint, Direction, Layout, Rect},
     style::{Color, Modifier, Style},
     text::{Line, Span},
-    widgets::Paragraph,
+    widgets::{Paragraph, Wrap},
 };
 
 fn draw_vertical_rule(frame: &mut Frame, x: u16, y: u16, height: u16, style: Style) {
@@ -395,12 +395,18 @@ impl AppState {
                 }
             }
         } else {
+            let reason = self.tabs[tab_idx]
+                .session_error
+                .as_deref()
+                .unwrap_or("The session process could not be started.");
             let error_lines = vec![
                 Line::from(""),
                 Line::from(vec![
                     Span::styled("Failed to start session for ", Style::default().fg(theme::ansi_red())),
                     Span::styled(&host.name, Style::default().fg(theme::ansi_yellow()).add_modifier(Modifier::BOLD)),
                 ]),
+                Line::from(""),
+                Line::from(vec![Span::styled(reason, Style::default().fg(theme::ansi_bright_white()))]),
                 Line::from(""),
                 Line::from(vec![
                     Span::styled("Press ", Style::default().fg(theme::ansi_white())),
@@ -409,7 +415,9 @@ impl AppState {
                 ]),
             ];
 
-            let paragraph = Paragraph::new(error_lines).style(Style::default().fg(theme::ansi_red()));
+            let paragraph = Paragraph::new(error_lines)
+                .style(Style::default().fg(theme::ansi_red()))
+                .wrap(Wrap { trim: false });
             frame.render_widget(paragraph, area);
         }
     }

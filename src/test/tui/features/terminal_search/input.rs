@@ -9,6 +9,7 @@ fn app_with_active_search() -> AppState {
         host: SshHost::new("test-host".to_string()),
         title: "test-host".to_string(),
         session: None,
+        session_error: None,
         scroll_offset: 0,
         terminal_search: TerminalSearchState {
             active: true,

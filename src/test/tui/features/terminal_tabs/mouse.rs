@@ -17,6 +17,7 @@ fn app_with_tabs(titles: &[&str]) -> AppState {
             host: SshHost::new((*title).to_string()),
             title: (*title).to_string(),
             session: None,
+            session_error: None,
             scroll_offset: 0,
             terminal_search: TerminalSearchState::default(),
             force_ssh_logging: false,

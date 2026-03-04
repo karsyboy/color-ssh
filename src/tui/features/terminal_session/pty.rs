@@ -379,11 +379,12 @@ impl AppState {
             pass_fallback_notice,
         };
 
-        let session = match Self::spawn_session(&host, &tab_title, history_buffer, session_launch_options) {
-            Ok(session) => Some(session),
+        let (session, session_error) = match Self::spawn_session(&host, &tab_title, history_buffer, session_launch_options) {
+            Ok(session) => (Some(session), None),
             Err(err) => {
-                log_error!("Failed to spawn {} session: {}", host.protocol.display_name(), err);
-                None
+                let err_message = err.to_string();
+                log_error!("Failed to spawn {} session: {}", host.protocol.display_name(), err_message);
+                (None, Some(err_message))
             }
         };
 
@@ -391,6 +392,7 @@ impl AppState {
             title: tab_title,
             host: host.clone(),
             session,
+            session_error,
             scroll_offset: 0,
             terminal_search: TerminalSearchState::default(),
             force_ssh_logging,
@@ -635,6 +637,7 @@ impl AppState {
             Ok(session) => {
                 let tab = &mut self.tabs[tab_index];
                 tab.session = Some(session);
+                tab.session_error = None;
                 tab.scroll_offset = 0;
                 tab.terminal_search.matches.clear();
                 tab.terminal_search.current = 0;
@@ -642,7 +645,11 @@ impl AppState {
                 log_debug!("Successfully reconnected to {}", host.name);
             }
             Err(err) => {
-                log_error!("Failed to reconnect {} session: {}", host.protocol.display_name(), err);
+                let err_message = err.to_string();
+                log_error!("Failed to reconnect {} session: {}", host.protocol.display_name(), err_message);
+                let tab = &mut self.tabs[tab_index];
+                tab.session = None;
+                tab.session_error = Some(err_message);
             }
         }
     }

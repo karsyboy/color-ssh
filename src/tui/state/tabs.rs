@@ -69,6 +69,7 @@ pub(crate) struct HostTab {
     pub(crate) host: SshHost,
     pub(crate) title: String,
     pub(crate) session: Option<ManagedSession>,
+    pub(crate) session_error: Option<String>,
     pub(crate) scroll_offset: usize,
     pub(crate) terminal_search: TerminalSearchState,
     pub(crate) force_ssh_logging: bool,
