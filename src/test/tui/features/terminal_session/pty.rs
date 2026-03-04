@@ -1,4 +1,4 @@
-use super::encode_key_event_bytes;
+use super::{encode_key_event_bytes, normalize_managed_output_newlines};
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
 #[test]
@@ -48,4 +48,25 @@ fn encode_key_event_bytes_shift_arrow_preserves_shift_modifier() {
 fn encode_key_event_bytes_shift_pageup_preserves_shift_modifier() {
     let key = KeyEvent::new(KeyCode::PageUp, KeyModifiers::SHIFT);
     assert_eq!(encode_key_event_bytes(key), Some(b"\x1b[5;2~".to_vec()));
+}
+
+#[test]
+fn normalize_managed_output_newlines_rewrites_lf_to_crlf() {
+    let mut previous_ended_with_cr = false;
+    let normalized = normalize_managed_output_newlines(b"first\nsecond\n", &mut previous_ended_with_cr);
+
+    assert_eq!(normalized, b"first\r\nsecond\r\n");
+    assert!(!previous_ended_with_cr);
+}
+
+#[test]
+fn normalize_managed_output_newlines_preserves_existing_crlf_across_chunks() {
+    let mut previous_ended_with_cr = false;
+
+    let first = normalize_managed_output_newlines(b"first line\r", &mut previous_ended_with_cr);
+    let second = normalize_managed_output_newlines(b"\nsecond line\n", &mut previous_ended_with_cr);
+
+    assert_eq!(first, b"first line\r");
+    assert_eq!(second, b"\nsecond line\r\n");
+    assert!(!previous_ended_with_cr);
 }

@@ -139,6 +139,39 @@ fn parses_hidden_agent_serve_mode() {
 }
 
 #[test]
+fn parses_rdp_subcommand_with_overrides_and_extra_args() {
+    let cmd = build_cli_command();
+    let parsed = parse_main_args_from(
+        &cmd,
+        [
+            "cossh",
+            "--pass-entry",
+            "office_rdp",
+            "rdp",
+            "desktop01",
+            "--user",
+            "administrator",
+            "--domain",
+            "ACME",
+            "--port",
+            "3390",
+            "/f",
+            "+clipboard",
+        ],
+    );
+
+    let rdp = parsed.rdp_command.expect("rdp command");
+    assert_eq!(rdp.target, "desktop01");
+    assert_eq!(rdp.user.as_deref(), Some("administrator"));
+    assert_eq!(rdp.domain.as_deref(), Some("ACME"));
+    assert_eq!(rdp.port, Some(3390));
+    assert_eq!(rdp.extra_args, vec!["/f".to_string(), "+clipboard".to_string()]);
+    assert_eq!(parsed.pass_entry.as_deref(), Some("office_rdp"));
+    assert!(parsed.ssh_args.is_empty());
+    assert!(!parsed.interactive);
+}
+
+#[test]
 fn rejects_vault_add_pass_with_ssh_args() {
     let cmd = build_cli_command();
     assert!(

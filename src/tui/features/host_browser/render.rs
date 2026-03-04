@@ -141,6 +141,11 @@ impl AppState {
                 lines.push(Line::from(""));
             }
 
+            lines.push(Line::from(vec![
+                Span::styled("Type: ", Style::default().fg(theme::ansi_bright_black())),
+                Span::styled(host.protocol.display_name(), Style::default().fg(theme::ansi_cyan())),
+            ]));
+
             if let Some(hostname) = &host.hostname {
                 lines.push(Line::from(vec![
                     Span::styled("Host: ", Style::default().fg(theme::ansi_bright_black())),
@@ -194,6 +199,13 @@ impl AppState {
                 lines.push(Line::from(vec![
                     Span::styled("Prof: ", Style::default().fg(theme::ansi_bright_black())),
                     Span::styled(profile, Style::default().fg(theme::ansi_magenta())),
+                ]));
+            }
+
+            if !host.rdp_args.is_empty() {
+                lines.push(Line::from(vec![
+                    Span::styled("RDP:  ", Style::default().fg(theme::ansi_bright_black())),
+                    Span::styled(host.rdp_args.join(" "), Style::default().fg(theme::ansi_bright_white())),
                 ]));
             }
 
@@ -260,6 +272,13 @@ impl AppState {
                     Span::styled("Host: ", Style::default().fg(theme::ansi_white())),
                     Span::styled(&host.name, Style::default().fg(theme::ansi_yellow()).add_modifier(Modifier::BOLD)),
                 ]),
+                Line::from(vec![
+                    Span::styled("Type: ", Style::default().fg(theme::ansi_white())),
+                    Span::styled(
+                        host.protocol.display_name(),
+                        Style::default().fg(theme::ansi_cyan()).add_modifier(Modifier::BOLD),
+                    ),
+                ]),
                 Line::from(""),
             ];
 
@@ -295,6 +314,13 @@ impl AppState {
                 lines.push(Line::from(vec![
                     Span::styled("  ProxyJump: ", Style::default().fg(theme::ansi_white())),
                     Span::styled(proxy, Style::default().fg(theme::ansi_bright_white())),
+                ]));
+            }
+
+            if !host.rdp_args.is_empty() {
+                lines.push(Line::from(vec![
+                    Span::styled("  RdpArgs: ", Style::default().fg(theme::ansi_white())),
+                    Span::styled(host.rdp_args.join(" "), Style::default().fg(theme::ansi_bright_white())),
                 ]));
             }
 

@@ -1,20 +1,22 @@
-//! SSH session spawning and PTY management.
+//! Interactive session spawning and PTY management.
 
 use crate::auth::agent;
-use crate::ssh_config::SshHost;
+use crate::process;
+use crate::ssh_config::{ConnectionProtocol, SshHost};
 use crate::tui::terminal_emulator::Parser;
-use crate::tui::{AppState, HostTab, SshSession, TerminalSearchState, VaultUnlockAction};
+use crate::tui::{AppState, HostTab, ManagedChild, ManagedSession, TerminalSearchState, VaultUnlockAction};
 use crate::{command_path, debug_enabled, log_debug, log_error};
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use portable_pty::{CommandBuilder, PtySize, native_pty_system};
 use std::io::{self, Read};
+use std::process::{Child as ProcessChild, Stdio};
 use std::sync::{
     Arc, Mutex,
     atomic::{AtomicU64, Ordering},
 };
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
-struct SshSessionLaunchOptions {
+struct SessionLaunchOptions {
     force_ssh_logging: bool,
     initial_rows: u16,
     initial_cols: u16,
@@ -65,6 +67,96 @@ fn encode_csi_tilde_key(code: u8, modifiers: KeyModifiers) -> Vec<u8> {
     }
 
     format!("\x1b[{};{}~", code, modifier_parameter(modifiers)).into_bytes()
+}
+
+fn auto_login_notice(host: &SshHost, detail: impl Into<String>) -> String {
+    let detail = detail.into();
+    match host.protocol {
+        ConnectionProtocol::Ssh => format!("{detail}; continuing with the standard SSH password prompt."),
+        ConnectionProtocol::Rdp => format!("{detail}; RDP launch requires vault-backed credentials."),
+    }
+}
+
+fn normalize_managed_output_newlines(bytes: &[u8], previous_ended_with_cr: &mut bool) -> Vec<u8> {
+    let mut normalized = Vec::with_capacity(bytes.len());
+    let mut ended_with_cr = *previous_ended_with_cr;
+
+    for &byte in bytes {
+        if byte == b'\n' && !ended_with_cr {
+            normalized.push(b'\r');
+        }
+        normalized.push(byte);
+        ended_with_cr = byte == b'\r';
+    }
+
+    *previous_ended_with_cr = ended_with_cr;
+    normalized
+}
+
+fn spawn_output_reader<R>(name: &'static str, mut reader: R, parser: Arc<Mutex<Parser>>, render_epoch: Arc<AtomicU64>)
+where
+    R: Read + Send + 'static,
+{
+    std::thread::spawn(move || {
+        let mut buf = [0u8; 8192];
+        let mut previous_ended_with_cr = false;
+        loop {
+            match reader.read(&mut buf) {
+                Ok(0) => break,
+                Ok(bytes_read) => {
+                    let normalized = normalize_managed_output_newlines(&buf[..bytes_read], &mut previous_ended_with_cr);
+                    if let Ok(mut parser) = parser.lock() {
+                        parser.process(&normalized);
+                        render_epoch.fetch_add(1, Ordering::Relaxed);
+                    }
+                }
+                Err(err) => {
+                    log_error!("Error reading from {} stream: {}", name, err);
+                    break;
+                }
+            }
+        }
+        log_debug!("{} reader thread exiting", name);
+    });
+}
+
+fn spawn_process_exit_watcher(child: Arc<Mutex<ProcessChild>>, exited: Arc<Mutex<bool>>) {
+    std::thread::spawn(move || {
+        loop {
+            let should_exit = match exited.lock() {
+                Ok(exited) => *exited,
+                Err(_) => true,
+            };
+            if should_exit {
+                break;
+            }
+
+            let status = match child.lock() {
+                Ok(mut child) => child.try_wait(),
+                Err(err) => {
+                    log_error!("Failed to lock managed child for exit polling: {}", err);
+                    break;
+                }
+            };
+
+            match status {
+                Ok(Some(_)) => {
+                    if let Ok(mut exited) = exited.lock() {
+                        *exited = true;
+                    }
+                    break;
+                }
+                Ok(None) => std::thread::sleep(Duration::from_millis(100)),
+                Err(err) => {
+                    log_error!("Failed to poll RDP process state: {}", err);
+                    if let Ok(mut exited) = exited.lock() {
+                        *exited = true;
+                    }
+                    break;
+                }
+            }
+        }
+    });
 }
 
 pub(crate) fn encode_key_event_bytes(key: KeyEvent) -> Option<Vec<u8>> {
@@ -158,11 +250,21 @@ impl AppState {
     fn resolve_host_pass_password(&mut self, host: &SshHost, action: VaultUnlockAction) -> Option<(Option<String>, Option<String>)> {
         let auth_settings = crate::config::auth_settings();
         if !auth_settings.tui_password_autologin {
-            return Some((None, None));
+            let notice = match host.protocol {
+                ConnectionProtocol::Ssh => None,
+                ConnectionProtocol::Rdp => {
+                    Some("TUI password auto-login is disabled in auth settings; enable it to launch RDP sessions from the session manager.".to_string())
+                }
+            };
+            return Some((None, notice));
         }
 
         let Some(pass_key) = host.pass_key.as_deref() else {
-            return Some((None, None));
+            let notice = match host.protocol {
+                ConnectionProtocol::Ssh => None,
+                ConnectionProtocol::Rdp => Some("RDP launch requires a password vault entry; add `#_pass <name>` to the host config.".to_string()),
+            };
+            return Some((None, notice));
         };
 
         let client = match agent::AgentClient::new() {
@@ -170,8 +272,9 @@ impl AppState {
             Err(err) => {
                 return Some((
                     None,
-                    Some(format!(
-                        "Password auto-login is unavailable because the password vault agent could not be started ({err}); continuing with the standard SSH password prompt."
+                    Some(auto_login_notice(
+                        host,
+                        format!("Password auto-login is unavailable because the password vault agent could not be started ({err})"),
                     )),
                 ));
             }
@@ -188,9 +291,9 @@ impl AppState {
                 if !exists {
                     return Some((
                         None,
-                        Some(format!(
-                            "Password auto-login is unavailable because vault entry '{}' was not found; continuing with the standard SSH password prompt.",
-                            pass_key
+                        Some(auto_login_notice(
+                            host,
+                            format!("Password auto-login is unavailable because vault entry '{}' was not found", pass_key),
                         )),
                     ));
                 }
@@ -199,14 +302,20 @@ impl AppState {
             }
             Err(agent::AgentError::VaultNotInitialized) => Some((
                 None,
-                Some("Password vault is not initialized. Run `cossh vault init` or `cossh vault add <name>` first.".to_string()),
+                Some(match host.protocol {
+                    ConnectionProtocol::Ssh => "Password vault is not initialized. Run `cossh vault init` or `cossh vault add <name>` first.".to_string(),
+                    ConnectionProtocol::Rdp => {
+                        "RDP launch requires an initialized password vault. Run `cossh vault init` or `cossh vault add <name>` first.".to_string()
+                    }
+                }),
             )),
             Err(err) => {
                 log_debug!("Password auto-login unavailable for host {}: {}", host.name, err);
                 Some((
                     None,
-                    Some(format!(
-                        "Password auto-login is unavailable because the password vault could not be queried ({err}); continuing with the standard SSH password prompt."
+                    Some(auto_login_notice(
+                        host,
+                        format!("Password auto-login is unavailable because the password vault could not be queried ({err})"),
                     )),
                 ))
             }
@@ -240,7 +349,7 @@ impl AppState {
 
     // Tab/session creation.
     fn open_host_tab(&mut self, host: SshHost, force_ssh_logging: bool) {
-        log_debug!("Opening tab for host: {}", host.name);
+        log_debug!("Opening {:?} tab for host: {}", host.protocol, host.name);
         let action = VaultUnlockAction::OpenHostTab {
             host: Box::new(host.clone()),
             force_ssh_logging,
@@ -252,7 +361,6 @@ impl AppState {
     }
 
     fn open_host_tab_with_auth(&mut self, host: SshHost, force_ssh_logging: bool, pass_entry_override: Option<String>, pass_fallback_notice: Option<String>) {
-        // Generate unique tab title with suffix for duplicate hosts
         let existing_count = self.tabs.iter().filter(|tab| tab.host.name == host.name).count();
         let tab_title = if existing_count == 0 {
             host.name.clone()
@@ -263,8 +371,7 @@ impl AppState {
         log_debug!("Using history buffer {} for tab '{}' (profile: {:?})", history_buffer, tab_title, host.profile);
         let (initial_rows, initial_cols) = self.initial_pty_size();
 
-        // Spawn SSH session
-        let session_launch_options = SshSessionLaunchOptions {
+        let session_launch_options = SessionLaunchOptions {
             force_ssh_logging,
             initial_rows,
             initial_cols,
@@ -272,15 +379,14 @@ impl AppState {
             pass_fallback_notice,
         };
 
-        let session = match Self::spawn_ssh_session(&host, &tab_title, history_buffer, session_launch_options) {
+        let session = match Self::spawn_session(&host, &tab_title, history_buffer, session_launch_options) {
             Ok(session) => Some(session),
             Err(err) => {
-                log_error!("Failed to spawn SSH session: {}", err);
+                log_error!("Failed to spawn {} session: {}", host.protocol.display_name(), err);
                 None
             }
         };
 
-        // Create new tab
         let tab = HostTab {
             title: tab_title,
             host: host.clone(),
@@ -294,9 +400,7 @@ impl AppState {
         self.tabs.push(tab);
         self.selected_tab = self.tabs.len() - 1;
         self.focus_on_manager = false;
-        // Opening a host into a terminal should leave host search-edit mode.
         self.search_mode = false;
-        // Close quick-connect modal if it was open.
         self.quick_connect = None;
 
         log_debug!("Created new tab at index {}", self.selected_tab);
@@ -319,11 +423,17 @@ impl AppState {
         }
     }
 
+    fn spawn_session(host: &SshHost, tab_title: &str, history_buffer: usize, launch_options: SessionLaunchOptions) -> io::Result<ManagedSession> {
+        match host.protocol {
+            ConnectionProtocol::Ssh => Self::spawn_ssh_session(host, tab_title, history_buffer, launch_options),
+            ConnectionProtocol::Rdp => Self::spawn_rdp_session(host, tab_title, history_buffer, launch_options),
+        }
+    }
+
     // Spawn and wire a PTY-backed cossh process.
-    /// Spawn an SSH session in a PTY
-    fn spawn_ssh_session(host: &SshHost, tab_title: &str, history_buffer: usize, launch_options: SshSessionLaunchOptions) -> io::Result<SshSession> {
+    fn spawn_ssh_session(host: &SshHost, tab_title: &str, history_buffer: usize, launch_options: SessionLaunchOptions) -> io::Result<ManagedSession> {
         let pty_system = native_pty_system();
-        let SshSessionLaunchOptions {
+        let SessionLaunchOptions {
             force_ssh_logging,
             initial_rows,
             initial_cols,
@@ -333,8 +443,6 @@ impl AppState {
         let rows = initial_rows.max(1);
         let cols = initial_cols.max(1);
 
-        // Create a new PTY with current content area size to avoid startup
-        // geometry mismatches in full-screen terminal apps.
         let pty_pair = pty_system
             .openpty(PtySize {
                 rows,
@@ -344,9 +452,7 @@ impl AppState {
             })
             .map_err(|err| io::Error::other(err.to_string()))?;
 
-        // Build cossh command to get syntax highlighting
         let cossh_path = command_path::cossh_path()?;
-
         let using_pass_entry = pass_entry_override.is_some();
         let mut cmd = CommandBuilder::new(&cossh_path);
 
@@ -362,7 +468,6 @@ impl AppState {
         cmd.arg(&host.name);
         cmd.env("COSSH_SESSION_NAME", tab_title);
 
-        // Pass profile if specified in .ssh/config via #_Profile
         if let Some(profile) = &host.profile {
             cmd.arg("-P");
             cmd.arg(profile);
@@ -380,15 +485,12 @@ impl AppState {
             tab_title
         );
 
-        // Spawn the command in the PTY
-        let child = pty_pair.slave.spawn_command(cmd).map_err(|err| io::Error::other(err.to_string()))?;
+        let child = Arc::new(Mutex::new(pty_pair.slave.spawn_command(cmd).map_err(|err| io::Error::other(err.to_string()))?));
 
-        // Get the master for reading/writing
         let mut reader = pty_pair.master.try_clone_reader().map_err(|err| io::Error::other(err.to_string()))?;
         let writer = pty_pair.master.take_writer().map_err(|err| io::Error::other(err.to_string()))?;
         let writer = Arc::new(Mutex::new(writer));
 
-        // Create terminal parser/emulator and hook alacritty event callbacks to the PTY writer.
         let parser = Arc::new(Mutex::new(Parser::new_with_pty_writer(rows, cols, history_buffer, writer.clone())));
         let parser_clone = parser.clone();
         let exited = Arc::new(Mutex::new(false));
@@ -405,13 +507,11 @@ impl AppState {
             render_epoch.fetch_add(1, Ordering::Relaxed);
         }
 
-        // Spawn a thread to read from PTY
         std::thread::spawn(move || {
             let mut buf = [0u8; 8192];
             loop {
                 match reader.read(&mut buf) {
                     Ok(0) => {
-                        // EOF - process exited
                         if let Ok(mut exited) = exited_clone.lock() {
                             *exited = true;
                         }
@@ -419,7 +519,6 @@ impl AppState {
                     }
                     Ok(bytes_read) => {
                         if let Ok(mut parser) = parser_clone.lock() {
-                            // Process PTY bytes through terminal emulator.
                             parser.process(&buf[..bytes_read]);
                             render_epoch_clone.fetch_add(1, Ordering::Relaxed);
                         }
@@ -436,10 +535,51 @@ impl AppState {
             log_debug!("PTY reader thread exiting");
         });
 
-        Ok(SshSession {
-            pty_master,
-            writer,
-            _child: child,
+        Ok(ManagedSession {
+            pty_master: Some(pty_master),
+            writer: Some(writer),
+            child: ManagedChild::Pty(child),
+            parser,
+            exited,
+            render_epoch,
+        })
+    }
+
+    fn spawn_rdp_session(host: &SshHost, _tab_title: &str, history_buffer: usize, launch_options: SessionLaunchOptions) -> io::Result<ManagedSession> {
+        let SessionLaunchOptions {
+            initial_rows,
+            initial_cols,
+            pass_entry_override,
+            pass_fallback_notice,
+            ..
+        } = launch_options;
+        if let Some(notice) = pass_fallback_notice {
+            return Err(io::Error::other(notice));
+        }
+
+        let mut child = process::spawn_command(
+            process::build_rdp_command_for_host(host, pass_entry_override.as_deref())?,
+            Stdio::piped(),
+            Stdio::piped(),
+        )?;
+        let stdout = child.stdout.take().ok_or_else(|| io::Error::other("failed to capture FreeRDP stdout"))?;
+        let stderr = child.stderr.take().ok_or_else(|| io::Error::other("failed to capture FreeRDP stderr"))?;
+
+        let rows = initial_rows.max(1);
+        let cols = initial_cols.max(1);
+        let parser = Arc::new(Mutex::new(Parser::new(rows, cols, history_buffer)));
+        let exited = Arc::new(Mutex::new(false));
+        let render_epoch = Arc::new(AtomicU64::new(0));
+        let child = Arc::new(Mutex::new(child));
+
+        spawn_output_reader("freerdp stdout", stdout, parser.clone(), render_epoch.clone());
+        spawn_output_reader("freerdp stderr", stderr, parser.clone(), render_epoch.clone());
+        spawn_process_exit_watcher(child.clone(), exited.clone());
+
+        Ok(ManagedSession {
+            pty_master: None,
+            writer: None,
+            child: ManagedChild::Process(child),
             parser,
             exited,
             render_epoch,
@@ -483,7 +623,7 @@ impl AppState {
             tab_title,
             host.profile
         );
-        let session_launch_options = SshSessionLaunchOptions {
+        let session_launch_options = SessionLaunchOptions {
             force_ssh_logging,
             initial_rows,
             initial_cols,
@@ -491,7 +631,7 @@ impl AppState {
             pass_fallback_notice,
         };
 
-        match Self::spawn_ssh_session(&host, &tab_title, history_buffer, session_launch_options) {
+        match Self::spawn_session(&host, &tab_title, history_buffer, session_launch_options) {
             Ok(session) => {
                 let tab = &mut self.tabs[tab_index];
                 tab.session = Some(session);
@@ -502,7 +642,7 @@ impl AppState {
                 log_debug!("Successfully reconnected to {}", host.name);
             }
             Err(err) => {
-                log_error!("Failed to reconnect SSH session: {}", err);
+                log_error!("Failed to reconnect {} session: {}", host.protocol.display_name(), err);
             }
         }
     }
@@ -515,8 +655,6 @@ impl AppState {
             && let Some(tab) = self.tabs.get_mut(self.selected_tab)
             && let Some(session) = &mut tab.session
         {
-            // Area is already the raw terminal content region for this tab.
-            // Keep PTY size aligned 1:1 with the rendered content area.
             let rows = area.height.max(1);
             let cols = area.width.max(1);
             if tab.last_pty_size == Some((rows, cols)) {
@@ -524,7 +662,9 @@ impl AppState {
             }
             let resize_started_at = Instant::now();
 
-            if let Ok(pty_master) = session.pty_master.lock() {
+            if let Some(pty_master) = session.pty_master.as_ref()
+                && let Ok(pty_master) = pty_master.lock()
+            {
                 let _ = pty_master.resize(PtySize {
                     rows,
                     cols,
@@ -533,7 +673,6 @@ impl AppState {
                 });
             }
 
-            // Let the terminal emulator handle resize semantics directly.
             if let Ok(mut parser) = session.parser.lock() {
                 parser.set_size(rows, cols);
             }
@@ -541,7 +680,7 @@ impl AppState {
 
             tab.last_pty_size = Some((rows, cols));
             if debug_enabled!() {
-                log_debug!("Resized PTY/parser to {}x{} in {:?}", cols, rows, resize_started_at.elapsed());
+                log_debug!("Resized session/parser to {}x{} in {:?}", cols, rows, resize_started_at.elapsed());
             }
         }
     }

@@ -186,7 +186,6 @@ pub(crate) struct Parser {
 
 impl Parser {
     // Construction.
-    #[cfg(test)]
     pub(crate) fn new(rows: u16, cols: u16, history: usize) -> Self {
         Self::new_with_listener(rows, cols, history, ParserEventListener::new(rows, cols, None))
     }

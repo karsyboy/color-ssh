@@ -1,12 +1,15 @@
-//! SSH subprocess orchestration.
+//! Direct subprocess orchestration for SSH and RDP launches.
 
 mod exit;
 mod interactive;
 mod launch;
 mod stream;
 
+use crate::args::RdpCommandArgs;
 use crate::{Result, log_debug, log_debug_raw, log_error, log_info, log_warn, ssh_args};
 use std::process::ExitCode;
+
+pub(crate) use launch::{build_rdp_command_for_host, spawn_command};
 
 pub(crate) fn run_ssh_process(process_args: Vec<String>, is_non_interactive: bool, explicit_pass_entry: Option<String>) -> Result<ExitCode> {
     log_info!(
@@ -32,16 +35,40 @@ pub(crate) fn run_ssh_process(process_args: Vec<String>, is_non_interactive: boo
 
     if is_non_interactive {
         log_info!("Using passthrough mode for non-interactive command");
-        return launch::spawn_ssh_passthrough(&command_spec);
+        return launch::spawn_passthrough(command_spec);
     }
 
-    let child = launch::spawn_ssh(&command_spec).map_err(|err| {
+    let child = launch::spawn_command(command_spec, std::process::Stdio::piped(), std::process::Stdio::inherit()).map_err(|err| {
         log_error!("Failed to spawn SSH process: {}", err);
         err
     })?;
     log_debug!("SSH process spawned successfully (PID: {:?})", child.id());
 
-    interactive::run_interactive_session(child)
+    interactive::run_interactive_ssh_session(child)
+}
+
+pub(crate) fn run_rdp_process(rdp_args: RdpCommandArgs, explicit_pass_entry: Option<String>) -> Result<ExitCode> {
+    log_info!(
+        "Starting RDP process: target={} explicit_pass_entry={} extra_arg_count={}",
+        rdp_args.target,
+        explicit_pass_entry.is_some(),
+        rdp_args.extra_args.len()
+    );
+    log_debug_raw!("Starting RDP process with args: {:?}", rdp_args);
+
+    let command_spec = launch::build_rdp_command(&rdp_args, explicit_pass_entry.as_deref())?;
+    if let Some(notice) = &command_spec.fallback_notice {
+        log_warn!("{}", notice);
+        eprintln!("[color-ssh] {}", notice);
+    }
+
+    let child = launch::spawn_command(command_spec, std::process::Stdio::piped(), std::process::Stdio::piped()).map_err(|err| {
+        log_error!("Failed to spawn RDP process: {}", err);
+        err
+    })?;
+    log_debug!("RDP process spawned successfully (PID: {:?})", child.id());
+
+    interactive::run_interactive_rdp_session(child)
 }
 
 #[cfg(test)]

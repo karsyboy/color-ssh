@@ -5,7 +5,7 @@ mod model;
 mod parser;
 mod path;
 
-pub use model::{FolderId, SshHost, SshHostTreeModel, TreeFolder};
+pub use model::{ConnectionProtocol, FolderId, SshHost, SshHostTreeModel, TreeFolder};
 pub use parser::parse_ssh_config;
 pub use path::get_default_ssh_config_path;
 

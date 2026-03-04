@@ -56,9 +56,10 @@ pub(crate) fn run() -> Result<ExitCode> {
     apply_ssh_logging(&logger, &args, final_ssh_log);
 
     log_debug!(
-        "Parsed arguments summary: interactive={} ssh_arg_count={} pass_entry_override={} vault_command={} profile_set={} agent_serve={} test_mode={}",
+        "Parsed arguments summary: interactive={} ssh_arg_count={} rdp_launch={} pass_entry_override={} vault_command={} profile_set={} agent_serve={} test_mode={}",
         args.interactive,
         args.ssh_args.len(),
+        args.rdp_command.is_some(),
         args.pass_entry.is_some(),
         args.vault_command.is_some(),
         args.profile.is_some(),
@@ -70,14 +71,24 @@ pub(crate) fn run() -> Result<ExitCode> {
     print_title_banner(runtime_settings.show_title);
 
     if logger.is_ssh_logging_enabled() {
-        update_session_name_for_logging(&args.ssh_args);
+        if let Some(rdp_command) = args.rdp_command.as_ref() {
+            update_session_name_for_logging(Some(&rdp_command.target), &[]);
+        } else {
+            update_session_name_for_logging(None, &args.ssh_args);
+        }
     }
 
     log_debug!("Starting configuration file watcher");
     let _watcher = config::config_watcher(args.profile.clone());
 
-    log_info!("Launching SSH process handler");
-    let exit_code = process::run_ssh_process(args.ssh_args, args.is_non_interactive, args.pass_entry).map_err(|err| {
+    let exit_code = if let Some(rdp_command) = args.rdp_command.clone() {
+        log_info!("Launching RDP process handler");
+        process::run_rdp_process(rdp_command, args.pass_entry.clone())
+    } else {
+        log_info!("Launching SSH process handler");
+        process::run_ssh_process(args.ssh_args, args.is_non_interactive, args.pass_entry)
+    }
+    .map_err(|err| {
         log_error!("Process handler failed: {}", err);
         eprintln!("Process failed: {err}");
         flush_debug_logs(&logger);

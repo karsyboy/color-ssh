@@ -1,5 +1,5 @@
 use super::exit::map_exit_code;
-use super::launch::{build_plain_ssh_command, resolve_pass_entry_from_hosts};
+use super::launch::{build_plain_ssh_command, resolve_host_by_destination, resolve_pass_entry_from_hosts};
 use super::stream::{requires_immediate_terminal_flush, should_flush_immediately};
 use crate::ssh_config::SshHost;
 use std::process::ExitCode;
@@ -51,6 +51,7 @@ fn build_ssh_command_uses_plain_ssh_without_pass_password() {
     assert_eq!(command.program, "ssh");
     assert_eq!(command.args, args);
     assert!(command.env.is_empty());
+    assert!(command.stdin_payload.is_none());
     assert!(command.fallback_notice.is_none());
 }
 
@@ -62,6 +63,7 @@ fn build_ssh_command_leaves_direct_launches_as_plain_ssh() {
     assert_eq!(command.program, "ssh");
     assert_eq!(command.args, args);
     assert!(command.env.is_empty());
+    assert!(command.stdin_payload.is_none());
     assert!(command.fallback_notice.is_none());
 }
 
@@ -82,4 +84,17 @@ fn resolve_pass_entry_matches_unique_hostname_when_alias_not_found() {
 
     let resolved = resolve_pass_entry_from_hosts("host.example.com", None, &[host]);
     assert_eq!(resolved.as_deref(), Some("shared"));
+}
+
+#[test]
+fn resolve_host_by_destination_prefers_alias_before_hostname() {
+    let mut alias_host = SshHost::new("prod".to_string());
+    alias_host.hostname = Some("host.example.com".to_string());
+
+    let mut hostname_host = SshHost::new("host.example.com".to_string());
+    hostname_host.hostname = Some("other.example.com".to_string());
+
+    let hosts = vec![alias_host, hostname_host];
+    let resolved = resolve_host_by_destination("host.example.com", &hosts).expect("host");
+    assert_eq!(resolved.name, "host.example.com");
 }

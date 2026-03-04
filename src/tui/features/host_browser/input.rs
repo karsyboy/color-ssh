@@ -241,6 +241,7 @@ impl AppState {
                         target: tab.host.name.clone(),
                         profile: tab.host.profile.clone(),
                         force_ssh_logging: tab.force_ssh_logging,
+                        protocol: tab.host.protocol,
                     });
                     self.should_exit = true;
                 }

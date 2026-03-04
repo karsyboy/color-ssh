@@ -85,8 +85,11 @@ pub(crate) fn apply_ssh_logging(logger: &log::Logger, args: &args::MainArgs, ssh
     }
 }
 
-pub(crate) fn update_session_name_for_logging(ssh_args: &[String]) {
-    let session_hostname = ssh_args::extract_destination_host(ssh_args).unwrap_or_else(|| "unknown".to_string());
+pub(crate) fn update_session_name_for_logging(explicit_target: Option<&str>, ssh_args: &[String]) {
+    let session_hostname = explicit_target
+        .map(str::to_string)
+        .or_else(|| ssh_args::extract_destination_host(ssh_args))
+        .unwrap_or_else(|| "unknown".to_string());
 
     let session_name = std::env::var("COSSH_SESSION_NAME").unwrap_or(session_hostname);
     let session_name = log::sanitize_session_name(&session_name);

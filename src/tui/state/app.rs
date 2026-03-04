@@ -8,7 +8,7 @@ use super::tabs::{HostTab, TerminalSearchState};
 use super::vault::{VaultStatusModalState, VaultUnlockState};
 use crate::auth::ipc::{self, VaultStatus, VaultStatusEvent, VaultStatusEventKind};
 use crate::log_debug;
-use crate::ssh_config::{FolderId, SshHost, TreeFolder};
+use crate::ssh_config::{ConnectionProtocol, FolderId, SshHost, TreeFolder};
 use ratatui::layout::Rect;
 use std::collections::{HashMap, HashSet};
 use std::io;
@@ -26,6 +26,7 @@ pub(crate) struct ConnectRequest {
     pub(crate) target: String,
     pub(crate) profile: Option<String>,
     pub(crate) force_ssh_logging: bool,
+    pub(crate) protocol: ConnectionProtocol,
 }
 
 /// Main application state.

@@ -1,4 +1,5 @@
 use super::parse_ssh_config;
+use crate::ssh_config::ConnectionProtocol;
 use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
@@ -38,6 +39,7 @@ fn parses_metadata_and_filters_hidden_wildcard_hosts() {
 
     let host = &hosts[0];
     assert_eq!(host.name, "app");
+    assert_eq!(host.protocol, ConnectionProtocol::Ssh);
     assert_eq!(host.hostname.as_deref(), Some("10.0.0.10"));
     assert_eq!(host.user.as_deref(), Some("deploy"));
     assert_eq!(host.port, Some(2200));
@@ -155,6 +157,32 @@ fn invalid_pass_key_names_are_ignored() {
 
     let valid = hosts.iter().find(|host| host.name == "valid").expect("valid host");
     assert_eq!(valid.pass_key.as_deref(), Some("ok_1.2-3"));
+
+    let _ = fs::remove_dir_all(dir);
+}
+
+#[test]
+fn parses_rdp_metadata_comments() {
+    let dir = test_dir("rdp_metadata").expect("temp dir");
+    let config_path = dir.join("config");
+
+    write_file(
+        &config_path,
+        "Host desktop01\n#_Protocol rdp\n#_RdpDomain ACME\n#_RdpArgs /f +clipboard\n#_pass office_rdp\nHostName rdp.internal\nUser administrator\nPort 3390\n",
+    )
+    .expect("write config");
+
+    let hosts = parse_ssh_config(&config_path).expect("parse config");
+    assert_eq!(hosts.len(), 1);
+
+    let host = &hosts[0];
+    assert_eq!(host.protocol, ConnectionProtocol::Rdp);
+    assert_eq!(host.hostname.as_deref(), Some("rdp.internal"));
+    assert_eq!(host.user.as_deref(), Some("administrator"));
+    assert_eq!(host.port, Some(3390));
+    assert_eq!(host.pass_key.as_deref(), Some("office_rdp"));
+    assert_eq!(host.rdp_domain.as_deref(), Some("ACME"));
+    assert_eq!(host.rdp_args, vec!["/f".to_string(), "+clipboard".to_string()]);
 
     let _ = fs::remove_dir_all(dir);
 }

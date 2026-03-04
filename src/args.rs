@@ -19,6 +19,20 @@ pub enum VaultCommand {
     SetMasterPassword,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RdpCommandArgs {
+    /// Target host or configured alias.
+    pub target: String,
+    /// Optional username override.
+    pub user: Option<String>,
+    /// Optional domain override.
+    pub domain: Option<String>,
+    /// Optional port override.
+    pub port: Option<u16>,
+    /// Additional arguments forwarded to `xfreerdp3` or `xfreerdp`.
+    pub extra_args: Vec<String>,
+}
+
 /// Parsed command-line arguments
 #[derive(Debug, Clone)]
 pub struct MainArgs {
@@ -42,6 +56,8 @@ pub struct MainArgs {
     pub pass_entry: Option<String>,
     /// Hidden internal mode used to run the background unlock agent.
     pub agent_serve: bool,
+    /// Explicit RDP launch request.
+    pub rdp_command: Option<RdpCommandArgs>,
 }
 
 fn build_cli_command() -> Command {
@@ -90,6 +106,28 @@ fn build_cli_command() -> Command {
         )
         .arg(Arg::new("ssh_args").help("SSH arguments to forward to the SSH command").num_args(1..))
         .subcommand(
+            Command::new("rdp")
+                .about("Launch an RDP session using xfreerdp3 or xfreerdp")
+                .arg(Arg::new("target").help("RDP target host or configured alias").required(true))
+                .arg(Arg::new("user").short('u').long("user").help("Override the RDP username").num_args(1))
+                .arg(Arg::new("domain").short('D').long("domain").help("Override the RDP domain").num_args(1))
+                .arg(
+                    Arg::new("port")
+                        .short('p')
+                        .long("port")
+                        .help("Override the RDP port")
+                        .num_args(1)
+                        .value_parser(clap::value_parser!(u16)),
+                )
+                .arg(
+                    Arg::new("rdp_args")
+                        .help("Additional xfreerdp3/xfreerdp arguments")
+                        .num_args(0..)
+                        .trailing_var_arg(true)
+                        .allow_hyphen_values(true),
+                ),
+        )
+        .subcommand(
             Command::new("vault")
                 .about("Manage the password vault")
                 .subcommand_required(true)
@@ -127,14 +165,13 @@ fn build_cli_command() -> Command {
         .after_help(
             r"
 cossh                                              # Launch interactive session manager
-cossh -d                                           # Launch interactive session manager with safe debug enabled
-cossh -dd user@example.com                         # Raw debug enabled (may log terminal content and secrets)
 cossh -d user@example.com                          # Safe debug enabled
 cossh --pass-entry office_fw user@example.com      # Override the password entry for this launch
-cossh -l user@example.com                          # SSH logging enabled
 cossh -l -P network user@firewall.example.com      # Use 'network' config profile
 cossh -l user@host -p 2222                         # Both modes with SSH args
 cossh user@host -G                                 # Non-interactive command
+cossh vault help                                   # View vault management options
+cossh rdp --help                                   # View RDP launch options
 ",
         )
 }
@@ -157,6 +194,28 @@ fn parse_vault_command(matches: &clap::ArgMatches) -> Option<VaultCommand> {
     }
 }
 
+fn parse_rdp_command(matches: &clap::ArgMatches) -> Option<RdpCommandArgs> {
+    let ("rdp", rdp_matches) = matches.subcommand()? else {
+        return None;
+    };
+
+    let target = rdp_matches.get_one::<String>("target")?.trim().to_string();
+    if target.is_empty() {
+        return None;
+    }
+
+    Some(RdpCommandArgs {
+        target,
+        user: rdp_matches.get_one::<String>("user").cloned().filter(|value| !value.trim().is_empty()),
+        domain: rdp_matches.get_one::<String>("domain").cloned().filter(|value| !value.trim().is_empty()),
+        port: rdp_matches.get_one::<u16>("port").copied(),
+        extra_args: rdp_matches
+            .get_many::<String>("rdp_args")
+            .map(|values| values.cloned().collect())
+            .unwrap_or_default(),
+    })
+}
+
 fn parse_main_args_from<I, T>(cmd: &Command, raw_args: I) -> MainArgs
 where
     I: IntoIterator<Item = T>,
@@ -173,12 +232,14 @@ where
     let test_mode = matches.get_flag("test");
     let profile = matches.get_one::<String>("profile").cloned().filter(|profile_name| !profile_name.is_empty());
     let vault_command = parse_vault_command(&matches);
+    let rdp_command = parse_rdp_command(&matches);
     let pass_entry = matches.get_one::<String>("pass_entry").cloned().filter(|value| !value.is_empty());
     let agent_serve = matches
         .subcommand()
         .is_some_and(|(name, sub_matches)| name == "agent" && sub_matches.get_flag("serve"));
     let no_user_args = raw_args.len() <= 1;
-    let debug_only = debug_count > 0 && !ssh_logging && profile.is_none() && ssh_args.is_empty() && vault_command.is_none() && pass_entry.is_none();
+    let debug_only =
+        debug_count > 0 && !ssh_logging && profile.is_none() && ssh_args.is_empty() && vault_command.is_none() && pass_entry.is_none() && rdp_command.is_none();
     let interactive = (no_user_args || debug_only) && !agent_serve;
 
     MainArgs {
@@ -192,46 +253,11 @@ where
         vault_command,
         pass_entry,
         agent_serve,
+        rdp_command,
     }
 }
 
 /// Parses command-line arguments using clap.
-///
-/// # Arguments Supported
-/// - `-d, --debug` - Enable safe debug mode with detailed metadata logging
-/// - `-dd` - Enable raw-content debug tracing for troubleshooting
-/// - `-l, --log` - Enable SSH session logging
-/// - `-t, --test` - Ignore config logging settings and use only CLI `-d/-l` logging flags
-/// - `vault init` - Initialize the password vault
-/// - `vault add <name>` - Create or update a password vault entry interactively
-/// - `vault remove <name>` - Remove a password vault entry
-/// - `vault list` - List current password vault entries
-/// - `vault unlock` - Unlock the shared password vault
-/// - `vault lock` - Lock the shared password vault
-/// - `vault status` - Show shared password vault status
-/// - `vault set-master-password` - Create or rotate the master password
-/// - `--pass-entry <name>` - Override the password entry for a direct launch
-/// - `ssh_args` - All remaining arguments are passed to SSH
-///
-/// # Examples
-/// ```text
-/// cossh                              # Launch interactive session manager (default when no args)
-/// cossh -d                           # Launch interactive session manager with safe debug enabled
-/// cossh -dd user@example.com         # Raw debug enabled (may log terminal content and secrets)
-/// cossh vault init                   # Initialize the password vault
-/// cossh vault add office_fw     # Create/update password vault entry
-/// cossh vault list                   # List password vault entries
-/// cossh vault unlock                 # Unlock the shared password vault
-/// cossh -d user@example.com          # Safe debug enabled
-/// cossh --pass-entry office_fw user@example.com
-/// cossh -l user@example.com          # SSH logging enabled
-/// cossh -tld -P network localhost    # Test mode with CLI-controlled logging
-/// cossh -d -l user@example.com -p 22 # Both modes with SSH args
-/// cossh -- -G user@example.com       # Non-interactive command (config dump).
-/// ```
-///
-/// # Returns
-/// A `MainArgs` struct containing all parsed arguments
 pub fn main_args() -> MainArgs {
     let cmd = build_cli_command();
     let parsed = parse_main_args_from(&cmd, std::env::args_os());
@@ -240,7 +266,7 @@ pub fn main_args() -> MainArgs {
         return parsed;
     }
 
-    if parsed.vault_command.is_none() && !parsed.interactive && parsed.ssh_args.is_empty() {
+    if parsed.vault_command.is_none() && parsed.rdp_command.is_none() && !parsed.interactive && parsed.ssh_args.is_empty() {
         let mut help_cmd = cmd;
         let _ = help_cmd.print_long_help();
         println!();

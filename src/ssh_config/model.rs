@@ -6,11 +6,36 @@ use std::path::PathBuf;
 /// Stable folder identifier used by the TUI tree.
 pub type FolderId = usize;
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum ConnectionProtocol {
+    #[default]
+    Ssh,
+    Rdp,
+}
+
+impl ConnectionProtocol {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Ssh => "ssh",
+            Self::Rdp => "rdp",
+        }
+    }
+
+    pub fn display_name(self) -> &'static str {
+        match self {
+            Self::Ssh => "SSH",
+            Self::Rdp => "RDP",
+        }
+    }
+}
+
 /// Represents a single SSH host configuration.
 #[derive(Debug, Clone)]
 pub struct SshHost {
     /// The host name/alias from the config.
     pub name: String,
+    /// Connection protocol for this host.
+    pub protocol: ConnectionProtocol,
     /// Hostname (or IP address).
     pub hostname: Option<String>,
     /// Username.
@@ -27,6 +52,10 @@ pub struct SshHost {
     pub profile: Option<String>,
     /// Password key name (from `#_pass` comment).
     pub pass_key: Option<String>,
+    /// Optional RDP domain (from `#_RdpDomain` comment).
+    pub rdp_domain: Option<String>,
+    /// Additional FreeRDP client arguments (from `#_RdpArgs` comments).
+    pub rdp_args: Vec<String>,
     /// Whether to hide this host from the interactive host view (from `#_hidden` comment).
     pub hidden: bool,
     /// Local forward settings.
@@ -43,6 +72,7 @@ impl SshHost {
     pub fn new(name: String) -> Self {
         Self {
             name,
+            protocol: ConnectionProtocol::Ssh,
             hostname: None,
             user: None,
             port: None,
@@ -51,6 +81,8 @@ impl SshHost {
             description: None,
             profile: None,
             pass_key: None,
+            rdp_domain: None,
+            rdp_args: Vec::new(),
             hidden: false,
             local_forward: Vec::new(),
             remote_forward: Vec::new(),

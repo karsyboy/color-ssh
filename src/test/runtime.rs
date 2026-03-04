@@ -57,5 +57,6 @@ fn base_args(debug_count: u8, ssh_logging: bool, test_mode: bool) -> MainArgs {
         vault_command: None,
         pass_entry: None,
         agent_serve: false,
+        rdp_command: None,
     }
 }

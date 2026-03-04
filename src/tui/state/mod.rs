@@ -9,5 +9,5 @@ mod vault;
 pub(crate) use app::{AppState, ConnectRequest, HOST_PANEL_MAX_WIDTH, HOST_PANEL_MIN_WIDTH};
 pub(crate) use host_browser::{HostSearchEntry, HostTreeRow, HostTreeRowKind};
 pub(crate) use quick_connect::{QuickConnectField, QuickConnectState};
-pub(crate) use tabs::{HostTab, SshSession, TerminalSearchState};
+pub(crate) use tabs::{HostTab, ManagedChild, ManagedSession, TerminalSearchState};
 pub(crate) use vault::{VaultStatusModalState, VaultUnlockAction, VaultUnlockState};

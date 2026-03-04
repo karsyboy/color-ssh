@@ -398,7 +398,7 @@ impl AppState {
             let error_lines = vec![
                 Line::from(""),
                 Line::from(vec![
-                    Span::styled("Failed to start SSH session for ", Style::default().fg(theme::ansi_red())),
+                    Span::styled("Failed to start session for ", Style::default().fg(theme::ansi_red())),
                     Span::styled(&host.name, Style::default().fg(theme::ansi_yellow()).add_modifier(Modifier::BOLD)),
                 ]),
                 Line::from(""),

@@ -282,8 +282,11 @@ impl AppState {
         let Some(session) = &mut tab.session else {
             return Ok(());
         };
+        let Some(writer) = session.writer.as_ref() else {
+            return Ok(());
+        };
 
-        let mut writer = match session.writer.lock() {
+        let mut writer = match writer.lock() {
             Ok(writer) => writer,
             Err(lock_err) => {
                 log_error!("Failed to lock PTY writer: {}", lock_err);

@@ -1,7 +1,7 @@
 //! SSH config file parser and include tree builder.
 
 use super::include::{expand_include_pattern, resolve_include_pattern};
-use super::model::{FolderId, SshHost, SshHostTreeModel, TreeFolder};
+use super::model::{ConnectionProtocol, FolderId, SshHost, SshHostTreeModel, TreeFolder};
 use super::path::expand_tilde;
 use crate::log_debug;
 use crate::validation::validate_vault_entry_name;
@@ -14,6 +14,15 @@ use std::path::{Path, PathBuf};
 struct ParsedConfigFile {
     hosts: Vec<SshHost>,
     include_patterns: Vec<String>,
+}
+
+fn parse_protocol_tag(value: &str) -> Option<ConnectionProtocol> {
+    let normalized = value.trim().to_ascii_lowercase();
+    match normalized.as_str() {
+        "" | "ssh" => Some(ConnectionProtocol::Ssh),
+        "rdp" => Some(ConnectionProtocol::Rdp),
+        _ => None,
+    }
 }
 
 /// Parse an SSH config file and return a list of hosts.
@@ -134,6 +143,17 @@ fn parse_config_file(config_path: &Path) -> io::Result<ParsedConfigFile> {
                     host.description = Some(desc.clone());
                 }
             }
+            if let Some(protocol) = trimmed.strip_prefix("#_Protocol") {
+                let protocol_value = protocol.trim();
+                match parse_protocol_tag(protocol_value) {
+                    Some(protocol) => {
+                        for host in &mut current_hosts {
+                            host.protocol = protocol;
+                        }
+                    }
+                    None => log_debug!("Ignoring invalid #_Protocol value: {:?}", protocol_value),
+                }
+            }
             if let Some(profile) = trimmed.strip_prefix("#_Profile") {
                 let profile = profile.trim().to_string();
                 for host in &mut current_hosts {
@@ -150,6 +170,21 @@ fn parse_config_file(config_path: &Path) -> io::Result<ParsedConfigFile> {
                     log_debug!("Ignoring invalid #_pass key name: {:?}", pass_key);
                     for host in &mut current_hosts {
                         host.pass_key = None;
+                    }
+                }
+            }
+            if let Some(domain) = trimmed.strip_prefix("#_RdpDomain") {
+                let domain = domain.trim();
+                let domain = (!domain.is_empty()).then(|| domain.to_string());
+                for host in &mut current_hosts {
+                    host.rdp_domain = domain.clone();
+                }
+            }
+            if let Some(args) = trimmed.strip_prefix("#_RdpArgs") {
+                let args: Vec<String> = args.split_whitespace().map(str::to_string).collect();
+                if !args.is_empty() {
+                    for host in &mut current_hosts {
+                        host.rdp_args.extend(args.iter().cloned());
                     }
                 }
             }

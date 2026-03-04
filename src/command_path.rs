@@ -24,6 +24,7 @@ impl CachedPathError {
 }
 
 static SSH_PATH: OnceCell<Result<PathBuf, CachedPathError>> = OnceCell::new();
+static XFREERDP_PATH: OnceCell<Result<PathBuf, CachedPathError>> = OnceCell::new();
 static COSSH_PATH: OnceCell<Result<PathBuf, CachedPathError>> = OnceCell::new();
 
 fn resolve_cached(
@@ -46,9 +47,16 @@ pub(crate) fn cossh_path() -> io::Result<PathBuf> {
     resolve_cached(&COSSH_PATH, "cossh", resolve_current_exe_path)
 }
 
+pub(crate) fn xfreerdp_path() -> io::Result<PathBuf> {
+    resolve_cached(&XFREERDP_PATH, "xfreerdp3/xfreerdp", || {
+        resolve_path_from_env_candidates(&["xfreerdp3", "xfreerdp"])
+    })
+}
+
 pub(crate) fn resolve_known_command_path(command: &str) -> io::Result<PathBuf> {
     match command {
         "ssh" => ssh_path(),
+        "xfreerdp3" | "xfreerdp" => xfreerdp_path(),
         "cossh" => cossh_path(),
         _ => Err(io::Error::new(
             io::ErrorKind::InvalidInput,
@@ -60,6 +68,19 @@ pub(crate) fn resolve_known_command_path(command: &str) -> io::Result<PathBuf> {
 fn resolve_path_from_env(binary: &str) -> io::Result<PathBuf> {
     let located = which::which(binary).map_err(|err| io::Error::new(io::ErrorKind::NotFound, format!("{binary} not found in PATH: {err}")))?;
     validate_executable_path(&located, binary)
+}
+
+fn resolve_path_from_env_candidates(binaries: &[&str]) -> io::Result<PathBuf> {
+    let mut last_error = None;
+
+    for &binary in binaries {
+        match resolve_path_from_env(binary) {
+            Ok(path) => return Ok(path),
+            Err(err) => last_error = Some(err),
+        }
+    }
+
+    Err(last_error.unwrap_or_else(|| io::Error::new(io::ErrorKind::NotFound, "no candidate command names were provided")))
 }
 
 fn resolve_current_exe_path() -> io::Result<PathBuf> {

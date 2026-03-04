@@ -16,7 +16,7 @@
 
 ## About
 
-**Color SSH** (`cossh`) is a Rust-based wrapper for SSH that enhances your terminal experience with real-time syntax highlighting and session logging. Built for network engineers, system administrators, and anyone who works with devices that have basic shells.
+**Color SSH** (`cossh`) is a Rust-based wrapper for SSH and managed RDP launches that enhances your terminal experience with real-time syntax highlighting, shared vault access, and session logging. Built for network engineers, system administrators, and anyone who works with remote systems every day.
 
 ![cossh_example](./.resources/cossh_example.png)
 
@@ -29,6 +29,7 @@
 - Multiple profile support
 - Configurable rules using regex matching
 - Shared password vault unlock for TUI and direct mode
+- RDP launch support via `xfreerdp3` or `xfreerdp`
 
 
 ## Installation
@@ -37,6 +38,7 @@
 
 #### Requirement
 - SSH
+- `xfreerdp3` or `xfreerdp` for RDP sessions (Optional)
 
 ### Pre-built Binaries (Recommended)
 Download the latest release from [GitHub Releases](https://github.com/karsyboy/color-ssh/releases/).
@@ -66,6 +68,7 @@ Shell completion scripts are included for `fish` and `zsh`. For instructions see
 Usage: cossh [OPTIONS] [ssh_args]... [COMMAND]
 
 Commands:
+  rdp    Launch an RDP session using xfreerdp3 or xfreerdp
   vault  Manage the password vault
   help   Print this message or the help of the given subcommand(s)
 
@@ -91,6 +94,25 @@ cossh -l user@example.com                          # SSH logging enabled
 cossh -l -P network user@firewall.example.com      # Use 'network' config profile
 cossh -l user@host -p 2222                         # Both modes with SSH args
 cossh user@host -G                                 # Non-interactive command
+cossh rdp desktop01                                # Launch a configured RDP host
+```
+
+### RDP Usage
+```
+Launch an RDP session using xfreerdp3
+
+Usage: cossh rdp [OPTIONS] <target> [rdp_args]...
+
+Arguments:
+  <target>       RDP target host or configured alias
+  [rdp_args]...  Additional xfreerdp3 arguments
+
+Options:
+  -u, --user <user>      Override the RDP username
+  -D, --domain <domain>  Override the RDP domain
+  -p, --port <port>      Override the RDP port
+  -h, --help             Print help
+  -V, --version          Print version
 ```
 
 ### Vault Usage
@@ -115,7 +137,6 @@ Options:
   -V, --version  Print version
 ```
 
-
 ## Configuration
 
 #### Rule Config
@@ -128,15 +149,18 @@ Configuration files are looked for in the following order:
 
 If no configuration file is found the default configuration will be created at `~/.color-ssh/cossh-config.yaml`.
 
-#### Color-SSH TUI Metadata in `~/.ssh/config`
+#### Color-SSH Metadata in `~/.ssh/config`
 
 The interactive session manager supports metadata comments inside the SSH config file.
 
 | Tag | What it does |
 | --- | --- |
+| `#_Protocol <ssh\|rdp>` | Selects whether the host launches with SSH or RDP. Defaults to `ssh`. |
 | `#_Desc <text>` | Adds description in the info view. |
 | `#_Profile <name>` | Opens that host using the matching cossh profile (`[profile].cossh-config.yaml`). |
 | `#_pass <name>` | Uses password vault entry `<name>` for password auto-login. |
+| `#_RdpDomain <name>` | Sets the RDP domain passed to the FreeRDP client as `/d:<name>`. |
+| `#_RdpArgs <args...>` | Appends additional `xfreerdp3`/`xfreerdp` arguments for that host. |
 | `#_hidden <true\|yes\|1>` | Hides the host from the interactive host list. |
 
 ```sshconfig
@@ -146,6 +170,17 @@ Host switch01
     #_Profile network
     #_Desc Example Switch
     #_pass test_pass
+```
+
+```sshconfig
+Host desktop01
+    HostName rdp01.example.com
+    User administrator
+    Port 3390
+    #_Protocol rdp
+    #_RdpDomain ACME
+    #_RdpArgs /f +clipboard
+    #_pass office_rdp
 ```
 
 For more info on the TUI go here [TUI User Guide](docs/TUI_USER_GUIDE.md).

@@ -71,7 +71,7 @@ pub fn run_session_manager() -> io::Result<()> {
     }
 
     if let Some(request) = selected_request {
-        log_debug!("Connecting to host: {}", request.target);
+        log_debug!("Connecting to {} host: {}", request.protocol.display_name(), request.target);
 
         let cossh_path = command_path::cossh_path()?;
         let mut cmd = Command::new(cossh_path);
@@ -83,10 +83,14 @@ pub fn run_session_manager() -> io::Result<()> {
             cmd.arg("-P").arg(profile);
         }
 
+        if request.protocol == crate::ssh_config::ConnectionProtocol::Rdp {
+            cmd.arg("rdp");
+        }
+
         let status = cmd.arg(request.target).status()?;
 
         if !status.success() {
-            log_error!("SSH connection failed with code: {:?}", status.code());
+            log_error!("{} connection failed with code: {:?}", request.protocol.display_name(), status.code());
         }
     }
 
