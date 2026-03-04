@@ -29,34 +29,15 @@
 - Configuration hot reload
 - Multiple profile support
 - Configurable rules using regex matching
-- Shared password vault unlock for TUI and direct mode
+- Shared password vault
 - RDP launch support via `xfreerdp3` or `xfreerdp`
-
-## Quick Start
-
-```bash
-# 1) Install
-cargo install color-ssh
-
-# 2) Start interactive session manager
-cossh
-
-# 3) Launch direct SSH
-cossh ssh user@example.com
-
-# 4) Optional: import hosts from ~/.ssh/config
-cossh --migrate
-
-# 5) Optional: unlock vault for password-backed hosts
-cossh vault unlock
-```
 
 ## Installation
 
 `color-ssh` supports Linux and macOS. Windows users should run it through WSL.
 
 #### Requirement
-- SSH
+- `ssh`
 - `xfreerdp3` or `xfreerdp` (Optional)
 
 ### Pre-built Binaries (Recommended)
