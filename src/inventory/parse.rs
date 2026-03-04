@@ -1,3 +1,5 @@
+//! YAML inventory parser and normalization helpers.
+
 use super::error::{InventoryResult, invalid_inventory};
 use super::model::{ConnectionProtocol, InventoryHostRaw, InventoryNodeRaw, ParsedInventoryDocument};
 use serde_yml::{Mapping, Value};
@@ -95,6 +97,7 @@ fn parse_inventory_host(mapping: &Mapping, source_file: &Path) -> InventoryResul
             "rdp_domain" => host.rdp_domain = optional_scalar_to_string(value, source_file, "rdp_domain")?,
             "rdp_args" => host.rdp_args = parse_string_list(value, source_file, "rdp_args", true)?,
             _ => {
+                // Preserve unknown host keys as custom SSH options.
                 let values = parse_ssh_option_values(value, source_file, &original_key)?;
                 if !values.is_empty() {
                     host.ssh_options.insert(original_key, values);

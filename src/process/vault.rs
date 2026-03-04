@@ -1,3 +1,5 @@
+//! Shared vault-access helpers for protocol launch paths.
+
 use crate::auth::{
     self, agent,
     ipc::UnlockPolicy,
@@ -41,6 +43,7 @@ fn unlock_agent_interactively(client: &agent::AgentClient) -> io::Result<()> {
             return Err(io::Error::new(io::ErrorKind::PermissionDenied, "master password cannot be empty"));
         }
 
+        // Keep retry loop local here so SSH/RDP builders can stay non-interactive.
         match client.unlock(master_password.expose_secret(), policy.clone()) {
             Ok(_) => {
                 log_debug!("Interactive password vault unlock succeeded");
@@ -84,6 +87,7 @@ pub(super) fn query_vault_entry_status(client: &agent::AgentClient, pass_entry_n
 
     if !entry_status.status.unlocked {
         log_debug!("Password vault was locked during launch preparation");
+        // Non-interactive callers cannot prompt for master password.
         if !io::stdin().is_terminal() {
             return Err(VaultAccessError::LockedWithoutTerminal);
         }
@@ -131,6 +135,7 @@ pub(super) fn resolve_vault_password(pass_entry_name: &str) -> io::Result<Sensit
         ));
     }
 
+    // Reuse short-lived askpass token flow to avoid exposing entry names broadly.
     let askpass_token = client
         .authorize_askpass(pass_entry_name)
         .map_err(|err| io::Error::new(io::ErrorKind::PermissionDenied, err.to_string()))?;

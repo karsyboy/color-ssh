@@ -10,13 +10,19 @@ use std::path::{Path, PathBuf};
 
 #[derive(Debug, Clone)]
 pub(crate) struct MigrationSummary {
+    /// Inventory output file path.
     pub(crate) output_path: PathBuf,
+    /// Backup path when an existing inventory was replaced.
     pub(crate) backup_path: Option<PathBuf>,
+    /// Number of hosts written to output.
     pub(crate) hosts_written: usize,
+    /// Number of wildcard aliases skipped.
     pub(crate) wildcard_aliases_skipped: usize,
+    /// Number of unsupported OpenSSH `Match` blocks skipped.
     pub(crate) unsupported_blocks_skipped: usize,
 }
 
+/// Migrate `~/.ssh/config` into the default YAML inventory path.
 pub(crate) fn migrate_default_ssh_config_to_inventory() -> io::Result<MigrationSummary> {
     let ssh_config_path =
         get_default_ssh_config_path().ok_or_else(|| io::Error::new(io::ErrorKind::NotFound, "Could not find home directory for ~/.ssh/config"))?;

@@ -1,3 +1,8 @@
+//! `color-ssh` library crate.
+//!
+//! This crate exposes the runtime entrypoint and shared modules used by the
+//! `cossh` binary.
+
 pub mod args;
 pub mod auth;
 mod command_path;
@@ -19,22 +24,21 @@ use std::io;
 
 pub use runtime::run;
 
-/// Result type alias for color-ssh operations
+/// Result alias for crate operations.
 pub type Result<T> = std::result::Result<T, Error>;
 
-/// Top-level error type encompassing all module-specific errors
+/// Top-level error type for public crate APIs.
 #[derive(Debug)]
 pub enum Error {
-    /// I/O operation error
+    /// Filesystem or process I/O error.
     Io(io::Error),
-    /// Configuration loading or parsing error
+    /// Configuration load/parse error.
     Config(config::ConfigError),
-    /// Logging operation error
+    /// Logging initialization or write error.
     Log(log::LogError),
 }
 
 impl std::fmt::Display for Error {
-    // Human-readable top-level error formatting.
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Error::Io(err) => write!(f, "IO error: {}", err),
@@ -45,8 +49,6 @@ impl std::fmt::Display for Error {
 }
 
 impl std::error::Error for Error {}
-
-// Error conversions for `?` propagation at crate boundaries.
 
 impl From<io::Error> for Error {
     fn from(err: io::Error) -> Self {

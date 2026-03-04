@@ -1,3 +1,5 @@
+//! RDP command construction and inventory/default resolution.
+
 use super::command_spec::PreparedCommand;
 use super::ssh_builder::resolve_host_by_destination;
 use super::vault::resolve_vault_password;
@@ -35,6 +37,7 @@ fn build_rdp_stdin_payload(host: &InventoryHost, password: SensitiveString) -> i
     }
     args.push(format!("/v:{server}"));
     args.push(format!("/p:{}", password.expose_secret()));
+    // Keep default cert handling explicit when caller did not specify one.
     if !has_rdp_cert_flag(&host.rdp.args) {
         args.push("/cert:tofu".to_string());
     }

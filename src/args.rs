@@ -8,6 +8,7 @@ use clap::{Arg, Command, error::ErrorKind};
 use std::ffi::OsString;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+/// Supported `cossh vault` subcommands.
 pub enum VaultCommand {
     Init,
     AddPass(String),
@@ -20,6 +21,7 @@ pub enum VaultCommand {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+/// Parsed arguments for `cossh rdp`.
 pub struct RdpCommandArgs {
     /// Target host or configured alias.
     pub target: String,
@@ -34,6 +36,7 @@ pub struct RdpCommandArgs {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+/// Parsed arguments for `cossh ssh`.
 pub struct SshCommandArgs {
     /// Arguments to pass through to the SSH command.
     pub ssh_args: Vec<String>,
@@ -42,12 +45,14 @@ pub struct SshCommandArgs {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+/// Protocol-specific command payloads.
 pub enum ProtocolCommand {
     Ssh(SshCommandArgs),
     Rdp(RdpCommandArgs),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+/// Top-level dispatch command variants.
 pub enum MainCommand {
     Protocol(ProtocolCommand),
     Vault(VaultCommand),
@@ -55,7 +60,7 @@ pub enum MainCommand {
     AgentServe,
 }
 
-/// Parsed command-line arguments
+/// Parsed top-level command-line arguments.
 #[derive(Debug, Clone)]
 pub struct MainArgs {
     /// Debug verbosity requested on the CLI (`-d` safe, `-dd` raw).
@@ -326,7 +331,7 @@ where
     Ok(parsed)
 }
 
-/// Parses command-line arguments using clap.
+/// Parse process command-line arguments using clap.
 pub fn main_args() -> MainArgs {
     let cmd = build_cli_command();
     let parsed = parse_main_args_from(&cmd, std::env::args_os());

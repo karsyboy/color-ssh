@@ -1,3 +1,5 @@
+//! Prepared command model shared by SSH/RDP builders.
+
 use crate::auth::secret::SensitiveString;
 use crate::command_path;
 use std::io;
@@ -5,10 +7,15 @@ use std::process::Command;
 
 #[derive(Debug)]
 pub(crate) struct PreparedCommand {
+    /// Program name to execute.
     pub(crate) program: String,
+    /// Program arguments.
     pub(crate) args: Vec<String>,
+    /// Extra environment variables to inject.
     pub(crate) env: Vec<(String, String)>,
+    /// Optional stdin payload.
     pub(crate) stdin_payload: Option<SensitiveString>,
+    /// Optional user-facing notice when fallback behavior was used.
     pub(crate) fallback_notice: Option<String>,
 }
 

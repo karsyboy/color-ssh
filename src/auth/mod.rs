@@ -1,3 +1,11 @@
+//! Authentication and vault integration.
+//!
+//! This module provides:
+//! - encrypted local password vault primitives
+//! - unlock agent IPC/client/server plumbing
+//! - CLI flows for vault lifecycle commands
+//! - internal askpass transport for password auto-login
+
 pub mod agent;
 mod cli;
 pub mod ipc;

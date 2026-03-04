@@ -1,8 +1,11 @@
+//! Errors returned by unlock-agent operations.
+
 use crate::auth::vault::VaultError;
 use std::fmt;
 use std::io;
 
 #[derive(Debug)]
+/// Agent client/server error variants.
 pub enum AgentError {
     Vault(VaultError),
     Io(io::Error),

@@ -32,6 +32,24 @@
 - Shared password vault unlock for TUI and direct mode
 - RDP launch support via `xfreerdp3` or `xfreerdp`
 
+## Quick Start
+
+```bash
+# 1) Install
+cargo install color-ssh
+
+# 2) Start interactive session manager
+cossh
+
+# 3) Launch direct SSH
+cossh ssh user@example.com
+
+# 4) Optional: import hosts from ~/.ssh/config
+cossh --migrate
+
+# 5) Optional: unlock vault for password-backed hosts
+cossh vault unlock
+```
 
 ## Installation
 
@@ -96,55 +114,9 @@ cossh rdp desktop01                                       # Launch a configured 
 cossh --migrate                                           # Import ~/.ssh/config into the YAML inventory
 ```
 
-### SSH Usage
-```bash
-Usage: cossh ssh <ssh_args>...
+## Documentation
 
-Arguments:
-  <ssh_args>...  SSH arguments to forward to the SSH command
-
-Options:
-  -h, --help     Print help
-  -V, --version  Print version
-
-```
-
-### RDP Usage
-```bash
-Usage: cossh rdp [OPTIONS] <target> [rdp_args]...
-
-Arguments:
-  <target>       RDP target host or configured alias
-  [rdp_args]...  Additional xfreerdp3/xfreerdp arguments
-
-Options:
-  -u, --user <user>      Override the RDP username
-  -D, --domain <domain>  Override the RDP domain
-  -p, --port <port>      Override the RDP port
-  -h, --help             Print help
-  -V, --version          Print version
-
-```
-
-### Vault Usage
-```bash
-Usage: cossh vault <COMMAND>
-
-Commands:
-  init                 Initialize the password vault
-  add                  Create or replace a password vault entry interactively
-  remove               Remove a password vault entry
-  list                 List password vault entries
-  unlock               Unlock the shared password vault
-  lock                 Lock the shared password vault
-  status               Show shared password vault status
-  set-master-password  Create or rotate the password vault master password
-  help                 Print this message or the help of the given subcommand(s)
-
-Options:
-  -h, --help     Print help
-  -V, --version  Print version
-```
+The full user wiki lives in [Here](https://github.com/karsyboy/color-ssh/wiki).
 
 ## Configuration
 
@@ -185,7 +157,7 @@ cossh --migrate
 ```
 
 
-For more info go here [TUI User Guide](docs/TUI_USER_GUIDE.md).
+For more info go here [TUI User Guide](docs/tui-guide.md).
 
 ## Uninstall
 

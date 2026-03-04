@@ -11,24 +11,30 @@ use std::time::{Duration, Instant};
 const AGENT_STARTUP_TIMEOUT: Duration = Duration::from_secs(2);
 const AGENT_STARTUP_POLL_INTERVAL: Duration = Duration::from_millis(10);
 
+/// Result of checking whether a vault entry is available for use.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AgentEntryStatus {
+    /// Current vault lock/unlock status.
     pub status: VaultStatus,
+    /// Whether the queried entry name exists in the vault.
     pub exists: bool,
 }
 
+/// Client used by runtime command paths to communicate with the unlock agent.
 #[derive(Debug, Clone)]
 pub struct AgentClient {
     paths: VaultPaths,
 }
 
 impl AgentClient {
+    /// Create a client bound to the default `~/.color-ssh` runtime paths.
     pub fn new() -> Result<Self, AgentError> {
         let paths = VaultPaths::resolve_default()?;
         log_debug!("Initialized password vault client for '{}'", paths.base_dir().display());
         Ok(Self { paths })
     }
 
+    /// Query current vault status.
     pub fn status(&self) -> Result<VaultStatus, AgentError> {
         log_debug!("Requesting password vault status");
         match self.request(AgentRequestPayload::Status, false) {
@@ -39,6 +45,7 @@ impl AgentClient {
         }
     }
 
+    /// Unlock the vault using a master password and timeout policy.
     pub fn unlock(&self, master_password: &str, policy: UnlockPolicy) -> Result<VaultStatus, AgentError> {
         log_debug!(
             "Requesting password vault unlock with idle={}s absolute={}s",
@@ -58,6 +65,7 @@ impl AgentClient {
         }
     }
 
+    /// Query whether a vault entry exists and whether the vault is unlocked.
     pub fn entry_status(&self, name: &str) -> Result<AgentEntryStatus, AgentError> {
         log_debug!("Requesting password vault entry status '{}'", name);
         match self.request(AgentRequestPayload::EntryStatus { name: name.to_string() }, true)? {
@@ -67,6 +75,7 @@ impl AgentClient {
         }
     }
 
+    /// Authorize one short-lived askpass token for the named vault entry.
     pub fn authorize_askpass(&self, name: &str) -> Result<SensitiveString, AgentError> {
         log_debug!("Requesting internal askpass authorization for '{}'", name);
         match self.request(AgentRequestPayload::AuthorizeAskpass { name: name.to_string() }, true)? {
@@ -76,6 +85,7 @@ impl AgentClient {
         }
     }
 
+    /// Resolve a secret by askpass token.
     pub fn get_secret(&self, token: &str) -> Result<SensitiveString, AgentError> {
         log_debug!("Requesting password vault secret using askpass token");
         match self.request(
@@ -90,6 +100,7 @@ impl AgentClient {
         }
     }
 
+    /// Request an explicit vault lock and agent shutdown.
     pub fn lock(&self) -> Result<VaultStatus, AgentError> {
         log_debug!("Requesting password vault lock");
         match self.request(AgentRequestPayload::Lock, false)? {
@@ -134,6 +145,7 @@ impl AgentClient {
             .env_remove("SSH_ASKPASS_REQUIRE");
         command.spawn()?;
 
+        // Poll readiness briefly so first caller does not race the agent boot.
         let started_at = Instant::now();
         while started_at.elapsed() < AGENT_STARTUP_TIMEOUT {
             if ipc::send_request(&self.paths, &AgentRequestPayload::Status).is_ok() {

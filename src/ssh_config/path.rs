@@ -13,7 +13,7 @@ pub(super) fn expand_tilde(path: &str) -> String {
     path.to_string()
 }
 
-/// Get the default SSH config path.
+/// Returns `~/.ssh/config`.
 pub fn get_default_ssh_config_path() -> Option<PathBuf> {
     dirs::home_dir().map(|home| home.join(".ssh").join("config"))
 }

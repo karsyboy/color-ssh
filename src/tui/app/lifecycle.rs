@@ -95,6 +95,7 @@ pub fn run_session_manager() -> io::Result<()> {
             }
         }
 
+        // Relaunch via `cossh` so profile/logging/vault handling stays unified.
         let status = cmd.arg(request.target).status()?;
 
         if !status.success() {

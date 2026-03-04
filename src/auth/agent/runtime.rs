@@ -1,3 +1,5 @@
+//! In-memory unlock session state for the vault agent.
+
 use super::error::AgentError;
 use crate::auth::ipc::{UnlockPolicy, VaultStatus};
 use crate::auth::secret::{ExposeSecret, SensitiveString};
@@ -31,6 +33,7 @@ pub(crate) struct AgentRuntime {
 }
 
 impl AgentRuntime {
+    /// Create locked runtime state with no active key material.
     pub(crate) fn new() -> Self {
         Self {
             data_key: None,
@@ -42,6 +45,7 @@ impl AgentRuntime {
         }
     }
 
+    /// Returns `true` when session expiration caused a lock transition.
     pub(crate) fn expire_if_needed(&mut self) -> bool {
         let Some(policy) = &self.policy else {
             return false;
@@ -70,6 +74,7 @@ impl AgentRuntime {
         false
     }
 
+    /// Build current vault status snapshot.
     pub(crate) fn status(&self, paths: &VaultPaths) -> VaultStatus {
         let vault_exists = paths.metadata_path().is_file();
         let Some(policy) = &self.policy else {
@@ -99,6 +104,7 @@ impl AgentRuntime {
         }
     }
 
+    /// Install decrypted data-key material and unlock policy.
     pub(crate) fn unlock(&mut self, data_key: [u8; 32], policy: UnlockPolicy) {
         let _ = self.lock();
         log_debug!(
@@ -113,10 +119,12 @@ impl AgentRuntime {
         self.policy = Some(policy);
     }
 
+    /// Refresh idle activity timestamp.
     pub(crate) fn touch(&mut self) {
         self.last_activity_at = Some(Instant::now());
     }
 
+    /// Lock runtime and zeroize sensitive state. Returns previous unlock state.
     pub(crate) fn lock(&mut self) -> bool {
         let was_unlocked = self.data_key.is_some();
         if let Some(mut data_key) = self.data_key.take() {
@@ -137,10 +145,12 @@ impl AgentRuntime {
         was_unlocked
     }
 
+    /// Build an unlocked vault handle from in-memory key material.
     pub(crate) fn unlocked_vault(&self, paths: &VaultPaths) -> Option<UnlockedVault> {
         self.data_key.map(|data_key| UnlockedVault::from_data_key(paths.clone(), data_key))
     }
 
+    /// Issue a short-lived, single-use askpass token for one entry name.
     pub(crate) fn issue_askpass_token(&mut self, entry_name: &str) -> Result<SensitiveString, AgentError> {
         self.prune_expired_askpass_leases();
         let mut token_bytes = [0u8; ASKPASS_TOKEN_BYTES];
@@ -157,6 +167,7 @@ impl AgentRuntime {
         Ok(token)
     }
 
+    /// Consume token and return bound entry name.
     pub(crate) fn take_askpass_entry(&mut self, token: &str) -> Option<String> {
         self.prune_expired_askpass_leases();
         let index = self.askpass_leases.iter().position(|lease| lease.token.expose_secret() == token)?;
@@ -176,6 +187,7 @@ impl AgentRuntime {
     }
 }
 
+/// Exponential backoff helper for idle-loop polling.
 pub(crate) fn next_idle_shutdown_poll_interval(current: Duration) -> Duration {
     current.saturating_mul(2).min(AGENT_IDLE_SHUTDOWN_POLL_INTERVAL_MAX)
 }

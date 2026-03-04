@@ -1,3 +1,8 @@
+//! Sensitive in-memory string/buffer helpers.
+//!
+//! These wrappers reduce accidental secret exposure in logs and ensure buffers
+//! are zeroized when dropped.
+
 pub use secrecy::ExposeSecret;
 use secrecy::SecretString;
 use std::fmt;
@@ -5,17 +10,21 @@ use std::str;
 use zeroize::Zeroize;
 
 #[derive(Default, Clone)]
+/// Redacted wrapper around a secret string.
 pub struct SensitiveString(SecretString);
 
 impl SensitiveString {
+    /// Create a new sensitive string from owned or borrowed input.
     pub fn new(value: impl Into<String>) -> Self {
         Self(SecretString::new(value.into().into_boxed_str()))
     }
 
+    /// Build directly from an owned `String`.
     pub fn from_owned_string(value: String) -> Self {
         Self(SecretString::new(value.into_boxed_str()))
     }
 
+    /// Decode UTF-8 bytes into a sensitive string.
     pub fn from_utf8_bytes(value: Vec<u8>) -> Result<Self, std::string::FromUtf8Error> {
         String::from_utf8(value).map(Self::from_owned_string)
     }
@@ -58,12 +67,14 @@ pub fn sensitive_string(value: impl Into<String>) -> SensitiveString {
 }
 
 #[derive(Default)]
+/// Editable secret buffer used by interactive prompts.
 pub struct SensitiveBuffer {
     bytes: Vec<u8>,
     len: usize,
 }
 
 impl SensitiveBuffer {
+    /// Create an empty secret buffer.
     pub fn new() -> Self {
         Self::default()
     }
@@ -192,6 +203,7 @@ pub mod serde_sensitive_string {
     use serde::{Deserializer, Serializer};
     use std::fmt;
 
+    /// Serialize a sensitive string as plain text for protocol payloads.
     pub fn serialize<S>(value: &SensitiveString, serializer: S) -> Result<S::Ok, S::Error>
     where
         S: Serializer,
@@ -199,6 +211,7 @@ pub mod serde_sensitive_string {
         serializer.serialize_str(value.expose_secret())
     }
 
+    /// Deserialize a sensitive string from plain text.
     pub fn deserialize<'de, D>(deserializer: D) -> Result<SensitiveString, D::Error>
     where
         D: Deserializer<'de>,

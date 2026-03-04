@@ -47,7 +47,6 @@ pub struct SshHost {
 }
 
 impl SshHost {
-    // Construction.
     /// Create a new `SshHost` with just a name.
     pub fn new(name: String) -> Self {
         Self {
@@ -84,7 +83,6 @@ pub struct SshHostTreeModel {
 }
 
 impl SshHostTreeModel {
-    // Construction helpers.
     #[allow(dead_code)]
     pub(super) fn empty(root_path: PathBuf) -> Self {
         let root_name = root_path.file_name().and_then(|segment| segment.to_str()).unwrap_or("config").to_string();

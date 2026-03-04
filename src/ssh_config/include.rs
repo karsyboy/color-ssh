@@ -49,6 +49,7 @@ pub(super) fn expand_include_pattern(pattern: &str) -> Vec<PathBuf> {
 }
 
 fn matches_pattern(text: &str, pattern: &str) -> bool {
+    // Lightweight wildcard matcher supporting only '*' and '?'.
     let pattern_chars: Vec<char> = pattern.chars().collect();
     let text_chars: Vec<char> = text.chars().collect();
 
@@ -62,6 +63,7 @@ fn matches_pattern(text: &str, pattern: &str) -> bool {
                     return true;
                 }
 
+                // Greedy scan: advance text until the remaining pattern matches.
                 pattern_idx += 1;
                 while text_idx < text_chars.len() {
                     if matches_pattern(

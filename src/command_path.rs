@@ -1,3 +1,5 @@
+//! Secure command path resolution for known executables.
+
 use once_cell::sync::OnceCell;
 use std::os::unix::fs::{MetadataExt, PermissionsExt};
 use std::{

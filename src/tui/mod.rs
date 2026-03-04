@@ -1,4 +1,7 @@
-//! Interactive TUI-based SSH host selector.
+//! Interactive session manager UI.
+//!
+//! This module exposes the public TUI entrypoint and keeps internal state,
+//! rendering, and terminal emulation modules private.
 
 mod app;
 mod features;
@@ -12,4 +15,5 @@ pub(crate) use state::{
     VaultStatusModalState, VaultUnlockAction, VaultUnlockState,
 };
 
+/// Run the interactive session manager.
 pub use app::run_session_manager;

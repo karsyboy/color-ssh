@@ -1,3 +1,8 @@
+//! Encrypted local password vault.
+//!
+//! Vault data is stored under `~/.color-ssh/vault` with restrictive
+//! permissions and authenticated encryption at rest.
+
 use crate::auth::secret::{SensitiveString, sensitive_string};
 use crate::validation::validate_vault_entry_name;
 use argon2::{Algorithm, Argon2, Params, Version};
@@ -29,6 +34,7 @@ const WRAPPED_KEY_AAD: &[u8] = b"color-ssh/vault-metadata/v1";
 const ENTRY_AAD_PREFIX: &[u8] = b"color-ssh/vault-entry/v1:";
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+/// Vault metadata containing wrapped key material and KDF settings.
 pub struct VaultMetadata {
     pub version: u8,
     pub kdf_salt: String,
@@ -42,6 +48,7 @@ pub struct VaultMetadata {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+/// Encrypted vault entry payload.
 pub struct VaultEntry {
     pub version: u8,
     pub name: String,
@@ -51,11 +58,13 @@ pub struct VaultEntry {
 }
 
 #[derive(Debug, Clone)]
+/// Filesystem paths used by vault and agent runtime data.
 pub struct VaultPaths {
     base_dir: PathBuf,
 }
 
 #[derive(Debug)]
+/// Errors returned by vault operations.
 pub enum VaultError {
     MissingHomeDirectory,
     InvalidEntryName,
@@ -93,6 +102,7 @@ impl From<io::Error> for VaultError {
 }
 
 impl VaultPaths {
+    /// Resolve default paths rooted at `~/.color-ssh`.
     pub fn resolve_default() -> Result<Self, VaultError> {
         let Some(home_dir) = dirs::home_dir() else {
             return Err(VaultError::MissingHomeDirectory);
@@ -107,22 +117,27 @@ impl VaultPaths {
         Self { base_dir }
     }
 
+    /// Base directory used for all `color-ssh` data files.
     pub fn base_dir(&self) -> &Path {
         &self.base_dir
     }
 
+    /// Path to the encrypted vault directory.
     pub fn vault_dir(&self) -> PathBuf {
         self.base_dir.join(VAULT_DIRNAME)
     }
 
+    /// Path to vault metadata JSON.
     pub fn metadata_path(&self) -> PathBuf {
         self.vault_dir().join(VAULT_METADATA_FILENAME)
     }
 
+    /// Directory containing encrypted entry JSON files.
     pub fn entries_dir(&self) -> PathBuf {
         self.vault_dir().join(VAULT_ENTRIES_DIRNAME)
     }
 
+    /// Path to one entry file after name validation.
     pub fn entry_path(&self, name: &str) -> Result<PathBuf, VaultError> {
         if !validate_vault_entry_name(name) {
             return Err(VaultError::InvalidEntryName);
@@ -130,12 +145,14 @@ impl VaultPaths {
         Ok(self.entries_dir().join(format!("{name}.json")))
     }
 
+    /// Runtime directory used by unlock-agent IPC/event files.
     pub fn run_dir(&self) -> PathBuf {
         self.base_dir.join(RUN_DIRNAME)
     }
 }
 
 #[derive(Debug)]
+/// Unlocked vault handle carrying decrypted data key material.
 pub struct UnlockedVault {
     paths: VaultPaths,
     data_key: Zeroizing<[u8; DATA_KEY_LEN]>,
@@ -149,6 +166,7 @@ impl UnlockedVault {
         }
     }
 
+    /// Encrypt and store one secret under `name`.
     pub fn store_secret(&self, name: &str, secret: &str) -> Result<(), VaultError> {
         if !validate_vault_entry_name(name) {
             return Err(VaultError::InvalidEntryName);
@@ -184,6 +202,7 @@ impl UnlockedVault {
         Ok(())
     }
 
+    /// Decrypt and return one secret by `name`.
     pub fn get_secret(&self, name: &str) -> Result<SensitiveString, VaultError> {
         if !validate_vault_entry_name(name) {
             return Err(VaultError::InvalidEntryName);
@@ -230,6 +249,7 @@ impl UnlockedVault {
         }
     }
 
+    /// Remove one secret entry by `name`.
     pub fn remove_entry(&self, name: &str) -> Result<(), VaultError> {
         let path = self.paths.entry_path(name)?;
         if !path.exists() {
@@ -239,6 +259,7 @@ impl UnlockedVault {
         Ok(())
     }
 
+    /// Return paths associated with this unlocked vault handle.
     pub fn paths(&self) -> &VaultPaths {
         &self.paths
     }
@@ -248,26 +269,32 @@ impl UnlockedVault {
     }
 }
 
+/// Returns whether the default vault is initialized.
 pub fn vault_exists() -> Result<bool, VaultError> {
     Ok(VaultPaths::resolve_default()?.metadata_path().is_file())
 }
 
+/// List all entry names in the default vault.
 pub fn list_entries() -> Result<Vec<String>, VaultError> {
     list_entries_with_paths(&VaultPaths::resolve_default()?)
 }
 
+/// Returns whether the named entry exists in the default vault.
 pub fn entry_exists(name: &str) -> Result<bool, VaultError> {
     entry_exists_with_paths(&VaultPaths::resolve_default()?, name)
 }
 
+/// Initialize the default vault with a master password.
 pub fn initialize_vault(master_password: &str) -> Result<(), VaultError> {
     initialize_vault_with_paths(&VaultPaths::resolve_default()?, master_password)
 }
 
+/// Unlock the default vault and return a handle for entry operations.
 pub fn unlock_with_password(master_password: &str) -> Result<UnlockedVault, VaultError> {
     unlock_with_password_and_paths(&VaultPaths::resolve_default()?, master_password)
 }
 
+/// Rotate the default vault master password.
 pub fn rotate_master_password(current_password: &str, new_password: &str) -> Result<(), VaultError> {
     rotate_master_password_with_paths(&VaultPaths::resolve_default()?, current_password, new_password)
 }

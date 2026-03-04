@@ -6,6 +6,7 @@ mod startup;
 
 use std::process::ExitCode;
 
+/// Execute the `cossh` runtime and return process exit code.
 pub fn run() -> crate::Result<ExitCode> {
     dispatch::run()
 }

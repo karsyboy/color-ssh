@@ -9,13 +9,18 @@ use std::str::FromStr;
 /// Stable folder identifier used by the TUI tree.
 pub type FolderId = usize;
 
+/// Arbitrary SSH option map (`option_name -> values`).
 pub type SshOptionMap = BTreeMap<String, Vec<String>>;
 
+/// Inventory-level connection protocol.
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub enum ConnectionProtocol {
+    /// OpenSSH launch.
     #[default]
     Ssh,
+    /// FreeRDP launch.
     Rdp,
+    /// Preserved unknown protocol string.
     Other(String),
 }
 
@@ -65,42 +70,69 @@ impl fmt::Display for ConnectionProtocol {
     }
 }
 
+/// SSH-specific inventory options.
 #[derive(Debug, Clone, Default)]
 pub struct SshHostOptions {
+    /// One or more identity files.
     pub identity_files: Vec<String>,
+    /// Equivalent to SSH `IdentitiesOnly`.
     pub identities_only: Option<bool>,
+    /// SSH `ProxyJump`.
     pub proxy_jump: Option<String>,
+    /// SSH `ProxyCommand`.
     pub proxy_command: Option<String>,
+    /// SSH `ForwardAgent`.
     pub forward_agent: Option<String>,
+    /// SSH `LocalForward` entries.
     pub local_forward: Vec<String>,
+    /// SSH `RemoteForward` entries.
     pub remote_forward: Vec<String>,
+    /// Additional SSH options not promoted to first-class fields.
     pub extra_options: SshOptionMap,
 }
 
+/// RDP-specific inventory options.
 #[derive(Debug, Clone, Default)]
 pub struct RdpHostOptions {
+    /// Optional RDP domain.
     pub domain: Option<String>,
+    /// Additional FreeRDP args.
     pub args: Vec<String>,
 }
 
+/// Fully normalized host record loaded from inventory files.
 #[derive(Debug, Clone)]
 pub struct InventoryHost {
+    /// User-facing alias.
     pub name: String,
+    /// Optional description shown in UI.
     pub description: Option<String>,
+    /// Launch protocol.
     pub protocol: ConnectionProtocol,
+    /// Destination hostname or IP.
     pub host: String,
+    /// Optional login user.
     pub user: Option<String>,
+    /// Optional destination port.
     pub port: Option<u16>,
+    /// Optional runtime profile.
     pub profile: Option<String>,
+    /// Optional vault entry name.
     pub vault_pass: Option<String>,
+    /// Whether to hide this host from runtime host lists.
     pub hidden: bool,
+    /// SSH-specific options.
     pub ssh: SshHostOptions,
+    /// RDP-specific options.
     pub rdp: RdpHostOptions,
+    /// Source inventory file where this host was loaded.
     pub source_file: PathBuf,
+    /// Folder path from root to this host.
     pub source_folder_path: Vec<String>,
 }
 
 impl InventoryHost {
+    /// Construct a host with SSH defaults using `name` as alias and host.
     pub fn new(name: String) -> Self {
         Self {
             host: name.clone(),
@@ -123,17 +155,24 @@ impl InventoryHost {
 /// Tree folder node used by the TUI tree.
 #[derive(Debug, Clone)]
 pub struct TreeFolder {
+    /// Stable folder id.
     pub id: FolderId,
+    /// Folder display name.
     pub name: String,
+    /// Source file path represented by this folder.
     pub path: PathBuf,
+    /// Nested folders.
     pub children: Vec<TreeFolder>,
+    /// Indices into [`InventoryTreeModel::hosts`].
     pub host_indices: Vec<usize>,
 }
 
 /// Parsed inventory data and folder tree.
 #[derive(Debug, Clone)]
 pub struct InventoryTreeModel {
+    /// Folder tree rooted at the main inventory file.
     pub root: TreeFolder,
+    /// Flattened hosts in tree traversal order.
     pub hosts: Vec<InventoryHost>,
 }
 

@@ -1,16 +1,21 @@
+//! Inventory parsing and normalization error types.
+
 use std::fmt;
 use std::io;
 use std::path::{Path, PathBuf};
 
+/// Inventory operation result alias.
 pub(crate) type InventoryResult<T> = Result<T, InventoryError>;
 
 #[derive(Debug, Clone)]
+/// Inventory error with source file context.
 pub(crate) struct InventoryError {
     source_file: PathBuf,
     message: String,
 }
 
 impl InventoryError {
+    /// Build a new inventory error.
     pub(crate) fn new(source_file: &Path, message: impl Into<String>) -> Self {
         Self {
             source_file: source_file.to_path_buf(),
@@ -33,6 +38,7 @@ impl From<InventoryError> for io::Error {
     }
 }
 
+/// Convenience helper for building inventory parse errors.
 pub(crate) fn invalid_inventory(source_file: &Path, message: impl Into<String>) -> InventoryError {
     InventoryError::new(source_file, message)
 }

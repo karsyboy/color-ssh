@@ -1,13 +1,7 @@
-//! Configuration management module
+//! Runtime configuration loading, storage, and reload hooks.
 //!
-//! Provides:
-//! - Configuration file loading from multiple locations
-//! - YAML parsing and validation
-//! - Hot-reloading via file watching
-//! - Global configuration access via thread-safe static
-//!
-//! The configuration is loaded once at startup and stored in a global
-//! [`SESSION_CONFIG`] static that can be accessed from anywhere in the application.
+//! The active config lives in [`SESSION_CONFIG`] and is shared through a
+//! process-wide lock.
 
 mod errors;
 mod loader;
@@ -25,10 +19,7 @@ use std::sync::{
     atomic::{AtomicU64, Ordering},
 };
 
-/// Global configuration instance
-///
-/// This is set once at startup (in main.rs) and can be updated via the config watcher.
-/// Use `.read()` for read-only access and `.write()` for modifications.
+/// Global configuration instance used by runtime components.
 ///
 /// # Examples
 ///
@@ -70,13 +61,14 @@ fn replace_config(shared_config: &Arc<RwLock<Config>>, config: Config) {
     }
 }
 
-/// Get a reference to the global configuration
+/// Get the global configuration container.
 pub fn get_config() -> &'static Arc<RwLock<Config>> {
     SESSION_CONFIG.get_or_init(|| Arc::new(RwLock::new(fallback_config())))
 }
 
-/// Run a read-only closure against the current configuration, recovering from a
-/// poisoned lock and logging the context when necessary.
+/// Run a read-only closure against the current configuration.
+///
+/// If the lock is poisoned, this recovers the inner value and logs the context.
 pub fn with_current_config<T>(context: &str, with_config: impl FnOnce(&Config) -> T) -> T {
     match get_config().read() {
         Ok(config_guard) => with_config(&config_guard),
@@ -88,8 +80,9 @@ pub fn with_current_config<T>(context: &str, with_config: impl FnOnce(&Config) -
     }
 }
 
-/// Run a mutable closure against the current configuration, recovering from a
-/// poisoned lock and logging the context when necessary.
+/// Run a mutable closure against the current configuration.
+///
+/// If the lock is poisoned, this recovers the inner value and logs the context.
 pub fn with_current_config_mut<T>(context: &str, with_config: impl FnOnce(&mut Config) -> T) -> T {
     match get_config().write() {
         Ok(mut config_guard) => with_config(&mut config_guard),
@@ -106,8 +99,7 @@ fn install_config(config: Config) {
     replace_config(get_config(), config);
 }
 
-/// Loads and initializes the global configuration with an optional profile.
-/// If fallback config has already been created, it is replaced in-place.
+/// Load and install session configuration for an optional profile.
 pub fn init_session_config(profile: Option<String>) -> Result<(), ConfigError> {
     let config_loader = loader::ConfigLoader::new(profile).map_err(ConfigError::IoError)?;
     let config = config_loader.load_config().map_err(ConfigError::IoError)?;
@@ -127,6 +119,7 @@ pub(crate) fn history_buffer_for_profile(profile: Option<&str>) -> Option<usize>
     config.interactive_settings.map(|interactive| interactive.history_buffer)
 }
 
+/// Return auth settings from the currently active configuration.
 pub fn auth_settings() -> AuthSettings {
     with_current_config("reading auth settings", |cfg| cfg.auth_settings.clone())
 }

@@ -1,3 +1,5 @@
+//! CLI handlers for `cossh vault` and internal askpass mode.
+
 use super::prompt::{
     prompt_entry_secret, prompt_existing_master_password, prompt_existing_master_password_with_label, prompt_new_master_password,
     prompt_new_master_password_with_label,

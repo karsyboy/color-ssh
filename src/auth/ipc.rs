@@ -1,3 +1,5 @@
+//! Local IPC protocol used by the password-vault unlock agent.
+
 use crate::auth::secret::{SensitiveString, serde_sensitive_string};
 use crate::auth::vault::VaultPaths;
 use crate::log_debug;
@@ -29,18 +31,25 @@ impl AgentEndpoint {
 }
 
 #[derive(Debug)]
+/// Result of trying to bind the agent socket listener.
 pub enum ListenerBindResult {
+    /// Listener successfully bound on this process.
     Bound(LocalSocketListener),
+    /// Another live agent already owns the endpoint.
     AlreadyRunning,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+/// Unlock timeout policy sent to the agent.
 pub struct UnlockPolicy {
+    /// Idle timeout after which the vault is re-locked.
     pub unlock_idle_timeout_seconds: u64,
+    /// Absolute unlock lifetime cap.
     pub unlock_absolute_timeout_seconds: u64,
 }
 
 impl UnlockPolicy {
+    /// Build a new unlock policy.
     pub fn new(unlock_idle_timeout_seconds: u64, unlock_absolute_timeout_seconds: u64) -> Self {
         Self {
             unlock_idle_timeout_seconds,
@@ -50,16 +59,24 @@ impl UnlockPolicy {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+/// Current vault state reported by the agent.
 pub struct VaultStatus {
+    /// Whether the vault metadata exists on disk.
     pub vault_exists: bool,
+    /// Whether the vault is currently unlocked in the agent.
     pub unlocked: bool,
+    /// Remaining unlock time in seconds, if unlocked.
     pub unlock_expires_in_seconds: Option<u64>,
+    /// Effective idle timeout for the current session.
     pub idle_timeout_seconds: Option<u64>,
+    /// Effective absolute timeout for the current session.
     pub absolute_timeout_seconds: Option<u64>,
+    /// Absolute timeout wall-clock epoch, if available.
     pub absolute_timeout_at_epoch_seconds: Option<u64>,
 }
 
 impl VaultStatus {
+    /// Build a locked-status snapshot.
     pub fn locked(vault_exists: bool) -> Self {
         Self {
             vault_exists,
@@ -74,20 +91,28 @@ impl VaultStatus {
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
+/// Emitted vault status transition kind.
 pub enum VaultStatusEventKind {
+    /// Vault transitioned to locked.
     Locked,
+    /// Vault transitioned to unlocked.
     Unlocked,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+/// Broadcast event stored in the status event file.
 pub struct VaultStatusEvent {
+    /// Transition kind.
     pub kind: VaultStatusEventKind,
+    /// Vault status snapshot at event time.
     pub status: VaultStatus,
+    /// Monotonic-ish event id derived from timestamp nanos.
     pub event_id: u128,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(tag = "type", rename_all = "snake_case")]
+/// Request payload sent from clients to the unlock agent.
 pub enum AgentRequestPayload {
     Status,
     Unlock {
@@ -109,6 +134,7 @@ pub enum AgentRequestPayload {
 }
 
 impl AgentRequestPayload {
+    /// Stable debug label for logging request flow.
     pub fn debug_name(&self) -> &'static str {
         match self {
             Self::Status => "status",
@@ -122,12 +148,15 @@ impl AgentRequestPayload {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+/// Top-level client request wrapper.
 pub struct AgentRequest {
+    /// Request payload.
     pub payload: AgentRequestPayload,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(tag = "type", rename_all = "snake_case")]
+/// Response envelope returned by the unlock agent.
 pub enum AgentResponse {
     Status {
         status: VaultStatus,
@@ -160,6 +189,7 @@ pub enum AgentResponse {
 }
 
 impl AgentResponse {
+    /// Borrow the status snapshot included in any response variant.
     pub fn status(&self) -> &VaultStatus {
         match self {
             Self::Status { status }
@@ -177,6 +207,7 @@ struct AgentRequestRef<'a> {
     payload: &'a AgentRequestPayload,
 }
 
+/// Bind the unlock-agent local socket listener.
 pub fn bind_listener(paths: &VaultPaths) -> io::Result<ListenerBindResult> {
     remove_legacy_state_file(paths);
     log_debug!("Binding password vault agent endpoint");
@@ -187,6 +218,7 @@ pub fn bind_listener(paths: &VaultPaths) -> io::Result<ListenerBindResult> {
     }
 }
 
+/// Send one request and wait for one response.
 pub fn send_request(paths: &VaultPaths, payload: &AgentRequestPayload) -> io::Result<AgentResponse> {
     log_debug!("Opening IPC request '{}' to password vault agent", payload.debug_name());
     let mut stream = connect(paths)?;
@@ -195,6 +227,7 @@ pub fn send_request(paths: &VaultPaths, payload: &AgentRequestPayload) -> io::Re
     read_json_line(&mut stream)
 }
 
+/// Connect directly to the current agent endpoint.
 pub fn connect(paths: &VaultPaths) -> io::Result<LocalSocketStream> {
     let endpoint = agent_endpoint(paths);
     log_debug!("Connecting to password vault agent endpoint '{}'", endpoint.debug_label());
@@ -203,12 +236,14 @@ pub fn connect(paths: &VaultPaths) -> io::Result<LocalSocketStream> {
     Ok(stream)
 }
 
+/// Remove endpoint resources used by the unlock agent.
 pub fn cleanup_endpoint(paths: &VaultPaths) -> io::Result<()> {
     log_debug!("Cleaning password vault agent endpoint resources");
     remove_legacy_state_file(paths);
     cleanup_local_endpoint(paths)
 }
 
+/// Persist a vault status event for local consumers.
 pub fn broadcast_vault_status_event(paths: &VaultPaths, kind: VaultStatusEventKind, status: VaultStatus) -> io::Result<()> {
     let run_dir = paths.run_dir();
     fs::create_dir_all(&run_dir)?;
@@ -226,16 +261,19 @@ pub fn broadcast_vault_status_event(paths: &VaultPaths, kind: VaultStatusEventKi
     Ok(())
 }
 
+/// Read the latest persisted vault status event.
 pub fn read_vault_status_event(paths: &VaultPaths) -> io::Result<VaultStatusEvent> {
     let path = vault_status_event_file_path(paths);
     let bytes = fs::read(path)?;
     serde_json::from_slice(&bytes).map_err(|err| io::Error::other(format!("failed to parse vault status event: {err}")))
 }
 
+/// Read one IPC request from a connected stream.
 pub fn read_request(stream: &mut LocalSocketStream) -> io::Result<AgentRequest> {
     read_json_line(stream)
 }
 
+/// Write one IPC response to a connected stream.
 pub fn write_response(stream: &mut LocalSocketStream, response: &AgentResponse) -> io::Result<()> {
     write_json_line(stream, response)
 }

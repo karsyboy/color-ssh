@@ -1,3 +1,5 @@
+//! Inventory include expansion and tree construction.
+
 use super::error::{InventoryResult, invalid_inventory};
 use super::include::{expand_include_pattern, resolve_include_pattern};
 use super::model::{FolderId, InventoryHost, InventoryNodeRaw, InventoryTreeModel, ParsedInventoryDocument, TreeFolder};
@@ -71,6 +73,7 @@ fn load_document_recursive(
     let canonical = inventory_path.canonicalize().unwrap_or_else(|_| inventory_path.to_path_buf());
 
     if !visited.insert(canonical.clone()) {
+        // Include cycles are ignored once a file has already been loaded.
         log_debug!("Skipping already visited inventory file (possible include cycle): {}", canonical.display());
         return Ok(());
     }
@@ -103,6 +106,7 @@ fn load_include_document(
     let canonical = inventory_path.canonicalize().unwrap_or_else(|_| inventory_path.to_path_buf());
 
     if visited.contains(&canonical) {
+        // Child include may point back to an ancestor; skip already-loaded file.
         log_debug!("Skipping already visited inventory file (possible include cycle): {}", canonical.display());
         return Ok(());
     }
@@ -172,6 +176,7 @@ fn add_inventory_node(
     match node {
         InventoryNodeRaw::Host(raw) => {
             let host = normalize_inventory_host(*raw, source_file, folder_path)?;
+            // Host aliases are globally unique across merged include files.
             if let Some(previous_path) = seen_host_names.insert(host.name.clone(), host.source_file.clone()) {
                 return Err(invalid_inventory(
                     source_file,

@@ -1,3 +1,5 @@
+//! SSH command synthesis and vault-aware askpass wiring.
+
 use super::command_spec::{PreparedCommand, build_plain_ssh_command};
 use super::vault::{VaultAccessError, query_vault_entry_status};
 use crate::auth::{agent, secret::ExposeSecret, transport};
@@ -81,6 +83,7 @@ pub(crate) fn resolve_host_by_destination<'a>(destination: &str, hosts: &'a [Inv
         return Some(host);
     }
 
+    // Hostname lookup is only accepted when the match is unique.
     let mut host_matches = hosts.iter().filter(|host| host.host == destination);
     let first = host_matches.next()?;
     if host_matches.next().is_some() {
@@ -103,6 +106,7 @@ fn inspect_ssh_args(args: &[String]) -> SshArgInspection {
     let mut inspection = SshArgInspection::default();
     let mut skip_next = false;
 
+    // Walk args once to identify destination position and caller overrides.
     for (idx, arg) in args.iter().enumerate() {
         if skip_next {
             skip_next = false;
@@ -331,6 +335,7 @@ fn inspect_ssh_args(args: &[String]) -> SshArgInspection {
             continue;
         }
 
+        // First non-flag token is treated as destination.
         inspection.destination_index = Some(idx);
         inspection.destination_host = Some(
             arg.split_once('@')
@@ -457,6 +462,7 @@ pub(crate) fn synthesize_ssh_args(args: &[String], host: &InventoryHost) -> Vec<
         }
     }
 
+    // Preserve user@host form when user is explicit in destination.
     let destination = if let Some(explicit_user) = inspection.explicit_destination_user {
         format!("{explicit_user}@{}", host.host)
     } else {
@@ -568,6 +574,7 @@ pub(crate) fn build_ssh_command(args: &[String], explicit_pass_entry: Option<&st
         ));
         return Ok(command);
     }
+    // At this point SSH can request password prompts through the internal helper.
     log_debug!("Configured internal askpass helper for direct SSH launch");
     Ok(command)
 }

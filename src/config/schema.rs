@@ -1,10 +1,7 @@
-//! Configuration data structures and styling
+//! Config schema definitions deserialized from YAML.
 //!
-//! Defines the configuration schema for color-ssh, including:
-//! - Application settings
-//! - Color palette definitions
-//! - Highlight rules with regex patterns
-//! - Runtime metadata
+//! This module defines stable user-facing config fields and runtime metadata
+//! attached after parsing.
 
 use crate::highlighter::CompiledHighlightRule;
 use regex::{Regex, RegexSet};
@@ -52,7 +49,6 @@ pub struct Settings {
 }
 
 impl Default for Settings {
-    // Default settings used when keys are missing in config files.
     fn default() -> Self {
         Self {
             remove_secrets: None,
@@ -173,6 +169,7 @@ fn deserialize_host_view_size<'de, D>(deserializer: D) -> Result<u16, D::Error>
 where
     D: Deserializer<'de>,
 {
+    // Clamp persisted values so invalid config does not break layout math.
     let value = u16::deserialize(deserializer)?;
     Ok(value.clamp(10, 70))
 }
@@ -181,6 +178,7 @@ fn deserialize_info_view_size<'de, D>(deserializer: D) -> Result<u16, D::Error>
 where
     D: Deserializer<'de>,
 {
+    // Clamp persisted values so invalid config does not break layout math.
     let value = u16::deserialize(deserializer)?;
     Ok(value.clamp(10, 80))
 }
@@ -189,6 +187,7 @@ fn deserialize_remote_clipboard_max_bytes<'de, D>(deserializer: D) -> Result<usi
 where
     D: Deserializer<'de>,
 {
+    // Keep clipboard payload bounds within a safe and practical range.
     let value = usize::deserialize(deserializer)?;
     Ok(value.clamp(64, 1_048_576))
 }

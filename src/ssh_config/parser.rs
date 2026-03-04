@@ -24,9 +24,13 @@ struct ParseOptions {
 }
 
 #[derive(Debug, Clone)]
+/// Result payload used by inventory migration to preserve folder structure.
 pub struct MigrationParseResult {
+    /// Parsed include-tree root.
     pub root: TreeFolder,
+    /// Flattened host list discovered across includes.
     pub hosts: Vec<SshHost>,
+    /// Number of unsupported `Match` blocks skipped.
     pub unsupported_blocks: usize,
 }
 
@@ -121,6 +125,7 @@ fn parse_tree_folder(
     let canonical = config_path.canonicalize().unwrap_or_else(|_| config_path.to_path_buf());
 
     if !visited.insert(canonical.clone()) {
+        // Avoid recursive include loops and duplicate host ingestion.
         log_debug!("Skipping already visited SSH include file (possible include cycle): {}", canonical.display());
         return Ok(None);
     }
@@ -161,6 +166,7 @@ fn parse_tree_folder(
 
 fn finalize_current_hosts(parsed: &mut ParsedConfigFile, current_hosts: &mut Vec<SshHost>, options: ParseOptions) {
     for host in current_hosts.drain(..) {
+        // Runtime host browsing hides wildcard aliases and explicitly hidden hosts.
         if options.filter_runtime_only_hosts && (host.name.contains('*') || host.name.contains('?') || host.hidden) {
             continue;
         }

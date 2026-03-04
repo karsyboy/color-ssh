@@ -1,3 +1,5 @@
+//! Unlock-agent server loop and request handling.
+
 use super::error::AgentError;
 use super::runtime::{AGENT_IDLE_SHUTDOWN_POLL_INTERVAL_MIN, AgentRuntime, next_idle_shutdown_poll_interval};
 use crate::auth::ipc::{self, AgentRequestPayload, AgentResponse, VaultStatus, VaultStatusEventKind};
@@ -19,6 +21,7 @@ impl Drop for EndpointGuard {
     }
 }
 
+/// Start unlock-agent server loop on the local IPC endpoint.
 pub fn run_server() -> Result<(), AgentError> {
     let paths = VaultPaths::resolve_default()?;
     let listener = match ipc::bind_listener(&paths)? {
@@ -162,6 +165,7 @@ pub(crate) fn handle_request(paths: &VaultPaths, runtime: &mut AgentRuntime, req
                     message: "password vault is locked".to_string(),
                 };
             };
+            // Tokens are single-use and are consumed on lookup.
             let Some(name) = runtime.take_askpass_entry(token.expose_secret()) else {
                 return AgentResponse::Error {
                     status: runtime.status(paths),

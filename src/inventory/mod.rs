@@ -18,6 +18,8 @@ use std::path::Path;
 pub(crate) use migration::migrate_default_ssh_config_to_inventory;
 pub(crate) use tree::sort_tree_folder_by_host_name;
 
+/// Normalize `LocalForward`/`RemoteForward` style specs that were split by
+/// whitespace (for example `"8080 localhost:80"` -> `"8080:localhost:80"`).
 pub(crate) fn normalize_ssh_forward_spec(value: &str) -> String {
     let trimmed = value.trim();
     let mut parts = trimmed.split_whitespace();
@@ -35,10 +37,12 @@ pub(crate) fn normalize_ssh_forward_spec(value: &str) -> String {
     format!("{left}:{right}")
 }
 
+/// Build a tree model from an explicit inventory file path.
 pub(crate) fn build_inventory_tree(inventory_path: &Path) -> io::Result<InventoryTreeModel> {
     tree::build_inventory_tree(inventory_path)
 }
 
+/// Load the default inventory (`~/.color-ssh/cossh-inventory.yaml`).
 pub(crate) fn load_inventory_tree() -> io::Result<InventoryTreeModel> {
     let inventory_path = get_default_inventory_path().ok_or_else(|| io::Error::new(io::ErrorKind::NotFound, "Could not find home directory"))?;
 

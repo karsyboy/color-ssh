@@ -17,18 +17,21 @@ const TITLE_BANNER: &[&str] = &[
 ];
 
 #[derive(Debug, Clone, Copy)]
+/// Snapshot of runtime settings used during dispatch initialization.
 pub(crate) struct RuntimeConfigSettings {
     pub(crate) debug_mode: bool,
     pub(crate) ssh_logging: bool,
     pub(crate) show_title: bool,
 }
 
+/// Print an error, flush logs, and terminate process with exit code `1`.
 pub(crate) fn exit_with_logged_error(logger: &log::Logger, message: impl std::fmt::Display) -> ! {
     eprintln!("{message}");
     crate::runtime::logging::flush_debug_logs(logger);
     std::process::exit(1);
 }
 
+/// Initialize session config or terminate with a logged startup error.
 pub(crate) fn initialize_config_or_exit(logger: &log::Logger, profile: Option<String>, context: &str) {
     if let Err(err) = config::init_session_config(profile) {
         log_error!("{context}: {}", err);
@@ -36,6 +39,7 @@ pub(crate) fn initialize_config_or_exit(logger: &log::Logger, profile: Option<St
     }
 }
 
+/// Best-effort load of debug setting before interactive startup.
 pub(crate) fn try_load_interactive_debug_mode(profile: Option<String>) -> bool {
     match config::init_session_config(profile) {
         Ok(()) => config::with_current_config("reading interactive debug setting", |cfg| cfg.settings.debug_mode),
@@ -46,6 +50,7 @@ pub(crate) fn try_load_interactive_debug_mode(profile: Option<String>) -> bool {
     }
 }
 
+/// Read runtime settings from the currently installed config.
 pub(crate) fn load_runtime_config_settings() -> RuntimeConfigSettings {
     config::with_current_config("reading global settings", |cfg| RuntimeConfigSettings {
         debug_mode: cfg.settings.debug_mode,
@@ -54,6 +59,7 @@ pub(crate) fn load_runtime_config_settings() -> RuntimeConfigSettings {
     })
 }
 
+/// Print startup banner when enabled.
 pub(crate) fn print_title_banner(show_title: bool) {
     if !show_title {
         return;

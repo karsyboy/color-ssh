@@ -13,7 +13,7 @@ pub fn expand_tilde(path: &str) -> String {
     path.to_string()
 }
 
-/// Get the default inventory path.
+/// Returns `~/.color-ssh/cossh-inventory.yaml`.
 pub fn get_default_inventory_path() -> Option<PathBuf> {
     dirs::home_dir().map(|home| home.join(".color-ssh").join("cossh-inventory.yaml"))
 }
