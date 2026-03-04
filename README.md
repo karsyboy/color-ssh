@@ -23,6 +23,7 @@
 ## Features
 
 - Session manager TUI
+- YAML inventory for SSH and RDP hosts
 - Syntax highlighting
 - Session logging
 - Configuration hot reload
@@ -38,7 +39,7 @@
 
 #### Requirement
 - SSH
-- `xfreerdp3` or `xfreerdp` for RDP sessions (Optional)
+- `xfreerdp3` or `xfreerdp` (Optional)
 
 ### Pre-built Binaries (Recommended)
 Download the latest release from [GitHub Releases](https://github.com/karsyboy/color-ssh/releases/).
@@ -79,6 +80,7 @@ Options:
   -P, --profile <profile>  Specify a configuration profile to use
   -t, --test               Ignore config logging settings; only use CLI -d/-l logging flags
       --pass-entry <name>  Override the password vault entry used for a direct protocol launch
+      --migrate            Migrate ~/.ssh/config host entries into ~/.color-ssh/cossh-inventory.yaml
   -h, --help               Print help
   -V, --version            Print version
 
@@ -91,6 +93,7 @@ cossh -l -P network ssh user@firewall.example.com         # Use 'network' config
 cossh -l ssh user@host -p 2222                            # Both modes with SSH args
 cossh ssh user@host -G                                    # Non-interactive command
 cossh rdp desktop01                                       # Launch a configured RDP host
+cossh --migrate                                           # Import ~/.ssh/config into the YAML inventory
 ```
 
 ### SSH Usage
@@ -145,7 +148,7 @@ Options:
 
 ## Configuration
 
-#### Rule Config
+#### Runtime Config
 
 Configuration files are looked for in the following order:
 
@@ -155,41 +158,34 @@ Configuration files are looked for in the following order:
 
 If no configuration file is found the default configuration will be created at `~/.color-ssh/cossh-config.yaml`.
 
-#### Color-SSH Metadata in `~/.ssh/config`
+#### Host Inventory
 
-The interactive session manager supports metadata comments inside the SSH config file.
+`color-ssh` loads SSH and RDP hosts from `~/.color-ssh/cossh-inventory.yaml`.
 
-| Tag | What it does |
+#### Common inventory fields:
+
+| Field | What it does |
 | --- | --- |
-| `#_Protocol <ssh\|rdp>` | Selects whether the host launches with SSH or RDP. Defaults to `ssh`. |
-| `#_Desc <text>` | Adds description in the info view. |
-| `#_Profile <name>` | Opens that host using the matching cossh profile (`[profile].cossh-config.yaml`). |
-| `#_pass <name>` | Uses password vault entry `<name>` for password auto-login. |
-| `#_RdpDomain <name>` | Sets the RDP domain passed to the FreeRDP client as `/d:<name>`. |
-| `#_RdpArgs <args...>` | Appends additional `xfreerdp3`/`xfreerdp` arguments for that host. |
-| `#_hidden <true\|yes\|1>` | Hides the host from the interactive host list. |
+| `name` | Alias shown in the TUI and used for direct launches like `cossh ssh <name>`. |
+| `protocol` | Protocol to launch, such as `ssh` or `rdp`. |
+| `host` | Actual destination hostname or IP address. |
+| `description` | Text shown in the TUI info/details view. |
+| `profile` | Uses the matching `cossh` runtime profile when opening the host. |
+| `vault_pass` | Password vault entry used for password auto-login. |
+| `hidden` | Hides the host from the interactive host list and search results. |
+| `identity_file`, `proxy_jump`, `proxy_command`, `forward_agent`, `local_forward`, `remote_forward`, `ssh_options` | SSH-specific connection settings. |
+| `rdp_domain`, `rdp_args` | RDP-specific connection settings. |
 
-```sshconfig
-Host switch01
-    HostName switch01.example.com
-    User admin
-    #_Profile network
-    #_Desc Example Switch
-    #_pass test_pass
+#### Migrate from `~/.ssh/config`
+
+Use this once to import your existing OpenSSH host entries into the YAML inventory:
+
+```bash
+cossh --migrate
 ```
 
-```sshconfig
-Host desktop01
-    HostName rdp01.example.com
-    User administrator
-    Port 3390
-    #_Protocol rdp
-    #_RdpDomain ACME
-    #_RdpArgs /f +clipboard
-    #_pass office_rdp
-```
 
-For more info on the TUI go here [TUI User Guide](docs/TUI_USER_GUIDE.md).
+For more info go here [TUI User Guide](docs/TUI_USER_GUIDE.md).
 
 ## Uninstall
 

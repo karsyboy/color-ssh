@@ -24,7 +24,7 @@ Notes:
 
 The TUI has these areas:
 
-- Host panel (left): SSH host tree and optional host info pane.
+- Host panel (left): inventory host tree and optional host info pane.
 - Main pane (right): host details (when no tabs are open) or terminal tabs (when sessions are open).
 - Tab bar: appears at the top of the main pane when tabs are open.
 - Status bar (bottom): active context and key hints.
@@ -85,7 +85,7 @@ Host search keys:
 
 Search behavior:
 
-- Matches host alias, `HostName`, and `User`.
+- Matches inventory `name`, `host`, and `user`.
 - Matching is case-insensitive.
 - Uses strict contiguous matching first; falls back to fuzzy matching if needed.
 - Matching folders auto-expand during search.
@@ -193,41 +193,79 @@ Terminal pane:
 - If the remote app enables mouse reporting (for example full-screen TUIs), mouse events go to the remote app.
 - In remote mouse mode, hold `Shift` (or `Alt`) while dragging to force local text selection.
 
-## SSH Config Metadata for Better TUI Results
+## Inventory Setup for Better TUI Results
 
-You can add metadata comments inside `~/.ssh/config` host blocks:
+The TUI host browser loads from `~/.color-ssh/cossh-inventory.yaml`.
 
-| Tag | Effect in TUI |
-| --- | --- |
-| `#_Desc <text>` | Description shown in host info pane |
-| `#_Profile <name>` | Uses profile `<name>.cossh-config.yaml` when opening that host |
-| `#_pass <name>` | Uses password vault entry `<name>` and runs that host with password auto-login |
-| `#_hidden <true\|yes\|1>` | Hides host from interactive host list |
+Example root inventory:
 
-Example:
+```yaml
+include:
+  - ~/.color-ssh/inventory/network.yaml
 
-```sshconfig
-Host prod-fw
-  #_Desc Production firewall
-  #_Profile network
-  #_pass lab_switch
-  HostName 10.0.0.10
-  User admin
-  Port 22
+inventory:
+  - name: prod-fw
+    description: Production firewall
+    protocol: ssh
+    host: 10.0.0.10
+    user: admin
+    port: 22
+    profile: network
+    vault_pass: lab_switch
+    identity_file: ~/.ssh/id_rsa
+
+  - Desktops:
+      - name: desktop01
+        description: Helpdesk desktop
+        protocol: rdp
+        host: rdp01.example.com
+        user: administrator
+        port: 3390
+        vault_pass: office_rdp
+        rdp_domain: ACME
+        rdp_args:
+          - /f
+          - +clipboard
 ```
+
+Common inventory host fields:
+
+| Field | What it does |
+| --- | --- |
+| `name` | Alias shown in the TUI and used for direct launches like `cossh ssh <name>`. |
+| `protocol` | Protocol to launch, such as `ssh` or `rdp`. |
+| `host` | Actual destination hostname or IP address. |
+| `description` | Text shown in the TUI info/details view. |
+| `profile` | Uses the matching `cossh` runtime profile when opening the host. |
+| `vault_pass` | Password vault entry used for password auto-login. |
+| `hidden` | Hides the host from the interactive host list and search results. |
+| `identity_file`, `proxy_jump`, `proxy_command`, `forward_agent`, `local_forward`, `remote_forward`, `ssh_options` | SSH-specific connection settings. |
+| `rdp_domain`, `rdp_args` | RDP-specific connection settings. |
 
 Additional behavior:
 
-- Host aliases containing `*` or `?` are not shown in the interactive host list.
-- Standard OpenSSH `Include` directives are supported and shown as folder nodes.
-- `#_pass` entries are read from the password vault under `~/.color-ssh/vault/`.
+- Root `include:` entries are shown as folders in the host tree.
+- Includes inside included inventory files appear as subfolders of that folder.
+- Folder items declared directly under `inventory:` also appear as folders in the TUI.
+- `vault_pass` entries are read from the password vault under `~/.color-ssh/vault/`.
 - If the vault is locked, the TUI prompts once for the master password and reuses that unlock for later protected hosts until the session relocks.
 - On macOS and Linux builds of OpenSSH that honor `SSH_ASKPASS`, password auto-login uses cossh's internal askpass helper.
 - Each auto-login launch now uses a short-lived, single-use token instead of exposing a reusable vault entry lookup to the askpass process.
 - The askpass helper only returns secrets for prompts that look like standard password prompts.
 - Nonstandard, localized, passphrase, OTP, PIN, or host-verification prompts fall back to the normal OpenSSH prompt instead of auto-login.
+- If the inventory cannot be parsed, the host details pane shows the inventory error and the file that caused it.
 
-### Create a `#_pass` Vault Entry
+### Migrate Existing `~/.ssh/config`
+
+If you already have host entries in OpenSSH config, import them into the inventory with:
+
+```bash
+cossh --migrate
+```
+
+This writes `~/.color-ssh/cossh-inventory.yaml`, preserves supported `color-ssh` metadata, and creates a backup of an existing inventory before overwrite.
+
+### Create a `vault_pass` Vault Entry
 
 You can create password vault entries directly from CLI:
 
@@ -240,7 +278,7 @@ Flow:
 - On first use, `cossh` creates the master-password-protected vault.
 - You enter the SSH password twice with hidden prompts.
 - The password is stored as vault entry `lab_switch`.
-- On success, use `#_pass lab_switch` in `~/.ssh/config`.
+- On success, set `vault_pass: lab_switch` on the target host in `~/.color-ssh/cossh-inventory.yaml`.
 
 ### Unlock Once, Use TUI and Direct Mode
 
