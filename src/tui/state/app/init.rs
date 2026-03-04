@@ -133,6 +133,7 @@ impl AppStateConfig {
 pub(super) struct AppStateInit {
     pub(super) hosts: Vec<InventoryHost>,
     pub(super) host_tree_root: TreeFolder,
+    pub(super) inventory_load_error: Option<String>,
     pub(super) collapsed_folders: HashSet<FolderId>,
     pub(super) history_buffer: usize,
     pub(super) host_panel_width: u16,
@@ -168,14 +169,20 @@ fn fallback_host_tree_root() -> TreeFolder {
     }
 }
 
-fn load_host_tree_model() -> InventoryTreeModel {
-    load_inventory_tree().unwrap_or_else(|err| {
-        log_error!("Failed to load inventory hosts: {}", err);
-        InventoryTreeModel {
-            root: fallback_host_tree_root(),
-            hosts: Vec::new(),
+fn load_host_tree_model() -> (InventoryTreeModel, Option<String>) {
+    match load_inventory_tree() {
+        Ok(tree_model) => (tree_model, None),
+        Err(err) => {
+            log_error!("Failed to load inventory hosts: {}", err);
+            (
+                InventoryTreeModel {
+                    root: fallback_host_tree_root(),
+                    hosts: Vec::new(),
+                },
+                Some(err.to_string()),
+            )
         }
-    })
+    }
 }
 
 fn build_collapsed_folders(host_tree_root: &TreeFolder, host_tree_uncollapsed: bool) -> HashSet<FolderId> {
@@ -203,7 +210,7 @@ pub(super) fn load_vault_status() -> VaultStatus {
 }
 
 pub(super) fn load_app_state_init() -> AppStateInit {
-    let tree_model = load_host_tree_model();
+    let (tree_model, inventory_load_error) = load_host_tree_model();
     let session_config = AppStateConfig::load();
     let host_count = tree_model.hosts.len();
     let host_tree_root = tree_model.root;
@@ -217,6 +224,7 @@ pub(super) fn load_app_state_init() -> AppStateInit {
     AppStateInit {
         hosts: tree_model.hosts,
         host_tree_root,
+        inventory_load_error,
         collapsed_folders,
         history_buffer: session_config.history_buffer,
         host_panel_width,
@@ -235,6 +243,7 @@ pub(super) fn test_app_state_init() -> AppStateInit {
     AppStateInit {
         hosts: Vec::new(),
         host_tree_root: fallback_host_tree_root(),
+        inventory_load_error: None,
         collapsed_folders: HashSet::new(),
         history_buffer: 1000,
         host_panel_width: 25,

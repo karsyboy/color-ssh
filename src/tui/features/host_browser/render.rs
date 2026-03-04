@@ -10,6 +10,25 @@ use ratatui::{
     widgets::{List, ListItem, ListState, Paragraph, Wrap},
 };
 
+fn inventory_load_error_lines(error: &str) -> Vec<Line<'static>> {
+    vec![
+        Line::from(""),
+        Line::from(Span::styled(
+            "Inventory load failed",
+            Style::default().fg(theme::ansi_red()).add_modifier(Modifier::BOLD),
+        )),
+        Line::from(Span::styled(
+            "Fix the inventory YAML formatting and included files.",
+            Style::default().fg(theme::ansi_bright_black()),
+        )),
+        Line::from(""),
+        Line::from(vec![
+            Span::styled("Reason: ", Style::default().fg(theme::ansi_bright_black())),
+            Span::styled(error.to_string(), Style::default().fg(theme::ansi_bright_white())),
+        ]),
+    ]
+}
+
 impl AppState {
     // Host list panel.
     pub(crate) fn render_host_list(&mut self, frame: &mut Frame, area: Rect) {
@@ -119,7 +138,11 @@ impl AppState {
 
         if self.visible_host_rows.is_empty() {
             frame.render_widget(Paragraph::new(Line::from(Span::styled("Info", header_style))), header_area);
-            frame.render_widget(Paragraph::new("No selection").style(Style::default().fg(theme::ansi_bright_black())), body_area);
+            if let Some(error) = self.inventory_load_error.as_deref() {
+                frame.render_widget(Paragraph::new(inventory_load_error_lines(error)).wrap(Wrap { trim: false }), body_area);
+            } else {
+                frame.render_widget(Paragraph::new("No selection").style(Style::default().fg(theme::ansi_bright_black())), body_area);
+            }
             return;
         }
 
@@ -249,7 +272,11 @@ impl AppState {
         }
 
         frame.render_widget(Paragraph::new(Line::from(Span::styled("Info", header_style))), header_area);
-        frame.render_widget(Paragraph::new("No selection").style(Style::default().fg(theme::ansi_bright_black())), body_area);
+        if let Some(error) = self.inventory_load_error.as_deref() {
+            frame.render_widget(Paragraph::new(inventory_load_error_lines(error)).wrap(Wrap { trim: false }), body_area);
+        } else {
+            frame.render_widget(Paragraph::new("No selection").style(Style::default().fg(theme::ansi_bright_black())), body_area);
+        }
     }
 
     // Detailed host/folder panel (shown when no tabs are open).
@@ -353,10 +380,12 @@ impl AppState {
                 ]
             }
         } else {
-            vec![
-                Line::from(""),
-                Line::from(Span::styled("No selection", Style::default().fg(theme::ansi_bright_black()))),
-            ]
+            self.inventory_load_error.as_deref().map(inventory_load_error_lines).unwrap_or_else(|| {
+                vec![
+                    Line::from(""),
+                    Line::from(Span::styled("No selection", Style::default().fg(theme::ansi_bright_black()))),
+                ]
+            })
         };
 
         let header = Paragraph::new(Line::from(Span::styled(
@@ -364,6 +393,10 @@ impl AppState {
             Style::default().fg(theme::ansi_bright_black()).add_modifier(Modifier::BOLD),
         )));
         frame.render_widget(header, header_area);
-        frame.render_widget(Paragraph::new(content), body_area);
+        frame.render_widget(Paragraph::new(content).wrap(Wrap { trim: false }), body_area);
     }
 }
+
+#[cfg(test)]
+#[path = "../../../test/tui/features/host_browser/render.rs"]
+mod tests;

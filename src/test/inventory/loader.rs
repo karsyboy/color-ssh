@@ -117,9 +117,17 @@ inventory:
     assert_eq!(tree.hosts.len(), 2);
     assert!(tree.hosts.iter().any(|host| host.name == "hidden-a" && host.hidden));
     assert!(tree.hosts.iter().any(|host| host.name == "visible-b" && !host.hidden));
-    assert_eq!(tree.root.children.len(), 1);
-    assert_eq!(tree.root.children[0].name, "Shared");
-    assert_eq!(tree.root.children[0].host_indices.len(), 2);
+
+    let shared = tree.root.children.iter().find(|folder| folder.name == "Shared").expect("root shared folder");
+    assert_eq!(shared.host_indices.len(), 1);
+
+    let include_folder = tree.root.children.iter().find(|folder| folder.name == "10-extra").expect("include folder");
+    assert_eq!(include_folder.children.len(), 1);
+    assert_eq!(include_folder.children[0].name, "Shared");
+    assert_eq!(include_folder.children[0].host_indices.len(), 1);
+
+    let visible = tree.hosts.iter().find(|host| host.name == "visible-b").expect("visible-b");
+    assert_eq!(visible.source_folder_path, vec!["10-extra".to_string(), "Shared".to_string()]);
 
     let _ = fs::remove_dir_all(dir);
 }
@@ -203,6 +211,65 @@ inventory:
     let tree = build_inventory_tree(&inventory_path).expect("load inventory");
     let names: Vec<&str> = tree.hosts.iter().map(|host| host.name.as_str()).collect();
     assert_eq!(names, vec!["a", "b", "root"]);
+    assert_eq!(tree.root.children.len(), 2);
+    assert_eq!(tree.root.children[0].name, "10-a");
+    assert_eq!(tree.root.children[1].name, "20-b");
+
+    let _ = fs::remove_dir_all(dir);
+}
+
+#[test]
+fn nests_sub_includes_under_their_parent_include_folder() {
+    let dir = test_dir("nested_include_folders").expect("temp dir");
+    let inventory_path = dir.join("cossh-inventory.yaml");
+    write_file(
+        &inventory_path,
+        r#"
+include:
+  - ./inventory/k-ops.yaml
+inventory:
+  - name: root
+    protocol: ssh
+    host: root.example
+"#,
+    )
+    .expect("write root inventory");
+    write_file(
+        &dir.join("inventory/k-ops.yaml"),
+        r#"
+include:
+  - ./regions/site-a.yaml
+inventory:
+  - name: jump
+    protocol: ssh
+    host: jump.example
+"#,
+    )
+    .expect("write included inventory");
+    write_file(
+        &dir.join("inventory/regions/site-a.yaml"),
+        r#"
+inventory:
+  - name: switch-a
+    protocol: ssh
+    host: switch-a.example
+"#,
+    )
+    .expect("write nested inventory");
+
+    let tree = build_inventory_tree(&inventory_path).expect("load inventory");
+    assert_eq!(tree.root.children.len(), 1);
+    assert_eq!(tree.root.children[0].name, "k-ops");
+    assert_eq!(tree.root.children[0].host_indices.len(), 1);
+    assert_eq!(tree.root.children[0].children.len(), 1);
+    assert_eq!(tree.root.children[0].children[0].name, "site-a");
+    assert_eq!(tree.root.children[0].children[0].host_indices.len(), 1);
+
+    let jump = tree.hosts.iter().find(|host| host.name == "jump").expect("jump");
+    assert_eq!(jump.source_folder_path, vec!["k-ops".to_string()]);
+
+    let switch = tree.hosts.iter().find(|host| host.name == "switch-a").expect("switch-a");
+    assert_eq!(switch.source_folder_path, vec!["k-ops".to_string(), "site-a".to_string()]);
 
     let _ = fs::remove_dir_all(dir);
 }

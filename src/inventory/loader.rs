@@ -1,4 +1,4 @@
-//! Inventory parsing, normalization, and include merging.
+//! Inventory parsing, normalization, and include folder loading.
 
 use super::include::{expand_include_pattern, resolve_include_pattern};
 use super::model::{FolderId, InventoryDocumentRaw, InventoryHost, InventoryHostRaw, InventoryNodeRaw, InventoryTreeModel, TreeFolder};
@@ -6,7 +6,7 @@ use super::path::expand_tilde;
 use crate::log_debug;
 use crate::validation::validate_vault_entry_name;
 use serde_yml::{Mapping, Value};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
@@ -49,9 +49,9 @@ pub(super) fn build_inventory_tree(inventory_path: &Path) -> io::Result<Inventor
     let mut root = FolderAccumulator::new(root_name, inventory_path.to_path_buf());
     let mut hosts = Vec::new();
     let mut seen_host_names = HashMap::new();
-    let mut visited = std::collections::HashSet::new();
+    let mut visited = HashSet::new();
 
-    load_document_recursive(inventory_path, &mut root, &mut hosts, &mut seen_host_names, &mut visited)?;
+    load_document_recursive(inventory_path, &mut root, &mut hosts, &mut seen_host_names, &mut visited, &[])?;
 
     let mut next_id: FolderId = 0;
     let mut tree_root = finalize_folder(root, &mut next_id);
@@ -61,10 +61,11 @@ pub(super) fn build_inventory_tree(inventory_path: &Path) -> io::Result<Inventor
 
 fn load_document_recursive(
     inventory_path: &Path,
-    root: &mut FolderAccumulator,
+    folder: &mut FolderAccumulator,
     hosts: &mut Vec<InventoryHost>,
     seen_host_names: &mut HashMap<String, PathBuf>,
-    visited: &mut std::collections::HashSet<PathBuf>,
+    visited: &mut HashSet<PathBuf>,
+    folder_path: &[String],
 ) -> io::Result<()> {
     let canonical = inventory_path.canonicalize().unwrap_or_else(|_| inventory_path.to_path_buf());
 
@@ -79,15 +80,45 @@ fn load_document_recursive(
     for include in parsed.include {
         let resolved_pattern = resolve_include_pattern(&include, parent_dir);
         for include_path in expand_include_pattern(&resolved_pattern) {
-            load_document_recursive(&include_path, root, hosts, seen_host_names, visited)?;
+            load_include_document(&include_path, folder, hosts, seen_host_names, visited, folder_path)?;
         }
     }
 
     for node in parsed.inventory {
-        add_inventory_node(node, root, hosts, seen_host_names, &canonical, &[])?;
+        add_inventory_node(node, folder, hosts, seen_host_names, &canonical, folder_path)?;
     }
 
     Ok(())
+}
+
+fn load_include_document(
+    inventory_path: &Path,
+    parent_folder: &mut FolderAccumulator,
+    hosts: &mut Vec<InventoryHost>,
+    seen_host_names: &mut HashMap<String, PathBuf>,
+    visited: &mut HashSet<PathBuf>,
+    parent_folder_path: &[String],
+) -> io::Result<()> {
+    let canonical = inventory_path.canonicalize().unwrap_or_else(|_| inventory_path.to_path_buf());
+
+    if visited.contains(&canonical) {
+        log_debug!("Skipping already visited inventory file (possible include cycle): {}", canonical.display());
+        return Ok(());
+    }
+
+    let folder_name = inventory_folder_name(&canonical);
+    let child = parent_folder.child_mut(&folder_name, &canonical);
+    let mut child_path = parent_folder_path.to_vec();
+    child_path.push(folder_name);
+    load_document_recursive(&canonical, child, hosts, seen_host_names, visited, &child_path)
+}
+
+fn inventory_folder_name(path: &Path) -> String {
+    path.file_stem()
+        .or_else(|| path.file_name())
+        .and_then(|segment| segment.to_str())
+        .unwrap_or("include")
+        .to_string()
 }
 
 fn finalize_folder(folder: FolderAccumulator, next_id: &mut FolderId) -> TreeFolder {
