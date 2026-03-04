@@ -178,3 +178,11 @@ Thanks to the following projects for the inspiration behind Color SSH.
 - [netcli-highlight](https://github.com/danielmacuare/netcli-highlight)
 
 Also thank you to [Alacritty](https://github.com/alacritty/alacritty) for the terminal crate used to render the terminal in the TUI.
+
+## AI Usage Note
+
+This project has used AI-assisted tooling for parts of development and documentation.  
+All AI-assisted changes are reviewed, edited, and validated by a human maintainer before they are merged.
+Tools used are:
+- @codex
+- @copilot
