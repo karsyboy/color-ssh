@@ -76,7 +76,9 @@ Match host bastion
     assert!(rendered.contains("identities_only: true"));
     assert!(rendered.contains("proxy_jump: 'bastion'"));
     assert!(rendered.contains("proxy_command: 'ssh -W %h:%p bastion'"));
-    assert!(rendered.contains("forward_agent: true"));
+    assert!(rendered.contains("forward_agent: 'yes'"));
+    assert!(rendered.contains("local_forward:\n      - '8080:localhost:80'"));
+    assert!(rendered.contains("remote_forward:\n      - '9090:localhost:90'"));
     assert!(rendered.contains("rdp_domain: 'ACME'"));
     assert!(rendered.contains("hidden: true"));
 
@@ -88,6 +90,8 @@ Match host bastion
     assert_eq!(app_a.port, Some(2222));
     assert_eq!(app_a.profile.as_deref(), Some("prod"));
     assert_eq!(app_a.vault_pass.as_deref(), Some("shared_key"));
+    assert_eq!(app_a.ssh.local_forward, vec!["8080:localhost:80".to_string()]);
+    assert_eq!(app_a.ssh.remote_forward, vec!["9090:localhost:90".to_string()]);
 
     let desktop = tree.hosts.iter().find(|host| host.name == "desktop01").expect("desktop01");
     assert_eq!(desktop.protocol, ConnectionProtocol::Rdp);

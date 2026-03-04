@@ -49,9 +49,9 @@ fn parses_metadata_and_filters_hidden_wildcard_hosts() {
     assert!(!host.hidden);
     assert_eq!(host.local_forward, vec!["8080 localhost:80"]);
     assert_eq!(host.remote_forward, vec!["9090 localhost:90"]);
-    assert_eq!(host.other_options.get("compression").map(String::as_str), Some("yes"));
+    assert_eq!(host.other_options.get("compression"), Some(&vec!["yes".to_string()]));
 
-    let identity = host.identity_file.as_deref().unwrap_or_default();
+    let identity = host.identity_files.first().map(String::as_str).unwrap_or_default();
     assert!(identity.ends_with(".ssh/id_app"));
 
     let _ = fs::remove_dir_all(dir);
@@ -113,7 +113,7 @@ fn expands_multi_alias_host_stanzas_and_applies_metadata_to_all_aliases() {
         assert_eq!(host.profile.as_deref(), Some("prod"));
         assert_eq!(host.pass_key.as_deref(), Some("shared_key"));
         assert_eq!(host.proxy_jump.as_deref(), Some("bastion"));
-        let identity = host.identity_file.as_deref().unwrap_or_default();
+        let identity = host.identity_files.first().map(String::as_str).unwrap_or_default();
         assert!(identity.ends_with(".ssh/id_app"));
     }
 
@@ -183,6 +183,33 @@ fn parses_rdp_metadata_comments() {
     assert_eq!(host.pass_key.as_deref(), Some("office_rdp"));
     assert_eq!(host.rdp_domain.as_deref(), Some("ACME"));
     assert_eq!(host.rdp_args, vec!["/f".to_string(), "+clipboard".to_string()]);
+
+    let _ = fs::remove_dir_all(dir);
+}
+
+#[test]
+fn preserves_repeated_identityfile_and_generic_options() {
+    let dir = test_dir("repeated_ssh_options").expect("temp dir");
+    let config_path = dir.join("config");
+
+    write_file(
+        &config_path,
+        "Host repeated\nHostName repeated.example\nIdentityFile ~/.ssh/id_first\nIdentityFile ~/.ssh/id_second\nCertificateFile ~/.ssh/id_first-cert.pub\nCertificateFile ~/.ssh/id_second-cert.pub\nForwardAgent $SSH_AUTH_SOCK\n",
+    )
+    .expect("write config");
+
+    let hosts = parse_ssh_config(&config_path).expect("parse config");
+    assert_eq!(hosts.len(), 1);
+
+    let host = &hosts[0];
+    assert_eq!(host.identity_files.len(), 2);
+    assert!(host.identity_files[0].ends_with(".ssh/id_first"));
+    assert!(host.identity_files[1].ends_with(".ssh/id_second"));
+    assert_eq!(
+        host.other_options.get("certificatefile"),
+        Some(&vec!["~/.ssh/id_first-cert.pub".to_string(), "~/.ssh/id_second-cert.pub".to_string()])
+    );
+    assert_eq!(host.forward_agent.as_deref(), Some("$SSH_AUTH_SOCK"));
 
     let _ = fs::remove_dir_all(dir);
 }

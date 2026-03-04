@@ -188,7 +188,7 @@ impl AppState {
                 ]));
             }
 
-            if let Some(identity) = &host.ssh.identity_file {
+            if let Some(identity) = host.ssh.identity_files.first() {
                 let display = identity.rsplit('/').next().unwrap_or(identity);
                 lines.push(Line::from(vec![
                     Span::styled("Key:  ", Style::default().fg(theme::ansi_bright_black())),
@@ -326,7 +326,7 @@ impl AppState {
                 ]));
             }
 
-            if let Some(identity) = &host.ssh.identity_file {
+            if let Some(identity) = host.ssh.identity_files.first() {
                 lines.push(Line::from(vec![
                     Span::styled("  IdentityFile: ", Style::default().fg(theme::ansi_white())),
                     Span::styled(identity, Style::default().fg(theme::ansi_bright_black())),

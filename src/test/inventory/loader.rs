@@ -70,10 +70,11 @@ inventory:
     assert_eq!(switch.ssh.identities_only, Some(true));
     assert_eq!(switch.ssh.proxy_jump.as_deref(), Some("bastion"));
     assert_eq!(switch.ssh.proxy_command.as_deref(), Some("ssh -W %h:%p bastion"));
-    assert_eq!(switch.ssh.forward_agent, Some(true));
-    assert_eq!(switch.ssh.local_forward, vec!["8080 localhost:80".to_string()]);
-    assert_eq!(switch.ssh.remote_forward, vec!["9090 localhost:90".to_string()]);
-    assert!(switch.ssh.identity_file.as_deref().unwrap_or_default().ends_with(".ssh/id_rsa"));
+    assert_eq!(switch.ssh.forward_agent.as_deref(), Some("yes"));
+    assert_eq!(switch.ssh.local_forward, vec!["8080:localhost:80".to_string()]);
+    assert_eq!(switch.ssh.remote_forward, vec!["9090:localhost:90".to_string()]);
+    assert_eq!(switch.ssh.identity_files.len(), 1);
+    assert!(switch.ssh.identity_files[0].ends_with(".ssh/id_rsa"));
 
     let desktop = tree.hosts.iter().find(|host| host.name == "desktop01").expect("desktop host");
     assert_eq!(desktop.protocol, ConnectionProtocol::Rdp);
@@ -270,6 +271,49 @@ inventory:
 
     let switch = tree.hosts.iter().find(|host| host.name == "switch-a").expect("switch-a");
     assert_eq!(switch.source_folder_path, vec!["k-ops".to_string(), "site-a".to_string()]);
+
+    let _ = fs::remove_dir_all(dir);
+}
+
+#[test]
+fn parses_repeated_ssh_options_and_known_keys_inside_ssh_options_mapping() {
+    let dir = test_dir("ssh_options_lists").expect("temp dir");
+    let inventory_path = dir.join("cossh-inventory.yaml");
+
+    write_file(
+        &inventory_path,
+        r#"
+inventory:
+  - name: jump
+    protocol: ssh
+    host: jump.example
+    identity_file:
+      - ~/.ssh/id_jump
+      - ~/.ssh/id_ops
+    ssh_options:
+      ForwardAgent: $SSH_AUTH_SOCK
+      CertificateFile:
+        - ~/.ssh/id_jump-cert.pub
+        - ~/.ssh/id_ops-cert.pub
+      SendEnv:
+        - LANG
+        - LC_*
+"#,
+    )
+    .expect("write inventory");
+
+    let tree = build_inventory_tree(&inventory_path).expect("load inventory");
+    let jump = tree.hosts.iter().find(|host| host.name == "jump").expect("jump");
+
+    assert_eq!(jump.ssh.identity_files.len(), 2);
+    assert!(jump.ssh.identity_files[0].ends_with(".ssh/id_jump"));
+    assert!(jump.ssh.identity_files[1].ends_with(".ssh/id_ops"));
+    assert_eq!(jump.ssh.forward_agent.as_deref(), Some("$SSH_AUTH_SOCK"));
+    assert_eq!(
+        jump.ssh.extra_options.get("CertificateFile"),
+        Some(&vec!["~/.ssh/id_jump-cert.pub".to_string(), "~/.ssh/id_ops-cert.pub".to_string()])
+    );
+    assert_eq!(jump.ssh.extra_options.get("SendEnv"), Some(&vec!["LANG".to_string(), "LC_*".to_string()]));
 
     let _ = fs::remove_dir_all(dir);
 }

@@ -226,13 +226,21 @@ fn normalize_inventory_host(raw: InventoryHostRaw, source_file: &Path, folder_pa
         vault_pass: raw.vault_pass,
         hidden: raw.hidden,
         ssh: crate::inventory::SshHostOptions {
-            identity_file: raw.identity_file.map(|value| expand_tilde(&value)),
+            identity_files: raw.identity_files.into_iter().map(|value| expand_tilde(&value)).collect(),
             identities_only: raw.identities_only,
             proxy_jump: raw.proxy_jump,
             proxy_command: raw.proxy_command,
             forward_agent: raw.forward_agent,
-            local_forward: raw.local_forward,
-            remote_forward: raw.remote_forward,
+            local_forward: raw
+                .local_forward
+                .into_iter()
+                .map(|value| crate::inventory::normalize_ssh_forward_spec(&value))
+                .collect(),
+            remote_forward: raw
+                .remote_forward
+                .into_iter()
+                .map(|value| crate::inventory::normalize_ssh_forward_spec(&value))
+                .collect(),
             extra_options: raw.ssh_options,
         },
         rdp: crate::inventory::RdpHostOptions {
@@ -323,19 +331,21 @@ fn parse_inventory_host(mapping: &Mapping, source_file: &Path) -> io::Result<Inv
             "profile" => host.profile = optional_scalar_to_string(value, source_file, "profile")?,
             "vault_pass" => host.vault_pass = optional_scalar_to_string(value, source_file, "vault_pass")?,
             "hidden" => host.hidden = parse_bool(value, source_file, "hidden")?.unwrap_or(false),
-            "identity_file" => host.identity_file = optional_scalar_to_string(value, source_file, "identity_file")?,
+            "identity_file" => host.identity_files = parse_string_list(value, source_file, "identity_file", false)?,
             "identities_only" => host.identities_only = parse_bool(value, source_file, "identities_only")?,
             "proxy_jump" => host.proxy_jump = optional_scalar_to_string(value, source_file, "proxy_jump")?,
             "proxy_command" => host.proxy_command = optional_scalar_to_string(value, source_file, "proxy_command")?,
-            "forward_agent" => host.forward_agent = parse_bool(value, source_file, "forward_agent")?,
+            "forward_agent" => host.forward_agent = parse_forward_agent(value, source_file)?,
             "local_forward" => host.local_forward = parse_string_list(value, source_file, "local_forward", false)?,
             "remote_forward" => host.remote_forward = parse_string_list(value, source_file, "remote_forward", false)?,
-            "ssh_options" => merge_ssh_options(&mut host.ssh_options, value, source_file)?,
+            "ssh_options" => merge_ssh_options(&mut host, value, source_file)?,
             "rdp_domain" => host.rdp_domain = optional_scalar_to_string(value, source_file, "rdp_domain")?,
             "rdp_args" => host.rdp_args = parse_string_list(value, source_file, "rdp_args", true)?,
             _ => {
-                let value = scalar_to_string(value, source_file, &original_key)?;
-                host.ssh_options.insert(original_key, value);
+                let values = parse_ssh_option_values(value, source_file, &original_key)?;
+                if !values.is_empty() {
+                    host.ssh_options.insert(original_key, values);
+                }
             }
         }
     }
@@ -347,18 +357,67 @@ fn parse_inventory_host(mapping: &Mapping, source_file: &Path) -> io::Result<Inv
     Ok(host)
 }
 
-fn merge_ssh_options(into: &mut std::collections::BTreeMap<String, String>, value: &Value, source_file: &Path) -> io::Result<()> {
+fn merge_ssh_options(into: &mut InventoryHostRaw, value: &Value, source_file: &Path) -> io::Result<()> {
     let Value::Mapping(mapping) = value else {
         return Err(invalid_inventory(source_file, "ssh_options must be a mapping"));
     };
 
     for (key, value) in mapping {
         let key = scalar_to_string(key, source_file, "ssh_options key")?;
-        let value = scalar_to_string(value, source_file, "ssh_options value")?;
-        into.insert(key, value);
+        match compact_key(&key).as_str() {
+            "identityfile" => into
+                .identity_files
+                .extend(parse_string_list(value, source_file, "ssh_options IdentityFile", false)?),
+            "identitiesonly" => into.identities_only = parse_bool(value, source_file, "ssh_options IdentitiesOnly")?,
+            "proxyjump" => into.proxy_jump = optional_scalar_to_string(value, source_file, "ssh_options ProxyJump")?,
+            "proxycommand" => into.proxy_command = optional_scalar_to_string(value, source_file, "ssh_options ProxyCommand")?,
+            "forwardagent" => into.forward_agent = parse_forward_agent(value, source_file)?,
+            "localforward" => into
+                .local_forward
+                .extend(parse_string_list(value, source_file, "ssh_options LocalForward", false)?),
+            "remoteforward" => into
+                .remote_forward
+                .extend(parse_string_list(value, source_file, "ssh_options RemoteForward", false)?),
+            _ => {
+                let values = parse_ssh_option_values(value, source_file, "ssh_options value")?;
+                if !values.is_empty() {
+                    into.ssh_options.entry(key).or_default().extend(values);
+                }
+            }
+        }
     }
 
     Ok(())
+}
+
+fn parse_forward_agent(value: &Value, source_file: &Path) -> io::Result<Option<String>> {
+    optional_scalar_to_string(value, source_file, "forward_agent").map(|value| value.map(|text| normalize_yes_no_string(&text)))
+}
+
+fn parse_ssh_option_values(value: &Value, source_file: &Path, field: &str) -> io::Result<Vec<String>> {
+    match value {
+        Value::Null => Err(invalid_inventory(source_file, format!("{field} cannot be null"))),
+        Value::Sequence(sequence) => sequence.iter().map(|item| ssh_option_scalar_to_string(item, source_file, field)).collect(),
+        _ => Ok(vec![ssh_option_scalar_to_string(value, source_file, field)?]),
+    }
+}
+
+fn ssh_option_scalar_to_string(value: &Value, source_file: &Path, field: &str) -> io::Result<String> {
+    match value {
+        Value::Bool(boolean) => Ok(if *boolean { "yes".to_string() } else { "no".to_string() }),
+        Value::Number(number) => Ok(number.to_string()),
+        Value::String(text) => Ok(text.clone()),
+        Value::Null => Err(invalid_inventory(source_file, format!("{field} cannot be null"))),
+        _ => Err(invalid_inventory(source_file, format!("{field} must be a scalar string, boolean, or number"))),
+    }
+}
+
+fn normalize_yes_no_string(value: &str) -> String {
+    match value.trim().to_ascii_lowercase().as_str() {
+        "1" | "true" | "yes" | "on" => "yes".to_string(),
+        "0" | "false" | "no" | "off" => "no".to_string(),
+        _ => value.trim().to_string(),
+    }
 }
 
 fn mapping_value<'a>(mapping: &'a Mapping, key: &str) -> Option<&'a Value> {

@@ -1,7 +1,6 @@
 //! SSH config domain models.
 
-use crate::inventory::{ConnectionProtocol, TreeFolder};
-use std::collections::HashMap;
+use crate::inventory::{ConnectionProtocol, SshOptionMap, TreeFolder};
 use std::path::PathBuf;
 
 /// Represents a single SSH host configuration.
@@ -18,7 +17,7 @@ pub struct SshHost {
     /// Port number.
     pub port: Option<u16>,
     /// Identity file path.
-    pub identity_file: Option<String>,
+    pub identity_files: Vec<String>,
     /// Whether only explicit identities should be used.
     pub identities_only: Option<bool>,
     /// Proxy jump host.
@@ -26,7 +25,7 @@ pub struct SshHost {
     /// Proxy command setting.
     pub proxy_command: Option<String>,
     /// ForwardAgent value.
-    pub forward_agent: Option<bool>,
+    pub forward_agent: Option<String>,
     /// Description from `#_Desc` comment.
     pub description: Option<String>,
     /// Profile from `#_Profile` comment.
@@ -44,7 +43,7 @@ pub struct SshHost {
     /// Remote forward settings.
     pub remote_forward: Vec<String>,
     /// Additional custom options.
-    pub other_options: HashMap<String, String>,
+    pub other_options: SshOptionMap,
 }
 
 impl SshHost {
@@ -57,7 +56,7 @@ impl SshHost {
             hostname: None,
             user: None,
             port: None,
-            identity_file: None,
+            identity_files: Vec::new(),
             identities_only: None,
             proxy_jump: None,
             proxy_command: None,
@@ -70,7 +69,7 @@ impl SshHost {
             hidden: false,
             local_forward: Vec::new(),
             remote_forward: Vec::new(),
-            other_options: HashMap::new(),
+            other_options: SshOptionMap::new(),
         }
     }
 }

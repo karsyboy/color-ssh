@@ -202,6 +202,18 @@ fn parse_bool_like(value: &str) -> Option<bool> {
     }
 }
 
+fn normalize_yes_no_string(value: &str) -> String {
+    match parse_bool_like(value) {
+        Some(true) => "yes".to_string(),
+        Some(false) => "no".to_string(),
+        None => value.trim().to_string(),
+    }
+}
+
+fn push_other_option(host: &mut SshHost, key: &str, value: &str) {
+    host.other_options.entry(key.to_string()).or_default().push(value.to_string());
+}
+
 fn parse_config_file(config_path: &Path, options: ParseOptions) -> io::Result<ParsedConfigFile> {
     let file = File::open(config_path)?;
     let reader = BufReader::new(file);
@@ -316,7 +328,7 @@ fn parse_config_file(config_path: &Path, options: ParseOptions) -> io::Result<Pa
             "identityfile" => {
                 let identity = expand_tilde(value);
                 for host in &mut current_hosts {
-                    host.identity_file = Some(identity.clone());
+                    host.identity_files.push(identity.clone());
                 }
             }
             "identitiesonly" => {
@@ -336,9 +348,8 @@ fn parse_config_file(config_path: &Path, options: ParseOptions) -> io::Result<Pa
                 }
             }
             "forwardagent" => {
-                let parsed_bool = parse_bool_like(value);
                 for host in &mut current_hosts {
-                    host.forward_agent = parsed_bool;
+                    host.forward_agent = Some(normalize_yes_no_string(value));
                 }
             }
             "localforward" => {
@@ -363,7 +374,7 @@ fn parse_config_file(config_path: &Path, options: ParseOptions) -> io::Result<Pa
             }
             _ => {
                 for host in &mut current_hosts {
-                    host.other_options.insert(keyword.clone(), value.to_string());
+                    push_other_option(host, &keyword, value);
                 }
             }
         }

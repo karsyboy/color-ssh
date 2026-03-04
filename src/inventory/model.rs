@@ -6,6 +6,8 @@ use std::path::PathBuf;
 /// Stable folder identifier used by the TUI tree.
 pub type FolderId = usize;
 
+pub type SshOptionMap = BTreeMap<String, Vec<String>>;
+
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub enum ConnectionProtocol {
     #[default]
@@ -63,28 +65,28 @@ pub struct InventoryHostRaw {
     pub profile: Option<String>,
     pub vault_pass: Option<String>,
     pub hidden: bool,
-    pub identity_file: Option<String>,
+    pub identity_files: Vec<String>,
     pub identities_only: Option<bool>,
     pub proxy_jump: Option<String>,
     pub proxy_command: Option<String>,
-    pub forward_agent: Option<bool>,
+    pub forward_agent: Option<String>,
     pub local_forward: Vec<String>,
     pub remote_forward: Vec<String>,
-    pub ssh_options: BTreeMap<String, String>,
+    pub ssh_options: SshOptionMap,
     pub rdp_domain: Option<String>,
     pub rdp_args: Vec<String>,
 }
 
 #[derive(Debug, Clone, Default)]
 pub struct SshHostOptions {
-    pub identity_file: Option<String>,
+    pub identity_files: Vec<String>,
     pub identities_only: Option<bool>,
     pub proxy_jump: Option<String>,
     pub proxy_command: Option<String>,
-    pub forward_agent: Option<bool>,
+    pub forward_agent: Option<String>,
     pub local_forward: Vec<String>,
     pub remote_forward: Vec<String>,
-    pub extra_options: BTreeMap<String, String>,
+    pub extra_options: SshOptionMap,
 }
 
 #[derive(Debug, Clone, Default)]

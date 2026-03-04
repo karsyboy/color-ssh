@@ -172,8 +172,15 @@ fn render_host_item(host: &SshHost, indent: usize, state: &mut RenderState) -> i
     if host.hidden {
         lines.push(format!("{field_indent}hidden: true"));
     }
-    if let Some(identity_file) = host.identity_file.as_ref() {
-        lines.push(format!("{field_indent}identity_file: {}", quote_yaml_string(identity_file)));
+    if let Some(identity_file) = host.identity_files.first() {
+        if host.identity_files.len() == 1 {
+            lines.push(format!("{field_indent}identity_file: {}", quote_yaml_string(identity_file)));
+        } else {
+            lines.push(format!("{field_indent}identity_file:"));
+            for identity_file in &host.identity_files {
+                lines.push(format!("{list_indent}- {}", quote_yaml_string(identity_file)));
+            }
+        }
     }
     if let Some(identities_only) = host.identities_only {
         lines.push(format!("{field_indent}identities_only: {identities_only}"));
@@ -184,19 +191,25 @@ fn render_host_item(host: &SshHost, indent: usize, state: &mut RenderState) -> i
     if let Some(proxy_command) = host.proxy_command.as_ref() {
         lines.push(format!("{field_indent}proxy_command: {}", quote_yaml_string(proxy_command)));
     }
-    if let Some(forward_agent) = host.forward_agent {
-        lines.push(format!("{field_indent}forward_agent: {forward_agent}"));
+    if let Some(forward_agent) = host.forward_agent.as_ref() {
+        lines.push(format!("{field_indent}forward_agent: {}", quote_yaml_string(forward_agent)));
     }
     if !host.local_forward.is_empty() {
         lines.push(format!("{field_indent}local_forward:"));
         for forward in &host.local_forward {
-            lines.push(format!("{list_indent}- {}", quote_yaml_string(forward)));
+            lines.push(format!(
+                "{list_indent}- {}",
+                quote_yaml_string(&crate::inventory::normalize_ssh_forward_spec(forward))
+            ));
         }
     }
     if !host.remote_forward.is_empty() {
         lines.push(format!("{field_indent}remote_forward:"));
         for forward in &host.remote_forward {
-            lines.push(format!("{list_indent}- {}", quote_yaml_string(forward)));
+            lines.push(format!(
+                "{list_indent}- {}",
+                quote_yaml_string(&crate::inventory::normalize_ssh_forward_spec(forward))
+            ));
         }
     }
     if let Some(rdp_domain) = host.rdp_domain.as_ref() {
@@ -213,8 +226,18 @@ fn render_host_item(host: &SshHost, indent: usize, state: &mut RenderState) -> i
         let mut keys: Vec<_> = host.other_options.keys().collect();
         keys.sort();
         for key in keys {
-            if let Some(value) = host.other_options.get(key) {
-                lines.push(format!("{list_indent}{}: {}", quote_yaml_key(key), quote_yaml_string(value)));
+            if let Some(values) = host.other_options.get(key) {
+                if values.len() <= 1 {
+                    if let Some(value) = values.first() {
+                        lines.push(format!("{list_indent}{}: {}", quote_yaml_key(key), quote_yaml_string(value)));
+                    }
+                } else {
+                    lines.push(format!("{list_indent}{}:", quote_yaml_key(key)));
+                    let nested_indent = " ".repeat(indent + 6);
+                    for value in values {
+                        lines.push(format!("{nested_indent}- {}", quote_yaml_string(value)));
+                    }
+                }
             }
         }
     }

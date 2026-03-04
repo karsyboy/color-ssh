@@ -105,7 +105,7 @@ fn synthesize_ssh_args_injects_inventory_defaults() {
     host.host = "10.0.0.10".to_string();
     host.user = Some("admin".to_string());
     host.port = Some(2222);
-    host.ssh.identity_file = Some("~/.ssh/id_rsa".to_string());
+    host.ssh.identity_files.push("~/.ssh/id_rsa".to_string());
     host.ssh.proxy_jump = Some("bastion".to_string());
     host.ssh.identities_only = Some(true);
     host.ssh.local_forward.push("8080 localhost:80".to_string());
@@ -127,8 +127,41 @@ fn synthesize_ssh_args_injects_inventory_defaults() {
             "-o".to_string(),
             "IdentitiesOnly=yes".to_string(),
             "-L".to_string(),
-            "8080 localhost:80".to_string(),
+            "8080:localhost:80".to_string(),
             "10.0.0.10".to_string(),
+        ]
+    );
+}
+
+#[test]
+fn synthesize_ssh_args_preserves_repeated_generic_ssh_options() {
+    let mut host = InventoryHost::new("jump".to_string());
+    host.host = "jump.example".to_string();
+    host.ssh.identity_files.push("~/.ssh/id_jump".to_string());
+    host.ssh.identity_files.push("~/.ssh/id_ops".to_string());
+    host.ssh.forward_agent = Some("$SSH_AUTH_SOCK".to_string());
+    host.ssh.extra_options.insert(
+        "CertificateFile".to_string(),
+        vec!["~/.ssh/id_jump-cert.pub".to_string(), "~/.ssh/id_ops-cert.pub".to_string()],
+    );
+
+    let args = vec!["jump".to_string()];
+    let synthesized = synthesize_ssh_args(&args, &host);
+
+    assert_eq!(
+        synthesized,
+        vec![
+            "-i".to_string(),
+            "~/.ssh/id_jump".to_string(),
+            "-i".to_string(),
+            "~/.ssh/id_ops".to_string(),
+            "-o".to_string(),
+            "ForwardAgent=$SSH_AUTH_SOCK".to_string(),
+            "-o".to_string(),
+            "CertificateFile=~/.ssh/id_jump-cert.pub".to_string(),
+            "-o".to_string(),
+            "CertificateFile=~/.ssh/id_ops-cert.pub".to_string(),
+            "jump.example".to_string(),
         ]
     );
 }
