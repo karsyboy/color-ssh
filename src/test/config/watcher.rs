@@ -14,8 +14,9 @@ fn event(kind: EventKind, paths: &[&str]) -> Event {
 }
 
 #[test]
-fn reloads_only_for_modify_or_create_on_target_file() {
+fn should_reload_for_event_modify_or_create_target_file_returns_true() {
     let config_name = "cossh-config.yaml";
+
     let modify_event = event(EventKind::Modify(ModifyKind::Any), &["/tmp/cossh-config.yaml"]);
     let create_event = event(EventKind::Create(CreateKind::Any), &["/tmp/cossh-config.yaml"]);
     let wrong_file = event(EventKind::Modify(ModifyKind::Any), &["/tmp/other.yaml"]);

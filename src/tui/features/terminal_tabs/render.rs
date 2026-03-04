@@ -284,12 +284,9 @@ impl AppState {
         let scroll_offset = tab.scroll_offset;
         let sel_start = self.selection_start;
         let sel_end = self.selection_end;
-        let (search_row_ranges, current_search_range) = self.current_tab_search().map_or((None, None), |search| {
-            (
-                Some(&search.highlight_row_ranges),
-                search.current_highlight_range,
-            )
-        });
+        let (search_row_ranges, current_search_range) = self
+            .current_tab_search()
+            .map_or((None, None), |search| (Some(&search.highlight_row_ranges), search.current_highlight_range));
 
         let session_active = tab.session.is_some();
 
@@ -313,9 +310,8 @@ impl AppState {
                 for row in 0..render_rows {
                     let abs_row = row as i64 - scroll_offset as i64;
                     let row_ranges = search_row_ranges.and_then(|ranges| ranges.get(&abs_row));
-                    let current_row_range = current_search_range.and_then(|(match_row, start_col, end_col)| {
-                        (abs_row == match_row).then_some((start_col, end_col))
-                    });
+                    let current_row_range =
+                        current_search_range.and_then(|(match_row, start_col, end_col)| (abs_row == match_row).then_some((start_col, end_col)));
                     let mut row_range_idx = 0usize;
 
                     for col in 0..render_cols {
@@ -334,11 +330,9 @@ impl AppState {
                                 row_range_idx += 1;
                             }
                         }
-                        let is_search_match = row_ranges.is_some_and(|ranges| {
-                            row_range_idx < ranges.len() && col >= ranges[row_range_idx].0 && col < ranges[row_range_idx].1
-                        });
-                        let is_current_search_match =
-                            current_row_range.is_some_and(|(start_col, end_col)| col >= start_col && col < end_col);
+                        let is_search_match =
+                            row_ranges.is_some_and(|ranges| row_range_idx < ranges.len() && col >= ranges[row_range_idx].0 && col < ranges[row_range_idx].1);
+                        let is_current_search_match = current_row_range.is_some_and(|(start_col, end_col)| col >= start_col && col < end_col);
 
                         let style = if is_current_search_match {
                             let mut s = Style::default().bg(theme::ansi_yellow()).fg(theme::ansi_black());

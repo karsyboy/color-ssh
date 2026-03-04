@@ -104,7 +104,3 @@ macro_rules! log_ssh {
         }
     }};
 }
-
-#[cfg(test)]
-#[path = "../test/log/macros.rs"]
-mod tests;

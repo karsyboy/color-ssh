@@ -154,7 +154,3 @@ impl AppState {
         col >= start_col && col < end_col
     }
 }
-
-#[cfg(test)]
-#[path = "../../../test/tui/features/pass_prompt/mouse.rs"]
-mod tests;

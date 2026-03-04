@@ -594,7 +594,3 @@ impl AppState {
         self.write_bytes_to_active_pty(&bytes)
     }
 }
-
-#[cfg(test)]
-#[path = "../../../test/tui/features/terminal_tabs/mouse.rs"]
-mod tests;

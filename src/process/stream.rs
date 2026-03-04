@@ -67,13 +67,7 @@ impl OutputFlushState {
         self.pending_bytes = self.pending_bytes.saturating_add(bytes_written);
     }
 
-    fn flush_if_needed(
-        &mut self,
-        output: &mut impl Write,
-        raw_chunk: &str,
-        processed_chunk: &str,
-        chunk_transformed: bool,
-    ) -> io::Result<()> {
+    fn flush_if_needed(&mut self, output: &mut impl Write, raw_chunk: &str, processed_chunk: &str, chunk_transformed: bool) -> io::Result<()> {
         let immediate_flush = should_flush_immediately(raw_chunk, processed_chunk, chunk_transformed);
         if immediate_flush || self.pending_bytes >= STDOUT_FLUSH_BYTES || self.last_flush_at.elapsed() >= STDOUT_FLUSH_INTERVAL {
             output.flush()?;

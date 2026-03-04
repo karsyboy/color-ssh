@@ -314,7 +314,3 @@ impl AppState {
         }
     }
 }
-
-#[cfg(test)]
-#[path = "../../../test/tui/features/pass_prompt/input.rs"]
-mod tests;

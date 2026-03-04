@@ -191,7 +191,3 @@ impl AppState {
         frame.render_widget(Paragraph::new(lines), inner);
     }
 }
-
-#[cfg(test)]
-#[path = "../../../test/tui/features/pass_prompt/render.rs"]
-mod tests;

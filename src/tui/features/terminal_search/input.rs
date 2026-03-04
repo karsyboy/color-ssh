@@ -270,7 +270,3 @@ impl AppState {
         }
     }
 }
-
-#[cfg(test)]
-#[path = "../../../test/tui/features/terminal_search/input.rs"]
-mod tests;

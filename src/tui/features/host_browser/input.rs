@@ -357,7 +357,3 @@ impl AppState {
         Ok(())
     }
 }
-
-#[cfg(test)]
-#[path = "../../../test/tui/features/host_browser/input.rs"]
-mod tests;

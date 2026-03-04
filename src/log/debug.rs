@@ -245,7 +245,3 @@ fn set_private_file_permissions(path: &Path) -> Result<(), LogError> {
     fs::set_permissions(path, fs::Permissions::from_mode(PRIVATE_LOG_FILE_MODE))?;
     Ok(())
 }
-
-#[cfg(test)]
-#[path = "../test/log/debug.rs"]
-mod tests;

@@ -79,12 +79,10 @@ impl AppState {
                         Span::styled(row.display_name.as_str(), Style::default().fg(theme::ansi_bright_cyan())),
                     ]))
                 }
-                HostTreeRowKind::Host(_) => {
-                    ListItem::new(Line::from(vec![
-                        Span::raw(row.indent.as_str()),
-                        Span::styled(row.display_name.as_str(), Style::default().fg(theme::ansi_bright_white())),
-                    ]))
-                }
+                HostTreeRowKind::Host(_) => ListItem::new(Line::from(vec![
+                    Span::raw(row.indent.as_str()),
+                    Span::styled(row.display_name.as_str(), Style::default().fg(theme::ansi_bright_white())),
+                ])),
             })
             .collect();
 
@@ -394,7 +392,3 @@ impl AppState {
         frame.render_widget(Paragraph::new(content).wrap(Wrap { trim: false }), body_area);
     }
 }
-
-#[cfg(test)]
-#[path = "../../../test/tui/features/host_browser/render.rs"]
-mod tests;

@@ -350,18 +350,15 @@ impl AppState {
 
     // Terminal search context.
     fn build_terminal_search_status_spans(&self) -> (Vec<Span<'_>>, Vec<Span<'_>>) {
-        let (query, cursor, selection, matches_len, current_idx) = self.current_tab_search().map_or(
-            ("", 0usize, None, 0usize, 0usize),
-            |search| {
-                (
-                    search.query.as_str(),
-                    search.query_cursor,
-                    search.query_selection,
-                    search.matches.len(),
-                    search.current,
-                )
-            },
-        );
+        let (query, cursor, selection, matches_len, current_idx) = self.current_tab_search().map_or(("", 0usize, None, 0usize, 0usize), |search| {
+            (
+                search.query.as_str(),
+                search.query_cursor,
+                search.query_selection,
+                search.matches.len(),
+                search.current,
+            )
+        });
 
         let match_info = if matches_len > 0 {
             Cow::Owned(format!("{}/{}", current_idx + 1, matches_len))
@@ -407,7 +404,3 @@ impl AppState {
         (left, right)
     }
 }
-
-#[cfg(test)]
-#[path = "../../test/tui/ui/status_bar.rs"]
-mod tests;

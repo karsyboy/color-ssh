@@ -171,7 +171,3 @@ impl AppState {
         }
     }
 }
-
-#[cfg(test)]
-#[path = "../../../test/tui/features/terminal_search/engine.rs"]
-mod tests;

@@ -294,5 +294,5 @@ impl AppState {
 }
 
 #[cfg(test)]
-#[path = "../../test/tui/state/app_state.rs"]
+#[path = "../../test/tui/app_state.rs"]
 mod tests;

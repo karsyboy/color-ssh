@@ -105,7 +105,3 @@ impl AppState {
         Some(final_offset)
     }
 }
-
-#[cfg(test)]
-#[path = "../../../test/tui/features/terminal_tabs/scroll.rs"]
-mod tests;

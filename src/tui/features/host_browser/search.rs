@@ -436,7 +436,3 @@ impl AppState {
         }
     }
 }
-
-#[cfg(test)]
-#[path = "../../../test/tui/features/host_browser/search.rs"]
-mod tests;

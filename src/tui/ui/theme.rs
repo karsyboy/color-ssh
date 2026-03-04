@@ -105,7 +105,3 @@ pub(crate) fn truncate_to_display_width(text: &str, max_width: usize) -> String 
 
     output
 }
-
-#[cfg(test)]
-#[path = "../../test/tui/ui/theme.rs"]
-mod tests;

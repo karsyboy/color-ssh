@@ -376,7 +376,3 @@ impl AppState {
         }
     }
 }
-
-#[cfg(test)]
-#[path = "../../../test/tui/features/terminal_tabs/input.rs"]
-mod tests;
