@@ -17,7 +17,7 @@ Notes:
 - `cossh` starts the interactive session manager.
 - `cossh -d` also starts the session manager, with safe debug logging enabled.
 - `cossh -dd` starts the session manager with raw debug logging enabled for troubleshooting regex/highlighting issues.
-- If you pass an SSH target (for example `cossh user@host`), `cossh` runs direct connection mode instead of opening the TUI.
+- If you run the SSH subcommand (for example `cossh ssh user@host`), `cossh` runs direct connection mode instead of opening the TUI.
 - Raw debug logging may capture terminal content, CLI arguments, and secrets in `~/.color-ssh/logs/cossh.log`.
 
 ## Understand the Layout
@@ -253,7 +253,7 @@ cossh vault unlock
 Once unlocked:
 
 - TUI host opens can reuse the same unlock.
-- Direct launches like `cossh prod-fw` can also reuse the same unlock.
+- Direct launches like `cossh ssh prod-fw` can also reuse the same unlock.
 - The unlock session relocks after the configured idle or absolute timeout.
 
 The default auth config is:

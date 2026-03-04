@@ -31,7 +31,7 @@ pub(crate) fn run() -> Result<ExitCode> {
     }
     log_info!("color-ssh {} starting", APP_VERSION);
 
-    if args.agent_serve {
+    if matches!(args.command, Some(args::MainCommand::AgentServe)) {
         auth::agent::run_server().map_err(|err| {
             log_error!("Password vault agent failed: {}", err);
             std::io::Error::other(err.to_string())
@@ -39,7 +39,7 @@ pub(crate) fn run() -> Result<ExitCode> {
         return Ok(ExitCode::SUCCESS);
     }
 
-    if let Some(vault_command) = args.vault_command.as_ref() {
+    if let Some(args::MainCommand::Vault(vault_command)) = args.command.as_ref() {
         initialize_config_or_exit(&logger, args.profile.clone(), "Failed to initialize config for vault command");
         return Ok(auth::run_vault_command(vault_command));
     }
@@ -55,15 +55,23 @@ pub(crate) fn run() -> Result<ExitCode> {
     apply_debug_logging(&logger, &args, final_debug, runtime_settings.debug_mode);
     apply_ssh_logging(&logger, &args, final_ssh_log);
 
+    let ssh_arg_count = match args.command.as_ref() {
+        Some(args::MainCommand::Protocol(args::ProtocolCommand::Ssh(ssh_command))) => ssh_command.ssh_args.len(),
+        _ => 0,
+    };
+    let rdp_launch = matches!(args.command, Some(args::MainCommand::Protocol(args::ProtocolCommand::Rdp(_))));
+    let vault_command = matches!(args.command, Some(args::MainCommand::Vault(_)));
+    let agent_serve = matches!(args.command, Some(args::MainCommand::AgentServe));
+
     log_debug!(
         "Parsed arguments summary: interactive={} ssh_arg_count={} rdp_launch={} pass_entry_override={} vault_command={} profile_set={} agent_serve={} test_mode={}",
         args.interactive,
-        args.ssh_args.len(),
-        args.rdp_command.is_some(),
+        ssh_arg_count,
+        rdp_launch,
         args.pass_entry.is_some(),
-        args.vault_command.is_some(),
+        vault_command,
         args.profile.is_some(),
-        args.agent_serve,
+        agent_serve,
         args.test_mode
     );
     log_debug_raw!("Parsed arguments: {:?}", args);
@@ -71,22 +79,30 @@ pub(crate) fn run() -> Result<ExitCode> {
     print_title_banner(runtime_settings.show_title);
 
     if logger.is_ssh_logging_enabled() {
-        if let Some(rdp_command) = args.rdp_command.as_ref() {
-            update_session_name_for_logging(Some(&rdp_command.target), &[]);
-        } else {
-            update_session_name_for_logging(None, &args.ssh_args);
+        match args.command.as_ref() {
+            Some(args::MainCommand::Protocol(args::ProtocolCommand::Rdp(rdp_command))) => {
+                update_session_name_for_logging(Some(&rdp_command.target), &[]);
+            }
+            Some(args::MainCommand::Protocol(args::ProtocolCommand::Ssh(ssh_command))) => {
+                update_session_name_for_logging(None, &ssh_command.ssh_args);
+            }
+            _ => {}
         }
     }
 
     log_debug!("Starting configuration file watcher");
     let _watcher = config::config_watcher(args.profile.clone());
 
-    let exit_code = if let Some(rdp_command) = args.rdp_command.clone() {
-        log_info!("Launching RDP process handler");
-        process::run_rdp_process(rdp_command, args.pass_entry.clone())
-    } else {
-        log_info!("Launching SSH process handler");
-        process::run_ssh_process(args.ssh_args, args.is_non_interactive, args.pass_entry)
+    let exit_code = match args.command.clone() {
+        Some(args::MainCommand::Protocol(args::ProtocolCommand::Rdp(rdp_command))) => {
+            log_info!("Launching RDP process handler");
+            process::run_rdp_process(rdp_command, args.pass_entry.clone())
+        }
+        Some(args::MainCommand::Protocol(args::ProtocolCommand::Ssh(ssh_command))) => {
+            log_info!("Launching SSH process handler");
+            process::run_ssh_process(ssh_command.ssh_args, ssh_command.is_non_interactive, args.pass_entry.clone())
+        }
+        _ => unreachable!("non-interactive dispatch requires a protocol command"),
     }
     .map_err(|err| {
         log_error!("Process handler failed: {}", err);

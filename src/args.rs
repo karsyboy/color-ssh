@@ -33,6 +33,27 @@ pub struct RdpCommandArgs {
     pub extra_args: Vec<String>,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SshCommandArgs {
+    /// Arguments to pass through to the SSH command.
+    pub ssh_args: Vec<String>,
+    /// Whether the SSH command is non-interactive (e.g., -G, -V, -O, -Q).
+    pub is_non_interactive: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ProtocolCommand {
+    Ssh(SshCommandArgs),
+    Rdp(RdpCommandArgs),
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum MainCommand {
+    Protocol(ProtocolCommand),
+    Vault(VaultCommand),
+    AgentServe,
+}
+
 /// Parsed command-line arguments
 #[derive(Debug, Clone)]
 pub struct MainArgs {
@@ -42,22 +63,14 @@ pub struct MainArgs {
     pub ssh_logging: bool,
     /// In test mode, ignore config logging settings and only honor CLI logging flags
     pub test_mode: bool,
-    /// Arguments to pass through to the SSH command
-    pub ssh_args: Vec<String>,
     /// Argument to pass for configuration profiles
     pub profile: Option<String>,
-    /// Whether the SSH command is non-interactive (e.g., -G, -V, -O, -Q, -T)
-    pub is_non_interactive: bool,
     /// Launch interactive session manager TUI
     pub interactive: bool,
-    /// Vault management subcommand.
-    pub vault_command: Option<VaultCommand>,
-    /// Override the password entry to use for a direct launch.
+    /// Override the password entry to use for a direct protocol launch.
     pub pass_entry: Option<String>,
-    /// Hidden internal mode used to run the background unlock agent.
-    pub agent_serve: bool,
-    /// Explicit RDP launch request.
-    pub rdp_command: Option<RdpCommandArgs>,
+    /// Selected command, if any.
+    pub command: Option<MainCommand>,
 }
 
 fn build_cli_command() -> Command {
@@ -99,12 +112,23 @@ fn build_cli_command() -> Command {
         .arg(
             Arg::new("pass_entry")
                 .long("pass-entry")
-                .help("Override the password vault entry used for a direct SSH launch")
+                .help("Override the password vault entry used for a direct protocol launch")
                 .num_args(1)
                 .value_name("name")
                 .value_parser(clap::builder::ValueParser::new(validation::parse_vault_entry_name)),
         )
-        .arg(Arg::new("ssh_args").help("SSH arguments to forward to the SSH command").num_args(1..))
+        .subcommand(
+            Command::new("ssh")
+                .about("Launch an SSH session by forwarding arguments to the SSH command")
+                .arg(
+                    Arg::new("ssh_args")
+                        .help("SSH arguments to forward to the SSH command")
+                        .required(true)
+                        .num_args(1..)
+                        .trailing_var_arg(true)
+                        .allow_hyphen_values(true),
+                ),
+        )
         .subcommand(
             Command::new("rdp")
                 .about("Launch an RDP session using xfreerdp3 or xfreerdp")
@@ -164,23 +188,34 @@ fn build_cli_command() -> Command {
         )
         .after_help(
             r"
-cossh                                              # Launch interactive session manager
-cossh -d user@example.com                          # Safe debug enabled
-cossh --pass-entry office_fw user@example.com      # Override the password entry for this launch
-cossh -l -P network user@firewall.example.com      # Use 'network' config profile
-cossh -l user@host -p 2222                         # Both modes with SSH args
-cossh user@host -G                                 # Non-interactive command
-cossh vault help                                   # View vault management options
-cossh rdp --help                                   # View RDP launch options
+cossh                                                     # Launch interactive session manager
+cossh -d ssh user@example.com                             # Safe debug enabled
+cossh --pass-entry office_fw <ssh/rdp> host.example.com   # Override the password entry for this launch
+cossh -l ssh user@example.com                             # SSH logging enabled
+cossh -l -P network ssh user@firewall.example.com         # Use 'network' config profile
+cossh -l ssh user@host -p 2222                            # Both modes with SSH args
+cossh ssh user@host -G                                    # Non-interactive command
+cossh rdp desktop01                                       # Launch a configured RDP host
 ",
         )
 }
 
-fn parse_vault_command(matches: &clap::ArgMatches) -> Option<VaultCommand> {
-    let ("vault", vault_matches) = matches.subcommand()? else {
+fn parse_ssh_command(ssh_matches: &clap::ArgMatches) -> Option<SshCommandArgs> {
+    let ssh_args: Vec<String> = ssh_matches
+        .get_many::<String>("ssh_args")
+        .map(|vals| vals.cloned().collect())
+        .unwrap_or_default();
+    if ssh_args.is_empty() {
         return None;
-    };
+    }
 
+    Some(SshCommandArgs {
+        is_non_interactive: ssh_args::is_non_interactive_ssh_invocation(&ssh_args),
+        ssh_args,
+    })
+}
+
+fn parse_vault_command(vault_matches: &clap::ArgMatches) -> Option<VaultCommand> {
     match vault_matches.subcommand() {
         Some(("init", _)) => Some(VaultCommand::Init),
         Some(("add", add_pass_matches)) => add_pass_matches.get_one::<String>("name").cloned().map(VaultCommand::AddPass),
@@ -194,11 +229,7 @@ fn parse_vault_command(matches: &clap::ArgMatches) -> Option<VaultCommand> {
     }
 }
 
-fn parse_rdp_command(matches: &clap::ArgMatches) -> Option<RdpCommandArgs> {
-    let ("rdp", rdp_matches) = matches.subcommand()? else {
-        return None;
-    };
-
+fn parse_rdp_command(rdp_matches: &clap::ArgMatches) -> Option<RdpCommandArgs> {
     let target = rdp_matches.get_one::<String>("target")?.trim().to_string();
     if target.is_empty() {
         return None;
@@ -216,6 +247,16 @@ fn parse_rdp_command(matches: &clap::ArgMatches) -> Option<RdpCommandArgs> {
     })
 }
 
+fn parse_main_command(matches: &clap::ArgMatches) -> Option<MainCommand> {
+    match matches.subcommand()? {
+        ("ssh", ssh_matches) => parse_ssh_command(ssh_matches).map(ProtocolCommand::Ssh).map(MainCommand::Protocol),
+        ("rdp", rdp_matches) => parse_rdp_command(rdp_matches).map(ProtocolCommand::Rdp).map(MainCommand::Protocol),
+        ("vault", vault_matches) => parse_vault_command(vault_matches).map(MainCommand::Vault),
+        ("agent", agent_matches) if agent_matches.get_flag("serve") => Some(MainCommand::AgentServe),
+        _ => None,
+    }
+}
+
 fn parse_main_args_from<I, T>(cmd: &Command, raw_args: I) -> MainArgs
 where
     I: IntoIterator<Item = T>,
@@ -225,35 +266,24 @@ where
 
     let matches = cmd.clone().get_matches_from(raw_args.clone());
 
-    // Retrieve SSH arguments to forward.
-    let ssh_args: Vec<String> = matches.get_many::<String>("ssh_args").map(|vals| vals.cloned().collect()).unwrap_or_default();
     let debug_count = matches.get_count("debug");
     let ssh_logging = matches.get_flag("log");
     let test_mode = matches.get_flag("test");
     let profile = matches.get_one::<String>("profile").cloned().filter(|profile_name| !profile_name.is_empty());
-    let vault_command = parse_vault_command(&matches);
-    let rdp_command = parse_rdp_command(&matches);
     let pass_entry = matches.get_one::<String>("pass_entry").cloned().filter(|value| !value.is_empty());
-    let agent_serve = matches
-        .subcommand()
-        .is_some_and(|(name, sub_matches)| name == "agent" && sub_matches.get_flag("serve"));
+    let command = parse_main_command(&matches);
     let no_user_args = raw_args.len() <= 1;
-    let debug_only =
-        debug_count > 0 && !ssh_logging && profile.is_none() && ssh_args.is_empty() && vault_command.is_none() && pass_entry.is_none() && rdp_command.is_none();
-    let interactive = (no_user_args || debug_only) && !agent_serve;
+    let debug_only = debug_count > 0 && !ssh_logging && profile.is_none() && pass_entry.is_none() && command.is_none();
+    let interactive = (no_user_args || debug_only) && command.is_none();
 
     MainArgs {
         debug_count,
         ssh_logging,
         test_mode,
-        interactive,
         profile,
-        is_non_interactive: ssh_args::is_non_interactive_ssh_invocation(&ssh_args),
-        ssh_args,
-        vault_command,
+        interactive,
         pass_entry,
-        agent_serve,
-        rdp_command,
+        command,
     }
 }
 
@@ -262,11 +292,11 @@ pub fn main_args() -> MainArgs {
     let cmd = build_cli_command();
     let parsed = parse_main_args_from(&cmd, std::env::args_os());
 
-    if parsed.agent_serve {
+    if matches!(parsed.command, Some(MainCommand::AgentServe)) {
         return parsed;
     }
 
-    if parsed.vault_command.is_none() && parsed.rdp_command.is_none() && !parsed.interactive && parsed.ssh_args.is_empty() {
+    if parsed.command.is_none() && !parsed.interactive {
         let mut help_cmd = cmd;
         let _ = help_cmd.print_long_help();
         println!();

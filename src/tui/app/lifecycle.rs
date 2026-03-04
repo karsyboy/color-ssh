@@ -83,8 +83,13 @@ pub fn run_session_manager() -> io::Result<()> {
             cmd.arg("-P").arg(profile);
         }
 
-        if request.protocol == crate::ssh_config::ConnectionProtocol::Rdp {
-            cmd.arg("rdp");
+        match request.protocol {
+            crate::ssh_config::ConnectionProtocol::Ssh => {
+                cmd.arg("ssh");
+            }
+            crate::ssh_config::ConnectionProtocol::Rdp => {
+                cmd.arg("rdp");
+            }
         }
 
         let status = cmd.arg(request.target).status()?;

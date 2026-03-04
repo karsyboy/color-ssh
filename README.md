@@ -65,47 +65,54 @@ Shell completion scripts are included for `fish` and `zsh`. For instructions see
 ## Usage
 
 ```bash
-Usage: cossh [OPTIONS] [ssh_args]... [COMMAND]
+Usage: cossh [OPTIONS] [COMMAND]
 
 Commands:
+  ssh    Launch an SSH session by forwarding arguments to the SSH command
   rdp    Launch an RDP session using xfreerdp3 or xfreerdp
   vault  Manage the password vault
   help   Print this message or the help of the given subcommand(s)
 
-Arguments:
-  [ssh_args]...  SSH arguments to forward to the SSH command
-
 Options:
-  -d, --debug              Enable safe debug logging to ~/.color-ssh/logs/cossh.log; repeat (-dd) for raw terminal and argument tracing
+  -d, --debug...           Enable debug logging to ~/.color-ssh/logs/cossh.log; repeat (-dd) for raw terminal and argument tracing
   -l, --log                Enable SSH session logging to ~/.color-ssh/logs/ssh_sessions/
   -P, --profile <profile>  Specify a configuration profile to use
   -t, --test               Ignore config logging settings; only use CLI -d/-l logging flags
-      --pass-entry <name>  Override the password vault entry used for a direct SSH launch
+      --pass-entry <name>  Override the password vault entry used for a direct protocol launch
   -h, --help               Print help
   -V, --version            Print version
 
 
-cossh                                              # Launch interactive session manager
-cossh -d                                           # Launch interactive session manager with safe debug enabled
-cossh -d user@example.com                          # Safe debug enabled
-cossh -dd user@example.com                         # Raw debug enabled (may log terminal content and secrets)
-cossh --pass-entry office_fw user@example.com      # Override the password entry for this launch
-cossh -l user@example.com                          # SSH logging enabled
-cossh -l -P network user@firewall.example.com      # Use 'network' config profile
-cossh -l user@host -p 2222                         # Both modes with SSH args
-cossh user@host -G                                 # Non-interactive command
-cossh rdp desktop01                                # Launch a configured RDP host
+cossh                                                     # Launch interactive session manager
+cossh -d ssh user@example.com                             # Safe debug enabled
+cossh --pass-entry office_fw <ssh/rdp> host.example.com   # Override the password entry for this launch
+cossh -l ssh user@example.com                             # SSH logging enabled
+cossh -l -P network ssh user@firewall.example.com         # Use 'network' config profile
+cossh -l ssh user@host -p 2222                            # Both modes with SSH args
+cossh ssh user@host -G                                    # Non-interactive command
+cossh rdp desktop01                                       # Launch a configured RDP host
+```
+
+### SSH Usage
+```bash
+Usage: cossh ssh <ssh_args>...
+
+Arguments:
+  <ssh_args>...  SSH arguments to forward to the SSH command
+
+Options:
+  -h, --help     Print help
+  -V, --version  Print version
+
 ```
 
 ### RDP Usage
-```
-Launch an RDP session using xfreerdp3
-
+```bash
 Usage: cossh rdp [OPTIONS] <target> [rdp_args]...
 
 Arguments:
   <target>       RDP target host or configured alias
-  [rdp_args]...  Additional xfreerdp3 arguments
+  [rdp_args]...  Additional xfreerdp3/xfreerdp arguments
 
 Options:
   -u, --user <user>      Override the RDP username
@@ -113,12 +120,11 @@ Options:
   -p, --port <port>      Override the RDP port
   -h, --help             Print help
   -V, --version          Print version
+
 ```
 
 ### Vault Usage
-```
-Manage the password vault
-
+```bash
 Usage: cossh vault <COMMAND>
 
 Commands:

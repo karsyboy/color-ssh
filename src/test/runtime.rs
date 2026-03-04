@@ -1,5 +1,5 @@
 use super::{DebugModeSource, debug_mode_source, resolve_logging_settings};
-use crate::args::MainArgs;
+use crate::args::{MainArgs, MainCommand, ProtocolCommand, SshCommandArgs};
 use crate::log::DebugVerbosity;
 
 #[test]
@@ -50,13 +50,12 @@ fn base_args(debug_count: u8, ssh_logging: bool, test_mode: bool) -> MainArgs {
         debug_count,
         ssh_logging,
         test_mode,
-        ssh_args: vec!["localhost".to_string()],
         profile: None,
-        is_non_interactive: false,
         interactive: false,
-        vault_command: None,
         pass_entry: None,
-        agent_serve: false,
-        rdp_command: None,
+        command: Some(MainCommand::Protocol(ProtocolCommand::Ssh(SshCommandArgs {
+            ssh_args: vec!["localhost".to_string()],
+            is_non_interactive: false,
+        }))),
     }
 }

@@ -142,7 +142,7 @@ function __cossh_fzf_select --argument-names query
 end
 
 # Fish completion entrypoint.
-# Replaces the current commandline with `cossh <host>` and optionally executes it.
+# Replaces the current commandline with `cossh ssh <host>` and optionally executes it.
 function __cossh_fzf_complete
     # Current token under cursor (used as fzf query)
     set query (commandline -ct)
@@ -157,7 +157,7 @@ function __cossh_fzf_complete
     set host (string split '|' $res)[2]
 
     # Replace commandline with selected host
-    commandline -r "cossh $host"
+    commandline -r "cossh ssh $host"
 
     # Execute immediately unless Alt-Enter was used
     if test "$key" = "enter"

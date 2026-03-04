@@ -197,7 +197,7 @@ _set_lbuffer() {
   fi
 
   selected_host=$(cut -f 1 -d " " <<< ${result})
-  connect_cmd="cossh ${selected_host}"
+  connect_cmd="cossh ssh ${selected_host}"
 
   LBUFFER="$connect_cmd"
 }

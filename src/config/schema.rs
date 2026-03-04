@@ -73,7 +73,7 @@ pub struct AuthSettings {
     /// Maximum unlock lifetime in seconds before the agent relocks regardless of activity.
     #[serde(default = "default_unlock_absolute_timeout_seconds")]
     pub unlock_absolute_timeout_seconds: u64,
-    /// Whether direct `cossh host` launches should attempt password auto-login.
+    /// Whether direct `cossh ssh host` launches should attempt password auto-login.
     #[serde(default = "default_direct_password_autologin")]
     pub direct_password_autologin: bool,
     /// Whether TUI launches should attempt password auto-login.

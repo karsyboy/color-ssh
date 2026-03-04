@@ -37,9 +37,9 @@ Each run writes to `benchmarks/hyperfine/<timestamp>/`:
 
 ## Commands included
 - `native-ssh`: `ssh <host> "cat <target-file>"`
-- `cossh-linux-log`: `cossh -l -P linux <host> "cat <target-file>"`
-- `cossh-network-log`: `cossh -l -P network <host> "cat <target-file>"`
-- `cossh-default-log`: `cossh -l -P default <host> "cat <target-file>"`
+- `cossh-linux-log`: `cossh -l -P linux ssh <host> "cat <target-file>"`
+- `cossh-network-log`: `cossh -l -P network ssh <host> "cat <target-file>"`
+- `cossh-default-log`: `cossh -l -P default ssh <host> "cat <target-file>"`
 
 ## Tracking guidance
 For each optimization slice, run once before and once after, then compare:

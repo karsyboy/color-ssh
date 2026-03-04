@@ -467,19 +467,20 @@ impl AppState {
             cmd.arg(pass_entry_override);
         }
 
-        cmd.arg(&host.name);
-        cmd.env("COSSH_SESSION_NAME", tab_title);
-
         if let Some(profile) = &host.profile {
             cmd.arg("-P");
             cmd.arg(profile);
         }
 
+        cmd.arg("ssh");
+        cmd.arg(&host.name);
+        cmd.env("COSSH_SESSION_NAME", tab_title);
+
         let pass_info = if using_pass_entry { " (via vault)" } else { "" };
         let profile_info = host.profile.as_ref().map_or(String::new(), |profile| format!(" [profile: {}]", profile));
         let logging_info = if force_ssh_logging { " [ssh-logging]" } else { "" };
         log_debug!(
-            "Spawning cossh command: cossh {}{}{}{} (session: {})",
+            "Spawning cossh command: cossh ssh {}{}{}{} (session: {})",
             host.name,
             pass_info,
             profile_info,

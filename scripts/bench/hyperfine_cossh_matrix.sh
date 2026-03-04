@@ -161,7 +161,7 @@ for profile in "${PROFILES[@]}"; do
         ;;
     esac
 
-    cmd="${COSSH_CMD} ${logging_flags} -P ${profile} ${HOST} \"cat ${TARGET_FILE}\""
+    cmd="${COSSH_CMD} ${logging_flags} -P ${profile} ssh ${HOST} \"cat ${TARGET_FILE}\""
     hyperfine_args+=(--command-name "cossh-${profile}-${mode}" "${cmd}")
   done
 done
