@@ -1,10 +1,10 @@
 use super::*;
-use crate::ssh_config::SshHost;
+use crate::inventory::InventoryHost;
 use crate::tui::{HostTab, QuickConnectField, QuickConnectState, TerminalSearchState, VaultStatusModalState, VaultUnlockAction, VaultUnlockState};
 
 fn host_tab(title: &str) -> HostTab {
     HostTab {
-        host: SshHost::new(title.to_string()),
+        host: InventoryHost::new(title.to_string()),
         title: title.to_string(),
         session: None,
         session_error: None,

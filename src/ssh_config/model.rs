@@ -1,33 +1,8 @@
 //! SSH config domain models.
 
+use crate::inventory::{ConnectionProtocol, TreeFolder};
 use std::collections::HashMap;
 use std::path::PathBuf;
-
-/// Stable folder identifier used by the TUI tree.
-pub type FolderId = usize;
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-pub enum ConnectionProtocol {
-    #[default]
-    Ssh,
-    Rdp,
-}
-
-impl ConnectionProtocol {
-    pub fn as_str(self) -> &'static str {
-        match self {
-            Self::Ssh => "ssh",
-            Self::Rdp => "rdp",
-        }
-    }
-
-    pub fn display_name(self) -> &'static str {
-        match self {
-            Self::Ssh => "SSH",
-            Self::Rdp => "RDP",
-        }
-    }
-}
 
 /// Represents a single SSH host configuration.
 #[derive(Debug, Clone)]
@@ -44,8 +19,14 @@ pub struct SshHost {
     pub port: Option<u16>,
     /// Identity file path.
     pub identity_file: Option<String>,
+    /// Whether only explicit identities should be used.
+    pub identities_only: Option<bool>,
     /// Proxy jump host.
     pub proxy_jump: Option<String>,
+    /// Proxy command setting.
+    pub proxy_command: Option<String>,
+    /// ForwardAgent value.
+    pub forward_agent: Option<bool>,
     /// Description from `#_Desc` comment.
     pub description: Option<String>,
     /// Profile from `#_Profile` comment.
@@ -77,7 +58,10 @@ impl SshHost {
             user: None,
             port: None,
             identity_file: None,
+            identities_only: None,
             proxy_jump: None,
+            proxy_command: None,
+            forward_agent: None,
             description: None,
             profile: None,
             pass_key: None,
@@ -91,21 +75,6 @@ impl SshHost {
     }
 }
 
-/// Tree folder node derived from include relationships.
-#[derive(Debug, Clone)]
-pub struct TreeFolder {
-    /// Stable folder ID.
-    pub id: FolderId,
-    /// Display name (file basename).
-    pub name: String,
-    /// Source config file path.
-    pub path: PathBuf,
-    /// Included child folders.
-    pub children: Vec<TreeFolder>,
-    /// Host indices (into [`SshHostTreeModel::hosts`]) defined in this file.
-    pub host_indices: Vec<usize>,
-}
-
 /// Parsed SSH host data and include graph as a folder tree.
 #[derive(Debug, Clone)]
 pub struct SshHostTreeModel {
@@ -117,6 +86,7 @@ pub struct SshHostTreeModel {
 
 impl SshHostTreeModel {
     // Construction helpers.
+    #[allow(dead_code)]
     pub(super) fn empty(root_path: PathBuf) -> Self {
         let root_name = root_path.file_name().and_then(|segment| segment.to_str()).unwrap_or("config").to_string();
         Self {

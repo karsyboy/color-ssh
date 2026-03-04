@@ -146,12 +146,10 @@ impl AppState {
                 Span::styled(host.protocol.display_name(), Style::default().fg(theme::ansi_cyan())),
             ]));
 
-            if let Some(hostname) = &host.hostname {
-                lines.push(Line::from(vec![
-                    Span::styled("Host: ", Style::default().fg(theme::ansi_bright_black())),
-                    Span::styled(hostname, Style::default().fg(theme::ansi_bright_white())),
-                ]));
-            }
+            lines.push(Line::from(vec![
+                Span::styled("Host: ", Style::default().fg(theme::ansi_bright_black())),
+                Span::styled(&host.host, Style::default().fg(theme::ansi_bright_white())),
+            ]));
 
             if let Some(user) = &host.user {
                 lines.push(Line::from(vec![
@@ -167,7 +165,7 @@ impl AppState {
                 ]));
             }
 
-            if let Some(identity) = &host.identity_file {
+            if let Some(identity) = &host.ssh.identity_file {
                 let display = identity.rsplit('/').next().unwrap_or(identity);
                 lines.push(Line::from(vec![
                     Span::styled("Key:  ", Style::default().fg(theme::ansi_bright_black())),
@@ -175,20 +173,20 @@ impl AppState {
                 ]));
             }
 
-            if let Some(proxy) = &host.proxy_jump {
+            if let Some(proxy) = &host.ssh.proxy_jump {
                 lines.push(Line::from(vec![
                     Span::styled("Jump: ", Style::default().fg(theme::ansi_bright_black())),
                     Span::styled(proxy, Style::default().fg(theme::ansi_bright_white())),
                 ]));
             }
 
-            for fwd in &host.local_forward {
+            for fwd in &host.ssh.local_forward {
                 lines.push(Line::from(vec![
                     Span::styled("LFwd: ", Style::default().fg(theme::ansi_bright_black())),
                     Span::styled(fwd, Style::default().fg(theme::ansi_bright_white())),
                 ]));
             }
-            for fwd in &host.remote_forward {
+            for fwd in &host.ssh.remote_forward {
                 lines.push(Line::from(vec![
                     Span::styled("RFwd: ", Style::default().fg(theme::ansi_bright_black())),
                     Span::styled(fwd, Style::default().fg(theme::ansi_bright_white())),
@@ -202,14 +200,14 @@ impl AppState {
                 ]));
             }
 
-            if !host.rdp_args.is_empty() {
+            if !host.rdp.args.is_empty() {
                 lines.push(Line::from(vec![
                     Span::styled("RDP:  ", Style::default().fg(theme::ansi_bright_black())),
-                    Span::styled(host.rdp_args.join(" "), Style::default().fg(theme::ansi_bright_white())),
+                    Span::styled(host.rdp.args.join(" "), Style::default().fg(theme::ansi_bright_white())),
                 ]));
             }
 
-            if host.pass_key.is_some() {
+            if host.vault_pass.is_some() {
                 lines.push(Line::from(vec![
                     Span::styled("Pass: ", Style::default().fg(theme::ansi_bright_black())),
                     Span::styled("enabled", Style::default().fg(theme::ansi_yellow())),
@@ -282,12 +280,10 @@ impl AppState {
                 Line::from(""),
             ];
 
-            if let Some(hostname) = &host.hostname {
-                lines.push(Line::from(vec![
-                    Span::styled("  Hostname: ", Style::default().fg(theme::ansi_white())),
-                    Span::styled(hostname, Style::default().fg(theme::ansi_bright_white())),
-                ]));
-            }
+            lines.push(Line::from(vec![
+                Span::styled("  Hostname: ", Style::default().fg(theme::ansi_white())),
+                Span::styled(&host.host, Style::default().fg(theme::ansi_bright_white())),
+            ]));
 
             if let Some(user) = &host.user {
                 lines.push(Line::from(vec![
@@ -303,24 +299,24 @@ impl AppState {
                 ]));
             }
 
-            if let Some(identity) = &host.identity_file {
+            if let Some(identity) = &host.ssh.identity_file {
                 lines.push(Line::from(vec![
                     Span::styled("  IdentityFile: ", Style::default().fg(theme::ansi_white())),
                     Span::styled(identity, Style::default().fg(theme::ansi_bright_black())),
                 ]));
             }
 
-            if let Some(proxy) = &host.proxy_jump {
+            if let Some(proxy) = &host.ssh.proxy_jump {
                 lines.push(Line::from(vec![
                     Span::styled("  ProxyJump: ", Style::default().fg(theme::ansi_white())),
                     Span::styled(proxy, Style::default().fg(theme::ansi_bright_white())),
                 ]));
             }
 
-            if !host.rdp_args.is_empty() {
+            if !host.rdp.args.is_empty() {
                 lines.push(Line::from(vec![
                     Span::styled("  RdpArgs: ", Style::default().fg(theme::ansi_white())),
-                    Span::styled(host.rdp_args.join(" "), Style::default().fg(theme::ansi_bright_white())),
+                    Span::styled(host.rdp.args.join(" "), Style::default().fg(theme::ansi_bright_white())),
                 ]));
             }
 

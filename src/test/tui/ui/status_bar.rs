@@ -1,6 +1,6 @@
 use super::AppState;
 use crate::auth::ipc::VaultStatus;
-use crate::ssh_config::TreeFolder;
+use crate::inventory::TreeFolder;
 use crate::tui::{HostTreeRow, HostTreeRowKind};
 use ratatui::style::Modifier;
 use ratatui::text::Span;

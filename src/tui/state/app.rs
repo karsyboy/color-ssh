@@ -7,8 +7,8 @@ use super::quick_connect::QuickConnectState;
 use super::tabs::{HostTab, TerminalSearchState};
 use super::vault::{VaultStatusModalState, VaultUnlockState};
 use crate::auth::ipc::{self, VaultStatus, VaultStatusEvent, VaultStatusEventKind};
+use crate::inventory::{ConnectionProtocol, FolderId, InventoryHost, TreeFolder};
 use crate::log_debug;
-use crate::ssh_config::{ConnectionProtocol, FolderId, SshHost, TreeFolder};
 use ratatui::layout::Rect;
 use std::collections::{HashMap, HashSet};
 use std::io;
@@ -31,7 +31,7 @@ pub(crate) struct ConnectRequest {
 
 /// Main application state.
 pub(crate) struct AppState {
-    pub(crate) hosts: Vec<SshHost>,
+    pub(crate) hosts: Vec<InventoryHost>,
     pub(crate) host_search_index: Vec<HostSearchEntry>,
     pub(crate) host_tree_root: TreeFolder,
     pub(crate) visible_host_rows: Vec<HostTreeRow>,
@@ -92,13 +92,14 @@ impl AppState {
     }
 
     // Search indexing helpers.
-    fn build_host_search_index(hosts: &[SshHost]) -> Vec<HostSearchEntry> {
+    fn build_host_search_index(hosts: &[InventoryHost]) -> Vec<HostSearchEntry> {
         hosts
             .iter()
             .map(|host| HostSearchEntry {
                 name_lower: host.name.to_lowercase(),
-                hostname_lower: host.hostname.as_ref().map(|hostname| hostname.to_lowercase()),
+                host_lower: Some(host.host.to_lowercase()),
                 user_lower: host.user.as_ref().map(|user| user.to_lowercase()),
+                hidden: host.hidden,
             })
             .collect()
     }

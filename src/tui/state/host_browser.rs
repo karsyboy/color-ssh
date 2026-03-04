@@ -1,12 +1,13 @@
 //! Host-browser tree and search indexing state.
 
-use crate::ssh_config::FolderId;
+use crate::inventory::FolderId;
 
 #[derive(Debug, Clone, Default)]
 pub(crate) struct HostSearchEntry {
     pub(crate) name_lower: String,
-    pub(crate) hostname_lower: Option<String>,
+    pub(crate) host_lower: Option<String>,
     pub(crate) user_lower: Option<String>,
+    pub(crate) hidden: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

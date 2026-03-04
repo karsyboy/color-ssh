@@ -10,13 +10,18 @@ use crate::auth::{
 };
 use crate::command_path;
 use crate::config;
+use crate::inventory::{ConnectionProtocol, InventoryHost};
 use crate::ssh_args;
-use crate::ssh_config::{ConnectionProtocol, SshHost};
 use crate::validation::validate_vault_entry_name;
 use crate::{Result, log_debug, log_debug_raw, log_error, log_info};
+use std::collections::HashSet;
 use std::fmt;
 use std::io::{self, IsTerminal, Write};
 use std::process::{Child, Command, ExitCode, Stdio};
+
+const SSH_FLAGS_WITH_SEPARATE_VALUES: &[&str] = &[
+    "-b", "-B", "-c", "-D", "-E", "-e", "-F", "-I", "-i", "-J", "-L", "-l", "-m", "-O", "-o", "-p", "-P", "-Q", "-R", "-S", "-w", "-W",
+];
 
 #[derive(Debug)]
 pub(crate) struct PreparedCommand {
@@ -57,6 +62,23 @@ impl fmt::Display for VaultAccessError {
     }
 }
 
+#[derive(Debug, Default)]
+struct SshArgInspection {
+    destination_index: Option<usize>,
+    destination_host: Option<String>,
+    explicit_destination_user: Option<String>,
+    has_user_flag: bool,
+    has_port_flag: bool,
+    has_identity_flag: bool,
+    has_proxy_jump: bool,
+    has_proxy_command: bool,
+    has_forward_agent: bool,
+    has_identities_only: bool,
+    has_local_forward: bool,
+    has_remote_forward: bool,
+    option_keys: HashSet<String>,
+}
+
 pub(crate) fn build_plain_ssh_command(args: &[String]) -> PreparedCommand {
     PreparedCommand::new("ssh", args.to_vec())
 }
@@ -71,26 +93,252 @@ pub(crate) fn command_from_spec(spec: &PreparedCommand) -> io::Result<Command> {
     Ok(command)
 }
 
-pub(crate) fn resolve_host_by_destination<'a>(destination: &str, hosts: &'a [SshHost]) -> Option<&'a SshHost> {
+pub(crate) fn resolve_host_by_destination<'a>(destination: &str, hosts: &'a [InventoryHost]) -> Option<&'a InventoryHost> {
     if let Some(host) = hosts.iter().find(|host| host.name == destination) {
         return Some(host);
     }
 
-    let mut hostname_matches = hosts.iter().filter(|host| host.hostname.as_deref() == Some(destination));
-    let first = hostname_matches.next()?;
-    if hostname_matches.next().is_some() {
+    let mut host_matches = hosts.iter().filter(|host| host.host == destination);
+    let first = host_matches.next()?;
+    if host_matches.next().is_some() {
         return None;
     }
 
     Some(first)
 }
 
-pub(crate) fn resolve_pass_entry_from_hosts(destination: &str, explicit_entry: Option<&str>, hosts: &[SshHost]) -> Option<String> {
+#[cfg_attr(not(test), allow(dead_code))]
+pub(crate) fn resolve_pass_entry_from_hosts(destination: &str, explicit_entry: Option<&str>, hosts: &[InventoryHost]) -> Option<String> {
     if let Some(explicit_entry) = explicit_entry {
         return Some(explicit_entry.to_string());
     }
 
-    resolve_host_by_destination(destination, hosts).and_then(|host| host.pass_key.clone())
+    resolve_host_by_destination(destination, hosts).and_then(|host| host.vault_pass.clone())
+}
+
+fn inspect_ssh_args(args: &[String]) -> SshArgInspection {
+    let mut inspection = SshArgInspection::default();
+    let mut skip_next = false;
+
+    for (idx, arg) in args.iter().enumerate() {
+        if skip_next {
+            skip_next = false;
+            continue;
+        }
+
+        match arg.as_str() {
+            "-l" => {
+                inspection.has_user_flag = true;
+                skip_next = true;
+                continue;
+            }
+            "-p" => {
+                inspection.has_port_flag = true;
+                skip_next = true;
+                continue;
+            }
+            "-i" => {
+                inspection.has_identity_flag = true;
+                skip_next = true;
+                continue;
+            }
+            "-J" => {
+                inspection.has_proxy_jump = true;
+                skip_next = true;
+                continue;
+            }
+            "-L" => {
+                inspection.has_local_forward = true;
+                skip_next = true;
+                continue;
+            }
+            "-R" => {
+                inspection.has_remote_forward = true;
+                skip_next = true;
+                continue;
+            }
+            "-o" => {
+                if let Some(option_arg) = args.get(idx + 1) {
+                    record_ssh_option(option_arg, &mut inspection);
+                }
+                skip_next = true;
+                continue;
+            }
+            _ => {}
+        }
+
+        if arg.starts_with("-l") && arg.len() > 2 {
+            inspection.has_user_flag = true;
+            continue;
+        }
+        if arg.starts_with("-p") && arg.len() > 2 {
+            inspection.has_port_flag = true;
+            continue;
+        }
+        if arg.starts_with("-i") && arg.len() > 2 {
+            inspection.has_identity_flag = true;
+            continue;
+        }
+        if arg.starts_with("-J") && arg.len() > 2 {
+            inspection.has_proxy_jump = true;
+            continue;
+        }
+        if arg.starts_with("-L") && arg.len() > 2 {
+            inspection.has_local_forward = true;
+            continue;
+        }
+        if arg.starts_with("-R") && arg.len() > 2 {
+            inspection.has_remote_forward = true;
+            continue;
+        }
+        if arg.starts_with("-o") && arg.len() > 2 {
+            record_ssh_option(&arg[2..], &mut inspection);
+            continue;
+        }
+
+        if arg.starts_with('-') {
+            if SSH_FLAGS_WITH_SEPARATE_VALUES.contains(&arg.as_str()) {
+                skip_next = true;
+            }
+            continue;
+        }
+
+        inspection.destination_index = Some(idx);
+        inspection.destination_host = Some(
+            arg.split_once('@')
+                .map(|(user, host)| {
+                    if !user.is_empty() {
+                        inspection.explicit_destination_user = Some(user.to_string());
+                    }
+                    host.to_string()
+                })
+                .unwrap_or_else(|| arg.clone()),
+        );
+        break;
+    }
+
+    inspection
+}
+
+fn record_ssh_option(option_arg: &str, inspection: &mut SshArgInspection) {
+    let option_key = option_arg.split_once('=').map(|(key, _)| key).unwrap_or(option_arg).trim().to_ascii_lowercase();
+    if option_key.is_empty() {
+        return;
+    }
+
+    inspection.option_keys.insert(option_key.clone());
+    match option_key.as_str() {
+        "user" => inspection.has_user_flag = true,
+        "port" => inspection.has_port_flag = true,
+        "identityfile" => inspection.has_identity_flag = true,
+        "proxyjump" => inspection.has_proxy_jump = true,
+        "proxycommand" => inspection.has_proxy_command = true,
+        "forwardagent" => inspection.has_forward_agent = true,
+        "identitiesonly" => inspection.has_identities_only = true,
+        "localforward" => inspection.has_local_forward = true,
+        "remoteforward" => inspection.has_remote_forward = true,
+        _ => {}
+    }
+}
+
+fn inject_ssh_option(args: &mut Vec<String>, key: &str, value: impl Into<String>) {
+    args.push("-o".to_string());
+    args.push(format!("{key}={}", value.into()));
+}
+
+pub(crate) fn synthesize_ssh_args(args: &[String], host: &InventoryHost) -> Vec<String> {
+    let inspection = inspect_ssh_args(args);
+    let Some(destination_index) = inspection.destination_index else {
+        return args.to_vec();
+    };
+
+    let mut injected = Vec::new();
+
+    if !inspection.has_user_flag
+        && inspection.explicit_destination_user.is_none()
+        && let Some(user) = host.user.as_ref().filter(|value| !value.trim().is_empty())
+    {
+        injected.push("-l".to_string());
+        injected.push(user.clone());
+    }
+
+    if !inspection.has_port_flag
+        && let Some(port) = host.port
+    {
+        injected.push("-p".to_string());
+        injected.push(port.to_string());
+    }
+
+    if !inspection.has_identity_flag
+        && let Some(identity_file) = host.ssh.identity_file.as_ref()
+    {
+        injected.push("-i".to_string());
+        injected.push(identity_file.clone());
+    }
+
+    if !inspection.has_proxy_jump
+        && let Some(proxy_jump) = host.ssh.proxy_jump.as_ref()
+    {
+        inject_ssh_option(&mut injected, "ProxyJump", proxy_jump.clone());
+    }
+
+    if !inspection.has_proxy_command
+        && let Some(proxy_command) = host.ssh.proxy_command.as_ref()
+    {
+        inject_ssh_option(&mut injected, "ProxyCommand", proxy_command.clone());
+    }
+
+    if !inspection.has_forward_agent
+        && let Some(forward_agent) = host.ssh.forward_agent
+    {
+        inject_ssh_option(&mut injected, "ForwardAgent", if forward_agent { "yes" } else { "no" });
+    }
+
+    if !inspection.has_identities_only
+        && let Some(identities_only) = host.ssh.identities_only
+    {
+        inject_ssh_option(&mut injected, "IdentitiesOnly", if identities_only { "yes" } else { "no" });
+    }
+
+    if !inspection.has_local_forward {
+        for forward in &host.ssh.local_forward {
+            injected.push("-L".to_string());
+            injected.push(forward.clone());
+        }
+    }
+
+    if !inspection.has_remote_forward {
+        for forward in &host.ssh.remote_forward {
+            injected.push("-R".to_string());
+            injected.push(forward.clone());
+        }
+    }
+
+    for (key, value) in &host.ssh.extra_options {
+        let normalized_key = key.trim().to_ascii_lowercase();
+        if inspection.option_keys.contains(&normalized_key)
+            || matches!(
+                normalized_key.as_str(),
+                "user" | "port" | "identityfile" | "proxyjump" | "proxycommand" | "forwardagent" | "identitiesonly" | "localforward" | "remoteforward"
+            )
+        {
+            continue;
+        }
+        inject_ssh_option(&mut injected, key, value.clone());
+    }
+
+    let destination = if let Some(explicit_user) = inspection.explicit_destination_user {
+        format!("{explicit_user}@{}", host.host)
+    } else {
+        host.host.clone()
+    };
+
+    let mut effective_args = Vec::with_capacity(args.len() + injected.len());
+    effective_args.extend_from_slice(&args[..destination_index]);
+    effective_args.extend(injected);
+    effective_args.push(destination);
+    effective_args.extend_from_slice(&args[destination_index + 1..]);
+    effective_args
 }
 
 fn current_unlock_policy() -> UnlockPolicy {
@@ -207,7 +455,17 @@ fn resolve_vault_password(pass_entry_name: &str) -> io::Result<SensitiveString> 
 }
 
 pub(crate) fn build_ssh_command(args: &[String], explicit_pass_entry: Option<&str>) -> io::Result<PreparedCommand> {
-    let mut command = build_plain_ssh_command(args);
+    let destination = ssh_args::extract_destination_host(args);
+    let inventory_hosts = crate::inventory::load_inventory_tree().ok().map(|tree| tree.hosts).unwrap_or_default();
+    let resolved_host = destination
+        .as_deref()
+        .and_then(|destination| resolve_host_by_destination(destination, &inventory_hosts))
+        .filter(|host| matches!(&host.protocol, ConnectionProtocol::Ssh))
+        .cloned();
+
+    let effective_args = resolved_host.as_ref().map_or_else(|| args.to_vec(), |host| synthesize_ssh_args(args, host));
+    let mut command = build_plain_ssh_command(&effective_args);
+
     let auth_settings = config::auth_settings();
     if !auth_settings.direct_password_autologin {
         log_debug!("Direct password auto-login disabled in auth settings");
@@ -217,13 +475,12 @@ pub(crate) fn build_ssh_command(args: &[String], explicit_pass_entry: Option<&st
     let pass_entry_source = if explicit_pass_entry.is_some() {
         "direct override"
     } else {
-        "ssh config lookup"
+        "inventory lookup"
     };
-    let Some(pass_entry_name) = explicit_pass_entry.map(|name| name.to_string()).or_else(|| {
-        let destination = ssh_args::extract_destination_host(args)?;
-        let hosts = crate::ssh_config::load_ssh_host_tree().ok()?.hosts;
-        resolve_pass_entry_from_hosts(&destination, None, &hosts)
-    }) else {
+    let Some(pass_entry_name) = explicit_pass_entry
+        .map(|name| name.to_string())
+        .or_else(|| resolved_host.as_ref().and_then(|host| host.vault_pass.clone()))
+    else {
         log_debug!("No password vault entry resolved for direct SSH launch");
         return Ok(command);
     };
@@ -298,8 +555,8 @@ pub(crate) fn build_ssh_command(args: &[String], explicit_pass_entry: Option<&st
     Ok(command)
 }
 
-fn rdp_server_address(host: &SshHost) -> String {
-    let destination = host.hostname.as_deref().unwrap_or(&host.name);
+fn rdp_server_address(host: &InventoryHost) -> String {
+    let destination = host.host.as_str();
     match host.port {
         Some(port) if destination.contains(':') && !destination.starts_with('[') => format!("[{destination}]:{port}"),
         Some(port) => format!("{destination}:{port}"),
@@ -311,35 +568,35 @@ fn has_rdp_cert_flag(args: &[String]) -> bool {
     args.iter().any(|arg| arg.starts_with("/cert:") || arg == "/cert")
 }
 
-fn build_rdp_stdin_payload(host: &SshHost, password: SensitiveString) -> io::Result<SensitiveString> {
+fn build_rdp_stdin_payload(host: &InventoryHost, password: SensitiveString) -> io::Result<SensitiveString> {
     let Some(user) = host.user.as_deref().filter(|value| !value.trim().is_empty()) else {
         return Err(io::Error::new(
             io::ErrorKind::InvalidInput,
-            "RDP username is required; set `User` in the host config or pass `--user`",
+            "RDP username is required; set `user` in the inventory or pass `--user`",
         ));
     };
 
     let server = rdp_server_address(host);
-    let mut args = Vec::with_capacity(host.rdp_args.len() + 6);
+    let mut args = Vec::with_capacity(host.rdp.args.len() + 6);
     args.push(format!("/u:{user}"));
-    if let Some(domain) = host.rdp_domain.as_deref().filter(|value| !value.trim().is_empty()) {
+    if let Some(domain) = host.rdp.domain.as_deref().filter(|value| !value.trim().is_empty()) {
         args.push(format!("/d:{domain}"));
     }
     args.push(format!("/v:{server}"));
     args.push(format!("/p:{}", password.expose_secret()));
-    if !has_rdp_cert_flag(&host.rdp_args) {
+    if !has_rdp_cert_flag(&host.rdp.args) {
         args.push("/cert:tofu".to_string());
     }
-    args.extend(host.rdp_args.iter().cloned());
+    args.extend(host.rdp.args.iter().cloned());
 
     Ok(SensitiveString::from(args.join("\n") + "\n"))
 }
 
-pub(crate) fn build_rdp_command_for_host(host: &SshHost, explicit_pass_entry: Option<&str>) -> io::Result<PreparedCommand> {
-    let pass_entry_name = explicit_pass_entry.map(str::to_string).or_else(|| host.pass_key.clone()).ok_or_else(|| {
+pub(crate) fn build_rdp_command_for_host(host: &InventoryHost, explicit_pass_entry: Option<&str>) -> io::Result<PreparedCommand> {
+    let pass_entry_name = explicit_pass_entry.map(str::to_string).or_else(|| host.vault_pass.clone()).ok_or_else(|| {
         io::Error::new(
             io::ErrorKind::InvalidInput,
-            "RDP launch requires a password vault entry; set `#_pass` in the host config or pass `--pass-entry`",
+            "RDP launch requires a password vault entry; set `vault_pass` in the inventory or pass `--pass-entry`",
         )
     })?;
 
@@ -351,30 +608,27 @@ pub(crate) fn build_rdp_command_for_host(host: &SshHost, explicit_pass_entry: Op
 }
 
 pub(crate) fn build_rdp_command(args: &RdpCommandArgs, explicit_pass_entry: Option<&str>) -> io::Result<PreparedCommand> {
-    let configured_host = crate::ssh_config::load_ssh_host_tree()
+    let configured_host = crate::inventory::load_inventory_tree()
         .ok()
         .and_then(|tree| resolve_host_by_destination(&args.target, &tree.hosts).cloned());
 
     let mut host = configured_host.unwrap_or_else(|| {
-        let mut host = SshHost::new(args.target.clone());
-        host.hostname = Some(args.target.clone());
+        let mut host = InventoryHost::new(args.target.clone());
+        host.host = args.target.clone();
         host
     });
 
     host.protocol = ConnectionProtocol::Rdp;
-    if host.hostname.is_none() {
-        host.hostname = Some(args.target.clone());
-    }
     if let Some(user) = args.user.as_ref() {
         host.user = Some(user.clone());
     }
     if let Some(domain) = args.domain.as_ref() {
-        host.rdp_domain = Some(domain.clone());
+        host.rdp.domain = Some(domain.clone());
     }
     if let Some(port) = args.port {
         host.port = Some(port);
     }
-    host.rdp_args.extend(args.extra_args.iter().cloned());
+    host.rdp.args.extend(args.extra_args.iter().cloned());
 
     build_rdp_command_for_host(&host, explicit_pass_entry)
 }

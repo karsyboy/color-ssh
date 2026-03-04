@@ -3,9 +3,22 @@ use super::*;
 fn search_entry(name: &str, hostname: Option<&str>, user: Option<&str>) -> HostSearchEntry {
     HostSearchEntry {
         name_lower: name.to_string(),
-        hostname_lower: hostname.map(str::to_string),
+        host_lower: hostname.map(str::to_string),
         user_lower: user.map(str::to_string),
+        hidden: false,
     }
+}
+
+#[test]
+fn hidden_entries_do_not_match_search() {
+    let entries = vec![HostSearchEntry {
+        name_lower: "hidden-switch".to_string(),
+        host_lower: Some("10.0.0.10".to_string()),
+        user_lower: Some("admin".to_string()),
+        hidden: true,
+    }];
+
+    assert!(compute_match_scores(&entries, "hidden").is_empty());
 }
 
 #[test]

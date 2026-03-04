@@ -1,6 +1,6 @@
 //! Fuzzy search and host filtering logic
 
-use crate::ssh_config::{FolderId, TreeFolder};
+use crate::inventory::{FolderId, TreeFolder};
 use crate::tui::state::HostSearchEntry;
 use crate::tui::{AppState, HostTreeRow, HostTreeRowKind};
 use std::collections::HashMap;
@@ -65,13 +65,17 @@ fn compute_match_scores(search_entries: &[HostSearchEntry], query_lower: &str) -
 
     // Pass 1: strict contiguous matching.
     for (idx, search_entry) in search_entries.iter().enumerate() {
+        if search_entry.hidden {
+            continue;
+        }
+
         let mut best_score = None;
 
         if let Some(score) = strict_match_score(&search_entry.name_lower, query_lower) {
             best_score = Some(score + 1000);
         }
 
-        if let Some(hostname) = &search_entry.hostname_lower
+        if let Some(hostname) = &search_entry.host_lower
             && let Some(score) = strict_match_score(hostname, query_lower)
         {
             best_score = Some(best_score.unwrap_or(0).max(score + 500));
@@ -94,13 +98,17 @@ fn compute_match_scores(search_entries: &[HostSearchEntry], query_lower: &str) -
 
     // Pass 2: fuzzy fallback when strict matching found nothing.
     for (idx, search_entry) in search_entries.iter().enumerate() {
+        if search_entry.hidden {
+            continue;
+        }
+
         let mut best_score = None;
 
         if let Some(score) = fuzzy_match(&search_entry.name_lower, query_lower) {
             best_score = Some(score + 100);
         }
 
-        if let Some(hostname) = &search_entry.hostname_lower
+        if let Some(hostname) = &search_entry.host_lower
             && let Some(score) = fuzzy_match(hostname, query_lower)
         {
             best_score = Some(best_score.unwrap_or(0).max(score + 50));
@@ -149,6 +157,9 @@ impl AppState {
     fn collect_root_visible_rows_normal(&self, rows: &mut Vec<HostTreeRow>) {
         for &host_idx in &self.host_tree_root.host_indices {
             if let Some(host) = self.hosts.get(host_idx) {
+                if host.hidden {
+                    continue;
+                }
                 rows.push(HostTreeRow {
                     kind: HostTreeRowKind::Host(host_idx),
                     depth: 0,
@@ -170,6 +181,9 @@ impl AppState {
             if self.host_match_scores.contains_key(&host_idx)
                 && let Some(host) = self.hosts.get(host_idx)
             {
+                if host.hidden {
+                    continue;
+                }
                 rows.push(HostTreeRow {
                     kind: HostTreeRowKind::Host(host_idx),
                     depth: 0,
@@ -202,6 +216,9 @@ impl AppState {
 
         for &host_idx in &folder.host_indices {
             if let Some(host) = self.hosts.get(host_idx) {
+                if host.hidden {
+                    continue;
+                }
                 rows.push(HostTreeRow {
                     kind: HostTreeRowKind::Host(host_idx),
                     depth: depth + 1,
@@ -234,6 +251,9 @@ impl AppState {
             if self.host_match_scores.contains_key(&host_idx)
                 && let Some(host) = self.hosts.get(host_idx)
             {
+                if host.hidden {
+                    continue;
+                }
                 host_rows.push(HostTreeRow {
                     kind: HostTreeRowKind::Host(host_idx),
                     depth: depth + 1,

@@ -1,12 +1,12 @@
 use super::AppState;
-use crate::ssh_config::SshHost;
+use crate::inventory::InventoryHost;
 use crate::tui::{HostTab, TerminalSearchState};
 
 fn app_with_tab_titles(titles: &[&str]) -> AppState {
     let mut app = AppState::new_for_tests();
     for title in titles {
         app.tabs.push(HostTab {
-            host: SshHost::new((*title).to_string()),
+            host: InventoryHost::new((*title).to_string()),
             title: (*title).to_string(),
             session: None,
             session_error: None,

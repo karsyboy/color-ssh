@@ -1,4 +1,4 @@
-use super::{MainCommand, ProtocolCommand, RdpCommandArgs, SshCommandArgs, VaultCommand, build_cli_command, parse_main_args_from};
+use super::{MainCommand, ProtocolCommand, RdpCommandArgs, SshCommandArgs, VaultCommand, build_cli_command, parse_main_args_from, try_parse_main_args_from};
 use crate::ssh_args::is_non_interactive_ssh_invocation;
 
 #[test]
@@ -153,6 +153,15 @@ fn parses_hidden_agent_serve_mode() {
 }
 
 #[test]
+fn parses_top_level_migrate_mode() {
+    let cmd = build_cli_command();
+    let parsed = parse_main_args_from(&cmd, ["cossh", "--migrate"]);
+
+    assert_eq!(parsed.command, Some(MainCommand::MigrateInventory));
+    assert!(!parsed.interactive);
+}
+
+#[test]
 fn parses_rdp_subcommand_with_overrides_and_extra_args() {
     let cmd = build_cli_command();
     let parsed = parse_main_args_from(
@@ -196,6 +205,17 @@ fn rejects_vault_add_pass_with_ssh_args() {
             .try_get_matches_from(["cossh", "vault", "add", "office_fw", "user@example.com"])
             .is_err()
     );
+}
+
+#[test]
+fn rejects_migrate_with_subcommands_or_incompatible_flags() {
+    let cmd = build_cli_command();
+
+    assert!(try_parse_main_args_from(&cmd, ["cossh", "--migrate", "ssh", "host"]).is_err());
+    assert!(cmd.clone().try_get_matches_from(["cossh", "--migrate", "--profile", "network"]).is_err());
+    assert!(cmd.clone().try_get_matches_from(["cossh", "--migrate", "--log"]).is_err());
+    assert!(cmd.clone().try_get_matches_from(["cossh", "--migrate", "--test"]).is_err());
+    assert!(cmd.try_get_matches_from(["cossh", "--migrate", "--pass-entry", "shared"]).is_err());
 }
 
 #[test]

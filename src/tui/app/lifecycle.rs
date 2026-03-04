@@ -2,7 +2,7 @@
 
 use super::event_loop::run_app;
 use crate::tui::AppState;
-use crate::{command_path, log_debug, log_error};
+use crate::{command_path, inventory::ConnectionProtocol, log_debug, log_error};
 use crossterm::{
     event::{DisableBracketedPaste, DisableMouseCapture, EnableBracketedPaste, EnableMouseCapture},
     execute,
@@ -83,12 +83,15 @@ pub fn run_session_manager() -> io::Result<()> {
             cmd.arg("-P").arg(profile);
         }
 
-        match request.protocol {
-            crate::ssh_config::ConnectionProtocol::Ssh => {
+        match &request.protocol {
+            ConnectionProtocol::Ssh => {
                 cmd.arg("ssh");
             }
-            crate::ssh_config::ConnectionProtocol::Rdp => {
+            ConnectionProtocol::Rdp => {
                 cmd.arg("rdp");
+            }
+            ConnectionProtocol::Other(protocol) => {
+                return Err(io::Error::other(format!("unsupported protocol '{}'", protocol)));
             }
         }
 

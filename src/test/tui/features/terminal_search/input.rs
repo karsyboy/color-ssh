@@ -1,12 +1,12 @@
 use super::AppState;
-use crate::ssh_config::SshHost;
+use crate::inventory::InventoryHost;
 use crate::tui::{HostTab, TerminalSearchState};
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
 fn app_with_active_search() -> AppState {
     let mut app = AppState::new_for_tests();
     app.tabs.push(HostTab {
-        host: SshHost::new("test-host".to_string()),
+        host: InventoryHost::new("test-host".to_string()),
         title: "test-host".to_string(),
         session: None,
         session_error: None,

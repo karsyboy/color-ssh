@@ -5,13 +5,15 @@ mod model;
 mod parser;
 mod path;
 
-pub use model::{ConnectionProtocol, FolderId, SshHost, SshHostTreeModel, TreeFolder};
-pub use parser::parse_ssh_config;
+pub use crate::inventory::{ConnectionProtocol, FolderId, TreeFolder};
+pub use model::{SshHost, SshHostTreeModel};
+pub use parser::{parse_ssh_config, parse_ssh_config_for_migration};
 pub use path::get_default_ssh_config_path;
 
 use std::io;
 
 /// Load the SSH include tree rooted at `~/.ssh/config`.
+#[allow(dead_code)]
 pub(crate) fn load_ssh_host_tree() -> io::Result<SshHostTreeModel> {
     let config_path = get_default_ssh_config_path().ok_or_else(|| io::Error::new(io::ErrorKind::NotFound, "Could not find home directory"))?;
 

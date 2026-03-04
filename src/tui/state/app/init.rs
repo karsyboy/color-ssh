@@ -7,7 +7,7 @@ use crate::auth::{
     vault::VaultPaths,
 };
 use crate::config;
-use crate::ssh_config::{FolderId, SshHost, SshHostTreeModel, TreeFolder, load_ssh_host_tree};
+use crate::inventory::{FolderId, InventoryHost, InventoryTreeModel, TreeFolder, get_default_inventory_path, load_inventory_tree};
 use crate::{log_debug, log_error, log_warn};
 use notify::{Event, RecommendedWatcher, RecursiveMode, Watcher};
 use std::collections::HashSet;
@@ -131,7 +131,7 @@ impl AppStateConfig {
 }
 
 pub(super) struct AppStateInit {
-    pub(super) hosts: Vec<SshHost>,
+    pub(super) hosts: Vec<InventoryHost>,
     pub(super) host_tree_root: TreeFolder,
     pub(super) collapsed_folders: HashSet<FolderId>,
     pub(super) history_buffer: usize,
@@ -161,17 +161,17 @@ fn should_forward_vault_status_event(event: &Event, marker_name: &str) -> bool {
 fn fallback_host_tree_root() -> TreeFolder {
     TreeFolder {
         id: 0,
-        name: "config".to_string(),
-        path: std::path::PathBuf::from("~/.ssh/config"),
+        name: "cossh-inventory.yaml".to_string(),
+        path: get_default_inventory_path().unwrap_or_else(|| std::path::PathBuf::from("~/.color-ssh/cossh-inventory.yaml")),
         children: Vec::new(),
         host_indices: Vec::new(),
     }
 }
 
-fn load_host_tree_model() -> SshHostTreeModel {
-    load_ssh_host_tree().unwrap_or_else(|err| {
-        log_error!("Failed to load SSH hosts: {}", err);
-        SshHostTreeModel {
+fn load_host_tree_model() -> InventoryTreeModel {
+    load_inventory_tree().unwrap_or_else(|err| {
+        log_error!("Failed to load inventory hosts: {}", err);
+        InventoryTreeModel {
             root: fallback_host_tree_root(),
             hosts: Vec::new(),
         }
@@ -212,7 +212,7 @@ pub(super) fn load_app_state_init() -> AppStateInit {
     let host_panel_width =
         AppState::clamp_host_panel_width_for_terminal(((term_width as u32 * session_config.host_view_size_percent as u32) / 100) as u16, term_width);
 
-    log_debug!("Loaded {} SSH hosts", host_count);
+    log_debug!("Loaded {} inventory hosts", host_count);
 
     AppStateInit {
         hosts: tree_model.hosts,

@@ -1,7 +1,7 @@
 //! Password vault unlock modal state and deferred action context.
 
 use crate::auth::secret::SensitiveBuffer;
-use crate::ssh_config::SshHost;
+use crate::inventory::InventoryHost;
 
 pub(crate) const VAULT_UNLOCK_MAX_ATTEMPTS: usize = 3;
 
@@ -27,7 +27,7 @@ impl VaultStatusModalState {
 #[derive(Debug, Clone)]
 pub(crate) enum VaultUnlockAction {
     UnlockVault,
-    OpenHostTab { host: Box<SshHost>, force_ssh_logging: bool },
+    OpenHostTab { host: Box<InventoryHost>, force_ssh_logging: bool },
     ReconnectTab { tab_index: usize },
 }
 

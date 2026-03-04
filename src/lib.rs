@@ -3,6 +3,7 @@ pub mod auth;
 mod command_path;
 pub mod config;
 mod highlighter;
+pub mod inventory;
 pub mod log;
 mod process;
 pub mod runtime;

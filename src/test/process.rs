@@ -1,7 +1,7 @@
 use super::exit::map_exit_code;
-use super::launch::{build_plain_ssh_command, resolve_host_by_destination, resolve_pass_entry_from_hosts};
+use super::launch::{build_plain_ssh_command, resolve_host_by_destination, resolve_pass_entry_from_hosts, synthesize_ssh_args};
 use super::stream::{requires_immediate_terminal_flush, should_flush_immediately};
-use crate::ssh_config::SshHost;
+use crate::inventory::InventoryHost;
 use std::process::ExitCode;
 
 #[test]
@@ -69,8 +69,8 @@ fn build_ssh_command_leaves_direct_launches_as_plain_ssh() {
 
 #[test]
 fn resolve_pass_entry_prefers_explicit_override() {
-    let mut host = SshHost::new("prod".to_string());
-    host.pass_key = Some("shared".to_string());
+    let mut host = InventoryHost::new("prod".to_string());
+    host.vault_pass = Some("shared".to_string());
 
     let resolved = resolve_pass_entry_from_hosts("prod", Some("override"), &[host]);
     assert_eq!(resolved.as_deref(), Some("override"));
@@ -78,9 +78,9 @@ fn resolve_pass_entry_prefers_explicit_override() {
 
 #[test]
 fn resolve_pass_entry_matches_unique_hostname_when_alias_not_found() {
-    let mut host = SshHost::new("prod".to_string());
-    host.hostname = Some("host.example.com".to_string());
-    host.pass_key = Some("shared".to_string());
+    let mut host = InventoryHost::new("prod".to_string());
+    host.host = "host.example.com".to_string();
+    host.vault_pass = Some("shared".to_string());
 
     let resolved = resolve_pass_entry_from_hosts("host.example.com", None, &[host]);
     assert_eq!(resolved.as_deref(), Some("shared"));
@@ -88,13 +88,80 @@ fn resolve_pass_entry_matches_unique_hostname_when_alias_not_found() {
 
 #[test]
 fn resolve_host_by_destination_prefers_alias_before_hostname() {
-    let mut alias_host = SshHost::new("prod".to_string());
-    alias_host.hostname = Some("host.example.com".to_string());
+    let mut alias_host = InventoryHost::new("prod".to_string());
+    alias_host.host = "host.example.com".to_string();
 
-    let mut hostname_host = SshHost::new("host.example.com".to_string());
-    hostname_host.hostname = Some("other.example.com".to_string());
+    let mut hostname_host = InventoryHost::new("host.example.com".to_string());
+    hostname_host.host = "other.example.com".to_string();
 
     let hosts = vec![alias_host, hostname_host];
     let resolved = resolve_host_by_destination("host.example.com", &hosts).expect("host");
     assert_eq!(resolved.name, "host.example.com");
+}
+
+#[test]
+fn synthesize_ssh_args_injects_inventory_defaults() {
+    let mut host = InventoryHost::new("switch".to_string());
+    host.host = "10.0.0.10".to_string();
+    host.user = Some("admin".to_string());
+    host.port = Some(2222);
+    host.ssh.identity_file = Some("~/.ssh/id_rsa".to_string());
+    host.ssh.proxy_jump = Some("bastion".to_string());
+    host.ssh.identities_only = Some(true);
+    host.ssh.local_forward.push("8080 localhost:80".to_string());
+
+    let args = vec!["switch".to_string()];
+    let synthesized = synthesize_ssh_args(&args, &host);
+
+    assert_eq!(
+        synthesized,
+        vec![
+            "-l".to_string(),
+            "admin".to_string(),
+            "-p".to_string(),
+            "2222".to_string(),
+            "-i".to_string(),
+            "~/.ssh/id_rsa".to_string(),
+            "-o".to_string(),
+            "ProxyJump=bastion".to_string(),
+            "-o".to_string(),
+            "IdentitiesOnly=yes".to_string(),
+            "-L".to_string(),
+            "8080 localhost:80".to_string(),
+            "10.0.0.10".to_string(),
+        ]
+    );
+}
+
+#[test]
+fn synthesize_ssh_args_preserves_cli_overrides() {
+    let mut host = InventoryHost::new("switch".to_string());
+    host.host = "10.0.0.10".to_string();
+    host.user = Some("admin".to_string());
+    host.port = Some(2222);
+    host.ssh.proxy_jump = Some("bastion".to_string());
+
+    let args = vec![
+        "-l".to_string(),
+        "override".to_string(),
+        "-p".to_string(),
+        "2200".to_string(),
+        "-o".to_string(),
+        "ProxyJump=direct".to_string(),
+        "user@switch".to_string(),
+    ];
+    let synthesized = synthesize_ssh_args(&args, &host);
+
+    assert_eq!(
+        synthesized,
+        vec![
+            "-l".to_string(),
+            "override".to_string(),
+            "-p".to_string(),
+            "2200".to_string(),
+            "-o".to_string(),
+            "ProxyJump=direct".to_string(),
+            "user@10.0.0.10".to_string(),
+        ]
+    );
 }

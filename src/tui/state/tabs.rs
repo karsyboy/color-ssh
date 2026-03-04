@@ -1,7 +1,7 @@
 //! Per-tab session state.
 
+use crate::inventory::InventoryHost;
 use crate::log_error;
-use crate::ssh_config::SshHost;
 use crate::tui::terminal_emulator::{Parser, PtyWriter};
 use portable_pty::{Child as PtyChild, MasterPty};
 use std::process::Child as ProcessChild;
@@ -66,7 +66,7 @@ pub(crate) struct TerminalSearchState {
 
 /// Represents an open host tab.
 pub(crate) struct HostTab {
-    pub(crate) host: SshHost,
+    pub(crate) host: InventoryHost,
     pub(crate) title: String,
     pub(crate) session: Option<ManagedSession>,
     pub(crate) session_error: Option<String>,

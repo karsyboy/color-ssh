@@ -1,8 +1,8 @@
 //! Interactive session spawning and PTY management.
 
 use crate::auth::agent;
+use crate::inventory::{ConnectionProtocol, InventoryHost};
 use crate::process;
-use crate::ssh_config::{ConnectionProtocol, SshHost};
 use crate::tui::terminal_emulator::Parser;
 use crate::tui::{AppState, HostTab, ManagedChild, ManagedSession, TerminalSearchState, VaultUnlockAction};
 use crate::{command_path, debug_enabled, log_debug, log_error};
@@ -69,11 +69,12 @@ fn encode_csi_tilde_key(code: u8, modifiers: KeyModifiers) -> Vec<u8> {
     format!("\x1b[{};{}~", code, modifier_parameter(modifiers)).into_bytes()
 }
 
-fn auto_login_notice(host: &SshHost, detail: impl Into<String>) -> String {
+fn auto_login_notice(host: &InventoryHost, detail: impl Into<String>) -> String {
     let detail = detail.into();
-    match host.protocol {
+    match &host.protocol {
         ConnectionProtocol::Ssh => format!("{detail}; continuing with the standard SSH password prompt."),
         ConnectionProtocol::Rdp => format!("{detail}; RDP launch requires vault-backed credentials."),
+        ConnectionProtocol::Other(protocol) => format!("{detail}; protocol '{}' is not supported for launch.", protocol),
     }
 }
 
@@ -243,26 +244,28 @@ impl AppState {
         (rows, cols)
     }
 
-    fn resolved_history_buffer_for_host(&self, host: &SshHost) -> usize {
+    fn resolved_history_buffer_for_host(&self, host: &InventoryHost) -> usize {
         crate::config::history_buffer_for_profile(host.profile.as_deref()).unwrap_or(self.history_buffer)
     }
 
-    fn resolve_host_pass_password(&mut self, host: &SshHost, action: VaultUnlockAction) -> Option<(Option<String>, Option<String>)> {
+    fn resolve_host_pass_password(&mut self, host: &InventoryHost, action: VaultUnlockAction) -> Option<(Option<String>, Option<String>)> {
         let auth_settings = crate::config::auth_settings();
         if !auth_settings.tui_password_autologin {
-            let notice = match host.protocol {
+            let notice = match &host.protocol {
                 ConnectionProtocol::Ssh => None,
                 ConnectionProtocol::Rdp => {
                     Some("TUI password auto-login is disabled in auth settings; enable it to launch RDP sessions from the session manager.".to_string())
                 }
+                ConnectionProtocol::Other(protocol) => Some(format!("Protocol '{}' is not supported for launch.", protocol)),
             };
             return Some((None, notice));
         }
 
-        let Some(pass_key) = host.pass_key.as_deref() else {
-            let notice = match host.protocol {
+        let Some(pass_key) = host.vault_pass.as_deref() else {
+            let notice = match &host.protocol {
                 ConnectionProtocol::Ssh => None,
-                ConnectionProtocol::Rdp => Some("RDP launch requires a password vault entry; add `#_pass <name>` to the host config.".to_string()),
+                ConnectionProtocol::Rdp => Some("RDP launch requires a password vault entry; add `vault_pass: <name>` to the inventory host.".to_string()),
+                ConnectionProtocol::Other(protocol) => Some(format!("Protocol '{}' is not supported for launch.", protocol)),
             };
             return Some((None, notice));
         };
@@ -302,11 +305,12 @@ impl AppState {
             }
             Err(agent::AgentError::VaultNotInitialized) => Some((
                 None,
-                Some(match host.protocol {
+                Some(match &host.protocol {
                     ConnectionProtocol::Ssh => "Password vault is not initialized. Run `cossh vault init` or `cossh vault add <name>` first.".to_string(),
                     ConnectionProtocol::Rdp => {
                         "RDP launch requires an initialized password vault. Run `cossh vault init` or `cossh vault add <name>` first.".to_string()
                     }
+                    ConnectionProtocol::Other(protocol) => format!("Protocol '{}' is not supported for launch.", protocol),
                 }),
             )),
             Err(err) => {
@@ -340,16 +344,16 @@ impl AppState {
         } else {
             format!("{}@{}", user, hostname)
         };
-        let mut host = SshHost::new(target);
+        let mut host = InventoryHost::new(target);
         host.user = if user.is_empty() { None } else { Some(user) };
-        host.hostname = Some(hostname);
+        host.host = hostname;
         host.profile = profile;
         self.open_host_tab(host, force_ssh_logging);
     }
 
     // Tab/session creation.
-    fn open_host_tab(&mut self, host: SshHost, force_ssh_logging: bool) {
-        log_debug!("Opening {:?} tab for host: {}", host.protocol, host.name);
+    fn open_host_tab(&mut self, host: InventoryHost, force_ssh_logging: bool) {
+        log_debug!("Opening {} tab for host: {}", host.protocol.as_str(), host.name);
         let action = VaultUnlockAction::OpenHostTab {
             host: Box::new(host.clone()),
             force_ssh_logging,
@@ -360,7 +364,13 @@ impl AppState {
         self.open_host_tab_with_auth(host, force_ssh_logging, pass_entry_override, pass_fallback_notice);
     }
 
-    fn open_host_tab_with_auth(&mut self, host: SshHost, force_ssh_logging: bool, pass_entry_override: Option<String>, pass_fallback_notice: Option<String>) {
+    fn open_host_tab_with_auth(
+        &mut self,
+        host: InventoryHost,
+        force_ssh_logging: bool,
+        pass_entry_override: Option<String>,
+        pass_fallback_notice: Option<String>,
+    ) {
         let existing_count = self.tabs.iter().filter(|tab| tab.host.name == host.name).count();
         let tab_title = if existing_count == 0 {
             host.name.clone()
@@ -425,15 +435,16 @@ impl AppState {
         }
     }
 
-    fn spawn_session(host: &SshHost, tab_title: &str, history_buffer: usize, launch_options: SessionLaunchOptions) -> io::Result<ManagedSession> {
-        match host.protocol {
+    fn spawn_session(host: &InventoryHost, tab_title: &str, history_buffer: usize, launch_options: SessionLaunchOptions) -> io::Result<ManagedSession> {
+        match &host.protocol {
             ConnectionProtocol::Ssh => Self::spawn_ssh_session(host, tab_title, history_buffer, launch_options),
             ConnectionProtocol::Rdp => Self::spawn_rdp_session(host, tab_title, history_buffer, launch_options),
+            ConnectionProtocol::Other(protocol) => Err(io::Error::other(format!("unsupported protocol '{}'", protocol))),
         }
     }
 
     // Spawn and wire a PTY-backed cossh process.
-    fn spawn_ssh_session(host: &SshHost, tab_title: &str, history_buffer: usize, launch_options: SessionLaunchOptions) -> io::Result<ManagedSession> {
+    fn spawn_ssh_session(host: &InventoryHost, tab_title: &str, history_buffer: usize, launch_options: SessionLaunchOptions) -> io::Result<ManagedSession> {
         let pty_system = native_pty_system();
         let SessionLaunchOptions {
             force_ssh_logging,
@@ -548,7 +559,7 @@ impl AppState {
         })
     }
 
-    fn spawn_rdp_session(host: &SshHost, _tab_title: &str, history_buffer: usize, launch_options: SessionLaunchOptions) -> io::Result<ManagedSession> {
+    fn spawn_rdp_session(host: &InventoryHost, _tab_title: &str, history_buffer: usize, launch_options: SessionLaunchOptions) -> io::Result<ManagedSession> {
         let SessionLaunchOptions {
             initial_rows,
             initial_cols,

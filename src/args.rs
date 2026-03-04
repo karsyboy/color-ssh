@@ -4,7 +4,7 @@
 //! to user-provided options.
 
 use crate::{ssh_args, validation};
-use clap::{Arg, Command};
+use clap::{Arg, Command, error::ErrorKind};
 use std::ffi::OsString;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -51,6 +51,7 @@ pub enum ProtocolCommand {
 pub enum MainCommand {
     Protocol(ProtocolCommand),
     Vault(VaultCommand),
+    MigrateInventory,
     AgentServe,
 }
 
@@ -116,6 +117,13 @@ fn build_cli_command() -> Command {
                 .num_args(1)
                 .value_name("name")
                 .value_parser(clap::builder::ValueParser::new(validation::parse_vault_entry_name)),
+        )
+        .arg(
+            Arg::new("migrate")
+                .long("migrate")
+                .help("Migrate ~/.ssh/config host entries into ~/.color-ssh/cossh-inventory.yaml")
+                .action(clap::ArgAction::SetTrue)
+                .conflicts_with_all(["log", "profile", "test", "pass_entry"]),
         )
         .subcommand(
             Command::new("ssh")
@@ -196,6 +204,7 @@ cossh -l -P network ssh user@firewall.example.com         # Use 'network' config
 cossh -l ssh user@host -p 2222                            # Both modes with SSH args
 cossh ssh user@host -G                                    # Non-interactive command
 cossh rdp desktop01                                       # Launch a configured RDP host
+cossh --migrate                                           # Import ~/.ssh/config into the YAML inventory
 ",
         )
 }
@@ -248,6 +257,10 @@ fn parse_rdp_command(rdp_matches: &clap::ArgMatches) -> Option<RdpCommandArgs> {
 }
 
 fn parse_main_command(matches: &clap::ArgMatches) -> Option<MainCommand> {
+    if matches.get_flag("migrate") {
+        return Some(MainCommand::MigrateInventory);
+    }
+
     match matches.subcommand()? {
         ("ssh", ssh_matches) => parse_ssh_command(ssh_matches).map(ProtocolCommand::Ssh).map(MainCommand::Protocol),
         ("rdp", rdp_matches) => parse_rdp_command(rdp_matches).map(ProtocolCommand::Rdp).map(MainCommand::Protocol),
@@ -257,14 +270,38 @@ fn parse_main_command(matches: &clap::ArgMatches) -> Option<MainCommand> {
     }
 }
 
+fn validate_main_args(cmd: &Command, matches: &clap::ArgMatches, parsed: &MainArgs) -> Result<(), clap::Error> {
+    if matches.get_flag("migrate") && matches.subcommand_name().is_some() {
+        return Err(cmd
+            .clone()
+            .error(ErrorKind::ArgumentConflict, "`--migrate` cannot be combined with subcommands"));
+    }
+
+    if matches!(parsed.command, Some(MainCommand::MigrateInventory)) && parsed.interactive {
+        return Err(cmd
+            .clone()
+            .error(ErrorKind::ArgumentConflict, "`--migrate` cannot be combined with interactive mode"));
+    }
+
+    Ok(())
+}
+
 fn parse_main_args_from<I, T>(cmd: &Command, raw_args: I) -> MainArgs
+where
+    I: IntoIterator<Item = T>,
+    T: Into<OsString> + Clone,
+{
+    try_parse_main_args_from(cmd, raw_args).unwrap_or_else(|err| err.exit())
+}
+
+fn try_parse_main_args_from<I, T>(cmd: &Command, raw_args: I) -> Result<MainArgs, clap::Error>
 where
     I: IntoIterator<Item = T>,
     T: Into<OsString> + Clone,
 {
     let raw_args: Vec<OsString> = raw_args.into_iter().map(Into::into).collect();
 
-    let matches = cmd.clone().get_matches_from(raw_args.clone());
+    let matches = cmd.clone().try_get_matches_from(raw_args.clone())?;
 
     let debug_count = matches.get_count("debug");
     let ssh_logging = matches.get_flag("log");
@@ -276,7 +313,7 @@ where
     let debug_only = debug_count > 0 && !ssh_logging && profile.is_none() && pass_entry.is_none() && command.is_none();
     let interactive = (no_user_args || debug_only) && command.is_none();
 
-    MainArgs {
+    let parsed = MainArgs {
         debug_count,
         ssh_logging,
         test_mode,
@@ -284,7 +321,9 @@ where
         interactive,
         pass_entry,
         command,
-    }
+    };
+    validate_main_args(cmd, &matches, &parsed)?;
+    Ok(parsed)
 }
 
 /// Parses command-line arguments using clap.

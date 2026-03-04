@@ -116,7 +116,7 @@ fn run_add_pass_cli(pass_name: &str) -> ExitCode {
         Ok(()) => {
             log_debug!("Saved password vault entry '{}'", pass_name);
             println!("Saved password vault entry: {}", pass_name);
-            println!("Use in ~/.ssh/config: #_pass {}", pass_name);
+            println!("Set `vault_pass: {}` on the target host in ~/.color-ssh/cossh-inventory.yaml", pass_name);
             ExitCode::SUCCESS
         }
         Err(err) => command_failure("Failed to save password vault entry", err),

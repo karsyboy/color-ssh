@@ -1,6 +1,6 @@
 use super::{AppState, force_local_selection};
 use crate::auth::ipc::VaultStatus;
-use crate::ssh_config::SshHost;
+use crate::inventory::InventoryHost;
 use crate::tui::terminal_emulator::MouseProtocolEncoding;
 use crate::tui::{HostTab, TerminalSearchState, VaultStatusModalState, VaultUnlockAction, VaultUnlockState};
 use crossterm::event::{KeyModifiers, MouseButton, MouseEvent, MouseEventKind};
@@ -14,7 +14,7 @@ fn app_with_tabs(titles: &[&str]) -> AppState {
     app.tab_bar_area = Rect::new(0, 0, 40, 1);
     for title in titles {
         app.tabs.push(HostTab {
-            host: SshHost::new((*title).to_string()),
+            host: InventoryHost::new((*title).to_string()),
             title: (*title).to_string(),
             session: None,
             session_error: None,
