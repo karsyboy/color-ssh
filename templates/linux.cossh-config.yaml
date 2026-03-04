@@ -12,7 +12,7 @@ settings:
 
 auth_settings:
   idle_timeout_seconds: 900
-  session_timeout_seconds: 28800
+  session_timeout_seconds: 3600
   direct_password_autologin: true
   tui_password_autologin: true
 
