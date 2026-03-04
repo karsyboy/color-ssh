@@ -93,11 +93,6 @@ cossh -l user@host -p 2222                         # Both modes with SSH args
 cossh user@host -G                                 # Non-interactive command
 ```
 
-Notes:
-
-- `-d` enables safe debug logging and keeps terminal-content dumps disabled.
-- `-dd` enables raw debug logging for troubleshooting regex/highlighting issues and may capture terminal output, CLI arguments, and secrets in `~/.color-ssh/logs/cossh.log`.
-- `settings.debug_mode: true` in config enables safe debug only; raw debug is CLI-only.
 ### Vault Usage
 ```
 Manage the password vault
