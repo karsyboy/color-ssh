@@ -1,7 +1,10 @@
 //! Inventory domain models.
 
 use std::collections::BTreeMap;
+use std::convert::Infallible;
+use std::fmt;
 use std::path::PathBuf;
+use std::str::FromStr;
 
 /// Stable folder identifier used by the TUI tree.
 pub type FolderId = usize;
@@ -17,7 +20,7 @@ pub enum ConnectionProtocol {
 }
 
 impl ConnectionProtocol {
-    pub fn from_str(value: &str) -> Self {
+    fn parse(value: &str) -> Self {
         match value.trim().to_ascii_lowercase().as_str() {
             "" | "ssh" => Self::Ssh,
             "rdp" => Self::Rdp,
@@ -42,39 +45,24 @@ impl ConnectionProtocol {
     }
 }
 
-#[derive(Debug, Clone, Default)]
-pub struct InventoryDocumentRaw {
-    pub include: Vec<String>,
-    pub inventory: Vec<InventoryNodeRaw>,
+impl From<&str> for ConnectionProtocol {
+    fn from(value: &str) -> Self {
+        Self::parse(value)
+    }
 }
 
-#[derive(Debug, Clone)]
-pub enum InventoryNodeRaw {
-    Host(InventoryHostRaw),
-    Folder { name: String, items: Vec<InventoryNodeRaw> },
+impl FromStr for ConnectionProtocol {
+    type Err = Infallible;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        Ok(Self::parse(s))
+    }
 }
 
-#[derive(Debug, Clone, Default)]
-pub struct InventoryHostRaw {
-    pub name: String,
-    pub description: Option<String>,
-    pub protocol: ConnectionProtocol,
-    pub host: Option<String>,
-    pub user: Option<String>,
-    pub port: Option<u16>,
-    pub profile: Option<String>,
-    pub vault_pass: Option<String>,
-    pub hidden: bool,
-    pub identity_files: Vec<String>,
-    pub identities_only: Option<bool>,
-    pub proxy_jump: Option<String>,
-    pub proxy_command: Option<String>,
-    pub forward_agent: Option<String>,
-    pub local_forward: Vec<String>,
-    pub remote_forward: Vec<String>,
-    pub ssh_options: SshOptionMap,
-    pub rdp_domain: Option<String>,
-    pub rdp_args: Vec<String>,
+impl fmt::Display for ConnectionProtocol {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(self.as_str())
+    }
 }
 
 #[derive(Debug, Clone, Default)]
@@ -168,3 +156,42 @@ impl InventoryTreeModel {
         }
     }
 }
+
+#[derive(Debug, Clone, Default)]
+pub(super) struct ParsedInventoryDocument {
+    pub include: Vec<String>,
+    pub inventory: Vec<InventoryNodeRaw>,
+}
+
+#[derive(Debug, Clone)]
+pub(super) enum InventoryNodeRaw {
+    Host(Box<InventoryHostRaw>),
+    Folder { name: String, items: Vec<InventoryNodeRaw> },
+}
+
+#[derive(Debug, Clone, Default)]
+pub(super) struct InventoryHostRaw {
+    pub name: String,
+    pub description: Option<String>,
+    pub protocol: ConnectionProtocol,
+    pub host: Option<String>,
+    pub user: Option<String>,
+    pub port: Option<u16>,
+    pub profile: Option<String>,
+    pub vault_pass: Option<String>,
+    pub hidden: bool,
+    pub identity_files: Vec<String>,
+    pub identities_only: Option<bool>,
+    pub proxy_jump: Option<String>,
+    pub proxy_command: Option<String>,
+    pub forward_agent: Option<String>,
+    pub local_forward: Vec<String>,
+    pub remote_forward: Vec<String>,
+    pub ssh_options: SshOptionMap,
+    pub rdp_domain: Option<String>,
+    pub rdp_args: Vec<String>,
+}
+
+#[cfg(test)]
+#[path = "../test/inventory/model.rs"]
+mod tests;

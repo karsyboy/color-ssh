@@ -1,15 +1,37 @@
 # GitHub Workflows Guide
 
-This document explains how release automation works in `.github/` for this repository.
+This document explains CI verification and release automation in `.github/` for this repository.
 
 ## Covered Files
 
+- `.github/workflows/ci.yml`
 - `.github/workflows/release-plz.yml`
 - `.github/workflows/release.yml`
 - `.github/dependabot.yml`
 - `release-plz.toml`
 - `dist-workspace.toml`
 - `cliff.toml`
+
+## Workflow: `ci.yml`
+
+`ci.yml` is the standard verification workflow for everyday development.
+
+### Trigger
+
+Runs on:
+
+- `pull_request`
+- `push` to `main`
+
+### What It Does
+
+In order:
+
+1. `cargo fmt --all --check`
+2. `cargo clippy --all-targets --all-features -- -D warnings`
+3. `cargo test --all-targets`
+
+Use this workflow as the quality gate for code changes. Release workflows stay focused on versioning and artifact publishing.
 
 ## Release Flow (Current Behavior)
 
@@ -23,7 +45,7 @@ The release flow is two-stage:
 6. The tag push triggers `release.yml`.
 7. `release.yml` builds artifacts, creates GitHub Release assets, and updates Homebrew tap formulae.
 
-This setup prevents the full release pipeline from running on every dev PR merge.
+This setup keeps release work separate from normal CI checks and prevents the full artifact pipeline from running on every PR merge.
 
 ## Workflow: `release-plz.yml`
 
@@ -141,6 +163,12 @@ If you regenerate `release.yml` via cargo-dist, review triggers after regenerati
 
 - Confirm push was to `main`.
 - Confirm changed files matched `Cargo.toml` or `src/**`.
+
+`ci.yml` did not run:
+
+- Confirm the event was `pull_request` or `push` to `main`.
+- Confirm the workflow file is present at `.github/workflows/ci.yml`.
+- Confirm the branch is not blocked by skipped required checks configuration.
 
 `release.yml` ran for a PR:
 

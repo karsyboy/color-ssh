@@ -1,9 +1,14 @@
 //! Direct subprocess orchestration for SSH and RDP launches.
 
+mod command_spec;
 mod exit;
 mod interactive;
 mod launch;
+mod rdp_builder;
+mod spawn;
+mod ssh_builder;
 mod stream;
+mod vault;
 
 use crate::args::RdpCommandArgs;
 use crate::{Result, log_debug, log_debug_raw, log_error, log_info, log_warn, ssh_args};

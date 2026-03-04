@@ -3,7 +3,7 @@
 use super::include::{expand_include_pattern, resolve_include_pattern};
 use super::model::{SshHost, SshHostTreeModel};
 use super::path::expand_tilde;
-use crate::inventory::{ConnectionProtocol, FolderId, TreeFolder};
+use crate::inventory::{ConnectionProtocol, FolderId, TreeFolder, sort_tree_folder_by_host_name};
 use crate::log_debug;
 use crate::validation::validate_vault_entry_name;
 use std::collections::HashSet;
@@ -41,7 +41,7 @@ impl ParseOptions {
 }
 
 fn parse_protocol_tag(value: &str) -> ConnectionProtocol {
-    ConnectionProtocol::from_str(value)
+    ConnectionProtocol::from(value)
 }
 
 /// Parse an SSH config file and return a list of visible hosts.
@@ -104,35 +104,9 @@ pub(super) fn build_ssh_host_tree(config_path: &Path) -> io::Result<SshHostTreeM
         children: Vec::new(),
         host_indices: Vec::new(),
     });
-    sort_tree_folder(&mut root, &hosts);
+    sort_tree_folder_by_host_name(&mut root, &hosts, |host| host.name.as_str());
 
     Ok(SshHostTreeModel { root, hosts })
-}
-
-fn sort_tree_folder(folder: &mut TreeFolder, hosts: &[SshHost]) {
-    folder.host_indices.sort_by(|left_idx, right_idx| {
-        let left_name = hosts.get(*left_idx).map(|host| host.name.as_str()).unwrap_or_default();
-        let right_name = hosts.get(*right_idx).map(|host| host.name.as_str()).unwrap_or_default();
-        let left_key = left_name.to_ascii_lowercase();
-        let right_key = right_name.to_ascii_lowercase();
-        left_key
-            .cmp(&right_key)
-            .then_with(|| left_name.cmp(right_name))
-            .then_with(|| left_idx.cmp(right_idx))
-    });
-
-    for child in &mut folder.children {
-        sort_tree_folder(child, hosts);
-    }
-
-    folder.children.sort_by(|left, right| {
-        let left_key = left.name.to_ascii_lowercase();
-        let right_key = right.name.to_ascii_lowercase();
-        left_key
-            .cmp(&right_key)
-            .then_with(|| left.name.cmp(&right.name))
-            .then_with(|| left.id.cmp(&right.id))
-    });
 }
 
 fn parse_tree_folder(

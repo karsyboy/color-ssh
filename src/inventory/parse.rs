@@ -1,265 +1,18 @@
-//! Inventory parsing, normalization, and include folder loading.
-
-use super::include::{expand_include_pattern, resolve_include_pattern};
-use super::model::{FolderId, InventoryDocumentRaw, InventoryHost, InventoryHostRaw, InventoryNodeRaw, InventoryTreeModel, TreeFolder};
-use super::path::expand_tilde;
-use crate::log_debug;
-use crate::validation::validate_vault_entry_name;
+use super::error::{InventoryResult, invalid_inventory};
+use super::model::{ConnectionProtocol, InventoryHostRaw, InventoryNodeRaw, ParsedInventoryDocument};
 use serde_yml::{Mapping, Value};
-use std::collections::{HashMap, HashSet};
 use std::fs;
-use std::io;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
-#[derive(Debug)]
-struct FolderAccumulator {
-    name: String,
-    path: PathBuf,
-    children: Vec<FolderAccumulator>,
-    host_indices: Vec<usize>,
-}
-
-impl FolderAccumulator {
-    fn new(name: String, path: PathBuf) -> Self {
-        Self {
-            name,
-            path,
-            children: Vec::new(),
-            host_indices: Vec::new(),
-        }
-    }
-
-    fn child_mut(&mut self, name: &str, path: &Path) -> &mut FolderAccumulator {
-        if let Some(index) = self.children.iter().position(|child| child.name == name) {
-            return &mut self.children[index];
-        }
-
-        self.children.push(FolderAccumulator::new(name.to_string(), path.to_path_buf()));
-        let index = self.children.len().saturating_sub(1);
-        &mut self.children[index]
-    }
-}
-
-pub(super) fn build_inventory_tree(inventory_path: &Path) -> io::Result<InventoryTreeModel> {
-    let root_name = inventory_path
-        .file_name()
-        .and_then(|segment| segment.to_str())
-        .unwrap_or("cossh-inventory.yaml")
-        .to_string();
-    let mut root = FolderAccumulator::new(root_name, inventory_path.to_path_buf());
-    let mut hosts = Vec::new();
-    let mut seen_host_names = HashMap::new();
-    let mut visited = HashSet::new();
-
-    load_document_recursive(inventory_path, &mut root, &mut hosts, &mut seen_host_names, &mut visited, &[])?;
-
-    let mut next_id: FolderId = 0;
-    let mut tree_root = finalize_folder(root, &mut next_id);
-    sort_tree_folder(&mut tree_root, &hosts);
-    Ok(InventoryTreeModel { root: tree_root, hosts })
-}
-
-fn load_document_recursive(
-    inventory_path: &Path,
-    folder: &mut FolderAccumulator,
-    hosts: &mut Vec<InventoryHost>,
-    seen_host_names: &mut HashMap<String, PathBuf>,
-    visited: &mut HashSet<PathBuf>,
-    folder_path: &[String],
-) -> io::Result<()> {
-    let canonical = inventory_path.canonicalize().unwrap_or_else(|_| inventory_path.to_path_buf());
-
-    if !visited.insert(canonical.clone()) {
-        log_debug!("Skipping already visited inventory file (possible include cycle): {}", canonical.display());
-        return Ok(());
-    }
-
-    let parsed = parse_inventory_document(&canonical)?;
-    let parent_dir = canonical.parent().unwrap_or(Path::new("."));
-
-    for include in parsed.include {
-        let resolved_pattern = resolve_include_pattern(&include, parent_dir);
-        for include_path in expand_include_pattern(&resolved_pattern) {
-            load_include_document(&include_path, folder, hosts, seen_host_names, visited, folder_path)?;
-        }
-    }
-
-    for node in parsed.inventory {
-        add_inventory_node(node, folder, hosts, seen_host_names, &canonical, folder_path)?;
-    }
-
-    Ok(())
-}
-
-fn load_include_document(
-    inventory_path: &Path,
-    parent_folder: &mut FolderAccumulator,
-    hosts: &mut Vec<InventoryHost>,
-    seen_host_names: &mut HashMap<String, PathBuf>,
-    visited: &mut HashSet<PathBuf>,
-    parent_folder_path: &[String],
-) -> io::Result<()> {
-    let canonical = inventory_path.canonicalize().unwrap_or_else(|_| inventory_path.to_path_buf());
-
-    if visited.contains(&canonical) {
-        log_debug!("Skipping already visited inventory file (possible include cycle): {}", canonical.display());
-        return Ok(());
-    }
-
-    let folder_name = inventory_folder_name(&canonical);
-    let child = parent_folder.child_mut(&folder_name, &canonical);
-    let mut child_path = parent_folder_path.to_vec();
-    child_path.push(folder_name);
-    load_document_recursive(&canonical, child, hosts, seen_host_names, visited, &child_path)
-}
-
-fn inventory_folder_name(path: &Path) -> String {
-    path.file_stem()
-        .or_else(|| path.file_name())
-        .and_then(|segment| segment.to_str())
-        .unwrap_or("include")
-        .to_string()
-}
-
-fn finalize_folder(folder: FolderAccumulator, next_id: &mut FolderId) -> TreeFolder {
-    let folder_id = *next_id;
-    *next_id += 1;
-
-    TreeFolder {
-        id: folder_id,
-        name: folder.name,
-        path: folder.path,
-        children: folder.children.into_iter().map(|child| finalize_folder(child, next_id)).collect(),
-        host_indices: folder.host_indices,
-    }
-}
-
-fn sort_tree_folder(folder: &mut TreeFolder, hosts: &[InventoryHost]) {
-    folder.host_indices.sort_by(|left_idx, right_idx| {
-        let left_name = hosts.get(*left_idx).map(|host| host.name.as_str()).unwrap_or_default();
-        let right_name = hosts.get(*right_idx).map(|host| host.name.as_str()).unwrap_or_default();
-        let left_key = left_name.to_ascii_lowercase();
-        let right_key = right_name.to_ascii_lowercase();
-        left_key
-            .cmp(&right_key)
-            .then_with(|| left_name.cmp(right_name))
-            .then_with(|| left_idx.cmp(right_idx))
-    });
-
-    for child in &mut folder.children {
-        sort_tree_folder(child, hosts);
-    }
-
-    folder.children.sort_by(|left, right| {
-        let left_key = left.name.to_ascii_lowercase();
-        let right_key = right.name.to_ascii_lowercase();
-        left_key
-            .cmp(&right_key)
-            .then_with(|| left.name.cmp(&right.name))
-            .then_with(|| left.id.cmp(&right.id))
-    });
-}
-
-fn add_inventory_node(
-    node: InventoryNodeRaw,
-    folder: &mut FolderAccumulator,
-    hosts: &mut Vec<InventoryHost>,
-    seen_host_names: &mut HashMap<String, PathBuf>,
-    source_file: &Path,
-    folder_path: &[String],
-) -> io::Result<()> {
-    match node {
-        InventoryNodeRaw::Host(raw) => {
-            let host = normalize_inventory_host(raw, source_file, folder_path)?;
-            if let Some(previous_path) = seen_host_names.insert(host.name.clone(), host.source_file.clone()) {
-                return Err(invalid_inventory(
-                    source_file,
-                    format!(
-                        "duplicate inventory host '{}' found in '{}' and '{}'",
-                        host.name,
-                        previous_path.display(),
-                        host.source_file.display()
-                    ),
-                ));
-            }
-
-            folder.host_indices.push(hosts.len());
-            hosts.push(host);
-            Ok(())
-        }
-        InventoryNodeRaw::Folder { name, items } => {
-            let child = folder.child_mut(&name, source_file);
-            let mut child_path = folder_path.to_vec();
-            child_path.push(name);
-            for item in items {
-                add_inventory_node(item, child, hosts, seen_host_names, source_file, &child_path)?;
-            }
-            Ok(())
-        }
-    }
-}
-
-fn normalize_inventory_host(raw: InventoryHostRaw, source_file: &Path, folder_path: &[String]) -> io::Result<InventoryHost> {
-    let host = raw
-        .host
-        .clone()
-        .filter(|value| !value.trim().is_empty())
-        .ok_or_else(|| invalid_inventory(source_file, format!("inventory host '{}' is missing required field 'host'", raw.name)))?;
-
-    if let Some(vault_pass) = raw.vault_pass.as_deref()
-        && !validate_vault_entry_name(vault_pass)
-    {
-        return Err(invalid_inventory(
-            source_file,
-            format!("inventory host '{}' has invalid vault_pass '{}'", raw.name, vault_pass),
-        ));
-    }
-
-    Ok(InventoryHost {
-        name: raw.name,
-        description: raw.description,
-        protocol: raw.protocol,
-        host,
-        user: raw.user,
-        port: raw.port,
-        profile: raw.profile,
-        vault_pass: raw.vault_pass,
-        hidden: raw.hidden,
-        ssh: crate::inventory::SshHostOptions {
-            identity_files: raw.identity_files.into_iter().map(|value| expand_tilde(&value)).collect(),
-            identities_only: raw.identities_only,
-            proxy_jump: raw.proxy_jump,
-            proxy_command: raw.proxy_command,
-            forward_agent: raw.forward_agent,
-            local_forward: raw
-                .local_forward
-                .into_iter()
-                .map(|value| crate::inventory::normalize_ssh_forward_spec(&value))
-                .collect(),
-            remote_forward: raw
-                .remote_forward
-                .into_iter()
-                .map(|value| crate::inventory::normalize_ssh_forward_spec(&value))
-                .collect(),
-            extra_options: raw.ssh_options,
-        },
-        rdp: crate::inventory::RdpHostOptions {
-            domain: raw.rdp_domain,
-            args: raw.rdp_args,
-        },
-        source_file: source_file.to_path_buf(),
-        source_folder_path: folder_path.to_vec(),
-    })
-}
-
-fn parse_inventory_document(inventory_path: &Path) -> io::Result<InventoryDocumentRaw> {
-    let contents = fs::read_to_string(inventory_path)?;
+pub(super) fn parse_inventory_document(inventory_path: &Path) -> InventoryResult<ParsedInventoryDocument> {
+    let contents = fs::read_to_string(inventory_path)
+        .map_err(|err| invalid_inventory(inventory_path, format!("failed to read inventory YAML '{}': {err}", inventory_path.display())))?;
     let yaml: Value = serde_yml::from_str(&contents)
         .map_err(|err| invalid_inventory(inventory_path, format!("failed to parse inventory YAML '{}': {err}", inventory_path.display())))?;
     parse_inventory_document_value(&yaml, inventory_path)
 }
 
-fn parse_inventory_document_value(yaml: &Value, source_file: &Path) -> io::Result<InventoryDocumentRaw> {
+fn parse_inventory_document_value(yaml: &Value, source_file: &Path) -> InventoryResult<ParsedInventoryDocument> {
     let Value::Mapping(mapping) = yaml else {
         return Err(invalid_inventory(source_file, "inventory file root must be a mapping"));
     };
@@ -273,10 +26,10 @@ fn parse_inventory_document_value(yaml: &Value, source_file: &Path) -> io::Resul
         None => Vec::new(),
     };
 
-    Ok(InventoryDocumentRaw { include, inventory })
+    Ok(ParsedInventoryDocument { include, inventory })
 }
 
-fn parse_inventory_nodes(value: &Value, source_file: &Path) -> io::Result<Vec<InventoryNodeRaw>> {
+fn parse_inventory_nodes(value: &Value, source_file: &Path) -> InventoryResult<Vec<InventoryNodeRaw>> {
     let Value::Sequence(sequence) = value else {
         return Err(invalid_inventory(source_file, "inventory must be a YAML list"));
     };
@@ -284,7 +37,7 @@ fn parse_inventory_nodes(value: &Value, source_file: &Path) -> io::Result<Vec<In
     sequence.iter().map(|item| parse_inventory_node(item, source_file)).collect()
 }
 
-fn parse_inventory_node(value: &Value, source_file: &Path) -> io::Result<InventoryNodeRaw> {
+fn parse_inventory_node(value: &Value, source_file: &Path) -> InventoryResult<InventoryNodeRaw> {
     let Value::Mapping(mapping) = value else {
         return Err(invalid_inventory(
             source_file,
@@ -293,7 +46,7 @@ fn parse_inventory_node(value: &Value, source_file: &Path) -> io::Result<Invento
     };
 
     if mapping_has_key(mapping, "name") {
-        return Ok(InventoryNodeRaw::Host(parse_inventory_host(mapping, source_file)?));
+        return Ok(InventoryNodeRaw::Host(Box::new(parse_inventory_host(mapping, source_file)?)));
     }
 
     if mapping.len() != 1 {
@@ -312,7 +65,7 @@ fn parse_inventory_node(value: &Value, source_file: &Path) -> io::Result<Invento
     Ok(InventoryNodeRaw::Folder { name: folder_name, items })
 }
 
-fn parse_inventory_host(mapping: &Mapping, source_file: &Path) -> io::Result<InventoryHostRaw> {
+fn parse_inventory_host(mapping: &Mapping, source_file: &Path) -> InventoryResult<InventoryHostRaw> {
     let mut host = InventoryHostRaw::default();
 
     for (raw_key, value) in mapping {
@@ -323,7 +76,7 @@ fn parse_inventory_host(mapping: &Mapping, source_file: &Path) -> io::Result<Inv
             "description" => host.description = optional_scalar_to_string(value, source_file, "description")?,
             "protocol" => {
                 let value = scalar_to_string(value, source_file, "protocol")?;
-                host.protocol = crate::inventory::ConnectionProtocol::from_str(&value);
+                host.protocol = ConnectionProtocol::from(value.as_str());
             }
             "host" => host.host = optional_scalar_to_string(value, source_file, "host")?,
             "user" => host.user = optional_scalar_to_string(value, source_file, "user")?,
@@ -357,7 +110,7 @@ fn parse_inventory_host(mapping: &Mapping, source_file: &Path) -> io::Result<Inv
     Ok(host)
 }
 
-fn merge_ssh_options(into: &mut InventoryHostRaw, value: &Value, source_file: &Path) -> io::Result<()> {
+fn merge_ssh_options(into: &mut InventoryHostRaw, value: &Value, source_file: &Path) -> InventoryResult<()> {
     let Value::Mapping(mapping) = value else {
         return Err(invalid_inventory(source_file, "ssh_options must be a mapping"));
     };
@@ -390,11 +143,11 @@ fn merge_ssh_options(into: &mut InventoryHostRaw, value: &Value, source_file: &P
     Ok(())
 }
 
-fn parse_forward_agent(value: &Value, source_file: &Path) -> io::Result<Option<String>> {
+fn parse_forward_agent(value: &Value, source_file: &Path) -> InventoryResult<Option<String>> {
     optional_scalar_to_string(value, source_file, "forward_agent").map(|value| value.map(|text| normalize_yes_no_string(&text)))
 }
 
-fn parse_ssh_option_values(value: &Value, source_file: &Path, field: &str) -> io::Result<Vec<String>> {
+fn parse_ssh_option_values(value: &Value, source_file: &Path, field: &str) -> InventoryResult<Vec<String>> {
     match value {
         Value::Null => Err(invalid_inventory(source_file, format!("{field} cannot be null"))),
         Value::Sequence(sequence) => sequence.iter().map(|item| ssh_option_scalar_to_string(item, source_file, field)).collect(),
@@ -402,7 +155,7 @@ fn parse_ssh_option_values(value: &Value, source_file: &Path, field: &str) -> io
     }
 }
 
-fn ssh_option_scalar_to_string(value: &Value, source_file: &Path, field: &str) -> io::Result<String> {
+fn ssh_option_scalar_to_string(value: &Value, source_file: &Path, field: &str) -> InventoryResult<String> {
     match value {
         Value::Bool(boolean) => Ok(if *boolean { "yes".to_string() } else { "no".to_string() }),
         Value::Number(number) => Ok(number.to_string()),
@@ -438,19 +191,19 @@ fn mapping_has_key(mapping: &Mapping, key: &str) -> bool {
     })
 }
 
-fn parse_string_list(value: &Value, source_file: &Path, field: &str, split_scalar: bool) -> io::Result<Vec<String>> {
+fn parse_string_list(value: &Value, source_file: &Path, field: &str, split_scalar: bool) -> InventoryResult<Vec<String>> {
     match value {
         Value::Null => Ok(Vec::new()),
         Value::Sequence(sequence) => sequence
             .iter()
             .map(|item| scalar_to_string(item, source_file, field))
-            .collect::<io::Result<Vec<_>>>(),
+            .collect::<InventoryResult<Vec<_>>>(),
         Value::String(text) if split_scalar => Ok(text.split_whitespace().map(str::to_string).collect()),
         _ => Ok(vec![scalar_to_string(value, source_file, field)?]),
     }
 }
 
-fn parse_u16(value: &Value, source_file: &Path, field: &str) -> io::Result<Option<u16>> {
+fn parse_u16(value: &Value, source_file: &Path, field: &str) -> InventoryResult<Option<u16>> {
     match value {
         Value::Null => Ok(None),
         Value::Number(number) => {
@@ -474,7 +227,7 @@ fn parse_u16(value: &Value, source_file: &Path, field: &str) -> io::Result<Optio
     }
 }
 
-fn parse_bool(value: &Value, source_file: &Path, field: &str) -> io::Result<Option<bool>> {
+fn parse_bool(value: &Value, source_file: &Path, field: &str) -> InventoryResult<Option<bool>> {
     match value {
         Value::Null => Ok(None),
         Value::Bool(boolean) => Ok(Some(*boolean)),
@@ -500,7 +253,7 @@ fn parse_bool(value: &Value, source_file: &Path, field: &str) -> io::Result<Opti
     }
 }
 
-fn optional_scalar_to_string(value: &Value, source_file: &Path, field: &str) -> io::Result<Option<String>> {
+fn optional_scalar_to_string(value: &Value, source_file: &Path, field: &str) -> InventoryResult<Option<String>> {
     if matches!(value, Value::Null) {
         return Ok(None);
     }
@@ -509,7 +262,7 @@ fn optional_scalar_to_string(value: &Value, source_file: &Path, field: &str) -> 
     if value.trim().is_empty() { Ok(None) } else { Ok(Some(value)) }
 }
 
-fn scalar_to_string(value: &Value, source_file: &Path, field: &str) -> io::Result<String> {
+fn scalar_to_string(value: &Value, source_file: &Path, field: &str) -> InventoryResult<String> {
     match value {
         Value::String(text) => Ok(text.clone()),
         Value::Bool(boolean) => Ok(boolean.to_string()),
@@ -555,14 +308,3 @@ fn canonical_host_key(key: &str) -> &str {
 fn compact_key(key: &str) -> String {
     key.chars().filter(|ch| ch.is_ascii_alphanumeric()).flat_map(char::to_lowercase).collect()
 }
-
-fn invalid_inventory(source_file: &Path, message: impl Into<String>) -> io::Error {
-    io::Error::new(
-        io::ErrorKind::InvalidData,
-        format!("inventory error in '{}': {}", source_file.display(), message.into()),
-    )
-}
-
-#[cfg(test)]
-#[path = "../test/inventory/loader.rs"]
-mod tests;

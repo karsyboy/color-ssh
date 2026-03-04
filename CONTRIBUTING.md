@@ -7,7 +7,7 @@ Before opening a pull request, run the full local verification suite.
 cargo fmt --all --check
 
 # Lint
-cargo clippy --all-targets -- -D warnings
+cargo clippy --all-targets --all-features -- -D warnings
 
 # Tests
 cargo test --all-targets
