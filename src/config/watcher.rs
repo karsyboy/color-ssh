@@ -5,23 +5,25 @@ use crate::{log_debug, log_error, log_info, log_warn};
 use notify::{Error, Event, RecommendedWatcher, RecursiveMode, Watcher};
 use std::{
     io::{self, Write},
-    path::PathBuf,
+    path::{Path, PathBuf},
     sync::mpsc,
     thread,
     time::Duration,
 };
 
-fn event_targets_config_file(event: &Event, config_file_name: &str) -> bool {
+fn event_targets_config_file(event: &Event, config_path: &Path) -> bool {
+    let config_file_name = config_path.file_name();
     event.paths.iter().any(|path| {
-        path.file_name()
-            .and_then(|segment| segment.to_str())
-            .map(|name| name == config_file_name)
-            .unwrap_or(false)
+        path == config_path
+            || match (path.file_name(), config_file_name) {
+                (Some(event_name), Some(config_name)) => event_name == config_name,
+                _ => false,
+            }
     })
 }
 
-fn should_reload_for_event(event: &Event, config_file_name: &str) -> bool {
-    (event.kind.is_modify() || event.kind.is_create()) && event_targets_config_file(event, config_file_name)
+fn should_reload_for_event(event: &Event, config_path: &Path) -> bool {
+    (event.kind.is_modify() || event.kind.is_create() || event.kind.is_remove()) && event_targets_config_file(event, config_path)
 }
 
 fn print_reload_notice(message: &str) {
@@ -37,14 +39,12 @@ pub fn config_watcher(profile: Option<String>) -> Option<RecommendedWatcher> {
     log_debug!("Initializing configuration file watcher");
 
     let config_path = super::with_current_config("starting watcher", |cfg| cfg.metadata.config_path.clone());
-    let config_file_name = config_path.file_name().and_then(|segment| segment.to_str()).unwrap_or("").to_string();
-
-    let config_file_name_clone = config_file_name.clone();
+    let config_path_clone = config_path.clone();
 
     let mut watcher = match RecommendedWatcher::new(
         move |res: Result<Event, Error>| {
             if let Ok(event) = res
-                && should_reload_for_event(&event, &config_file_name_clone)
+                && should_reload_for_event(&event, &config_path_clone)
             {
                 log_debug!("Config file change detected: {:?}", event);
                 let _ = tx.send(());

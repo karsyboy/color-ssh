@@ -220,9 +220,7 @@ fn spawn_output_processor(mode: InteractiveStreamMode, rx: Receiver<OutputChunk>
         let mut color_state = highlighter::AnsiColorState::default();
         let mut highlight_rules = HighlightRuleCache::load();
         let stdout = io::stdout();
-        let stderr = io::stderr();
         let mut stdout = stdout.lock();
-        let mut stderr = stderr.lock();
         let mut stdout_flush = OutputFlushState::new();
         let mut stderr_flush = OutputFlushState::new();
 
@@ -257,13 +255,18 @@ fn spawn_output_processor(mode: InteractiveStreamMode, rx: Receiver<OutputChunk>
                             }
                             Err(err) => Err(err),
                         },
-                        OutputTarget::Stderr => match stderr.write_all(processed_chunk.as_bytes()) {
-                            Ok(()) => {
-                                stderr_flush.record_write(processed_chunk.len());
-                                stderr_flush.flush_if_needed(&mut stderr, raw_chunk, &processed_chunk, chunk_transformed)
+                        OutputTarget::Stderr => {
+                            // Keep stderr lock scoped to each write so reload notices can print concurrently.
+                            let stderr = io::stderr();
+                            let mut stderr = stderr.lock();
+                            match stderr.write_all(processed_chunk.as_bytes()) {
+                                Ok(()) => {
+                                    stderr_flush.record_write(processed_chunk.len());
+                                    stderr_flush.flush_if_needed(&mut stderr, raw_chunk, &processed_chunk, chunk_transformed)
+                                }
+                                Err(err) => Err(err),
                             }
-                            Err(err) => Err(err),
-                        },
+                        }
                     };
 
                     if let Err(err) = write_result {
@@ -276,9 +279,13 @@ fn spawn_output_processor(mode: InteractiveStreamMode, rx: Receiver<OutputChunk>
                         log_error!("Failed to flush stdout on idle timeout: {}", err);
                         break;
                     }
-                    if let Err(err) = stderr_flush.flush_on_idle(&mut stderr) {
-                        log_error!("Failed to flush stderr on idle timeout: {}", err);
-                        break;
+                    if stderr_flush.pending_bytes > 0 {
+                        let stderr = io::stderr();
+                        let mut stderr = stderr.lock();
+                        if let Err(err) = stderr_flush.flush_on_idle(&mut stderr) {
+                            log_error!("Failed to flush stderr on idle timeout: {}", err);
+                            break;
+                        }
                     }
                 }
                 Err(RecvTimeoutError::Disconnected) => break,
@@ -288,8 +295,12 @@ fn spawn_output_processor(mode: InteractiveStreamMode, rx: Receiver<OutputChunk>
         if let Err(err) = stdout.flush() {
             log_error!("Failed to flush stdout at thread end: {}", err);
         }
-        if let Err(err) = stderr.flush() {
-            log_error!("Failed to flush stderr at thread end: {}", err);
+        if stderr_flush.pending_bytes > 0 {
+            let stderr = io::stderr();
+            let mut stderr = stderr.lock();
+            if let Err(err) = stderr.flush() {
+                log_error!("Failed to flush stderr at thread end: {}", err);
+            }
         }
         log_debug!("Output processing thread finished (processed {} highlighted chunks)", chunk_id);
     })
