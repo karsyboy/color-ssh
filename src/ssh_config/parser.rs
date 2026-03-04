@@ -1,10 +1,11 @@
 //! SSH config file parser and include tree builder.
 
 use super::include::{expand_include_pattern, resolve_include_pattern};
-use super::model::{FolderId, SshHost, SshHostTreeModel, TreeFolder};
+use super::model::{SshHost, SshHostTreeModel};
 use super::path::expand_tilde;
-use crate::auth::pass::validate_pass_key_name;
+use crate::inventory::{ConnectionProtocol, FolderId, TreeFolder, sort_tree_folder_by_host_name};
 use crate::log_debug;
+use crate::validation::validate_vault_entry_name;
 use std::collections::HashSet;
 use std::fs::File;
 use std::io::{self, BufRead, BufReader};
@@ -14,11 +15,74 @@ use std::path::{Path, PathBuf};
 struct ParsedConfigFile {
     hosts: Vec<SshHost>,
     include_patterns: Vec<String>,
+    unsupported_blocks: usize,
 }
 
-/// Parse an SSH config file and return a list of hosts.
+#[derive(Debug, Clone, Copy)]
+struct ParseOptions {
+    filter_runtime_only_hosts: bool,
+}
+
+#[derive(Debug, Clone)]
+/// Result payload used by inventory migration to preserve folder structure.
+pub struct MigrationParseResult {
+    /// Parsed include-tree root.
+    pub root: TreeFolder,
+    /// Flattened host list discovered across includes.
+    pub hosts: Vec<SshHost>,
+    /// Number of unsupported `Match` blocks skipped.
+    pub unsupported_blocks: usize,
+}
+
+impl ParseOptions {
+    const RUNTIME: Self = Self {
+        filter_runtime_only_hosts: true,
+    };
+
+    const MIGRATION: Self = Self {
+        filter_runtime_only_hosts: false,
+    };
+}
+
+fn parse_protocol_tag(value: &str) -> ConnectionProtocol {
+    ConnectionProtocol::from(value)
+}
+
+/// Parse an SSH config file and return a list of visible hosts.
 pub fn parse_ssh_config(config_path: &Path) -> io::Result<Vec<SshHost>> {
     Ok(build_ssh_host_tree(config_path)?.hosts)
+}
+
+/// Parse an SSH config file for YAML inventory migration.
+pub fn parse_ssh_config_for_migration(config_path: &Path) -> io::Result<MigrationParseResult> {
+    let mut hosts = Vec::new();
+    let mut visited = HashSet::new();
+    let mut next_id: FolderId = 0;
+    let mut unsupported_blocks = 0usize;
+    let root_name = config_path.file_name().and_then(|segment| segment.to_str()).unwrap_or("config").to_string();
+
+    let root = parse_tree_folder(
+        config_path,
+        &root_name,
+        &mut hosts,
+        &mut visited,
+        &mut next_id,
+        ParseOptions::MIGRATION,
+        &mut unsupported_blocks,
+    )?
+    .unwrap_or_else(|| TreeFolder {
+        id: 0,
+        name: root_name,
+        path: config_path.to_path_buf(),
+        children: Vec::new(),
+        host_indices: Vec::new(),
+    });
+
+    Ok(MigrationParseResult {
+        root,
+        hosts,
+        unsupported_blocks,
+    })
 }
 
 pub(super) fn build_ssh_host_tree(config_path: &Path) -> io::Result<SshHostTreeModel> {
@@ -27,42 +91,26 @@ pub(super) fn build_ssh_host_tree(config_path: &Path) -> io::Result<SshHostTreeM
     let mut next_id: FolderId = 0;
     let root_name = config_path.file_name().and_then(|segment| segment.to_str()).unwrap_or("config").to_string();
 
-    let mut root = parse_tree_folder(config_path, &root_name, &mut hosts, &mut visited, &mut next_id)?.unwrap_or_else(|| TreeFolder {
+    let mut unsupported_blocks = 0usize;
+    let mut root = parse_tree_folder(
+        config_path,
+        &root_name,
+        &mut hosts,
+        &mut visited,
+        &mut next_id,
+        ParseOptions::RUNTIME,
+        &mut unsupported_blocks,
+    )?
+    .unwrap_or_else(|| TreeFolder {
         id: 0,
         name: root_name,
         path: config_path.to_path_buf(),
         children: Vec::new(),
         host_indices: Vec::new(),
     });
-    sort_tree_folder(&mut root, &hosts);
+    sort_tree_folder_by_host_name(&mut root, &hosts, |host| host.name.as_str());
 
     Ok(SshHostTreeModel { root, hosts })
-}
-
-fn sort_tree_folder(folder: &mut TreeFolder, hosts: &[SshHost]) {
-    folder.host_indices.sort_by(|left_idx, right_idx| {
-        let left_name = hosts.get(*left_idx).map(|host| host.name.as_str()).unwrap_or_default();
-        let right_name = hosts.get(*right_idx).map(|host| host.name.as_str()).unwrap_or_default();
-        let left_key = left_name.to_lowercase();
-        let right_key = right_name.to_lowercase();
-        left_key
-            .cmp(&right_key)
-            .then_with(|| left_name.cmp(right_name))
-            .then_with(|| left_idx.cmp(right_idx))
-    });
-
-    for child in &mut folder.children {
-        sort_tree_folder(child, hosts);
-    }
-
-    folder.children.sort_by(|left, right| {
-        let left_key = left.name.to_lowercase();
-        let right_key = right.name.to_lowercase();
-        left_key
-            .cmp(&right_key)
-            .then_with(|| left.name.cmp(&right.name))
-            .then_with(|| left.id.cmp(&right.id))
-    });
 }
 
 fn parse_tree_folder(
@@ -71,15 +119,19 @@ fn parse_tree_folder(
     hosts: &mut Vec<SshHost>,
     visited: &mut HashSet<PathBuf>,
     next_id: &mut FolderId,
+    options: ParseOptions,
+    unsupported_blocks: &mut usize,
 ) -> io::Result<Option<TreeFolder>> {
     let canonical = config_path.canonicalize().unwrap_or_else(|_| config_path.to_path_buf());
 
     if !visited.insert(canonical.clone()) {
+        // Avoid recursive include loops and duplicate host ingestion.
         log_debug!("Skipping already visited SSH include file (possible include cycle): {}", canonical.display());
         return Ok(None);
     }
 
-    let parsed = parse_config_file(&canonical)?;
+    let parsed = parse_config_file(&canonical, options)?;
+    *unsupported_blocks += parsed.unsupported_blocks;
     let folder_id = *next_id;
     *next_id += 1;
 
@@ -97,7 +149,7 @@ fn parse_tree_folder(
         for include_path in expand_include_pattern(&resolved_pattern) {
             let child_name = include_path.file_name().and_then(|segment| segment.to_str()).unwrap_or("include").to_string();
 
-            if let Some(child) = parse_tree_folder(&include_path, &child_name, hosts, visited, next_id)? {
+            if let Some(child) = parse_tree_folder(&include_path, &child_name, hosts, visited, next_id, options, unsupported_blocks)? {
                 children.push(child);
             }
         }
@@ -112,12 +164,43 @@ fn parse_tree_folder(
     }))
 }
 
-fn parse_config_file(config_path: &Path) -> io::Result<ParsedConfigFile> {
+fn finalize_current_hosts(parsed: &mut ParsedConfigFile, current_hosts: &mut Vec<SshHost>, options: ParseOptions) {
+    for host in current_hosts.drain(..) {
+        // Runtime host browsing hides wildcard aliases and explicitly hidden hosts.
+        if options.filter_runtime_only_hosts && (host.name.contains('*') || host.name.contains('?') || host.hidden) {
+            continue;
+        }
+        parsed.hosts.push(host);
+    }
+}
+
+fn parse_bool_like(value: &str) -> Option<bool> {
+    match value.trim().to_ascii_lowercase().as_str() {
+        "1" | "true" | "yes" | "on" => Some(true),
+        "0" | "false" | "no" | "off" => Some(false),
+        _ => None,
+    }
+}
+
+fn normalize_yes_no_string(value: &str) -> String {
+    match parse_bool_like(value) {
+        Some(true) => "yes".to_string(),
+        Some(false) => "no".to_string(),
+        None => value.trim().to_string(),
+    }
+}
+
+fn push_other_option(host: &mut SshHost, key: &str, value: &str) {
+    host.other_options.entry(key.to_string()).or_default().push(value.to_string());
+}
+
+fn parse_config_file(config_path: &Path, options: ParseOptions) -> io::Result<ParsedConfigFile> {
     let file = File::open(config_path)?;
     let reader = BufReader::new(file);
 
     let mut parsed = ParsedConfigFile::default();
     let mut current_hosts: Vec<SshHost> = Vec::new();
+    let mut in_match_block = false;
 
     for line in reader.lines() {
         let line = line?;
@@ -134,6 +217,12 @@ fn parse_config_file(config_path: &Path) -> io::Result<ParsedConfigFile> {
                     host.description = Some(desc.clone());
                 }
             }
+            if let Some(protocol) = trimmed.strip_prefix("#_Protocol") {
+                let protocol = parse_protocol_tag(protocol.trim());
+                for host in &mut current_hosts {
+                    host.protocol = protocol.clone();
+                }
+            }
             if let Some(profile) = trimmed.strip_prefix("#_Profile") {
                 let profile = profile.trim().to_string();
                 for host in &mut current_hosts {
@@ -142,7 +231,7 @@ fn parse_config_file(config_path: &Path) -> io::Result<ParsedConfigFile> {
             }
             if let Some(pass_val) = trimmed.strip_prefix("#_pass") {
                 let pass_key = pass_val.trim();
-                if validate_pass_key_name(pass_key) {
+                if validate_vault_entry_name(pass_key) {
                     for host in &mut current_hosts {
                         host.pass_key = Some(pass_key.to_string());
                     }
@@ -153,9 +242,23 @@ fn parse_config_file(config_path: &Path) -> io::Result<ParsedConfigFile> {
                     }
                 }
             }
+            if let Some(domain) = trimmed.strip_prefix("#_RdpDomain") {
+                let domain = domain.trim();
+                let domain = (!domain.is_empty()).then(|| domain.to_string());
+                for host in &mut current_hosts {
+                    host.rdp_domain = domain.clone();
+                }
+            }
+            if let Some(args) = trimmed.strip_prefix("#_RdpArgs") {
+                let args: Vec<String> = args.split_whitespace().map(str::to_string).collect();
+                if !args.is_empty() {
+                    for host in &mut current_hosts {
+                        host.rdp_args.extend(args.iter().cloned());
+                    }
+                }
+            }
             if let Some(hidden_val) = trimmed.strip_prefix("#_hidden") {
-                let val = hidden_val.trim().to_lowercase();
-                let hidden = val == "true" || val == "yes" || val == "1";
+                let hidden = parse_bool_like(hidden_val).unwrap_or(false);
                 for host in &mut current_hosts {
                     host.hidden = hidden;
                 }
@@ -168,16 +271,17 @@ fn parse_config_file(config_path: &Path) -> io::Result<ParsedConfigFile> {
             continue;
         }
 
-        let keyword = parts[0].to_lowercase();
+        let keyword = parts[0].to_ascii_lowercase();
         let value = parts[1].trim();
+
+        if in_match_block && keyword != "host" && keyword != "match" {
+            continue;
+        }
 
         match keyword.as_str() {
             "host" => {
-                for host in current_hosts.drain(..) {
-                    if !host.name.contains('*') && !host.name.contains('?') && !host.hidden {
-                        parsed.hosts.push(host);
-                    }
-                }
+                in_match_block = false;
+                finalize_current_hosts(&mut parsed, &mut current_hosts, options);
 
                 current_hosts = value.split_whitespace().map(|alias| SshHost::new(alias.to_string())).collect();
                 if current_hosts.is_empty() {
@@ -204,12 +308,28 @@ fn parse_config_file(config_path: &Path) -> io::Result<ParsedConfigFile> {
             "identityfile" => {
                 let identity = expand_tilde(value);
                 for host in &mut current_hosts {
-                    host.identity_file = Some(identity.clone());
+                    host.identity_files.push(identity.clone());
+                }
+            }
+            "identitiesonly" => {
+                let parsed_bool = parse_bool_like(value);
+                for host in &mut current_hosts {
+                    host.identities_only = parsed_bool;
                 }
             }
             "proxyjump" => {
                 for host in &mut current_hosts {
                     host.proxy_jump = Some(value.to_string());
+                }
+            }
+            "proxycommand" => {
+                for host in &mut current_hosts {
+                    host.proxy_command = Some(value.to_string());
+                }
+            }
+            "forwardagent" => {
+                for host in &mut current_hosts {
+                    host.forward_agent = Some(normalize_yes_no_string(value));
                 }
             }
             "localforward" => {
@@ -227,20 +347,20 @@ fn parse_config_file(config_path: &Path) -> io::Result<ParsedConfigFile> {
                     parsed.include_patterns.push(token.to_string());
                 }
             }
+            "match" => {
+                finalize_current_hosts(&mut parsed, &mut current_hosts, options);
+                parsed.unsupported_blocks += 1;
+                in_match_block = true;
+            }
             _ => {
                 for host in &mut current_hosts {
-                    host.other_options.insert(keyword.clone(), value.to_string());
+                    push_other_option(host, &keyword, value);
                 }
             }
         }
     }
 
-    for host in current_hosts {
-        if !host.name.contains('*') && !host.name.contains('?') && !host.hidden {
-            parsed.hosts.push(host);
-        }
-    }
-
+    finalize_current_hosts(&mut parsed, &mut current_hosts, options);
     Ok(parsed)
 }
 

@@ -1,7 +1,7 @@
 //! Host browser rendering.
 
 use crate::tui::ui::theme;
-use crate::tui::{HostTreeRowKind, SessionManager};
+use crate::tui::{AppState, HostTreeRowKind};
 use ratatui::{
     Frame,
     layout::Rect,
@@ -10,7 +10,26 @@ use ratatui::{
     widgets::{List, ListItem, ListState, Paragraph, Wrap},
 };
 
-impl SessionManager {
+fn inventory_load_error_lines(error: &str) -> Vec<Line<'static>> {
+    vec![
+        Line::from(""),
+        Line::from(Span::styled(
+            "Inventory load failed",
+            Style::default().fg(theme::ansi_red()).add_modifier(Modifier::BOLD),
+        )),
+        Line::from(Span::styled(
+            "Fix the inventory YAML formatting and included files.",
+            Style::default().fg(theme::ansi_bright_black()),
+        )),
+        Line::from(""),
+        Line::from(vec![
+            Span::styled("Reason: ", Style::default().fg(theme::ansi_bright_black())),
+            Span::styled(error.to_string(), Style::default().fg(theme::ansi_bright_white())),
+        ]),
+    ]
+}
+
+impl AppState {
     // Host list panel.
     pub(crate) fn render_host_list(&mut self, frame: &mut Frame, area: Rect) {
         if area.height == 0 {
@@ -45,7 +64,7 @@ impl SessionManager {
             return;
         }
 
-        let visible_hosts: Vec<ListItem> = self
+        let visible_hosts: Vec<ListItem<'_>> = self
             .visible_host_rows
             .iter()
             .skip(self.host_scroll_offset)
@@ -53,21 +72,17 @@ impl SessionManager {
             .map(|row| match row.kind {
                 HostTreeRowKind::Folder(_) => {
                     let glyph = if row.expanded { "▾" } else { "▸" };
-                    let indent = "  ".repeat(row.depth);
                     ListItem::new(Line::from(vec![
-                        Span::raw(indent),
+                        Span::raw(row.indent.as_str()),
                         Span::styled(glyph, Style::default().fg(theme::ansi_cyan())),
                         Span::raw(" "),
-                        Span::styled(row.display_name.clone(), Style::default().fg(theme::ansi_bright_cyan())),
+                        Span::styled(row.display_name.as_str(), Style::default().fg(theme::ansi_bright_cyan())),
                     ]))
                 }
-                HostTreeRowKind::Host(_) => {
-                    let indent = "  ".repeat(row.depth);
-                    ListItem::new(Line::from(vec![
-                        Span::raw(indent),
-                        Span::styled(row.display_name.clone(), Style::default().fg(theme::ansi_bright_white())),
-                    ]))
-                }
+                HostTreeRowKind::Host(_) => ListItem::new(Line::from(vec![
+                    Span::raw(row.indent.as_str()),
+                    Span::styled(row.display_name.as_str(), Style::default().fg(theme::ansi_bright_white())),
+                ])),
             })
             .collect();
 
@@ -119,7 +134,11 @@ impl SessionManager {
 
         if self.visible_host_rows.is_empty() {
             frame.render_widget(Paragraph::new(Line::from(Span::styled("Info", header_style))), header_area);
-            frame.render_widget(Paragraph::new("No selection").style(Style::default().fg(theme::ansi_bright_black())), body_area);
+            if let Some(error) = self.inventory_load_error.as_deref() {
+                frame.render_widget(Paragraph::new(inventory_load_error_lines(error)).wrap(Wrap { trim: false }), body_area);
+            } else {
+                frame.render_widget(Paragraph::new("No selection").style(Style::default().fg(theme::ansi_bright_black())), body_area);
+            }
             return;
         }
 
@@ -141,12 +160,15 @@ impl SessionManager {
                 lines.push(Line::from(""));
             }
 
-            if let Some(hostname) = &host.hostname {
-                lines.push(Line::from(vec![
-                    Span::styled("Host: ", Style::default().fg(theme::ansi_bright_black())),
-                    Span::styled(hostname, Style::default().fg(theme::ansi_bright_white())),
-                ]));
-            }
+            lines.push(Line::from(vec![
+                Span::styled("Type: ", Style::default().fg(theme::ansi_bright_black())),
+                Span::styled(host.protocol.display_name(), Style::default().fg(theme::ansi_cyan())),
+            ]));
+
+            lines.push(Line::from(vec![
+                Span::styled("Host: ", Style::default().fg(theme::ansi_bright_black())),
+                Span::styled(&host.host, Style::default().fg(theme::ansi_bright_white())),
+            ]));
 
             if let Some(user) = &host.user {
                 lines.push(Line::from(vec![
@@ -162,7 +184,7 @@ impl SessionManager {
                 ]));
             }
 
-            if let Some(identity) = &host.identity_file {
+            if let Some(identity) = host.ssh.identity_files.first() {
                 let display = identity.rsplit('/').next().unwrap_or(identity);
                 lines.push(Line::from(vec![
                     Span::styled("Key:  ", Style::default().fg(theme::ansi_bright_black())),
@@ -170,20 +192,20 @@ impl SessionManager {
                 ]));
             }
 
-            if let Some(proxy) = &host.proxy_jump {
+            if let Some(proxy) = &host.ssh.proxy_jump {
                 lines.push(Line::from(vec![
                     Span::styled("Jump: ", Style::default().fg(theme::ansi_bright_black())),
                     Span::styled(proxy, Style::default().fg(theme::ansi_bright_white())),
                 ]));
             }
 
-            for fwd in &host.local_forward {
+            for fwd in &host.ssh.local_forward {
                 lines.push(Line::from(vec![
                     Span::styled("LFwd: ", Style::default().fg(theme::ansi_bright_black())),
                     Span::styled(fwd, Style::default().fg(theme::ansi_bright_white())),
                 ]));
             }
-            for fwd in &host.remote_forward {
+            for fwd in &host.ssh.remote_forward {
                 lines.push(Line::from(vec![
                     Span::styled("RFwd: ", Style::default().fg(theme::ansi_bright_black())),
                     Span::styled(fwd, Style::default().fg(theme::ansi_bright_white())),
@@ -197,7 +219,14 @@ impl SessionManager {
                 ]));
             }
 
-            if host.pass_key.is_some() {
+            if !host.rdp.args.is_empty() {
+                lines.push(Line::from(vec![
+                    Span::styled("RDP:  ", Style::default().fg(theme::ansi_bright_black())),
+                    Span::styled(host.rdp.args.join(" "), Style::default().fg(theme::ansi_bright_white())),
+                ]));
+            }
+
+            if host.vault_pass.is_some() {
                 lines.push(Line::from(vec![
                     Span::styled("Pass: ", Style::default().fg(theme::ansi_bright_black())),
                     Span::styled("enabled", Style::default().fg(theme::ansi_yellow())),
@@ -239,7 +268,11 @@ impl SessionManager {
         }
 
         frame.render_widget(Paragraph::new(Line::from(Span::styled("Info", header_style))), header_area);
-        frame.render_widget(Paragraph::new("No selection").style(Style::default().fg(theme::ansi_bright_black())), body_area);
+        if let Some(error) = self.inventory_load_error.as_deref() {
+            frame.render_widget(Paragraph::new(inventory_load_error_lines(error)).wrap(Wrap { trim: false }), body_area);
+        } else {
+            frame.render_widget(Paragraph::new("No selection").style(Style::default().fg(theme::ansi_bright_black())), body_area);
+        }
     }
 
     // Detailed host/folder panel (shown when no tabs are open).
@@ -260,15 +293,20 @@ impl SessionManager {
                     Span::styled("Host: ", Style::default().fg(theme::ansi_white())),
                     Span::styled(&host.name, Style::default().fg(theme::ansi_yellow()).add_modifier(Modifier::BOLD)),
                 ]),
+                Line::from(vec![
+                    Span::styled("Type: ", Style::default().fg(theme::ansi_white())),
+                    Span::styled(
+                        host.protocol.display_name(),
+                        Style::default().fg(theme::ansi_cyan()).add_modifier(Modifier::BOLD),
+                    ),
+                ]),
                 Line::from(""),
             ];
 
-            if let Some(hostname) = &host.hostname {
-                lines.push(Line::from(vec![
-                    Span::styled("  Hostname: ", Style::default().fg(theme::ansi_white())),
-                    Span::styled(hostname, Style::default().fg(theme::ansi_bright_white())),
-                ]));
-            }
+            lines.push(Line::from(vec![
+                Span::styled("  Hostname: ", Style::default().fg(theme::ansi_white())),
+                Span::styled(&host.host, Style::default().fg(theme::ansi_bright_white())),
+            ]));
 
             if let Some(user) = &host.user {
                 lines.push(Line::from(vec![
@@ -284,17 +322,24 @@ impl SessionManager {
                 ]));
             }
 
-            if let Some(identity) = &host.identity_file {
+            if let Some(identity) = host.ssh.identity_files.first() {
                 lines.push(Line::from(vec![
                     Span::styled("  IdentityFile: ", Style::default().fg(theme::ansi_white())),
                     Span::styled(identity, Style::default().fg(theme::ansi_bright_black())),
                 ]));
             }
 
-            if let Some(proxy) = &host.proxy_jump {
+            if let Some(proxy) = &host.ssh.proxy_jump {
                 lines.push(Line::from(vec![
                     Span::styled("  ProxyJump: ", Style::default().fg(theme::ansi_white())),
                     Span::styled(proxy, Style::default().fg(theme::ansi_bright_white())),
+                ]));
+            }
+
+            if !host.rdp.args.is_empty() {
+                lines.push(Line::from(vec![
+                    Span::styled("  RdpArgs: ", Style::default().fg(theme::ansi_white())),
+                    Span::styled(host.rdp.args.join(" "), Style::default().fg(theme::ansi_bright_white())),
                 ]));
             }
 
@@ -331,10 +376,12 @@ impl SessionManager {
                 ]
             }
         } else {
-            vec![
-                Line::from(""),
-                Line::from(Span::styled("No selection", Style::default().fg(theme::ansi_bright_black()))),
-            ]
+            self.inventory_load_error.as_deref().map(inventory_load_error_lines).unwrap_or_else(|| {
+                vec![
+                    Line::from(""),
+                    Line::from(Span::styled("No selection", Style::default().fg(theme::ansi_bright_black()))),
+                ]
+            })
         };
 
         let header = Paragraph::new(Line::from(Span::styled(
@@ -342,6 +389,6 @@ impl SessionManager {
             Style::default().fg(theme::ansi_bright_black()).add_modifier(Modifier::BOLD),
         )));
         frame.render_widget(header, header_area);
-        frame.render_widget(Paragraph::new(content), body_area);
+        frame.render_widget(Paragraph::new(content).wrap(Wrap { trim: false }), body_area);
     }
 }

@@ -1,15 +1,13 @@
+//! Secure command path resolution for known executables.
+
 use once_cell::sync::OnceCell;
+use std::os::unix::fs::{MetadataExt, PermissionsExt};
 use std::{
     fs, io,
     path::{Path, PathBuf},
 };
 
-#[cfg(unix)]
-use std::os::unix::fs::{MetadataExt, PermissionsExt};
-
-#[cfg(unix)]
 const EXECUTE_BITS: u32 = 0o111;
-#[cfg(unix)]
 const WORLD_WRITABLE_BIT: u32 = 0o002;
 
 #[derive(Debug, Clone)]
@@ -28,8 +26,7 @@ impl CachedPathError {
 }
 
 static SSH_PATH: OnceCell<Result<PathBuf, CachedPathError>> = OnceCell::new();
-static SSHPASS_PATH: OnceCell<Result<PathBuf, CachedPathError>> = OnceCell::new();
-static GPG_PATH: OnceCell<Result<PathBuf, CachedPathError>> = OnceCell::new();
+static XFREERDP_PATH: OnceCell<Result<PathBuf, CachedPathError>> = OnceCell::new();
 static COSSH_PATH: OnceCell<Result<PathBuf, CachedPathError>> = OnceCell::new();
 
 fn resolve_cached(
@@ -48,23 +45,20 @@ pub(crate) fn ssh_path() -> io::Result<PathBuf> {
     resolve_cached(&SSH_PATH, "ssh", || resolve_path_from_env("ssh"))
 }
 
-pub(crate) fn sshpass_path() -> io::Result<PathBuf> {
-    resolve_cached(&SSHPASS_PATH, "sshpass", || resolve_path_from_env("sshpass"))
-}
-
-pub(crate) fn gpg_path() -> io::Result<PathBuf> {
-    resolve_cached(&GPG_PATH, "gpg", || resolve_path_from_env("gpg"))
-}
-
 pub(crate) fn cossh_path() -> io::Result<PathBuf> {
     resolve_cached(&COSSH_PATH, "cossh", resolve_current_exe_path)
+}
+
+pub(crate) fn xfreerdp_path() -> io::Result<PathBuf> {
+    resolve_cached(&XFREERDP_PATH, "xfreerdp3/xfreerdp", || {
+        resolve_path_from_env_candidates(&["xfreerdp3", "xfreerdp"])
+    })
 }
 
 pub(crate) fn resolve_known_command_path(command: &str) -> io::Result<PathBuf> {
     match command {
         "ssh" => ssh_path(),
-        "sshpass" => sshpass_path(),
-        "gpg" => gpg_path(),
+        "xfreerdp3" | "xfreerdp" => xfreerdp_path(),
         "cossh" => cossh_path(),
         _ => Err(io::Error::new(
             io::ErrorKind::InvalidInput,
@@ -76,6 +70,19 @@ pub(crate) fn resolve_known_command_path(command: &str) -> io::Result<PathBuf> {
 fn resolve_path_from_env(binary: &str) -> io::Result<PathBuf> {
     let located = which::which(binary).map_err(|err| io::Error::new(io::ErrorKind::NotFound, format!("{binary} not found in PATH: {err}")))?;
     validate_executable_path(&located, binary)
+}
+
+fn resolve_path_from_env_candidates(binaries: &[&str]) -> io::Result<PathBuf> {
+    let mut last_error = None;
+
+    for &binary in binaries {
+        match resolve_path_from_env(binary) {
+            Ok(path) => return Ok(path),
+            Err(err) => last_error = Some(err),
+        }
+    }
+
+    Err(last_error.unwrap_or_else(|| io::Error::new(io::ErrorKind::NotFound, "no candidate command names were provided")))
 }
 
 fn resolve_current_exe_path() -> io::Result<PathBuf> {
@@ -106,16 +113,12 @@ fn validate_executable_path(path: &Path, label: &str) -> io::Result<PathBuf> {
         ));
     }
 
-    #[cfg(unix)]
-    {
-        validate_unix_executable_security(&canonical, &metadata, label)?;
-    }
+    validate_executable_security(&canonical, &metadata, label)?;
 
     Ok(canonical)
 }
 
-#[cfg(unix)]
-fn validate_unix_executable_security(path: &Path, metadata: &fs::Metadata, label: &str) -> io::Result<()> {
+fn validate_executable_security(path: &Path, metadata: &fs::Metadata, label: &str) -> io::Result<()> {
     let mode = metadata.permissions().mode();
     if mode & WORLD_WRITABLE_BIT != 0 {
         return Err(io::Error::new(

@@ -1,14 +1,19 @@
-//! Interactive TUI-based SSH host selector.
+//! Interactive session manager UI.
+//!
+//! This module exposes the public TUI entrypoint and keeps internal state,
+//! rendering, and terminal emulation modules private.
 
 mod app;
 mod features;
 mod state;
+mod terminal;
 mod terminal_emulator;
 mod ui;
 
 pub(crate) use state::{
-    AppState, ConnectRequest, HostTab, HostTreeRow, HostTreeRowKind, PassPromptAction, PassPromptState, QuickConnectField, QuickConnectState, SessionManager,
-    SshSession, TerminalSearchState,
+    AppState, ConnectRequest, HostTab, HostTreeRow, HostTreeRowKind, ManagedChild, ManagedSession, QuickConnectField, QuickConnectState, TerminalSearchState,
+    VaultStatusModalState, VaultUnlockAction, VaultUnlockState,
 };
 
+/// Run the interactive session manager.
 pub use app::run_session_manager;

@@ -1,6 +1,6 @@
 //! Quick-connect mouse handling.
 
-use crate::tui::{QuickConnectField, SessionManager};
+use crate::tui::{AppState, QuickConnectField};
 use crossterm::event::{self, MouseButton, MouseEventKind};
 use ratatui::layout::Rect;
 
@@ -17,7 +17,7 @@ const USER_LABEL_PREFIX: &str = "User: ";
 const HOST_LABEL_PREFIX: &str = "Host: ";
 const PROFILE_LIST_PREFIX: &str = "Profiles: ";
 
-impl SessionManager {
+impl AppState {
     // Modal mouse event entry point.
     pub(crate) fn handle_quick_connect_mouse(&mut self, mouse: event::MouseEvent) {
         let Some((modal_area, inner_area)) = self.quick_connect_modal_layout() else {

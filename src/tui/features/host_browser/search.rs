@@ -1,14 +1,18 @@
 //! Fuzzy search and host filtering logic
 
-use crate::ssh_config::{FolderId, TreeFolder};
+use crate::inventory::{FolderId, TreeFolder};
 use crate::tui::state::HostSearchEntry;
-use crate::tui::{HostTreeRow, HostTreeRowKind, SessionManager};
+use crate::tui::{AppState, HostTreeRow, HostTreeRowKind};
 use std::collections::HashMap;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum HostRowKey {
     Folder(FolderId),
     Host(usize),
+}
+
+fn host_row_indent(depth: usize) -> String {
+    "  ".repeat(depth)
 }
 
 /// Fuzzy match scoring for host search.
@@ -65,13 +69,17 @@ fn compute_match_scores(search_entries: &[HostSearchEntry], query_lower: &str) -
 
     // Pass 1: strict contiguous matching.
     for (idx, search_entry) in search_entries.iter().enumerate() {
+        if search_entry.hidden {
+            continue;
+        }
+
         let mut best_score = None;
 
         if let Some(score) = strict_match_score(&search_entry.name_lower, query_lower) {
             best_score = Some(score + 1000);
         }
 
-        if let Some(hostname) = &search_entry.hostname_lower
+        if let Some(hostname) = &search_entry.host_lower
             && let Some(score) = strict_match_score(hostname, query_lower)
         {
             best_score = Some(best_score.unwrap_or(0).max(score + 500));
@@ -94,13 +102,17 @@ fn compute_match_scores(search_entries: &[HostSearchEntry], query_lower: &str) -
 
     // Pass 2: fuzzy fallback when strict matching found nothing.
     for (idx, search_entry) in search_entries.iter().enumerate() {
+        if search_entry.hidden {
+            continue;
+        }
+
         let mut best_score = None;
 
         if let Some(score) = fuzzy_match(&search_entry.name_lower, query_lower) {
             best_score = Some(score + 100);
         }
 
-        if let Some(hostname) = &search_entry.hostname_lower
+        if let Some(hostname) = &search_entry.host_lower
             && let Some(score) = fuzzy_match(hostname, query_lower)
         {
             best_score = Some(best_score.unwrap_or(0).max(score + 50));
@@ -120,7 +132,7 @@ fn compute_match_scores(search_entries: &[HostSearchEntry], query_lower: &str) -
     match_scores
 }
 
-impl SessionManager {
+impl AppState {
     // Row identity helpers.
     fn row_key_from_kind(kind: HostTreeRowKind) -> HostRowKey {
         match kind {
@@ -149,9 +161,12 @@ impl SessionManager {
     fn collect_root_visible_rows_normal(&self, rows: &mut Vec<HostTreeRow>) {
         for &host_idx in &self.host_tree_root.host_indices {
             if let Some(host) = self.hosts.get(host_idx) {
+                if host.hidden {
+                    continue;
+                }
                 rows.push(HostTreeRow {
                     kind: HostTreeRowKind::Host(host_idx),
-                    depth: 0,
+                    indent: host_row_indent(0),
                     display_name: host.name.clone(),
                     expanded: false,
                 });
@@ -170,9 +185,12 @@ impl SessionManager {
             if self.host_match_scores.contains_key(&host_idx)
                 && let Some(host) = self.hosts.get(host_idx)
             {
+                if host.hidden {
+                    continue;
+                }
                 rows.push(HostTreeRow {
                     kind: HostTreeRowKind::Host(host_idx),
-                    depth: 0,
+                    indent: host_row_indent(0),
                     display_name: host.name.clone(),
                     expanded: false,
                 });
@@ -191,7 +209,7 @@ impl SessionManager {
         let expanded = !self.collapsed_folders.contains(&folder.id);
         rows.push(HostTreeRow {
             kind: HostTreeRowKind::Folder(folder.id),
-            depth,
+            indent: host_row_indent(depth),
             display_name: folder.name.clone(),
             expanded,
         });
@@ -202,9 +220,12 @@ impl SessionManager {
 
         for &host_idx in &folder.host_indices {
             if let Some(host) = self.hosts.get(host_idx) {
+                if host.hidden {
+                    continue;
+                }
                 rows.push(HostTreeRow {
                     kind: HostTreeRowKind::Host(host_idx),
-                    depth: depth + 1,
+                    indent: host_row_indent(depth + 1),
                     display_name: host.name.clone(),
                     expanded: false,
                 });
@@ -234,9 +255,12 @@ impl SessionManager {
             if self.host_match_scores.contains_key(&host_idx)
                 && let Some(host) = self.hosts.get(host_idx)
             {
+                if host.hidden {
+                    continue;
+                }
                 host_rows.push(HostTreeRow {
                     kind: HostTreeRowKind::Host(host_idx),
-                    depth: depth + 1,
+                    indent: host_row_indent(depth + 1),
                     display_name: host.name.clone(),
                     expanded: false,
                 });
@@ -247,7 +271,7 @@ impl SessionManager {
         if has_match {
             rows.push(HostTreeRow {
                 kind: HostTreeRowKind::Folder(folder.id),
-                depth,
+                indent: host_row_indent(depth),
                 display_name: folder.name.clone(),
                 expanded: true,
             });
@@ -412,7 +436,3 @@ impl SessionManager {
         }
     }
 }
-
-#[cfg(test)]
-#[path = "../../../test/tui/features/host_browser/search.rs"]
-mod tests;

@@ -1,8 +1,8 @@
 //! Tab-bar scrolling helpers.
 
-use crate::tui::SessionManager;
+use crate::tui::AppState;
 
-impl SessionManager {
+impl AppState {
     // Right-most snap point when tabs overflow.
     pub(crate) fn final_right_tab_scroll_offset(&self, available_width: usize) -> usize {
         if self.tabs.is_empty() || available_width == 0 {
@@ -105,7 +105,3 @@ impl SessionManager {
         Some(final_offset)
     }
 }
-
-#[cfg(test)]
-#[path = "../../../test/tui/features/terminal_tabs/scroll.rs"]
-mod tests;

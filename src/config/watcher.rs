@@ -1,30 +1,29 @@
-//! Configuration file watching and hot-reloading
-//!
-//! Monitors the configuration file for changes and automatically reloads
-//! when modifications are detected.
+//! Config file watch and hot-reload loop.
 
 use super::loader::ConfigLoader;
 use crate::{log_debug, log_error, log_info, log_warn};
 use notify::{Error, Event, RecommendedWatcher, RecursiveMode, Watcher};
 use std::{
     io::{self, Write},
-    path::PathBuf,
+    path::{Path, PathBuf},
     sync::mpsc,
     thread,
     time::Duration,
 };
 
-fn event_targets_config_file(event: &Event, config_file_name: &str) -> bool {
+fn event_targets_config_file(event: &Event, config_path: &Path) -> bool {
+    let config_file_name = config_path.file_name();
     event.paths.iter().any(|path| {
-        path.file_name()
-            .and_then(|segment| segment.to_str())
-            .map(|name| name == config_file_name)
-            .unwrap_or(false)
+        path == config_path
+            || match (path.file_name(), config_file_name) {
+                (Some(event_name), Some(config_name)) => event_name == config_name,
+                _ => false,
+            }
     })
 }
 
-fn should_reload_for_event(event: &Event, config_file_name: &str) -> bool {
-    (event.kind.is_modify() || event.kind.is_create()) && event_targets_config_file(event, config_file_name)
+fn should_reload_for_event(event: &Event, config_path: &Path) -> bool {
+    (event.kind.is_modify() || event.kind.is_create() || event.kind.is_remove()) && event_targets_config_file(event, config_path)
 }
 
 fn print_reload_notice(message: &str) {
@@ -33,28 +32,19 @@ fn print_reload_notice(message: &str) {
     let _ = io::stderr().flush();
 }
 
-/// Start watching the configuration file for changes
+/// Start watching the active config file for changes.
 pub fn config_watcher(profile: Option<String>) -> Option<RecommendedWatcher> {
     let (tx, rx) = mpsc::channel();
 
     log_debug!("Initializing configuration file watcher");
 
-    let config_path = match super::get_config().read() {
-        Ok(config_guard) => config_guard.metadata.config_path.clone(),
-        Err(poisoned) => {
-            log_error!("Configuration lock poisoned while starting watcher; continuing with recovered state");
-            poisoned.into_inner().metadata.config_path.clone()
-        }
-    };
-    let config_file_name = config_path.file_name().and_then(|segment| segment.to_str()).unwrap_or("").to_string();
-
-    // Clone for use in the closure
-    let config_file_name_clone = config_file_name.clone();
+    let config_path = super::with_current_config("starting watcher", |cfg| cfg.metadata.config_path.clone());
+    let config_path_clone = config_path.clone();
 
     let mut watcher = match RecommendedWatcher::new(
         move |res: Result<Event, Error>| {
             if let Ok(event) = res
-                && should_reload_for_event(&event, &config_file_name_clone)
+                && should_reload_for_event(&event, &config_path_clone)
             {
                 log_debug!("Config file change detected: {:?}", event);
                 let _ = tx.send(());
@@ -70,7 +60,7 @@ pub fn config_watcher(profile: Option<String>) -> Option<RecommendedWatcher> {
         }
     };
 
-    // Watch the parent directory to handle atomic writes (temp file + rename)
+    // Watch the parent directory to catch atomic rename writes.
     let fallback = PathBuf::from(".");
     let watch_path = config_path.parent().unwrap_or(&fallback);
     log_info!("Starting config watcher for: {:?} (watching directory: {:?})", config_path, watch_path);
@@ -81,13 +71,12 @@ pub fn config_watcher(profile: Option<String>) -> Option<RecommendedWatcher> {
         return None;
     }
 
-    // Spawn a named thread for config watching
     if let Err(err) = thread::Builder::new().name("config-watcher".to_string()).spawn(move || {
         log_debug!("Config watcher thread started");
         loop {
             match rx.recv() {
                 Ok(()) => {
-                    // Debounce: wait for additional events and discard them
+                    // Debounce bursty editor writes before one reload attempt.
                     while rx.recv_timeout(Duration::from_millis(500)).is_ok() {}
 
                     log_info!("Configuration change detected, reloading...");

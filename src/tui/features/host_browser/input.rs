@@ -1,6 +1,6 @@
 //! Host browser keyboard handling.
 
-use crate::tui::{ConnectRequest, HostTreeRowKind, SessionManager};
+use crate::tui::{AppState, ConnectRequest, HostTreeRowKind};
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use std::io;
 
@@ -54,7 +54,7 @@ fn delete_selection(text: &mut String, cursor: &mut usize, selection: &mut Optio
     true
 }
 
-impl SessionManager {
+impl AppState {
     fn clear_host_search_query(&mut self) {
         self.search_query.clear();
         self.search_query_cursor = 0;
@@ -241,6 +241,7 @@ impl SessionManager {
                         target: tab.host.name.clone(),
                         profile: tab.host.profile.clone(),
                         force_ssh_logging: tab.force_ssh_logging,
+                        protocol: tab.host.protocol.clone(),
                     });
                     self.should_exit = true;
                 }
@@ -262,6 +263,13 @@ impl SessionManager {
             }
             KeyCode::Char('q') if self.focus_on_manager && key.modifiers.is_empty() => {
                 self.open_quick_connect_modal();
+            }
+            KeyCode::Char('v') if self.focus_on_manager && key.modifiers.is_empty() => {
+                if self.vault_status.unlocked {
+                    self.open_vault_status_modal();
+                } else {
+                    self.open_manual_vault_unlock();
+                }
             }
             KeyCode::Char('i') if self.focus_on_manager && key.modifiers.is_empty() => {
                 self.host_info_visible = !self.host_info_visible;
@@ -349,7 +357,3 @@ impl SessionManager {
         Ok(())
     }
 }
-
-#[cfg(test)]
-#[path = "../../../test/tui/features/host_browser/input.rs"]
-mod tests;

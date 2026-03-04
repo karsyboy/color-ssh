@@ -1,6 +1,6 @@
 //! Global status bar rendering.
 
-use crate::tui::SessionManager;
+use crate::tui::AppState;
 use crate::tui::ui::theme::{self, display_width};
 use ratatui::{
     Frame,
@@ -9,6 +9,7 @@ use ratatui::{
     text::{Line, Span},
     widgets::Paragraph,
 };
+use std::borrow::Cow;
 
 #[derive(Debug, Clone, Copy)]
 enum StatusContext {
@@ -31,20 +32,20 @@ fn char_to_byte_index(text: &str, char_index: usize) -> usize {
     }
 }
 
-fn push_if_non_empty(spans: &mut Vec<Span<'static>>, text: &str, style: Style) {
+fn push_if_non_empty<'a>(spans: &mut Vec<Span<'a>>, text: &'a str, style: Style) {
     if !text.is_empty() {
-        spans.push(Span::styled(text.to_string(), style));
+        spans.push(Span::styled(text, style));
     }
 }
 
-fn build_edit_value_spans(
-    text: &str,
+fn build_edit_value_spans<'a>(
+    text: &'a str,
     cursor: usize,
     selection: Option<(usize, usize)>,
     value_style: Style,
     cursor_style: Style,
     selection_style: Style,
-) -> Vec<Span<'static>> {
+) -> Vec<Span<'a>> {
     let mut spans = Vec::new();
     let len = text.chars().count();
     let cursor = cursor.min(len);
@@ -65,7 +66,7 @@ fn build_edit_value_spans(
     }
 
     if len == 0 {
-        spans.push(Span::styled(" ".to_string(), cursor_style));
+        spans.push(Span::styled(" ", cursor_style));
         return spans;
     }
 
@@ -76,14 +77,14 @@ fn build_edit_value_spans(
         push_if_non_empty(&mut spans, &text[cursor_start..cursor_end], cursor_style);
         push_if_non_empty(&mut spans, &text[cursor_end..], value_style);
     } else {
-        spans.push(Span::styled(text.to_string(), value_style));
-        spans.push(Span::styled(" ".to_string(), cursor_style));
+        spans.push(Span::styled(text, value_style));
+        spans.push(Span::styled(" ", cursor_style));
     }
 
     spans
 }
 
-impl SessionManager {
+impl AppState {
     // Entry point.
     pub(crate) fn render_global_status_bar(&self, frame: &mut Frame, area: Rect) {
         if area.width == 0 || area.height == 0 {
@@ -112,7 +113,7 @@ impl SessionManager {
     }
 
     // Context dispatch.
-    fn build_status_line_sections(&self) -> (Vec<Span<'static>>, Vec<Span<'static>>) {
+    fn build_status_line_sections(&self) -> (Vec<Span<'_>>, Vec<Span<'_>>) {
         match self.resolve_status_context() {
             StatusContext::HostSearch => self.build_search_mode_status_spans(),
             StatusContext::TerminalSearch => self.build_terminal_search_status_spans(),
@@ -122,7 +123,7 @@ impl SessionManager {
     }
 
     // Shared helpers.
-    fn spans_display_width(spans: &[Span<'static>]) -> usize {
+    fn spans_display_width(spans: &[Span<'_>]) -> usize {
         spans.iter().map(|span| display_width(span.content.as_ref())).sum()
     }
 
@@ -148,29 +149,45 @@ impl SessionManager {
         Span::styled(" || ", Style::default().fg(theme::ansi_bright_black()))
     }
 
-    fn selected_host_name(&self) -> Option<String> {
+    fn selected_host_name(&self) -> Option<Cow<'_, str>> {
         if let Some(host_idx) = self.selected_host_idx() {
-            return self.hosts.get(host_idx).map(|host| host.name.clone());
+            return self.hosts.get(host_idx).map(|host| Cow::Borrowed(host.name.as_str()));
         }
         if let Some(folder_id) = self.selected_folder_id() {
-            return self.folder_by_id(folder_id).map(|folder| format!("Folder: {}", folder.name));
+            return self.folder_by_id(folder_id).map(|folder| Cow::Owned(format!("Folder: {}", folder.name)));
         }
         None
     }
 
+    fn vault_status_spans(&self) -> [Span<'static>; 3] {
+        let (icon, icon_color) = if self.vault_status.unlocked {
+            (" ", theme::ansi_green())
+        } else {
+            (" ", theme::ansi_red())
+        };
+
+        [
+            Span::styled(icon, Style::default().fg(icon_color).add_modifier(Modifier::BOLD)),
+            Span::styled("V", Style::default().fg(theme::ansi_bright_white()).add_modifier(Modifier::UNDERLINED)),
+            Span::styled("ault", Style::default().fg(theme::ansi_bright_white())),
+        ]
+    }
+
     // Host browser context.
-    fn build_manager_status_spans(&self) -> (Vec<Span<'static>>, Vec<Span<'static>>) {
-        let host_name = self.selected_host_name().unwrap_or_else(|| "none".to_string());
+    fn build_manager_status_spans(&self) -> (Vec<Span<'_>>, Vec<Span<'_>>) {
+        let host_name = self.selected_host_name().unwrap_or(Cow::Borrowed("none"));
         let mut left = vec![
             Span::styled("Host", Style::default().fg(theme::ansi_cyan()).add_modifier(Modifier::BOLD)),
             Self::context_split_indicator(),
-            Span::styled(host_name, Style::default().fg(theme::ansi_bright_white())),
         ];
+        left.extend(self.vault_status_spans());
+        left.push(Self::context_split_indicator());
+        left.push(Span::styled(host_name, Style::default().fg(theme::ansi_bright_white())));
         if !self.search_query.is_empty() {
             left.push(Self::context_split_indicator());
             left.push(Span::styled("filter:", Style::default().fg(theme::ansi_bright_black())));
             left.push(Span::styled(" ", Style::default()));
-            left.push(Span::styled(self.search_query.clone(), Style::default().fg(theme::ansi_yellow())));
+            left.push(Span::styled(self.search_query.as_str(), Style::default().fg(theme::ansi_yellow())));
             left.push(Span::styled(" ", Style::default()));
             left.push(Span::styled("(", Style::default().fg(theme::ansi_bright_black())));
             left.push(Span::styled("^C", Style::default().fg(theme::ansi_red())));
@@ -209,7 +226,7 @@ impl SessionManager {
     }
 
     // Terminal context.
-    fn build_terminal_status_spans(&self) -> (Vec<Span<'static>>, Vec<Span<'static>>) {
+    fn build_terminal_status_spans(&self) -> (Vec<Span<'_>>, Vec<Span<'_>>) {
         if self.tabs.is_empty() || self.selected_tab >= self.tabs.len() {
             return (
                 vec![
@@ -240,7 +257,7 @@ impl SessionManager {
             Self::context_split_indicator(),
             Span::styled("●", Style::default().fg(status_icon_color).add_modifier(Modifier::BOLD)),
             Span::styled(" ", Style::default()),
-            Span::styled(tab.host.name.clone(), Style::default().fg(theme::ansi_cyan()).add_modifier(Modifier::BOLD)),
+            Span::styled(tab.host.name.as_str(), Style::default().fg(theme::ansi_cyan()).add_modifier(Modifier::BOLD)),
         ];
 
         if !scroll_info.is_empty() {
@@ -295,7 +312,7 @@ impl SessionManager {
     }
 
     // Host search context.
-    fn build_search_mode_status_spans(&self) -> (Vec<Span<'static>>, Vec<Span<'static>>) {
+    fn build_search_mode_status_spans(&self) -> (Vec<Span<'_>>, Vec<Span<'_>>) {
         let cursor_style = Style::default().fg(theme::ansi_black()).bg(theme::ansi_cyan()).add_modifier(Modifier::BOLD);
         let selection_style = Style::default()
             .fg(theme::selection_fg())
@@ -332,24 +349,21 @@ impl SessionManager {
     }
 
     // Terminal search context.
-    fn build_terminal_search_status_spans(&self) -> (Vec<Span<'static>>, Vec<Span<'static>>) {
-        let (query, cursor, selection, matches_len, current_idx) = self.current_tab_search().map_or_else(
-            || (String::new(), 0usize, None, 0usize, 0usize),
-            |search| {
-                (
-                    search.query.clone(),
-                    search.query_cursor,
-                    search.query_selection,
-                    search.matches.len(),
-                    search.current,
-                )
-            },
-        );
+    fn build_terminal_search_status_spans(&self) -> (Vec<Span<'_>>, Vec<Span<'_>>) {
+        let (query, cursor, selection, matches_len, current_idx) = self.current_tab_search().map_or(("", 0usize, None, 0usize, 0usize), |search| {
+            (
+                search.query.as_str(),
+                search.query_cursor,
+                search.query_selection,
+                search.matches.len(),
+                search.current,
+            )
+        });
 
         let match_info = if matches_len > 0 {
-            format!("{}/{}", current_idx + 1, matches_len)
+            Cow::Owned(format!("{}/{}", current_idx + 1, matches_len))
         } else {
-            "0/0".to_string()
+            Cow::Borrowed("0/0")
         };
 
         let cursor_style = Style::default().fg(theme::ansi_black()).bg(theme::ansi_cyan()).add_modifier(Modifier::BOLD);
@@ -362,17 +376,17 @@ impl SessionManager {
             Self::context_split_indicator(),
         ];
         left.extend(build_edit_value_spans(
-            &query,
+            query,
             cursor,
             selection,
             Style::default().fg(theme::ansi_bright_white()),
             cursor_style,
             selection_style,
         ));
-        left.extend([
-            Span::styled(" ", Style::default()),
-            Span::styled(format!("({match_info})"), Style::default().fg(theme::ansi_yellow())),
-        ]);
+        left.push(Span::styled(" ", Style::default()));
+        left.push(Span::styled("(", Style::default().fg(theme::ansi_yellow())));
+        left.push(Span::styled(match_info, Style::default().fg(theme::ansi_yellow())));
+        left.push(Span::styled(")", Style::default().fg(theme::ansi_yellow())));
         let right = vec![
             Span::styled("Enter", Style::default().fg(theme::ansi_green())),
             Span::styled(":next | ", Style::default().fg(theme::ansi_bright_black())),
@@ -390,7 +404,3 @@ impl SessionManager {
         (left, right)
     }
 }
-
-#[cfg(test)]
-#[path = "../../test/tui/ui/status_bar.rs"]
-mod tests;

@@ -1,7 +1,7 @@
 //! Keyboard input handling and PTY write helpers.
 
 use crate::log_error;
-use crate::tui::SessionManager;
+use crate::tui::AppState;
 use crate::tui::features::terminal_session::pty::encode_key_event_bytes;
 use crate::tui::ui::theme::display_width;
 use crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
@@ -23,7 +23,7 @@ fn encode_paste_bytes(pasted: &str, bracketed: bool) -> Vec<u8> {
     out
 }
 
-impl SessionManager {
+impl AppState {
     // Selection/focus helpers.
     pub(crate) fn clear_selection_state(&mut self) {
         self.selection_start = None;
@@ -115,8 +115,13 @@ impl SessionManager {
             return Ok(());
         }
 
-        if self.pass_prompt.is_some() {
-            self.handle_pass_prompt_key(key);
+        if self.vault_unlock.is_some() {
+            self.handle_vault_unlock_key(key);
+            return Ok(());
+        }
+
+        if self.vault_status_modal.is_some() {
+            self.handle_vault_status_modal_key(key);
             return Ok(());
         }
 
@@ -141,8 +146,12 @@ impl SessionManager {
             return Ok(());
         }
 
-        if self.pass_prompt.is_some() {
-            self.handle_pass_prompt_paste(&pasted);
+        if self.vault_unlock.is_some() {
+            self.handle_vault_unlock_paste(&pasted);
+            return Ok(());
+        }
+
+        if self.vault_status_modal.is_some() {
             return Ok(());
         }
 
@@ -219,10 +228,17 @@ impl SessionManager {
             }
             KeyCode::Char('f') if key.modifiers.contains(KeyModifiers::CONTROL) => {
                 if !self.is_pty_mouse_mode_active() {
+                    let mut should_recompute_search = false;
                     if let Some(search) = self.current_tab_search_mut() {
                         search.active = true;
                         search.query_cursor = search.query.chars().count();
                         search.query_selection = None;
+                        search.last_search_query.clear();
+                        search.last_scanned_render_epoch = 0;
+                        should_recompute_search = !search.query.is_empty();
+                    }
+                    if should_recompute_search {
+                        self.update_terminal_search();
                     }
                 } else {
                     self.send_key_to_pty(key)?;
@@ -273,8 +289,11 @@ impl SessionManager {
         let Some(session) = &mut tab.session else {
             return Ok(());
         };
+        let Some(writer) = session.writer.as_ref() else {
+            return Ok(());
+        };
 
-        let mut writer = match session.writer.lock() {
+        let mut writer = match writer.lock() {
             Ok(writer) => writer,
             Err(lock_err) => {
                 log_error!("Failed to lock PTY writer: {}", lock_err);
@@ -357,7 +376,3 @@ impl SessionManager {
         }
     }
 }
-
-#[cfg(test)]
-#[path = "../../../test/tui/features/terminal_tabs/input.rs"]
-mod tests;

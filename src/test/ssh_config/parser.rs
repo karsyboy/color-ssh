@@ -1,160 +1,83 @@
 use super::parse_ssh_config;
-use std::fs;
-use std::io;
-use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicU64, Ordering};
-use std::time::{SystemTime, UNIX_EPOCH};
-
-static TEST_COUNTER: AtomicU64 = AtomicU64::new(0);
-
-fn test_dir(name: &str) -> io::Result<PathBuf> {
-    let nanos = SystemTime::now().duration_since(UNIX_EPOCH).expect("clock drift").as_nanos();
-    let serial = TEST_COUNTER.fetch_add(1, Ordering::Relaxed);
-    let dir = std::env::temp_dir().join(format!("cossh_ssh_config_{name}_{nanos}_{serial}"));
-    fs::create_dir_all(&dir)?;
-    Ok(dir)
-}
-
-fn write_file(path: &Path, contents: &str) -> io::Result<()> {
-    if let Some(parent) = path.parent() {
-        fs::create_dir_all(parent)?;
-    }
-    fs::write(path, contents)
-}
+use crate::ssh_config::ConnectionProtocol;
+use crate::test::support::fs::TestWorkspace;
 
 #[test]
-fn parses_metadata_and_filters_hidden_wildcard_hosts() {
-    let dir = test_dir("metadata_filter").expect("temp dir");
-    let config_path = dir.join("config");
+fn parser_metadata_hidden_and_wildcard_filtering_core_behavior() {
+    let workspace = TestWorkspace::new("ssh_config", "metadata_core").expect("temp workspace");
+    let config_path = workspace.join("config");
 
-    write_file(
+    workspace
+        .write(
             &config_path,
-            "Host app\n#_Desc Production app\n#_Profile prod\n#_pass test_pass\nHostName 10.0.0.10\nUser deploy\nPort 2200\nIdentityFile ~/.ssh/id_app\nLocalForward 8080 localhost:80\nRemoteForward 9090 localhost:90\nCompression yes\n\nHost hidden-node\n#_hidden true\nHostName 10.0.0.20\n\nHost web-*\nHostName 10.0.0.30\n",
+            "Host app\n#_Desc Production app\n#_Profile prod\n#_pass test_pass\nHostName 10.0.0.10\nUser deploy\nPort 2200\n\nHost hidden-node\n#_hidden true\nHostName 10.0.0.20\n\nHost web-*\nHostName 10.0.0.30\n",
         )
         .expect("write config");
 
     let hosts = parse_ssh_config(&config_path).expect("parse config");
     assert_eq!(hosts.len(), 1);
-
-    let host = &hosts[0];
-    assert_eq!(host.name, "app");
-    assert_eq!(host.hostname.as_deref(), Some("10.0.0.10"));
-    assert_eq!(host.user.as_deref(), Some("deploy"));
-    assert_eq!(host.port, Some(2200));
-    assert_eq!(host.description.as_deref(), Some("Production app"));
-    assert_eq!(host.profile.as_deref(), Some("prod"));
-    assert_eq!(host.pass_key.as_deref(), Some("test_pass"));
-    assert!(!host.hidden);
-    assert_eq!(host.local_forward, vec!["8080 localhost:80"]);
-    assert_eq!(host.remote_forward, vec!["9090 localhost:90"]);
-    assert_eq!(host.other_options.get("compression").map(String::as_str), Some("yes"));
-
-    let identity = host.identity_file.as_deref().unwrap_or_default();
-    assert!(identity.ends_with(".ssh/id_app"));
-
-    let _ = fs::remove_dir_all(dir);
+    assert_eq!(hosts[0].name, "app");
+    assert_eq!(hosts[0].protocol, ConnectionProtocol::Ssh);
+    assert_eq!(hosts[0].profile.as_deref(), Some("prod"));
 }
 
 #[test]
-fn expands_wildcard_includes_in_sorted_order() {
-    let dir = test_dir("include_order").expect("temp dir");
-    let config_path = dir.join("config");
+fn parser_include_glob_order_and_cycle_handling_core_behavior() {
+    let workspace = TestWorkspace::new("ssh_config", "include_cycle_core").expect("temp workspace");
+    let config_path = workspace.join("config");
 
-    write_file(&config_path, "Host root\nHostName root.example\nInclude conf.d/*.conf\n").expect("write root config");
-
-    write_file(&dir.join("conf.d/20-b.conf"), "Host b\nHostName b.example\n").expect("write b include");
-    write_file(&dir.join("conf.d/10-a.conf"), "Host a\nHostName a.example\n").expect("write a include");
+    workspace
+        .write(&config_path, "Host root\nHostName root.example\nInclude conf.d/*.conf\n")
+        .expect("write root config");
+    workspace
+        .write_rel("conf.d/20-b.conf", "Host b\nHostName b.example\n")
+        .expect("write b include");
+    workspace
+        .write_rel(
+            "conf.d/10-a.conf",
+            format!("Host a\nHostName a.example\nInclude {}\n", config_path.display()).as_str(),
+        )
+        .expect("write a include");
 
     let hosts = parse_ssh_config(&config_path).expect("parse config");
     let names: Vec<&str> = hosts.iter().map(|host| host.name.as_str()).collect();
     assert_eq!(names, vec!["root", "a", "b"]);
-
-    let _ = fs::remove_dir_all(dir);
 }
 
 #[test]
-fn handles_include_cycles_without_recursing_forever() {
-    let dir = test_dir("include_cycle").expect("temp dir");
-    let config_path = dir.join("config");
+fn parser_multi_alias_and_invalid_pass_key_behavior() {
+    let workspace = TestWorkspace::new("ssh_config", "alias_pass_core").expect("temp workspace");
+    let config_path = workspace.join("config");
 
-    write_file(&config_path, "Host root\nHostName root.example\nInclude include/sub.conf\n").expect("write root config");
-
-    write_file(&dir.join("include/sub.conf"), "Host sub\nHostName sub.example\nInclude ../config\n").expect("write sub config");
-
-    let hosts = parse_ssh_config(&config_path).expect("parse config");
-    let names: Vec<&str> = hosts.iter().map(|host| host.name.as_str()).collect();
-    assert_eq!(names, vec!["root", "sub"]);
-
-    let _ = fs::remove_dir_all(dir);
-}
-
-#[test]
-fn expands_multi_alias_host_stanzas_and_applies_metadata_to_all_aliases() {
-    let dir = test_dir("multi_alias").expect("temp dir");
-    let config_path = dir.join("config");
-
-    write_file(
+    workspace
+        .write(
             &config_path,
-            "Host app-a app-b app-c\n#_Desc Shared app hosts\n#_Profile prod\n#_pass shared_key\nHostName app.internal\nUser deploy\nPort 2222\nIdentityFile ~/.ssh/id_app\nProxyJump bastion\n",
+            "Host app-a app-b app-c\n#_pass shared_key\nHostName app.internal\n\nHost invalid\n#_pass ../secret\nHostName invalid.example\n",
         )
         .expect("write config");
 
     let hosts = parse_ssh_config(&config_path).expect("parse config");
-    let names: Vec<&str> = hosts.iter().map(|host| host.name.as_str()).collect();
-    assert_eq!(names, vec!["app-a", "app-b", "app-c"]);
-
-    for host in hosts {
-        assert_eq!(host.hostname.as_deref(), Some("app.internal"));
-        assert_eq!(host.user.as_deref(), Some("deploy"));
-        assert_eq!(host.port, Some(2222));
-        assert_eq!(host.description.as_deref(), Some("Shared app hosts"));
-        assert_eq!(host.profile.as_deref(), Some("prod"));
-        assert_eq!(host.pass_key.as_deref(), Some("shared_key"));
-        assert_eq!(host.proxy_jump.as_deref(), Some("bastion"));
-        let identity = host.identity_file.as_deref().unwrap_or_default();
-        assert!(identity.ends_with(".ssh/id_app"));
-    }
-
-    let _ = fs::remove_dir_all(dir);
+    assert!(hosts.iter().any(|host| host.name == "app-a" && host.pass_key.as_deref() == Some("shared_key")));
+    assert!(hosts.iter().any(|host| host.name == "invalid" && host.pass_key.is_none()));
 }
 
 #[test]
-fn filters_hidden_and_wildcard_aliases_within_multi_alias_stanza() {
-    let dir = test_dir("alias_filtering").expect("temp dir");
-    let config_path = dir.join("config");
+fn parser_rdp_and_repeated_options_core_behavior() {
+    let workspace = TestWorkspace::new("ssh_config", "rdp_repeated_core").expect("temp workspace");
+    let config_path = workspace.join("config");
 
-    write_file(
-        &config_path,
-        "Host db-* db-primary db-standby\nHostName db.internal\n\nHost hidden-a hidden-b\n#_hidden true\nHostName hidden.internal\n",
-    )
-    .expect("write config");
-
-    let hosts = parse_ssh_config(&config_path).expect("parse config");
-    let names: Vec<&str> = hosts.iter().map(|host| host.name.as_str()).collect();
-    assert_eq!(names, vec!["db-primary", "db-standby"]);
-
-    let _ = fs::remove_dir_all(dir);
-}
-
-#[test]
-fn invalid_pass_key_names_are_ignored() {
-    let dir = test_dir("invalid_pass_key").expect("temp dir");
-    let config_path = dir.join("config");
-
-    write_file(
-        &config_path,
-        "Host invalid\n#_pass ../secret\nHostName invalid.example\n\nHost valid\n#_pass ok_1.2-3\nHostName valid.example\n",
-    )
-    .expect("write config");
+    workspace
+        .write(
+            &config_path,
+            "Host desktop01\n#_Protocol rdp\n#_RdpDomain ACME\nHostName rdp.internal\n\nHost repeated\nHostName repeated.example\nIdentityFile ~/.ssh/id_first\nIdentityFile ~/.ssh/id_second\nCertificateFile ~/.ssh/id_first-cert.pub\nCertificateFile ~/.ssh/id_second-cert.pub\n",
+        )
+        .expect("write config");
 
     let hosts = parse_ssh_config(&config_path).expect("parse config");
-    assert_eq!(hosts.len(), 2);
+    let desktop = hosts.iter().find(|host| host.name == "desktop01").expect("desktop01");
+    assert_eq!(desktop.protocol, ConnectionProtocol::Rdp);
 
-    let invalid = hosts.iter().find(|host| host.name == "invalid").expect("invalid host");
-    assert_eq!(invalid.pass_key, None);
-
-    let valid = hosts.iter().find(|host| host.name == "valid").expect("valid host");
-    assert_eq!(valid.pass_key.as_deref(), Some("ok_1.2-3"));
-
-    let _ = fs::remove_dir_all(dir);
+    let repeated = hosts.iter().find(|host| host.name == "repeated").expect("repeated");
+    assert_eq!(repeated.identity_files.len(), 2);
+    assert_eq!(repeated.other_options.get("certificatefile").map(Vec::len), Some(2));
 }

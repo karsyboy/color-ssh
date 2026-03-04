@@ -14,6 +14,12 @@ macro_rules! debug_enabled {
     () => {{ $crate::log::LOGGER.is_debug_enabled() }};
 }
 
+/// Check if raw debug logging is enabled
+#[macro_export]
+macro_rules! raw_debug_enabled {
+    () => {{ $crate::log::LOGGER.is_raw_debug_enabled() }};
+}
+
 /// Log a debug message
 #[macro_export]
 macro_rules! log_debug {
@@ -24,6 +30,21 @@ macro_rules! log_debug {
     }};
     ($($arg:tt)*) => {{
         if $crate::log::LOGGER.is_debug_enabled() {
+            let _ = $crate::log::LOGGER.log_debug(&format!($($arg)*));
+        }
+    }};
+}
+
+/// Log a raw-content debug message
+#[macro_export]
+macro_rules! log_debug_raw {
+    ($msg:expr) => {{
+        if $crate::log::LOGGER.is_raw_debug_enabled() {
+            let _ = $crate::log::LOGGER.log_debug(::core::convert::AsRef::<str>::as_ref(&$msg));
+        }
+    }};
+    ($($arg:tt)*) => {{
+        if $crate::log::LOGGER.is_raw_debug_enabled() {
             let _ = $crate::log::LOGGER.log_debug(&format!($($arg)*));
         }
     }};
@@ -83,7 +104,3 @@ macro_rules! log_ssh {
         }
     }};
 }
-
-#[cfg(test)]
-#[path = "../test/log/macros.rs"]
-mod tests;

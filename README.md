@@ -4,7 +4,7 @@
 
 <p align="center">
     <a href="https://github.com/karsyboy/color-ssh/releases">
-        <img src="https://img.shields.io/github/v/release/karsyboy/color-ssh?include_prereleases&logo=GitHub&label=Github"></a>
+        <img src="https://img.shields.io/github/v/release/karsyboy/color-ssh?display_name=tag&logo=Github&label=Github"></a>
     <a href="https://crates.io/crates/color-ssh">
         <img src="https://img.shields.io/crates/v/color-ssh?logo=Rust"></a>
   <br>
@@ -16,30 +16,32 @@
 
 ## About
 
-**Color SSH** (`cossh`) is a Rust-based wrapper for SSH that enhances your terminal experience with real-time syntax highlighting and session logging. Built for network engineers, system administrators, and anyone who works with devices that have basic shells.
+**Color SSH** (`cossh`) is a Rust-based wrapper for SSH and managed RDP launches that enhances your terminal experience with real-time syntax highlighting, shared vault access, and session logging. Built for network engineers, system administrators, and anyone who works with remote systems every day.
 
 ![cossh_example](./.resources/cossh_example.png)
 
 ## Features
 
-- Session Manger TUI
+- Session manager TUI
+- YAML inventory for SSH and RDP hosts
 - Syntax highlighting
 - Session logging
 - Configuration hot reload
-- Mutliple Profile Support
+- Multiple profile support
 - Configurable rules using regex matching
-- SSH auto login with sshpass
-
+- Shared password vault
+- RDP launch support via `xfreerdp3` or `xfreerdp`
 
 ## Installation
 
+`color-ssh` supports Linux and macOS. Windows users should run it through WSL.
+
 #### Requirement
-- SSH
-- sshpass (optional)
-- gpg (optional)
+- `ssh`
+- `xfreerdp3` or `xfreerdp` (Optional)
 
 ### Pre-built Binaries (Recommended)
-Download the latest release from [GitHub Releases](https://github.com/karsyboy/color-ssh/releases/) for your platform.
+Download the latest release from [GitHub Releases](https://github.com/karsyboy/color-ssh/releases/).
 
 ### Cargo
 ```bash
@@ -57,71 +59,83 @@ cargo build --release
 ```
 
 ### Shell Completion
-Shell completeion scripts are included for `fish` and `zsh`. For instructions see the [Shell Completion README](shell-completion/README.md).
+Shell completion scripts are included for `fish` and `zsh`. For instructions see the [Shell Completion README](shell-completion/README.md).
 
 
 ## Usage
 
 ```bash
-Usage: cossh [OPTIONS] [ssh_args]...
+Usage: cossh [OPTIONS] [COMMAND]
 
-Arguments:
-  [ssh_args]...  SSH arguments to forward to the SSH command
+Commands:
+  ssh    Launch an SSH session by forwarding arguments to the SSH command
+  rdp    Launch an RDP session using xfreerdp3 or xfreerdp
+  vault  Manage the password vault
+  help   Print this message or the help of the given subcommand(s)
 
 Options:
-  -d, --debug              Enable debug mode with detailed logging to ~/.color-ssh/logs/cossh.log
+  -d, --debug...           Enable debug logging to ~/.color-ssh/logs/cossh.log; repeat (-dd) for raw terminal and argument tracing
   -l, --log                Enable SSH session logging to ~/.color-ssh/logs/ssh_sessions/
   -P, --profile <profile>  Specify a configuration profile to use
   -t, --test               Ignore config logging settings; only use CLI -d/-l logging flags
-      --add-pass <name>    Create or replace ~/.color-ssh/keys/<name>.gpg interactively
+      --pass-entry <name>  Override the password vault entry used for a direct protocol launch
+      --migrate            Migrate ~/.ssh/config host entries into ~/.color-ssh/cossh-inventory.yaml
   -h, --help               Print help
   -V, --version            Print version
 
 
-cossh                                              # Launch interactive session manager
-cossh --add-pass office_fw                         # Create ~/.color-ssh/keys/office_fw.gpg
-cossh -d                                           # Launch interactive session manager with debug enabled
-cossh -d user@example.com                          # Debug mode enabled
-cossh -l user@example.com                          # SSH logging enabled
-cossh -l -P network user@firewall.example.com      # Use 'network' config profile
-cossh -l user@host -p 2222                         # Both modes with SSH args
-cossh -tld -P network localhost                    # Test mode: force logging from CLI flags only
-cossh user@host -G                                 # Non-interactive command
+cossh                                                     # Launch interactive session manager
+cossh -d ssh user@example.com                             # Safe debug enabled
+cossh --pass-entry office_fw <ssh/rdp> host.example.com   # Override the password entry for this launch
+cossh -l ssh user@example.com                             # SSH logging enabled
+cossh -l -P network ssh user@firewall.example.com         # Use 'network' config profile
+cossh -l ssh user@host -p 2222                            # Both modes with SSH args
+cossh ssh user@host -G                                    # Non-interactive command
+cossh rdp desktop01                                       # Launch a configured RDP host
+cossh --migrate                                           # Import ~/.ssh/config into the YAML inventory
 ```
 
+## Documentation
+
+The full user wiki lives in [here](https://github.com/karsyboy/color-ssh/wiki).
 
 ## Configuration
 
-#### Rule Config
+#### Runtime Config
 
 Configuration files are looked for in the following order:
 
-1. **Current directory**: `./[profile].cossh-config.yaml`
-2. **Home directory**: `~/.color-ssh/[profile].cossh-config.yaml`
+1. **Color SSH config directory**: `~/.color-ssh/[profile].cossh-config.yaml`
+2. **Home directory**: `~/[profile].cossh-config.yaml`
+3. **Current directory**: `./[profile].cossh-config.yaml`
 
 If no configuration file is found the default configuration will be created at `~/.color-ssh/cossh-config.yaml`.
 
-#### Color-SSH TUI Metadata in `~/.ssh/config`
+#### Host Inventory
 
-The interactive session manger supports metadata comments inside the SSH config file.
+`color-ssh` loads SSH and RDP hosts from `~/.color-ssh/cossh-inventory.yaml`.
 
-| Tag | What it does |
+#### Common inventory fields:
+
+| Field | What it does |
 | --- | --- |
-| `#_Desc <text>` | Adds description in the info view. |
-| `#_Profile <name>` | Opens that host using the matching cossh profile (`[profile].cossh-config.yaml`). |
-| `#_pass <name>` | Decrypts `~/.color-ssh/keys/<name>.gpg` and uses password auto-login for that host. |
-| `#_hidden <true\|yes\|1>` | Hides the host from the interactive host list. |
+| `name` | Alias shown in the TUI and used for direct launches like `cossh ssh <name>`. |
+| `protocol` | Protocol to launch, such as `ssh` or `rdp`. |
+| `host` | Actual destination hostname or IP address. |
+| `description` | Text shown in the TUI info/details view. |
+| `profile` | Uses the matching `cossh` runtime profile when opening the host. |
+| `vault_pass` | Password vault entry used for password auto-login. |
+| `hidden` | Hides the host from the interactive host list and search results. |
+| `identity_file`, `proxy_jump`, `proxy_command`, `forward_agent`, `local_forward`, `remote_forward`, `ssh_options` | SSH-specific connection settings. |
+| `rdp_domain`, `rdp_args` | RDP-specific connection settings. |
 
-```sshconfig
-Host switch01
-    HostName switch01.example.com
-    User admin
-    #_Profile network
-    #_Desc Example Switch
-    #_pass test_pass
+#### Migrate from `~/.ssh/config`
+
+Use this once to import your existing OpenSSH host entries into the YAML inventory:
+
+```bash
+cossh --migrate
 ```
-
-For more info on the TUI go here [TUI User Guide](docs/TUI_USER_GUIDE.md).
 
 ## Uninstall
 
@@ -154,7 +168,7 @@ rm -rf ~/.config/color-ssh/
 For instructions see the [Shell Completion README](shell-completion/README.md).
 
 ## Support
-If you need help, have an issue, or just want to make a sugestion / request a feature please open an [issue](https://github.com/karsyboy/color-ssh/issues/new). 
+If you need help, have an issue, or want to request a feature, open an [issue](https://github.com/karsyboy/color-ssh/issues/new).
 
 ## Special Thanks
 
@@ -163,4 +177,12 @@ Thanks to the following projects for the inspiration behind Color SSH.
 - [Chromaterm](https://github.com/hSaria/ChromaTerm)
 - [netcli-highlight](https://github.com/danielmacuare/netcli-highlight)
 
-Also thank you to [Alacritty](https://github.com/alacritty/alacritty) for the terminal create that is being used to render the terminal in the TUI
+Also thank you to [Alacritty](https://github.com/alacritty/alacritty) for the terminal crate used to render the terminal in the TUI.
+
+## AI Usage Note
+
+This project has used AI-assisted tooling for parts of development and documentation.  
+All AI-assisted changes are reviewed, edited, and validated by a human maintainer before they are merged.
+Tools used are:
+- @codex
+- @copilot

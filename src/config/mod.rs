@@ -1,0 +1,137 @@
+//! Runtime configuration loading, storage, and reload hooks.
+//!
+//! The active config lives in [`SESSION_CONFIG`] and is shared through a
+//! process-wide lock.
+
+mod errors;
+mod loader;
+mod paths;
+mod schema;
+mod watcher;
+
+pub use errors::ConfigError;
+pub use schema::{AuthSettings, Config, HighlightRule, InteractiveSettings, Metadata, Settings};
+pub use watcher::config_watcher;
+
+use once_cell::sync::OnceCell;
+use std::sync::{
+    Arc, RwLock,
+    atomic::{AtomicU64, Ordering},
+};
+
+/// Global configuration instance used by runtime components.
+///
+/// # Examples
+///
+/// ```no_run
+/// use cossh::config;
+///
+/// // Read configuration using helper
+/// let show_title = config::with_current_config("reading show_title", |cfg| cfg.settings.show_title);
+///
+/// // Write configuration using helper
+/// config::with_current_config_mut("setting session name", |cfg| {
+///     cfg.metadata.session_name = "example".to_string();
+/// });
+/// ```
+pub static SESSION_CONFIG: OnceCell<Arc<RwLock<Config>>> = OnceCell::new();
+static CONFIG_VERSION: AtomicU64 = AtomicU64::new(0);
+
+fn fallback_config() -> Config {
+    Config {
+        settings: Settings::default(),
+        auth_settings: AuthSettings::default(),
+        interactive_settings: None,
+        palette: std::collections::HashMap::new(),
+        rules: Vec::new(),
+        metadata: Metadata {
+            session_name: "session".to_string(),
+            ..Default::default()
+        },
+    }
+}
+
+fn replace_config(shared_config: &Arc<RwLock<Config>>, config: Config) {
+    match shared_config.write() {
+        Ok(mut guard) => *guard = config,
+        Err(poisoned) => {
+            let mut guard = poisoned.into_inner();
+            *guard = config;
+        }
+    }
+}
+
+/// Get the global configuration container.
+pub fn get_config() -> &'static Arc<RwLock<Config>> {
+    SESSION_CONFIG.get_or_init(|| Arc::new(RwLock::new(fallback_config())))
+}
+
+/// Run a read-only closure against the current configuration.
+///
+/// If the lock is poisoned, this recovers the inner value and logs the context.
+pub fn with_current_config<T>(context: &str, with_config: impl FnOnce(&Config) -> T) -> T {
+    match get_config().read() {
+        Ok(config_guard) => with_config(&config_guard),
+        Err(poisoned) => {
+            crate::log_error!("Configuration lock poisoned while {}; continuing with recovered state", context);
+            let config_guard = poisoned.into_inner();
+            with_config(&config_guard)
+        }
+    }
+}
+
+/// Run a mutable closure against the current configuration.
+///
+/// If the lock is poisoned, this recovers the inner value and logs the context.
+pub fn with_current_config_mut<T>(context: &str, with_config: impl FnOnce(&mut Config) -> T) -> T {
+    match get_config().write() {
+        Ok(mut config_guard) => with_config(&mut config_guard),
+        Err(poisoned) => {
+            crate::log_error!("Configuration lock poisoned while {}; continuing with recovered state", context);
+            let mut config_guard = poisoned.into_inner();
+            with_config(&mut config_guard)
+        }
+    }
+}
+
+fn install_config(config: Config) {
+    set_config_version(config.metadata.version);
+    replace_config(get_config(), config);
+}
+
+/// Load and install session configuration for an optional profile.
+pub fn init_session_config(profile: Option<String>) -> Result<(), ConfigError> {
+    let config_loader = loader::ConfigLoader::new(profile).map_err(ConfigError::IoError)?;
+    let config = config_loader.load_config().map_err(ConfigError::IoError)?;
+    install_config(config);
+    Ok(())
+}
+
+/// Load `interactive_settings.history_buffer` for a specific profile, if available.
+pub(crate) fn history_buffer_for_profile(profile: Option<&str>) -> Option<usize> {
+    let profile = profile?.trim();
+    if profile.is_empty() {
+        return None;
+    }
+
+    let config_loader = loader::ConfigLoader::new(Some(profile.to_string())).ok()?;
+    let config = config_loader.load_config().ok()?;
+    config.interactive_settings.map(|interactive| interactive.history_buffer)
+}
+
+/// Return auth settings from the currently active configuration.
+pub fn auth_settings() -> AuthSettings {
+    with_current_config("reading auth settings", |cfg| cfg.auth_settings.clone())
+}
+
+pub(crate) fn current_config_version() -> u64 {
+    CONFIG_VERSION.load(Ordering::Acquire)
+}
+
+pub(crate) fn set_config_version(version: u64) {
+    CONFIG_VERSION.store(version, Ordering::Release);
+}
+
+#[cfg(test)]
+#[path = "../test/config.rs"]
+mod tests;

@@ -1,8 +1,7 @@
 //! Terminal-tabs and root layout rendering.
 
-use crate::tui::SessionManager;
+use crate::tui::AppState;
 use crate::tui::features::selection::extract::is_cell_in_selection;
-use crate::tui::features::terminal_search::render_highlight::build_search_row_ranges;
 use crate::tui::terminal_emulator;
 use crate::tui::ui::theme::{self, display_width, truncate_to_display_width};
 use ratatui::{
@@ -10,7 +9,7 @@ use ratatui::{
     layout::{Constraint, Direction, Layout, Rect},
     style::{Color, Modifier, Style},
     text::{Line, Span},
-    widgets::Paragraph,
+    widgets::{Paragraph, Wrap},
 };
 
 fn draw_vertical_rule(frame: &mut Frame, x: u16, y: u16, height: u16, style: Style) {
@@ -47,7 +46,7 @@ fn draw_horizontal_rule(frame: &mut Frame, y: u16, x: u16, width: u16, style: St
     }
 }
 
-impl SessionManager {
+impl AppState {
     // Root frame composition.
     /// Render the full UI.
     pub(crate) fn draw(&mut self, frame: &mut Frame) {
@@ -169,7 +168,8 @@ impl SessionManager {
 
         self.render_global_status_bar(frame, status_area);
         self.render_quick_connect_modal(frame, size);
-        self.render_pass_prompt_modal(frame, size);
+        self.render_vault_unlock_modal(frame, size);
+        self.render_vault_status_modal(frame, size);
     }
 
     // Terminal-pane composition.
@@ -284,7 +284,9 @@ impl SessionManager {
         let scroll_offset = tab.scroll_offset;
         let sel_start = self.selection_start;
         let sel_end = self.selection_end;
-        let (search_row_ranges, current_search_range) = build_search_row_ranges(self.current_tab_search());
+        let (search_row_ranges, current_search_range) = self
+            .current_tab_search()
+            .map_or((None, None), |search| (Some(&search.highlight_row_ranges), search.current_highlight_range));
 
         let session_active = tab.session.is_some();
 
@@ -303,26 +305,34 @@ impl SessionManager {
 
                 let render_rows = area.height.min(vt_rows);
                 let render_cols = area.width.min(vt_cols);
+                let mut cell_symbol = String::new();
 
                 for row in 0..render_rows {
+                    let abs_row = row as i64 - scroll_offset as i64;
+                    let row_ranges = search_row_ranges.and_then(|ranges| ranges.get(&abs_row));
+                    let current_row_range =
+                        current_search_range.and_then(|(match_row, start_col, end_col)| (abs_row == match_row).then_some((start_col, end_col)));
+                    let mut row_range_idx = 0usize;
+
                     for col in 0..render_cols {
                         let cell = match screen.cell(row, col) {
                             Some(cell) => cell,
                             None => continue,
                         };
 
-                        let ch = if cell.has_contents() { cell.contents() } else { " ".to_string() };
+                        let ch = cell.symbol(&mut cell_symbol);
 
                         let is_cursor = !hide_cursor && scroll_offset == 0 && row == cursor_position.0 && col == cursor_position.1;
-                        let abs_row = row as i64 - scroll_offset as i64;
                         let is_selected = is_cell_in_selection(abs_row, col, sel_start, sel_end);
 
-                        let is_search_match = search_row_ranges
-                            .get(&abs_row)
-                            .is_some_and(|ranges| ranges.iter().any(|(start_col, end_col)| col >= *start_col && col < *end_col));
-                        let is_current_search_match = current_search_range
-                            .as_ref()
-                            .is_some_and(|(match_row, start_col, end_col)| abs_row == *match_row && col >= *start_col && col < *end_col);
+                        if let Some(ranges) = row_ranges {
+                            while row_range_idx < ranges.len() && col >= ranges[row_range_idx].1 {
+                                row_range_idx += 1;
+                            }
+                        }
+                        let is_search_match =
+                            row_ranges.is_some_and(|ranges| row_range_idx < ranges.len() && col >= ranges[row_range_idx].0 && col < ranges[row_range_idx].1);
+                        let is_current_search_match = current_row_range.is_some_and(|(start_col, end_col)| col >= start_col && col < end_col);
 
                         let style = if is_current_search_match {
                             let mut s = Style::default().bg(theme::ansi_yellow()).fg(theme::ansi_black());
@@ -387,19 +397,25 @@ impl SessionManager {
 
                         if buf_x < area.x + area.width && buf_y < area.y + area.height {
                             let buf_cell = &mut buf[(buf_x, buf_y)];
-                            buf_cell.set_symbol(&ch);
+                            buf_cell.set_symbol(ch);
                             buf_cell.set_style(style);
                         }
                     }
                 }
             }
         } else {
+            let reason = self.tabs[tab_idx]
+                .session_error
+                .as_deref()
+                .unwrap_or("The session process could not be started.");
             let error_lines = vec![
                 Line::from(""),
                 Line::from(vec![
-                    Span::styled("Failed to start SSH session for ", Style::default().fg(theme::ansi_red())),
+                    Span::styled("Failed to start session for ", Style::default().fg(theme::ansi_red())),
                     Span::styled(&host.name, Style::default().fg(theme::ansi_yellow()).add_modifier(Modifier::BOLD)),
                 ]),
+                Line::from(""),
+                Line::from(vec![Span::styled(reason, Style::default().fg(theme::ansi_bright_white()))]),
                 Line::from(""),
                 Line::from(vec![
                     Span::styled("Press ", Style::default().fg(theme::ansi_white())),
@@ -408,7 +424,9 @@ impl SessionManager {
                 ]),
             ];
 
-            let paragraph = Paragraph::new(error_lines).style(Style::default().fg(theme::ansi_red()));
+            let paragraph = Paragraph::new(error_lines)
+                .style(Style::default().fg(theme::ansi_red()))
+                .wrap(Wrap { trim: false });
             frame.render_widget(paragraph, area);
         }
     }

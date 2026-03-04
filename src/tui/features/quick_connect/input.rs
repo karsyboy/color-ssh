@@ -1,9 +1,9 @@
 //! Quick-connect keyboard handling.
 
-use crate::tui::{QuickConnectField, QuickConnectState, SessionManager};
+use crate::tui::{AppState, QuickConnectField, QuickConnectState};
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
-impl SessionManager {
+impl AppState {
     // Modal lifecycle.
     pub(crate) fn open_quick_connect_modal(&mut self) {
         let profiles = self.discover_quick_connect_profiles();

@@ -1,21 +1,20 @@
 ## Contributing
 
-Contributions are welcomed just please make sure to do the following before opening a pull request.
+Before opening a pull request, run the full local verification suite.
 
 ```bash
-# Build and test locally
-cargo build --release
-./target/release/cossh user@testhost
+# Format check
+cargo fmt --all --check
 
-# Run linter
-cargo clippy
+# Lint
+cargo clippy --all-targets --all-features -- -D warnings
 
-# Format code
-cargo fmt
+# Tests
+cargo test --all-targets
 ```
 
 ### Open a Pull Request
 
 - Provide a clear description of your changes
 - Reference any related issues
-- Ensure CI/CD checks pass
+- Ensure CI checks pass

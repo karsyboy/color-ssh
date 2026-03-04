@@ -10,6 +10,7 @@ use super::{LogError, formatter::LogFormatter, sanitize_session_name};
 use chrono::Local;
 use once_cell::sync::Lazy;
 use regex::Regex;
+use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
 use std::{
     borrow::Cow,
     fs::{self, File, OpenOptions},
@@ -23,16 +24,11 @@ use std::{
     time::{Duration, Instant},
 };
 
-#[cfg(unix)]
-use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
-
 const SSH_LOG_FLUSH_BYTES: usize = 64 * 1024;
 const SSH_LOG_FLUSH_INTERVAL: Duration = Duration::from_millis(100);
 // 1024 * ~8KiB chunks ~= ~8MiB bounded backlog.
 const SSH_LOG_QUEUE_CAPACITY: usize = 1024;
-#[cfg(unix)]
 const PRIVATE_LOG_DIR_MODE: u32 = 0o700;
-#[cfg(unix)]
 const PRIVATE_LOG_FILE_MODE: u32 = 0o600;
 
 enum SshLogCommand {
@@ -343,13 +339,7 @@ fn get_ssh_log_path() -> Result<PathBuf, LogError> {
 
     create_private_directory(&log_dir)?;
 
-    let session_name = match crate::config::get_config().read() {
-        Ok(config_guard) => config_guard.metadata.session_name.clone(),
-        Err(poisoned) => {
-            eprintln!("Configuration lock poisoned while reading SSH session name; continuing with recovered state");
-            poisoned.into_inner().metadata.session_name.clone()
-        }
-    };
+    let session_name = crate::config::with_current_config("reading SSH session name", |cfg| cfg.metadata.session_name.clone());
     let sanitized = sanitize_session_name(&session_name);
     Ok(log_dir.join(format!("{sanitized}.log")))
 }
@@ -363,43 +353,15 @@ fn open_private_append_file(path: &Path) -> Result<File, LogError> {
     let mut options = OpenOptions::new();
     options
         .create(true) // Create if missing.
-        .append(true); // Preserve existing logs.
-    #[cfg(unix)]
-    {
-        options.mode(PRIVATE_LOG_FILE_MODE);
-    }
+        .append(true) // Preserve existing logs.
+        .mode(PRIVATE_LOG_FILE_MODE);
     let file = options.open(path)?;
     set_private_file_permissions(path)?;
     Ok(file)
 }
 
-#[cfg(unix)]
-fn set_private_directory_permissions(path: &Path) -> Result<(), LogError> {
-    fs::set_permissions(path, fs::Permissions::from_mode(PRIVATE_LOG_DIR_MODE))?;
-    Ok(())
-}
-
-#[cfg(not(unix))]
-fn set_private_directory_permissions(_path: &Path) -> Result<(), LogError> {
-    Ok(())
-}
-
-#[cfg(unix)]
-fn set_private_file_permissions(path: &Path) -> Result<(), LogError> {
-    fs::set_permissions(path, fs::Permissions::from_mode(PRIVATE_LOG_FILE_MODE))?;
-    Ok(())
-}
-
-#[cfg(not(unix))]
-fn set_private_file_permissions(_path: &Path) -> Result<(), LogError> {
-    Ok(())
-}
-
 fn current_secret_patterns() -> Vec<Regex> {
-    crate::config::SESSION_CONFIG
-        .get()
-        .and_then(|config| config.read().ok().map(|config_guard| config_guard.metadata.compiled_secret_patterns.clone()))
-        .unwrap_or_default()
+    crate::config::with_current_config("reading SSH secret patterns", |cfg| cfg.metadata.compiled_secret_patterns.clone())
 }
 
 fn sanitize_line<'a>(line: &'a str, secret_patterns: &[Regex]) -> Cow<'a, str> {
@@ -458,6 +420,16 @@ fn extract_complete_lines(buffer: &mut String) -> Vec<String> {
 
 fn should_flush(pending_bytes: usize, elapsed_since_flush: Duration) -> bool {
     pending_bytes >= SSH_LOG_FLUSH_BYTES || elapsed_since_flush >= SSH_LOG_FLUSH_INTERVAL
+}
+
+fn set_private_directory_permissions(path: &Path) -> Result<(), LogError> {
+    fs::set_permissions(path, fs::Permissions::from_mode(PRIVATE_LOG_DIR_MODE))?;
+    Ok(())
+}
+
+fn set_private_file_permissions(path: &Path) -> Result<(), LogError> {
+    fs::set_permissions(path, fs::Permissions::from_mode(PRIVATE_LOG_FILE_MODE))?;
+    Ok(())
 }
 
 #[cfg(test)]

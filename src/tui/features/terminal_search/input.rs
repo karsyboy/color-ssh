@@ -1,8 +1,11 @@
 //! Terminal-search keyboard handling.
 
-use crate::tui::SessionManager;
+use crate::tui::AppState;
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use std::io;
+
+type SearchSelection = Option<(usize, usize)>;
+type TerminalSearchQueryMut<'a> = (&'a mut String, &'a mut usize, &'a mut SearchSelection);
 
 fn char_len(text: &str) -> usize {
     text.chars().count()
@@ -54,8 +57,8 @@ fn delete_selection(text: &mut String, cursor: &mut usize, selection: &mut Optio
     true
 }
 
-impl SessionManager {
-    fn terminal_search_query_mut(&mut self) -> Option<(&mut String, &mut usize, &mut Option<(usize, usize)>)> {
+impl AppState {
+    fn terminal_search_query_mut(&mut self) -> Option<TerminalSearchQueryMut<'_>> {
         let search = self.current_tab_search_mut()?;
         Some((&mut search.query, &mut search.query_cursor, &mut search.query_selection))
     }
@@ -183,6 +186,10 @@ impl SessionManager {
             search.query_selection = None;
             search.matches.clear();
             search.current = 0;
+            search.highlight_row_ranges.clear();
+            search.current_highlight_range = None;
+            search.last_search_query.clear();
+            search.last_scanned_render_epoch = 0;
         }
     }
 
@@ -197,6 +204,7 @@ impl SessionManager {
                     && !search.matches.is_empty()
                 {
                     search.current = (search.current + 1) % search.matches.len();
+                    self.refresh_current_terminal_search_range();
                     self.scroll_to_search_match();
                 }
             }
@@ -209,6 +217,7 @@ impl SessionManager {
                     } else {
                         search.current -= 1;
                     }
+                    self.refresh_current_terminal_search_range();
                     self.scroll_to_search_match();
                 }
             }
@@ -261,7 +270,3 @@ impl SessionManager {
         }
     }
 }
-
-#[cfg(test)]
-#[path = "../../../test/tui/features/terminal_search/input.rs"]
-mod tests;
