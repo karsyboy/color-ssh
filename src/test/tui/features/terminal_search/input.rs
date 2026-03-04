@@ -18,6 +18,7 @@ fn app_with_active_search() -> AppState {
             query_selection: None,
             matches: Vec::new(),
             current: 0,
+            ..TerminalSearchState::default()
         },
         force_ssh_logging: false,
         last_pty_size: None,
@@ -34,6 +35,10 @@ fn clears_terminal_search_state() {
         search.query = "err".to_string();
         search.matches = vec![(0, 1, 3)];
         search.current = 2;
+        search.highlight_row_ranges.insert(0, vec![(1, 4)]);
+        search.current_highlight_range = Some((0, 1, 4));
+        search.last_search_query = "err".to_string();
+        search.last_scanned_render_epoch = 42;
     }
 
     app.clear_terminal_search();
@@ -43,6 +48,10 @@ fn clears_terminal_search_state() {
     assert!(search.query.is_empty());
     assert!(search.matches.is_empty());
     assert_eq!(search.current, 0);
+    assert!(search.highlight_row_ranges.is_empty());
+    assert!(search.current_highlight_range.is_none());
+    assert!(search.last_search_query.is_empty());
+    assert_eq!(search.last_scanned_render_epoch, 0);
 }
 
 #[test]
@@ -56,9 +65,17 @@ fn wraps_terminal_search_navigation_next_and_prev() {
     app.handle_terminal_search_key(KeyEvent::new(KeyCode::Down, KeyModifiers::NONE))
         .expect("down key");
     assert_eq!(app.current_tab_search().map(|search| search.current), Some(0));
+    assert_eq!(
+        app.current_tab_search().and_then(|search| search.current_highlight_range),
+        Some((0, 0, 1))
+    );
 
     app.handle_terminal_search_key(KeyEvent::new(KeyCode::Up, KeyModifiers::NONE)).expect("up key");
     assert_eq!(app.current_tab_search().map(|search| search.current), Some(1));
+    assert_eq!(
+        app.current_tab_search().and_then(|search| search.current_highlight_range),
+        Some((1, 0, 1))
+    );
 }
 
 #[test]

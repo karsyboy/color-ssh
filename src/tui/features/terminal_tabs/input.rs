@@ -228,10 +228,17 @@ impl AppState {
             }
             KeyCode::Char('f') if key.modifiers.contains(KeyModifiers::CONTROL) => {
                 if !self.is_pty_mouse_mode_active() {
+                    let mut should_recompute_search = false;
                     if let Some(search) = self.current_tab_search_mut() {
                         search.active = true;
                         search.query_cursor = search.query.chars().count();
                         search.query_selection = None;
+                        search.last_search_query.clear();
+                        search.last_scanned_render_epoch = 0;
+                        should_recompute_search = !search.query.is_empty();
+                    }
+                    if should_recompute_search {
+                        self.update_terminal_search();
                     }
                 } else {
                     self.send_key_to_pty(key)?;

@@ -2,6 +2,7 @@
 
 use super::exit::map_exit_code;
 use crate::{Result, config, highlighter, log, log_debug, log_error};
+use std::borrow::Cow;
 use std::io::{self, Read, Write};
 use std::process::{Child, ExitCode};
 use std::sync::{
@@ -66,8 +67,14 @@ impl OutputFlushState {
         self.pending_bytes = self.pending_bytes.saturating_add(bytes_written);
     }
 
-    fn flush_if_needed(&mut self, output: &mut impl Write, raw_chunk: &str, processed_chunk: &str) -> io::Result<()> {
-        let immediate_flush = should_flush_immediately(raw_chunk, processed_chunk);
+    fn flush_if_needed(
+        &mut self,
+        output: &mut impl Write,
+        raw_chunk: &str,
+        processed_chunk: &str,
+        chunk_transformed: bool,
+    ) -> io::Result<()> {
+        let immediate_flush = should_flush_immediately(raw_chunk, processed_chunk, chunk_transformed);
         if immediate_flush || self.pending_bytes >= STDOUT_FLUSH_BYTES || self.last_flush_at.elapsed() >= STDOUT_FLUSH_INTERVAL {
             output.flush()?;
             self.pending_bytes = 0;
@@ -199,13 +206,16 @@ pub(super) fn requires_immediate_terminal_flush(output: &str) -> bool {
     output.as_bytes().iter().any(|byte| matches!(*byte, b'\r' | 0x1b | 0x08))
 }
 
-pub(super) fn should_flush_immediately(raw_chunk: &str, processed_chunk: &str) -> bool {
+pub(super) fn should_flush_immediately(raw_chunk: &str, _processed_chunk: &str, chunk_transformed: bool) -> bool {
     if requires_immediate_terminal_flush(raw_chunk) {
         return true;
     }
 
-    let highlight_changed_chunk = !(raw_chunk.len() == processed_chunk.len() && raw_chunk.as_ptr() == processed_chunk.as_ptr());
-    highlight_changed_chunk && raw_chunk.len() <= HIGHLIGHT_FLUSH_HINT_BYTES && !raw_chunk.as_bytes().contains(&b'\n')
+    chunk_transformed && raw_chunk.len() <= HIGHLIGHT_FLUSH_HINT_BYTES && !raw_chunk.as_bytes().contains(&b'\n')
+}
+
+fn chunk_was_transformed(raw_chunk: &str, processed_chunk: &str) -> bool {
+    !(processed_chunk.len() == raw_chunk.len() && processed_chunk.as_ptr() == raw_chunk.as_ptr())
 }
 
 fn spawn_output_processor(mode: InteractiveStreamMode, rx: Receiver<OutputChunk>) -> io::Result<thread::JoinHandle<()>> {
@@ -226,7 +236,7 @@ fn spawn_output_processor(mode: InteractiveStreamMode, rx: Receiver<OutputChunk>
             match rx.recv_timeout(STDOUT_FLUSH_INTERVAL) {
                 Ok(chunk) => {
                     let raw_chunk = chunk.as_str();
-                    let processed_chunk = match (mode, chunk.target) {
+                    let (processed_chunk, chunk_transformed) = match (mode, chunk.target) {
                         (InteractiveStreamMode::HighlightStdout, OutputTarget::Stdout) => {
                             highlight_rules.refresh_if_changed();
                             let processed_chunk = highlighter::process_chunk_with_scratch(
@@ -239,23 +249,24 @@ fn spawn_output_processor(mode: InteractiveStreamMode, rx: Receiver<OutputChunk>
                                 &mut highlight_scratch,
                             );
                             chunk_id += 1;
-                            processed_chunk
+                            let chunk_transformed = chunk_was_transformed(raw_chunk, processed_chunk.as_ref());
+                            (processed_chunk, chunk_transformed)
                         }
-                        _ => raw_chunk.to_string().into(),
+                        _ => (Cow::Borrowed(raw_chunk), false),
                     };
 
                     let write_result = match chunk.target {
                         OutputTarget::Stdout => match stdout.write_all(processed_chunk.as_bytes()) {
                             Ok(()) => {
                                 stdout_flush.record_write(processed_chunk.len());
-                                stdout_flush.flush_if_needed(&mut stdout, raw_chunk, &processed_chunk)
+                                stdout_flush.flush_if_needed(&mut stdout, raw_chunk, &processed_chunk, chunk_transformed)
                             }
                             Err(err) => Err(err),
                         },
                         OutputTarget::Stderr => match stderr.write_all(processed_chunk.as_bytes()) {
                             Ok(()) => {
                                 stderr_flush.record_write(processed_chunk.len());
-                                stderr_flush.flush_if_needed(&mut stderr, raw_chunk, &processed_chunk)
+                                stderr_flush.flush_if_needed(&mut stderr, raw_chunk, &processed_chunk, chunk_transformed)
                             }
                             Err(err) => Err(err),
                         },

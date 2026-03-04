@@ -227,7 +227,7 @@ fn nests_sub_includes_under_their_parent_include_folder() {
         &inventory_path,
         r#"
 include:
-  - ./inventory/k-ops.yaml
+  - ./inventory/folder.yaml
 inventory:
   - name: root
     protocol: ssh
@@ -236,7 +236,7 @@ inventory:
     )
     .expect("write root inventory");
     write_file(
-        &dir.join("inventory/k-ops.yaml"),
+        &dir.join("inventory/folder.yaml"),
         r#"
 include:
   - ./regions/site-a.yaml
@@ -260,17 +260,17 @@ inventory:
 
     let tree = build_inventory_tree(&inventory_path).expect("load inventory");
     assert_eq!(tree.root.children.len(), 1);
-    assert_eq!(tree.root.children[0].name, "k-ops");
+    assert_eq!(tree.root.children[0].name, "folder");
     assert_eq!(tree.root.children[0].host_indices.len(), 1);
     assert_eq!(tree.root.children[0].children.len(), 1);
     assert_eq!(tree.root.children[0].children[0].name, "site-a");
     assert_eq!(tree.root.children[0].children[0].host_indices.len(), 1);
 
     let jump = tree.hosts.iter().find(|host| host.name == "jump").expect("jump");
-    assert_eq!(jump.source_folder_path, vec!["k-ops".to_string()]);
+    assert_eq!(jump.source_folder_path, vec!["folder".to_string()]);
 
     let switch = tree.hosts.iter().find(|host| host.name == "switch-a").expect("switch-a");
-    assert_eq!(switch.source_folder_path, vec!["k-ops".to_string(), "site-a".to_string()]);
+    assert_eq!(switch.source_folder_path, vec!["folder".to_string(), "site-a".to_string()]);
 
     let _ = fs::remove_dir_all(dir);
 }

@@ -17,15 +17,15 @@ fn manager_status_bar_shows_locked_vault_state() {
     let mut app = AppState::new_for_tests();
     app.host_tree_root.children.push(TreeFolder {
         id: 1,
-        name: "K-Ops".to_string(),
-        path: PathBuf::from("~/.ssh/k-ops"),
+        name: "folder".to_string(),
+        path: PathBuf::from("~/.ssh/folder"),
         children: Vec::new(),
         host_indices: Vec::new(),
     });
     app.visible_host_rows = vec![HostTreeRow {
         kind: HostTreeRowKind::Folder(1),
-        depth: 0,
-        display_name: "K-Ops".to_string(),
+        indent: String::new(),
+        display_name: "folder".to_string(),
         expanded: true,
     }];
     app.selected_host_row = 0;
@@ -34,7 +34,7 @@ fn manager_status_bar_shows_locked_vault_state() {
     let (left, _) = app.build_manager_status_spans();
     let text: String = left.iter().map(|span| span.content.as_ref()).collect();
 
-    assert_eq!(text, "Host ||  Vault || Folder: K-Ops");
+    assert_eq!(text, "Host ||  Vault || Folder: folder");
     assert_eq!(left[2].style.fg, Some(super::theme::ansi_red()));
     assert!(left[3].style.add_modifier.contains(Modifier::UNDERLINED));
 }

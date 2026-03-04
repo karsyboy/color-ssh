@@ -186,6 +186,10 @@ impl AppState {
             search.query_selection = None;
             search.matches.clear();
             search.current = 0;
+            search.highlight_row_ranges.clear();
+            search.current_highlight_range = None;
+            search.last_search_query.clear();
+            search.last_scanned_render_epoch = 0;
         }
     }
 
@@ -200,6 +204,7 @@ impl AppState {
                     && !search.matches.is_empty()
                 {
                     search.current = (search.current + 1) % search.matches.len();
+                    self.refresh_current_terminal_search_range();
                     self.scroll_to_search_match();
                 }
             }
@@ -212,6 +217,7 @@ impl AppState {
                     } else {
                         search.current -= 1;
                     }
+                    self.refresh_current_terminal_search_range();
                     self.scroll_to_search_match();
                 }
             }

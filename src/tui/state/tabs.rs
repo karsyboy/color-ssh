@@ -4,6 +4,7 @@ use crate::inventory::InventoryHost;
 use crate::log_error;
 use crate::tui::terminal_emulator::{Parser, PtyWriter};
 use portable_pty::{Child as PtyChild, MasterPty};
+use std::collections::HashMap;
 use std::process::Child as ProcessChild;
 use std::sync::{Arc, Mutex, atomic::AtomicU64};
 
@@ -62,6 +63,10 @@ pub(crate) struct TerminalSearchState {
     pub(crate) query_selection: Option<(usize, usize)>,
     pub(crate) matches: Vec<(i64, u16, usize)>,
     pub(crate) current: usize,
+    pub(crate) highlight_row_ranges: HashMap<i64, Vec<(u16, u16)>>,
+    pub(crate) current_highlight_range: Option<(i64, u16, u16)>,
+    pub(crate) last_search_query: String,
+    pub(crate) last_scanned_render_epoch: u64,
 }
 
 /// Represents an open host tab.

@@ -33,14 +33,20 @@ fn immediate_flush_detects_cursor_control_sequences() {
 fn immediate_flush_for_short_highlighted_prompt_chunks() {
     let raw = "router# ";
     let processed = "\x1b[38;2;255;0;0mrouter\x1b[0m# ";
-    assert!(should_flush_immediately(raw, processed));
+    assert!(should_flush_immediately(raw, processed, true));
 }
 
 #[test]
 fn does_not_force_immediate_flush_for_large_highlighted_chunks() {
     let raw = "x".repeat(1024);
     let processed = format!("\x1b[31m{}\x1b[0m", raw);
-    assert!(!should_flush_immediately(&raw, &processed));
+    assert!(!should_flush_immediately(&raw, &processed, true));
+}
+
+#[test]
+fn does_not_force_immediate_flush_for_plain_unmodified_chunks() {
+    let raw = "router# ";
+    assert!(!should_flush_immediately(raw, raw, false));
 }
 
 #[test]

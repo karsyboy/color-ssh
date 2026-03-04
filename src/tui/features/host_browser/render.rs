@@ -64,7 +64,7 @@ impl AppState {
             return;
         }
 
-        let visible_hosts: Vec<ListItem> = self
+        let visible_hosts: Vec<ListItem<'_>> = self
             .visible_host_rows
             .iter()
             .skip(self.host_scroll_offset)
@@ -72,19 +72,17 @@ impl AppState {
             .map(|row| match row.kind {
                 HostTreeRowKind::Folder(_) => {
                     let glyph = if row.expanded { "▾" } else { "▸" };
-                    let indent = "  ".repeat(row.depth);
                     ListItem::new(Line::from(vec![
-                        Span::raw(indent),
+                        Span::raw(row.indent.as_str()),
                         Span::styled(glyph, Style::default().fg(theme::ansi_cyan())),
                         Span::raw(" "),
-                        Span::styled(row.display_name.clone(), Style::default().fg(theme::ansi_bright_cyan())),
+                        Span::styled(row.display_name.as_str(), Style::default().fg(theme::ansi_bright_cyan())),
                     ]))
                 }
                 HostTreeRowKind::Host(_) => {
-                    let indent = "  ".repeat(row.depth);
                     ListItem::new(Line::from(vec![
-                        Span::raw(indent),
-                        Span::styled(row.display_name.clone(), Style::default().fg(theme::ansi_bright_white())),
+                        Span::raw(row.indent.as_str()),
+                        Span::styled(row.display_name.as_str(), Style::default().fg(theme::ansi_bright_white())),
                     ]))
                 }
             })

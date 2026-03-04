@@ -19,7 +19,7 @@ pub(crate) enum HostTreeRowKind {
 #[derive(Debug, Clone)]
 pub(crate) struct HostTreeRow {
     pub(crate) kind: HostTreeRowKind,
-    pub(crate) depth: usize,
+    pub(crate) indent: String,
     pub(crate) display_name: String,
     pub(crate) expanded: bool,
 }

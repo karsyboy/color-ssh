@@ -97,28 +97,35 @@ impl<'a> CellRef<'a> {
         !ch.is_control() && ch.width().unwrap_or(0) == 0
     }
 
+    #[cfg(test)]
     pub(crate) fn has_contents(&self) -> bool {
         !self.cell.flags.intersects(Flags::WIDE_CHAR_SPACER | Flags::LEADING_WIDE_CHAR_SPACER) && Self::is_renderable_primary_char(self.cell.c)
     }
 
-    pub(crate) fn contents(&self) -> String {
+    pub(crate) fn symbol<'b>(&self, scratch: &'b mut String) -> &'b str {
         if self.cell.flags.intersects(Flags::WIDE_CHAR_SPACER | Flags::LEADING_WIDE_CHAR_SPACER) {
-            return " ".to_string();
+            return " ";
         }
         if !Self::is_renderable_primary_char(self.cell.c) {
-            return " ".to_string();
+            return " ";
         }
 
-        let mut out = String::new();
-        out.push(self.cell.c);
+        scratch.clear();
+        scratch.push(self.cell.c);
         if let Some(zerowidth) = self.cell.zerowidth() {
             for c in zerowidth {
                 if Self::is_renderable_zero_width(*c) {
-                    out.push(*c);
+                    scratch.push(*c);
                 }
             }
         }
-        out
+        scratch.as_str()
+    }
+
+    #[cfg(test)]
+    pub(crate) fn contents(&self) -> String {
+        let mut scratch = String::new();
+        self.symbol(&mut scratch).to_owned()
     }
 
     pub(crate) fn fgcolor(&self) -> AnsiColor {

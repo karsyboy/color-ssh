@@ -440,6 +440,10 @@ impl AppState {
                 tab.scroll_offset = 0;
                 tab.terminal_search.matches.clear();
                 tab.terminal_search.current = 0;
+                tab.terminal_search.highlight_row_ranges.clear();
+                tab.terminal_search.current_highlight_range = None;
+                tab.terminal_search.last_search_query.clear();
+                tab.terminal_search.last_scanned_render_epoch = 0;
                 tab.last_pty_size = None;
                 log_debug!("Successfully reconnected to {}", host.name);
             }

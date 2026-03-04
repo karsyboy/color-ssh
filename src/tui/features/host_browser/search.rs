@@ -11,6 +11,10 @@ enum HostRowKey {
     Host(usize),
 }
 
+fn host_row_indent(depth: usize) -> String {
+    "  ".repeat(depth)
+}
+
 /// Fuzzy match scoring for host search.
 ///
 /// Returns a score if `pattern_lower` fuzzy-matches against `text_lower`, or
@@ -162,7 +166,7 @@ impl AppState {
                 }
                 rows.push(HostTreeRow {
                     kind: HostTreeRowKind::Host(host_idx),
-                    depth: 0,
+                    indent: host_row_indent(0),
                     display_name: host.name.clone(),
                     expanded: false,
                 });
@@ -186,7 +190,7 @@ impl AppState {
                 }
                 rows.push(HostTreeRow {
                     kind: HostTreeRowKind::Host(host_idx),
-                    depth: 0,
+                    indent: host_row_indent(0),
                     display_name: host.name.clone(),
                     expanded: false,
                 });
@@ -205,7 +209,7 @@ impl AppState {
         let expanded = !self.collapsed_folders.contains(&folder.id);
         rows.push(HostTreeRow {
             kind: HostTreeRowKind::Folder(folder.id),
-            depth,
+            indent: host_row_indent(depth),
             display_name: folder.name.clone(),
             expanded,
         });
@@ -221,7 +225,7 @@ impl AppState {
                 }
                 rows.push(HostTreeRow {
                     kind: HostTreeRowKind::Host(host_idx),
-                    depth: depth + 1,
+                    indent: host_row_indent(depth + 1),
                     display_name: host.name.clone(),
                     expanded: false,
                 });
@@ -256,7 +260,7 @@ impl AppState {
                 }
                 host_rows.push(HostTreeRow {
                     kind: HostTreeRowKind::Host(host_idx),
-                    depth: depth + 1,
+                    indent: host_row_indent(depth + 1),
                     display_name: host.name.clone(),
                     expanded: false,
                 });
@@ -267,7 +271,7 @@ impl AppState {
         if has_match {
             rows.push(HostTreeRow {
                 kind: HostTreeRowKind::Folder(folder.id),
-                depth,
+                indent: host_row_indent(depth),
                 display_name: folder.name.clone(),
                 expanded: true,
             });

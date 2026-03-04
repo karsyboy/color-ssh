@@ -10,6 +10,7 @@ fn build_search_row_ranges_groups_matches_by_row() {
         query_selection: None,
         matches: vec![(2, 4, 3), (2, 10, 2), (3, 1, 1)],
         current: 1,
+        ..TerminalSearchState::default()
     };
 
     let (ranges, current) = build_search_row_ranges(Some(&search));
