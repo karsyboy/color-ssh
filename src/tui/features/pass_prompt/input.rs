@@ -13,7 +13,7 @@ const MANUAL_VAULT_UNLOCK_RETRY_NOTICE: &str = "Vault unlock failed after multip
 
 fn current_unlock_policy() -> UnlockPolicy {
     let auth_settings = config::auth_settings();
-    UnlockPolicy::new(auth_settings.unlock_idle_timeout_seconds, auth_settings.unlock_absolute_timeout_seconds)
+    UnlockPolicy::new(auth_settings.idle_timeout_seconds, auth_settings.session_timeout_seconds)
 }
 
 impl AppState {

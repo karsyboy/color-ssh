@@ -59,8 +59,8 @@ impl AgentRuntime {
             return false;
         };
 
-        let idle_expired = last_activity_at.elapsed() >= Duration::from_secs(policy.unlock_idle_timeout_seconds);
-        let absolute_expired = unlocked_at.elapsed() >= Duration::from_secs(policy.unlock_absolute_timeout_seconds);
+        let idle_expired = last_activity_at.elapsed() >= Duration::from_secs(policy.idle_timeout_seconds);
+        let absolute_expired = unlocked_at.elapsed() >= Duration::from_secs(policy.session_timeout_seconds);
         if idle_expired || absolute_expired {
             log_debug!(
                 "Password vault session expired (idle_expired={}, absolute_expired={})",
@@ -86,8 +86,8 @@ impl AgentRuntime {
         let Some(last_activity_at) = self.last_activity_at else {
             return VaultStatus::locked(vault_exists);
         };
-        let idle_remaining = Duration::from_secs(policy.unlock_idle_timeout_seconds).saturating_sub(last_activity_at.elapsed());
-        let absolute_remaining = Duration::from_secs(policy.unlock_absolute_timeout_seconds).saturating_sub(unlocked_at.elapsed());
+        let idle_remaining = Duration::from_secs(policy.idle_timeout_seconds).saturating_sub(last_activity_at.elapsed());
+        let absolute_remaining = Duration::from_secs(policy.session_timeout_seconds).saturating_sub(unlocked_at.elapsed());
         let expires_in_seconds = idle_remaining.min(absolute_remaining).as_secs();
         let absolute_timeout_at_epoch_seconds = self
             .absolute_timeout_at
@@ -98,8 +98,8 @@ impl AgentRuntime {
             vault_exists,
             unlocked: self.data_key.is_some(),
             unlock_expires_in_seconds: self.data_key.map(|_| expires_in_seconds),
-            idle_timeout_seconds: Some(policy.unlock_idle_timeout_seconds),
-            absolute_timeout_seconds: Some(policy.unlock_absolute_timeout_seconds),
+            idle_timeout_seconds: Some(policy.idle_timeout_seconds),
+            absolute_timeout_seconds: Some(policy.session_timeout_seconds),
             absolute_timeout_at_epoch_seconds: self.data_key.and(absolute_timeout_at_epoch_seconds),
         }
     }
@@ -109,13 +109,13 @@ impl AgentRuntime {
         let _ = self.lock();
         log_debug!(
             "Password vault runtime unlocked with idle={}s absolute={}s",
-            policy.unlock_idle_timeout_seconds,
-            policy.unlock_absolute_timeout_seconds
+            policy.idle_timeout_seconds,
+            policy.session_timeout_seconds
         );
         self.data_key = Some(data_key);
         self.unlocked_at = Some(Instant::now());
         self.last_activity_at = self.unlocked_at;
-        self.absolute_timeout_at = SystemTime::now().checked_add(Duration::from_secs(policy.unlock_absolute_timeout_seconds));
+        self.absolute_timeout_at = SystemTime::now().checked_add(Duration::from_secs(policy.session_timeout_seconds));
         self.policy = Some(policy);
     }
 

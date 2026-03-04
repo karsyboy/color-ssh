@@ -49,8 +49,8 @@ impl AgentClient {
     pub fn unlock(&self, master_password: &str, policy: UnlockPolicy) -> Result<VaultStatus, AgentError> {
         log_debug!(
             "Requesting password vault unlock with idle={}s absolute={}s",
-            policy.unlock_idle_timeout_seconds,
-            policy.unlock_absolute_timeout_seconds
+            policy.idle_timeout_seconds,
+            policy.session_timeout_seconds
         );
         match self.request(
             AgentRequestPayload::Unlock {

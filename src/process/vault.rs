@@ -31,7 +31,7 @@ impl fmt::Display for VaultAccessError {
 
 fn current_unlock_policy() -> UnlockPolicy {
     let auth_settings = config::auth_settings();
-    UnlockPolicy::new(auth_settings.unlock_idle_timeout_seconds, auth_settings.unlock_absolute_timeout_seconds)
+    UnlockPolicy::new(auth_settings.idle_timeout_seconds, auth_settings.session_timeout_seconds)
 }
 
 fn unlock_agent_interactively(client: &agent::AgentClient) -> io::Result<()> {

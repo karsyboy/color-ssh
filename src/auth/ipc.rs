@@ -43,17 +43,17 @@ pub enum ListenerBindResult {
 /// Unlock timeout policy sent to the agent.
 pub struct UnlockPolicy {
     /// Idle timeout after which the vault is re-locked.
-    pub unlock_idle_timeout_seconds: u64,
+    pub idle_timeout_seconds: u64,
     /// Absolute unlock lifetime cap.
-    pub unlock_absolute_timeout_seconds: u64,
+    pub session_timeout_seconds: u64,
 }
 
 impl UnlockPolicy {
     /// Build a new unlock policy.
-    pub fn new(unlock_idle_timeout_seconds: u64, unlock_absolute_timeout_seconds: u64) -> Self {
+    pub fn new(idle_timeout_seconds: u64, session_timeout_seconds: u64) -> Self {
         Self {
-            unlock_idle_timeout_seconds,
-            unlock_absolute_timeout_seconds,
+            idle_timeout_seconds,
+            session_timeout_seconds,
         }
     }
 }

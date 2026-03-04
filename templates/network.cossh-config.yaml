@@ -21,8 +21,8 @@ settings:
   ssh_logging: true
 
 auth_settings:
-  unlock_idle_timeout_seconds: 900
-  unlock_absolute_timeout_seconds: 28800
+  idle_timeout_seconds: 900
+  session_timeout_seconds: 28800
   direct_password_autologin: true
   tui_password_autologin: true
 

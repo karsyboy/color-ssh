@@ -28,10 +28,10 @@ fn unlock_policy_from_config() -> super::ipc::UnlockPolicy {
     let auth_settings = config::auth_settings();
     log_debug!(
         "Using vault unlock policy from config: idle={}s absolute={}s",
-        auth_settings.unlock_idle_timeout_seconds,
-        auth_settings.unlock_absolute_timeout_seconds
+        auth_settings.idle_timeout_seconds,
+        auth_settings.session_timeout_seconds
     );
-    super::ipc::UnlockPolicy::new(auth_settings.unlock_idle_timeout_seconds, auth_settings.unlock_absolute_timeout_seconds)
+    super::ipc::UnlockPolicy::new(auth_settings.idle_timeout_seconds, auth_settings.session_timeout_seconds)
 }
 
 fn vault_command_name(vault_command: &args::VaultCommand) -> &'static str {
