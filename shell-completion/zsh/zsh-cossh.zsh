@@ -97,55 +97,10 @@ _cossh() {
     return
   fi
 
-<<<<<<< Updated upstream
-  header="
-Alias|->|Hostname|User|Desc
-─────|──|────────|────|────
-"
-
-  host_list="${header}\n${host_list}"
-
-  echo $host_list | command column -t -s '|'
-}
-
-_set_lbuffer() {
-  local result selected_host connect_cmd is_fzf_result
-  result="$1"
-  is_fzf_result="$2"
-
-  if [ "$is_fzf_result" = false ] ; then
-    result=$(cut -f 1 -d "|" <<< ${result})
-  fi
-
-  selected_host=$(cut -f 1 -d " " <<< ${result})
-  connect_cmd="cossh ssh ${selected_host}"
-
-  LBUFFER="$connect_cmd"
-}
-
-fzf_complete_cossh() {
-  local tokens cmd result key selection
-  setopt localoptions noshwordsplit noksh_arrays noposixbuiltins
-
-  tokens=(${(z)LBUFFER})
-  cmd=${tokens[1]}
-
-  if [[ "$LBUFFER" =~ "^ *cossh$" ]]; then
-    zle ${fzf_cossh_default_completion:-expand-or-complete}
-  elif [[ "$cmd" == "cossh" ]]; then
-    result=$(_cossh_host_list ${tokens[2, -1]})
-    fuzzy_input="${LBUFFER#"$tokens[1] "}"
-
-    if [ -z "$result" ]; then
-      # When host parameters exist, don't fall back to default completion to avoid slow hosts enumeration
-      if [[ -z "${tokens[2]}" || "${tokens[-1]}" == -* ]]; then
-        zle ${fzf_cossh_default_completion:-expand-or-complete}
-=======
   case "$subcmd" in
     ssh)
       if [[ "$cur" != -* ]]; then
         _wanted hosts expl 'SSH inventory host' compadd -- "${(@f)$(_cossh_completion_hosts ssh)}"
->>>>>>> Stashed changes
       fi
       ;;
     rdp)
@@ -204,22 +159,4 @@ fzf_complete_cossh() {
   esac
 }
 
-<<<<<<< Updated upstream
-
-[ -z "$fzf_cossh_default_completion" ] && {
-  binding=$(bindkey '^I')
-  [[ $binding =~ 'undefined-key' ]] || fzf_cossh_default_completion=$binding[(s: :w)2]
-  unset binding
-}
-
-
-zle -N fzf_complete_cossh
-bindkey '^I' fzf_complete_cossh
-
-# vim: set ft=zsh sw=2 ts=2 et
-<<<<<<< Updated upstream
-=======
-=======
 compdef _cossh cossh
->>>>>>> Stashed changes
->>>>>>> Stashed changes
