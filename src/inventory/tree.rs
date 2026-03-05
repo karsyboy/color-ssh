@@ -44,6 +44,8 @@ pub(crate) fn build_inventory_tree(inventory_path: &Path) -> io::Result<Inventor
 }
 
 fn build_inventory_tree_internal(inventory_path: &Path) -> InventoryResult<InventoryTreeModel> {
+    log_debug!("Building inventory tree from '{}'", inventory_path.display());
+
     let root_name = inventory_path
         .file_name()
         .and_then(|segment| segment.to_str())
@@ -55,6 +57,12 @@ fn build_inventory_tree_internal(inventory_path: &Path) -> InventoryResult<Inven
     let mut visited = HashSet::new();
 
     load_document_recursive(inventory_path, &mut root, &mut hosts, &mut seen_host_names, &mut visited, &[])?;
+
+    log_debug!(
+        "Inventory tree build complete: {} host(s) loaded from '{}'",
+        hosts.len(),
+        inventory_path.display()
+    );
 
     let mut next_id: FolderId = 0;
     let mut tree_root = finalize_folder(root, &mut next_id);
@@ -72,6 +80,8 @@ fn load_document_recursive(
 ) -> InventoryResult<()> {
     let canonical = inventory_path.canonicalize().unwrap_or_else(|_| inventory_path.to_path_buf());
 
+    log_debug!("Loading inventory document '{}'", canonical.display());
+
     if !visited.insert(canonical.clone()) {
         // Include cycles are ignored once a file has already been loaded.
         log_debug!("Skipping already visited inventory file (possible include cycle): {}", canonical.display());
@@ -79,11 +89,36 @@ fn load_document_recursive(
     }
 
     let ParsedInventoryDocument { include, inventory } = parse_inventory_document(&canonical)?;
+    log_debug!(
+        "Parsed inventory document '{}' (include count: {}, inventory node count: {})",
+        canonical.display(),
+        include.len(),
+        inventory.len()
+    );
     let parent_dir = canonical.parent().unwrap_or(Path::new("."));
 
-    for include in include {
-        let resolved_pattern = resolve_include_pattern(&include, parent_dir);
-        for include_path in expand_include_pattern(&resolved_pattern) {
+    for include_pattern in include {
+        let resolved_pattern = resolve_include_pattern(&include_pattern, parent_dir);
+        let include_paths = expand_include_pattern(&resolved_pattern);
+        if include_paths.is_empty() {
+            log_debug!(
+                "Inventory include '{}' in '{}' resolved to '{}' but matched no files",
+                include_pattern,
+                canonical.display(),
+                resolved_pattern
+            );
+        } else {
+            log_debug!(
+                "Inventory include '{}' in '{}' resolved to '{}' and matched {} file(s)",
+                include_pattern,
+                canonical.display(),
+                resolved_pattern,
+                include_paths.len()
+            );
+        }
+
+        for include_path in include_paths {
+            log_debug!("Loading include '{}' referenced by '{}'", include_path.display(), canonical.display());
             load_include_document(&include_path, folder, hosts, seen_host_names, visited, folder_path)?;
         }
     }
@@ -105,6 +140,8 @@ fn load_include_document(
 ) -> InventoryResult<()> {
     let canonical = inventory_path.canonicalize().unwrap_or_else(|_| inventory_path.to_path_buf());
 
+    log_debug!("Preparing included inventory file '{}'", canonical.display());
+
     if visited.contains(&canonical) {
         // Child include may point back to an ancestor; skip already-loaded file.
         log_debug!("Skipping already visited inventory file (possible include cycle): {}", canonical.display());
@@ -112,6 +149,7 @@ fn load_include_document(
     }
 
     let folder_name = inventory_folder_name(&canonical);
+    log_debug!("Attaching include '{}' under folder '{}'", canonical.display(), folder_name);
     let child = parent_folder.child_mut(&folder_name, &canonical);
     let mut child_path = parent_folder_path.to_vec();
     child_path.push(folder_name);
@@ -189,6 +227,12 @@ fn add_inventory_node(
                 ));
             }
 
+            log_debug!(
+                "Loaded inventory host '{}' (protocol='{}', source='{}')",
+                host.name,
+                host.protocol.as_str(),
+                host.source_file.display()
+            );
             folder.host_indices.push(hosts.len());
             hosts.push(host);
             Ok(())
