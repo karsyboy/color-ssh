@@ -4,3 +4,4 @@ Cargo.lock
 tst_code
 scripts/bench/benchmarks
 scripts/bench/cache
+color-ssh.wiki
