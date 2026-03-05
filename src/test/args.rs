@@ -1,5 +1,5 @@
 use super::{
-     CompletionProtocol, MainArgs, MainCommand, ProtocolCommand, RdpCommandArgs, SshCommandArgs, VaultCommand, build_cli_command, parse_main_args_from,
+    CompletionProtocol, MainArgs, MainCommand, ProtocolCommand, RdpCommandArgs, SshCommandArgs, VaultCommand, build_cli_command, parse_main_args_from,
     try_parse_main_args_from,
 };
 

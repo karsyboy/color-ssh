@@ -170,7 +170,6 @@ pub(crate) fn run() -> Result<ExitCode> {
         return Ok(run_completion_hosts(protocol));
     }
 
-
     if matches!(args.command, Some(args::MainCommand::MigrateInventory)) {
         return run_inventory_migration();
     }
