@@ -45,6 +45,40 @@ fn run_inventory_migration() -> Result<ExitCode> {
     Ok(ExitCode::SUCCESS)
 }
 
+fn run_completion_hosts(protocol: &args::CompletionProtocol) -> ExitCode {
+    let tree = match inventory::load_inventory_tree() {
+        Ok(tree) => tree,
+        Err(err) => {
+            log_debug!("Skipping completion host listing because inventory could not be loaded: {}", err);
+            return ExitCode::SUCCESS;
+        }
+    };
+
+    let mut host_names: Vec<String> = tree
+        .hosts
+        .into_iter()
+        .filter(|host| !host.hidden)
+        .filter(|host| match protocol {
+            args::CompletionProtocol::All => true,
+            args::CompletionProtocol::Ssh => matches!(host.protocol, inventory::ConnectionProtocol::Ssh),
+            args::CompletionProtocol::Rdp => matches!(host.protocol, inventory::ConnectionProtocol::Rdp),
+        })
+        .map(|host| host.name)
+        .collect();
+
+    host_names.sort_by(|left, right| {
+        let left_key = left.to_ascii_lowercase();
+        let right_key = right.to_ascii_lowercase();
+        left_key.cmp(&right_key).then_with(|| left.cmp(right))
+    });
+    host_names.dedup();
+
+    for host in host_names {
+        println!("{host}");
+    }
+    ExitCode::SUCCESS
+}
+
 fn run_vault_mode(logger: &log::Logger, args: &args::MainArgs, vault_command: &args::VaultCommand) -> ExitCode {
     initialize_config_or_exit(logger, args.profile.clone(), "Failed to initialize config for vault command");
     auth::run_vault_command(vault_command)
@@ -69,9 +103,9 @@ fn log_argument_summary(args: &args::MainArgs) {
     let vault_command = matches!(args.command, Some(args::MainCommand::Vault(_)));
     let agent_serve = matches!(args.command, Some(args::MainCommand::AgentServe));
     let migrate_inventory = matches!(args.command, Some(args::MainCommand::MigrateInventory));
-
+    let completion_hosts = matches!(args.command, Some(args::MainCommand::CompletionHosts(_)));
     log_debug!(
-        "Parsed arguments summary: interactive={} ssh_arg_count={} rdp_launch={} pass_entry_override={} vault_command={} profile_set={} agent_serve={} migrate_inventory={} test_mode={}",
+        "Parsed arguments summary: interactive={} ssh_arg_count={} rdp_launch={} pass_entry_override={} vault_command={} profile_set={} agent_serve={} migrate_inventory={} completion_hosts={} test_mode={}",
         args.interactive,
         ssh_arg_count,
         rdp_launch,
@@ -80,6 +114,7 @@ fn log_argument_summary(args: &args::MainArgs) {
         args.profile.is_some(),
         agent_serve,
         migrate_inventory,
+        completion_hosts,
         args.test_mode
     );
     log_debug_raw!("Parsed arguments: {:?}", args);
@@ -130,6 +165,11 @@ pub(crate) fn run() -> Result<ExitCode> {
     if matches!(args.command, Some(args::MainCommand::AgentServe)) {
         return run_agent_serve();
     }
+
+    if let Some(args::MainCommand::CompletionHosts(protocol)) = args.command.as_ref() {
+        return Ok(run_completion_hosts(protocol));
+    }
+
 
     if matches!(args.command, Some(args::MainCommand::MigrateInventory)) {
         return run_inventory_migration();
