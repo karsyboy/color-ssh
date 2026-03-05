@@ -242,6 +242,7 @@ impl AppState {
             pass_entry_override,
             pass_fallback_notice,
         } = launch_options;
+        let disable_vault_autologin = pass_fallback_notice.is_some();
         let rows = initial_rows.max(1);
         let cols = initial_cols.max(1);
 
@@ -266,6 +267,9 @@ impl AppState {
             cmd.arg("--pass-entry");
             cmd.arg(pass_entry_override);
         }
+        if disable_vault_autologin {
+            cmd.env(process::DISABLE_VAULT_AUTOLOGIN_ENV, "1");
+        }
 
         if let Some(profile) = &host.profile {
             cmd.arg("-P");
@@ -279,12 +283,14 @@ impl AppState {
         let pass_info = if using_pass_entry { " (via vault)" } else { "" };
         let profile_info = host.profile.as_ref().map_or(String::new(), |profile| format!(" [profile: {}]", profile));
         let logging_info = if force_ssh_logging { " [ssh-logging]" } else { "" };
+        let vault_info = if disable_vault_autologin { " [no-vault-autologin]" } else { "" };
         log_debug!(
-            "Spawning cossh command: cossh ssh {}{}{}{} (session: {})",
+            "Spawning cossh command: cossh ssh {}{}{}{}{} (session: {})",
             host.name,
             pass_info,
             profile_info,
             logging_info,
+            vault_info,
             tab_title
         );
 

@@ -1,5 +1,6 @@
 //! SSH command synthesis and vault-aware askpass wiring.
 
+use super::DISABLE_VAULT_AUTOLOGIN_ENV;
 use super::command_spec::{PreparedCommand, build_plain_ssh_command};
 use super::vault::{VaultAccessError, query_vault_entry_status};
 use crate::auth::{agent, secret::ExposeSecret, transport};
@@ -489,6 +490,11 @@ pub(crate) fn build_ssh_command(args: &[String], explicit_pass_entry: Option<&st
     let effective_args = resolved_host.as_ref().map_or_else(|| args.to_vec(), |host| synthesize_ssh_args(args, host));
     let mut command = build_plain_ssh_command(&effective_args);
 
+    if std::env::var_os(DISABLE_VAULT_AUTOLOGIN_ENV).is_some() {
+        log_debug!("Direct password auto-login disabled by environment override");
+        return Ok(command);
+    }
+
     let auth_settings = config::auth_settings();
     if !auth_settings.direct_password_autologin {
         log_debug!("Direct password auto-login disabled in auth settings");
@@ -511,11 +517,10 @@ pub(crate) fn build_ssh_command(args: &[String], explicit_pass_entry: Option<&st
 
     if !validate_vault_entry_name(&pass_entry_name) {
         log_debug!("Resolved password vault entry name was invalid");
-        command.fallback_notice = Some(
-            "Password auto-login is unavailable because the requested password entry name is invalid; continuing with the standard SSH password prompt."
-                .to_string(),
-        );
-        return Ok(command);
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "password auto-login requires a valid vault entry name",
+        ));
     }
 
     let client = agent::AgentClient::new().map_err(|err| io::Error::other(err.to_string()))?;
@@ -523,18 +528,14 @@ pub(crate) fn build_ssh_command(args: &[String], explicit_pass_entry: Option<&st
         Ok(status) => status,
         Err(VaultAccessError::VaultNotInitialized) => {
             log_debug!("Password vault is not initialized during direct SSH launch");
-            command.fallback_notice = Some(
-                "Password auto-login is unavailable because the password vault is not initialized; continuing with the standard SSH password prompt."
-                    .to_string(),
-            );
-            return Ok(command);
+            return Err(io::Error::new(
+                io::ErrorKind::NotFound,
+                "password vault is not initialized; run `cossh vault init` or `cossh vault add <name>`",
+            ));
         }
         Err(VaultAccessError::Query(err)) => {
             log_debug!("Password vault lookup failed during direct SSH launch: {}", err);
-            command.fallback_notice = Some(format!(
-                "Password auto-login is unavailable because the password vault could not be queried ({err}); continuing with the standard SSH password prompt."
-            ));
-            return Ok(command);
+            return Err(io::Error::new(io::ErrorKind::PermissionDenied, err));
         }
         Err(VaultAccessError::LockedWithoutTerminal) => {
             return Err(io::Error::new(
@@ -543,36 +544,37 @@ pub(crate) fn build_ssh_command(args: &[String], explicit_pass_entry: Option<&st
             ));
         }
         Err(VaultAccessError::UnlockFailed(err)) => {
-            return Err(io::Error::new(io::ErrorKind::PermissionDenied, err));
+            log_debug!("Password vault unlock failed during direct SSH launch: {}", err);
+            command.fallback_notice = Some(
+                "Password auto-login is unavailable because vault unlock failed after multiple attempts; continuing with the standard SSH password prompt."
+                    .to_string(),
+            );
+            return Ok(command);
         }
     };
 
     if !entry_status.exists {
         log_debug!("Password vault entry '{}' was not found", pass_entry_name);
-        command.fallback_notice = Some(format!(
-            "Password auto-login is unavailable because vault entry '{}' was not found; continuing with the standard SSH password prompt.",
-            pass_entry_name
+        return Err(io::Error::new(
+            io::ErrorKind::NotFound,
+            format!("password vault entry '{pass_entry_name}' was not found"),
         ));
-        return Ok(command);
     }
 
     let askpass_token = match client.authorize_askpass(&pass_entry_name) {
         Ok(token) => token,
         Err(err) => {
             log_debug!("Failed to authorize internal askpass token: {}", err);
-            command.fallback_notice = Some(format!(
-                "Password auto-login is unavailable because a vault access token could not be issued ({err}); continuing with the standard SSH password prompt."
+            return Err(io::Error::new(
+                io::ErrorKind::PermissionDenied,
+                format!("failed to authorize vault askpass token: {err}"),
             ));
-            return Ok(command);
         }
     };
 
     if let Err(err) = transport::configure_internal_askpass_env(&mut command.env, askpass_token.expose_secret()) {
         log_debug!("Failed to configure internal askpass helper: {}", err);
-        command.fallback_notice = Some(format!(
-            "Password auto-login is unavailable because the internal askpass helper could not be configured ({err}); continuing with the standard SSH password prompt."
-        ));
-        return Ok(command);
+        return Err(io::Error::other(format!("failed to configure internal askpass helper: {err}")));
     }
     // At this point SSH can request password prompts through the internal helper.
     log_debug!("Configured internal askpass helper for direct SSH launch");
