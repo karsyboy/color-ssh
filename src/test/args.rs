@@ -1,6 +1,17 @@
+<<<<<<< Updated upstream
 use super::{
     MainArgs, MainCommand, ProtocolCommand, RdpCommandArgs, SshCommandArgs, VaultCommand, build_cli_command, parse_main_args_from, try_parse_main_args_from,
 };
+=======
+<<<<<<< Updated upstream
+use super::{build_cli_command, detect_non_interactive_ssh_args, parse_main_args_from};
+=======
+use super::{
+    CompletionProtocol, MainArgs, MainCommand, ProtocolCommand, RdpCommandArgs, SshCommandArgs, VaultCommand, build_cli_command, parse_main_args_from,
+    try_parse_main_args_from,
+};
+>>>>>>> Stashed changes
+>>>>>>> Stashed changes
 
 fn parse_ok(args: &[&str]) -> MainArgs {
     let command = build_cli_command();
@@ -110,7 +121,117 @@ fn parse_main_args_invalid_combinations_and_profile_names_return_parse_errors() 
         vec!["cossh", "--profile", "prod.config", "ssh", "host"],
     ];
 
+<<<<<<< Updated upstream
     for args in invalid_cases {
         assert_parse_err(&args);
     }
+=======
+    assert!(parsed.test_mode);
+    assert!(parsed.debug);
+    assert!(parsed.ssh_logging);
+    assert!(!parsed.interactive);
+    assert_eq!(parsed.ssh_args, vec!["localhost".to_string()]);
+}
+
+#[test]
+fn parses_add_pass_mode() {
+    let cmd = build_cli_command();
+    let parsed = parse_main_args_from(&cmd, ["cossh", "--add-pass", "office_fw"]);
+
+    assert_eq!(parsed.add_pass.as_deref(), Some("office_fw"));
+    assert!(!parsed.interactive);
+    assert!(parsed.ssh_args.is_empty());
+}
+
+#[test]
+fn parses_add_pass_with_debug() {
+    let cmd = build_cli_command();
+    let parsed = parse_main_args_from(&cmd, ["cossh", "--debug", "--add-pass", "office_fw"]);
+
+    assert!(parsed.debug);
+    assert_eq!(parsed.add_pass.as_deref(), Some("office_fw"));
+}
+
+#[test]
+fn rejects_add_pass_with_ssh_args() {
+    let cmd = build_cli_command();
+    assert!(
+        cmd.clone()
+            .try_get_matches_from(["cossh", "--add-pass", "office_fw", "user@example.com"])
+            .is_err()
+    );
+}
+
+#[test]
+fn rejects_add_pass_with_profile_log_and_test_flags() {
+    let cmd = build_cli_command();
+
+    assert!(
+        cmd.clone()
+            .try_get_matches_from(["cossh", "--add-pass", "office_fw", "--profile", "network"])
+            .is_err()
+    );
+    assert!(cmd.clone().try_get_matches_from(["cossh", "--add-pass", "office_fw", "--log"]).is_err());
+    assert!(cmd.try_get_matches_from(["cossh", "--add-pass", "office_fw", "--test"]).is_err());
+}
+
+#[test]
+fn rejects_invalid_profile_names() {
+    let cmd = build_cli_command();
+
+<<<<<<< Updated upstream
+    assert!(cmd.clone().try_get_matches_from(["cossh", "--profile", "../prod", "user@example.com"]).is_err());
+    assert!(
+        cmd.clone()
+            .try_get_matches_from(["cossh", "--profile", "prod/main", "user@example.com"])
+            .is_err()
+    );
+    assert!(cmd.try_get_matches_from(["cossh", "--profile", "prod.config", "user@example.com"]).is_err());
+=======
+    for (args, expected_command) in cases {
+        let parsed = parse_ok(&args);
+        assert_eq!(parsed.command, Some(expected_command));
+    }
+}
+
+#[test]
+fn parse_main_args_vault_and_migrate_commands_map_to_expected_variants() {
+    let vault_cases: Vec<(Vec<&str>, MainCommand)> = vec![
+        (
+            vec!["cossh", "vault", "add", "office_fw"],
+            MainCommand::Vault(VaultCommand::AddPass("office_fw".to_string())),
+        ),
+        (vec!["cossh", "vault", "list"], MainCommand::Vault(VaultCommand::List)),
+        (vec!["cossh", "vault", "init"], MainCommand::Vault(VaultCommand::Init)),
+    ];
+
+    for (args, expected_command) in vault_cases {
+        assert_eq!(parse_ok(&args).command, Some(expected_command));
+    }
+
+    assert_eq!(parse_ok(&["cossh", "--migrate"]).command, Some(MainCommand::MigrateInventory));
+    assert_eq!(
+        parse_ok(&["cossh", "__complete", "hosts", "--protocol", "ssh"]).command,
+        Some(MainCommand::CompletionHosts(CompletionProtocol::Ssh))
+    );
+}
+
+#[test]
+fn parse_main_args_invalid_combinations_and_profile_names_return_parse_errors() {
+    let invalid_cases: Vec<Vec<&str>> = vec![
+        vec!["cossh", "vault", "add", "office_fw", "user@example.com"],
+        vec!["cossh", "--migrate", "ssh", "host"],
+        vec!["cossh", "--migrate", "--profile", "network"],
+        vec!["cossh", "user@example.com"],
+        vec!["cossh", "ssh"],
+        vec!["cossh", "--profile", "../prod", "ssh", "host"],
+        vec!["cossh", "--profile", "prod/main", "ssh", "host"],
+        vec!["cossh", "--profile", "prod.config", "ssh", "host"],
+    ];
+
+    for args in invalid_cases {
+        assert_parse_err(&args);
+    }
+>>>>>>> Stashed changes
+>>>>>>> Stashed changes
 }

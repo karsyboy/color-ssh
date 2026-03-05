@@ -1,182 +1,103 @@
 #!/usr/bin/env zsh
+#compdef cossh
 
-# Better completion for ssh in Zsh.
-# https://github.com/sunlei/zsh-ssh
-# v0.0.7
-# Copyright (c) 2020 Sunlei <guizaicn@gmail.com>
-# This script is a modified copy of the orginal from above to work with the cossh cli utility.
-# Minor changes have been mode to refrence of ssh to make it work with cossh
+# Zsh completion for cossh.
+# Host completions are sourced from:
+#   cossh __complete hosts --protocol <all|ssh|rdp>
 
-setopt no_beep # don't beep
-zstyle ':completion:*:cossh:*' hosts off # disable built-in hosts completion
+: ${COSSH_COMPLETION_BIN:=cossh}
 
-COSSH_CONFIG_FILE="${COSSH_CONFIG_FILE:-$HOME/.ssh/config}"
-
-# Parse the file and handle the include directive.
-_parse_config_file() {
-  # Enable PCRE matching and handle local options
-  setopt localoptions rematchpcre
-  unsetopt nomatch
-
-  # Resolve the full path of the input config file
-  local config_file_path=$(realpath "$1")
-
-  # Read the file line by line
-  while IFS= read -r line || [[ -n "$line" ]]; do
-    # Match lines starting with 'Include'
-    if [[ $line =~ ^[Ii]nclude[[:space:]]+(.*) ]] && (( $#match > 0 )); then
-      # Split the rest of the line into individual paths
-      local include_paths=(${(z)match[1]})
-
-      for raw_path in "${include_paths[@]}"; do
-        # Expand ~ and environment variables in the path
-        eval "local expanded=\${(e)raw_path}"
-
-        # If path is relative, resolve it relative to the current config file
-        if [[ "$expanded" != /* && "$expanded" != ~* ]]; then
-          expanded="$HOME/.ssh/$expanded"
-        fi
-
-        # Expand wildcards (e.g. *.conf) and loop over each matched file
-        for include_file_path in $~expanded; do
-          if [[ -f "$include_file_path" ]]; then
-            # Separate includes with a blank line (for readability)
-            echo ""
-            # Recursively parse included files
-            _parse_config_file "$include_file_path"
-          fi
-        done
-      done
-    else
-      # Print normal (non-Include) lines
-      echo "$line"
-    fi
-  done < "$config_file_path"
+_cossh_completion_hosts() {
+  local protocol="${1:-all}"
+  "$COSSH_COMPLETION_BIN" __complete hosts --protocol "$protocol" 2>/dev/null
 }
 
-_cossh_host_list() {
-  local cossh_config host_list
+_cossh_vault_entries() {
+  "$COSSH_COMPLETION_BIN" vault list 2>/dev/null
+}
 
-  cossh_config=$(_parse_config_file $COSSH_CONFIG_FILE)
-  cossh_config=$(echo $cossh_config | command grep -v -E "^\s*#[^_]")
+_cossh_profiles() {
+  local config_dir="$HOME/.color-ssh"
+  local -a profiles
+  local file profile
 
-  host_list=$(echo $cossh_config | command awk '
-    function join(array, start, end, sep, result, i) {
-      # https://www.gnu.org/software/gawk/manual/html_node/Join-Function.html
-      if (sep == "")
-        sep = " "
-      else if (sep == SUBSEP) # magic value
-        sep = ""
-      result = array[start]
-      for (i = start + 1; i <= end; i++)
-        result = result sep array[i]
-      return result
-    }
+  [[ -f "$config_dir/cossh-config.yaml" ]] && profiles+=("default")
 
-    function parse_line(line) {
-      n = split(line, line_array, " ")
+  for file in "$config_dir"/*.cossh-config.yaml(N); do
+    profile="${file:t}"
+    profile="${profile%.cossh-config.yaml}"
+    [[ -n "$profile" ]] && profiles+=("$profile")
+  done
 
-      key = line_array[1]
-      value = join(line_array, 2, n)
+  printf '%s\n' ${(ou)profiles}
+}
 
-      return key "#-#" value
-    }
+_cossh() {
+  local cur prev state
+  local subcmd=""
+  local subcmd_index=0
+  local idx=2
 
-    function contains_star(str) {
-        return index(str, "*") > 0
-    }
+  cur="${words[CURRENT]}"
+  prev="${words[CURRENT-1]}"
 
-    function starts_or_ends_with_star(str) {
-        start_char = substr(str, 1, 1)
-        end_char = substr(str, length(str), 1)
-
-        return start_char == "*" || end_char == "*"
-    }
-
-    BEGIN {
-      IGNORECASE = 1
-      FS="\n"
-      RS=""
-
-      host_list = ""
-    }
-    {
-      match_directive = ""
-
-      # Use spaces to ensure the column command maintains the correct number of columns.
-      #   - user
-      #   - desc_formated
-
-      user = " "
-      host_name = ""
-      alias = ""
-      desc = ""
-      desc_formated = " "
-
-      for (line_num = 1; line_num <= NF; ++line_num) {
-        line = parse_line($line_num)
-
-        split(line, tmp, "#-#")
-
-        key = tolower(tmp[1])
-        value = tmp[2]
-
-        if (key == "match") { match_directive = value }
-
-        if (key == "host") { aliases = value }
-        if (key == "user") { user = value }
-        if (key == "hostname") { host_name = value }
-        if (key == "#_desc") { desc = value }
-      }
-
-      split(aliases, alias_list, " ")
-      for (i in alias_list) {
-        alias = alias_list[i]
-
-        if (!host_name && alias ) {
-          host_name = alias
-        }
-
-        if (desc) {
-          desc_formated = sprintf("[\033[00;34m%s\033[0m]", desc)
-        }
-
-        if ((host_name && !starts_or_ends_with_star(host_name)) && (alias && !starts_or_ends_with_star(alias)) && !match_directive) {
-          host = sprintf("%s|->|%s|%s|%s\n", alias, host_name, user, desc_formated)
-          host_list = host_list host
-        }
-      }
-    }
-    END {
-      print host_list
-    }
-  ')
-
-  for arg in "$@"; do
-    case $arg in
-    -*) shift;;
-    *) break;;
+  while (( idx <= $#words )); do
+    case "${words[idx]}" in
+      -P|--profile|--pass-entry)
+        (( idx += 2 ))
+        continue
+        ;;
+      --profile=*|--pass-entry=*)
+        (( idx += 1 ))
+        continue
+        ;;
+      -d|-l|-t|--debug|--log|--test|--migrate)
+        (( idx += 1 ))
+        continue
+        ;;
+      ssh|rdp|vault)
+        subcmd="${words[idx]}"
+        subcmd_index=$idx
+        break
+        ;;
+      *)
+        break
+        ;;
     esac
   done
 
-  if [[ -n "$1" ]]; then
-    host_list=$(command grep -i "$1" <<< "$host_list")
+  if [[ -z "$subcmd" ]]; then
+    _arguments -C \
+      '(-d --debug)'{-d,--debug}'[Enable debug logging to ~/.color-ssh/logs/cossh.log; repeat (-dd) for raw terminal and argument tracing]' \
+      '(-l --log)'{-l,--log}'[Enable SSH session logging to ~/.color-ssh/logs/ssh_sessions/]' \
+      '(-P --profile)'{-P+,--profile=}'[Specify a configuration profile to use]:profile name:->profile' \
+      '(-t --test)'{-t,--test}'[Ignore config logging settings; only use CLI -d/-l logging flags]' \
+      '--pass-entry=[Override the password vault entry used for a direct protocol launch]:vault entry:->pass_entry' \
+      '--migrate[Migrate ~/.ssh/config host entries into ~/.color-ssh/cossh-inventory.yaml]' \
+      '1:subcommand:->subcommand'
+
+    case "$state" in
+      profile)
+        _wanted profiles expl 'profile' compadd -- "${(@f)$(_cossh_profiles)}"
+        return
+        ;;
+      pass_entry)
+        _wanted entries expl 'vault entry' compadd -- "${(@f)$(_cossh_vault_entries)}"
+        return
+        ;;
+      subcommand)
+        _values 'subcommand' \
+          'ssh[Launch an SSH session by forwarding arguments to the SSH command]' \
+          'rdp[Launch an RDP session using xfreerdp3 or xfreerdp]' \
+          'vault[Manage the password vault]'
+        return
+        ;;
+    esac
+
+    return
   fi
-  host_list=$(printf "%s\n" "$host_list" | command sort -u)
 
-  echo $host_list
-}
-
-
-_fzf_list_generator() {
-  local header host_list
-
-  if [ -n "$1" ]; then
-    host_list="$1"
-  else
-    host_list=$(_cossh_host_list)
-  fi
-
+<<<<<<< Updated upstream
   header="
 Alias|->|Hostname|User|Desc
 ─────|──|────────|────|────
@@ -219,65 +140,71 @@ fzf_complete_cossh() {
       # When host parameters exist, don't fall back to default completion to avoid slow hosts enumeration
       if [[ -z "${tokens[2]}" || "${tokens[-1]}" == -* ]]; then
         zle ${fzf_cossh_default_completion:-expand-or-complete}
+=======
+  case "$subcmd" in
+    ssh)
+      if [[ "$cur" != -* ]]; then
+        _wanted hosts expl 'SSH inventory host' compadd -- "${(@f)$(_cossh_completion_hosts ssh)}"
+>>>>>>> Stashed changes
       fi
-      return
-    fi
+      ;;
+    rdp)
+      case "$prev" in
+        -u|--user)
+          _message 'RDP username'
+          return
+          ;;
+        -D|--domain)
+          _message 'RDP domain'
+          return
+          ;;
+        -p|--port)
+          _message 'RDP port'
+          return
+          ;;
+      esac
 
-    if [ $(echo $result | wc -l) -eq 1 ]; then
-      _set_lbuffer $result false
-      zle reset-prompt
-      # zle redisplay
-      return
-    fi
-
-    result=$(_fzf_list_generator $result | fzf \
-      --height 40% \
-      --ansi \
-      --border \
-      --cycle \
-      --info=inline \
-      --header-lines=2 \
-      --reverse \
-      --prompt='Color SSH > ' \
-      --query=$fuzzy_input \
-      --no-separator \
-      --bind 'shift-tab:up,tab:down,bspace:backward-delete-char/eof' \
-      --preview 'ssh -T -G $(cut -f 1 -d " " <<< {}) | grep -i -E "^User |^HostName |^Port |^ControlMaster |^ForwardAgent |^LocalForward |^IdentityFile |^RemoteForward |^ProxyCommand |^ProxyJump " | column -t' \
-      --preview-window=right:40% \
-      --expect=alt-enter,enter
-    )
-
-    if [ -n "$result" ]; then
-      key=${result%%$'\n'*}
-      if [[ "$key" == "$result" ]]; then
-        selection="$result"
-        key=""
+      if [[ "$cur" == -* ]]; then
+        _values 'RDP option' \
+          '-u[Override the RDP username]' \
+          '--user[Override the RDP username]' \
+          '-D[Override the RDP domain]' \
+          '--domain[Override the RDP domain]' \
+          '-p[Override the RDP port]' \
+          '--port[Override the RDP port]'
       else
-        selection=${result#*$'\n'}
+        _wanted hosts expl 'RDP inventory host' compadd -- "${(@f)$(_cossh_completion_hosts rdp)}"
+      fi
+      ;;
+    vault)
+      local vault_action="${words[subcmd_index+1]}"
+
+      if (( CURRENT == subcmd_index + 1 )); then
+        _values 'vault subcommand' \
+          'init[Initialize the password vault]' \
+          'add[Create or replace a password vault entry interactively]' \
+          'remove[Remove a password vault entry]' \
+          'list[List password vault entries]' \
+          'unlock[Unlock the shared password vault]' \
+          'lock[Lock the shared password vault]' \
+          'status[Show shared password vault status]' \
+          'set-master-password[Create or rotate the password vault master password]'
+        return
       fi
 
-      if [ -n "$selection" ]; then
-        _set_lbuffer "$selection" true
-        if [[ "$key" == "alt-enter" ]]; then
-          zle reset-prompt
-        else
-          zle accept-line
-        fi
-      fi
-    fi
-
-    # Only reset prompt if not already done for alt-enter
-    if [[ "$key" != "alt-enter" ]]; then
-      zle reset-prompt
-      # zle redisplay
-    fi
-
-  # Fall back to default completion
-  else
-    zle ${fzf_cossh_default_completion:-expand-or-complete}
-  fi
+      case "$vault_action" in
+        remove)
+          _wanted entries expl 'vault entry' compadd -- "${(@f)$(_cossh_vault_entries)}"
+          ;;
+        add)
+          _message 'vault entry name'
+          ;;
+      esac
+      ;;
+  esac
 }
 
+<<<<<<< Updated upstream
 
 [ -z "$fzf_cossh_default_completion" ] && {
   binding=$(bindkey '^I')
@@ -290,3 +217,9 @@ zle -N fzf_complete_cossh
 bindkey '^I' fzf_complete_cossh
 
 # vim: set ft=zsh sw=2 ts=2 et
+<<<<<<< Updated upstream
+=======
+=======
+compdef _cossh cossh
+>>>>>>> Stashed changes
+>>>>>>> Stashed changes

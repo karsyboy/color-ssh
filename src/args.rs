@@ -7,6 +7,12 @@ use crate::{ssh_args, validation};
 use clap::{Arg, Command, error::ErrorKind};
 use std::ffi::OsString;
 
+<<<<<<< Updated upstream
+=======
+<<<<<<< Updated upstream
+/// Parsed command-line arguments
+=======
+>>>>>>> Stashed changes
 #[derive(Debug, Clone, PartialEq, Eq)]
 /// Supported `cossh vault` subcommands.
 pub enum VaultCommand {
@@ -57,10 +63,27 @@ pub enum MainCommand {
     Protocol(ProtocolCommand),
     Vault(VaultCommand),
     MigrateInventory,
+<<<<<<< Updated upstream
     AgentServe,
 }
 
 /// Parsed top-level command-line arguments.
+=======
+    CompletionHosts(CompletionProtocol),
+    AgentServe,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+/// Protocol filter used by hidden completion plumbing.
+pub enum CompletionProtocol {
+    All,
+    Ssh,
+    Rdp,
+}
+
+/// Parsed top-level command-line arguments.
+>>>>>>> Stashed changes
+>>>>>>> Stashed changes
 #[derive(Debug, Clone)]
 pub struct MainArgs {
     /// Debug verbosity requested on the CLI (`-d` safe, `-dd` raw).
@@ -199,6 +222,28 @@ fn build_cli_command() -> Command {
                 .arg_required_else_help(false)
                 .arg(Arg::new("serve").long("serve").hide(true).action(clap::ArgAction::SetTrue)),
         )
+<<<<<<< Updated upstream
+=======
+<<<<<<< Updated upstream
+        .arg(Arg::new("ssh_args").help("SSH arguments to forward to the SSH command").num_args(1..))
+=======
+        .subcommand(
+            Command::new("__complete")
+                .hide(true)
+                .subcommand_required(true)
+                .arg_required_else_help(true)
+                .subcommand(
+                    Command::new("hosts").hide(true).arg(
+                        Arg::new("protocol")
+                            .long("protocol")
+                            .num_args(1)
+                            .default_value("all")
+                            .value_parser(["all", "ssh", "rdp"]),
+                    ),
+                ),
+        )
+>>>>>>> Stashed changes
+>>>>>>> Stashed changes
         .after_help(
             r"
 cossh                                                     # Launch interactive session manager
@@ -214,6 +259,31 @@ cossh --migrate                                           # Import ~/.ssh/config
         )
 }
 
+<<<<<<< Updated upstream
+=======
+<<<<<<< Updated upstream
+fn detect_non_interactive_ssh_args(ssh_args: &[String]) -> bool {
+    ssh_args.iter().any(|arg| matches!(arg.as_str(), "-G" | "-V" | "-O" | "-Q"))
+=======
+fn parse_completion_protocol(value: &str) -> CompletionProtocol {
+    match value.to_ascii_lowercase().as_str() {
+        "ssh" => CompletionProtocol::Ssh,
+        "rdp" => CompletionProtocol::Rdp,
+        _ => CompletionProtocol::All,
+    }
+}
+
+fn parse_completion_command(completion_matches: &clap::ArgMatches) -> Option<MainCommand> {
+    match completion_matches.subcommand() {
+        Some(("hosts", hosts_matches)) => {
+            let protocol = hosts_matches.get_one::<String>("protocol").map(|value| parse_completion_protocol(value));
+            Some(MainCommand::CompletionHosts(protocol.unwrap_or(CompletionProtocol::All)))
+        }
+        _ => None,
+    }
+}
+
+>>>>>>> Stashed changes
 fn parse_ssh_command(ssh_matches: &clap::ArgMatches) -> Option<SshCommandArgs> {
     let ssh_args: Vec<String> = ssh_matches
         .get_many::<String>("ssh_args")
@@ -270,6 +340,10 @@ fn parse_main_command(matches: &clap::ArgMatches) -> Option<MainCommand> {
         ("ssh", ssh_matches) => parse_ssh_command(ssh_matches).map(ProtocolCommand::Ssh).map(MainCommand::Protocol),
         ("rdp", rdp_matches) => parse_rdp_command(rdp_matches).map(ProtocolCommand::Rdp).map(MainCommand::Protocol),
         ("vault", vault_matches) => parse_vault_command(vault_matches).map(MainCommand::Vault),
+<<<<<<< Updated upstream
+=======
+        ("__complete", completion_matches) => parse_completion_command(completion_matches),
+>>>>>>> Stashed changes
         ("agent", agent_matches) if agent_matches.get_flag("serve") => Some(MainCommand::AgentServe),
         _ => None,
     }
@@ -289,6 +363,10 @@ fn validate_main_args(cmd: &Command, matches: &clap::ArgMatches, parsed: &MainAr
     }
 
     Ok(())
+<<<<<<< Updated upstream
+=======
+>>>>>>> Stashed changes
+>>>>>>> Stashed changes
 }
 
 fn parse_main_args_from<I, T>(cmd: &Command, raw_args: I) -> MainArgs
@@ -336,11 +414,22 @@ pub fn main_args() -> MainArgs {
     let cmd = build_cli_command();
     let parsed = parse_main_args_from(&cmd, std::env::args_os());
 
+<<<<<<< Updated upstream
     if matches!(parsed.command, Some(MainCommand::AgentServe)) {
+=======
+<<<<<<< Updated upstream
+    if parsed.add_pass.is_none() && !parsed.interactive && parsed.ssh_args.is_empty() {
+=======
+    if matches!(parsed.command, Some(MainCommand::AgentServe) | Some(MainCommand::CompletionHosts(_))) {
+>>>>>>> Stashed changes
         return parsed;
     }
 
     if parsed.command.is_none() && !parsed.interactive {
+<<<<<<< Updated upstream
+=======
+>>>>>>> Stashed changes
+>>>>>>> Stashed changes
         let mut help_cmd = cmd;
         let _ = help_cmd.print_long_help();
         println!();
