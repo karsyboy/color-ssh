@@ -84,8 +84,40 @@ fn run_vault_mode(logger: &log::Logger, args: &args::MainArgs, vault_command: &a
     auth::run_vault_command(vault_command)
 }
 
-fn configure_non_interactive_runtime(logger: &log::Logger, args: &args::MainArgs) -> super::startup::RuntimeConfigSettings {
-    initialize_config_or_exit(logger, args.profile.clone(), "Failed to initialize config");
+pub(crate) fn resolve_inventory_profile_for_protocol_command(command: &args::ProtocolCommand, inventory_hosts: &[inventory::InventoryHost]) -> Option<String> {
+    match command {
+        args::ProtocolCommand::Ssh(ssh_command) => crate::ssh_args::extract_destination_host(&ssh_command.ssh_args)
+            .and_then(|destination| process::resolve_host_by_destination(&destination, inventory_hosts))
+            .filter(|host| matches!(&host.protocol, inventory::ConnectionProtocol::Ssh))
+            .and_then(|host| host.profile.clone()),
+        args::ProtocolCommand::Rdp(rdp_command) => process::resolve_host_by_destination(&rdp_command.target, inventory_hosts)
+            .filter(|host| matches!(&host.protocol, inventory::ConnectionProtocol::Rdp))
+            .and_then(|host| host.profile.clone()),
+    }
+}
+
+pub(crate) fn resolve_runtime_profile_for_command(
+    explicit_profile: Option<&str>,
+    command: Option<&args::MainCommand>,
+    inventory_hosts: &[inventory::InventoryHost],
+) -> Option<String> {
+    explicit_profile.map(str::to_string).or_else(|| match command {
+        Some(args::MainCommand::Protocol(protocol_command)) => resolve_inventory_profile_for_protocol_command(protocol_command, inventory_hosts),
+        _ => None,
+    })
+}
+
+fn effective_runtime_profile(args: &args::MainArgs) -> Option<String> {
+    if let Some(profile) = args.profile.as_ref() {
+        return Some(profile.clone());
+    }
+
+    let inventory_hosts = inventory::load_inventory_tree().ok().map(|tree| tree.hosts).unwrap_or_default();
+    resolve_runtime_profile_for_command(None, args.command.as_ref(), &inventory_hosts)
+}
+
+fn configure_non_interactive_runtime(logger: &log::Logger, profile: Option<String>, args: &args::MainArgs) -> super::startup::RuntimeConfigSettings {
+    initialize_config_or_exit(logger, profile, "Failed to initialize config");
 
     let runtime_settings = load_runtime_config_settings();
     let (final_debug, final_ssh_log) = resolve_logging_settings(args, runtime_settings.debug_mode, runtime_settings.ssh_logging);
@@ -182,14 +214,15 @@ pub(crate) fn run() -> Result<ExitCode> {
         return run_interactive_session(&logger, &args);
     }
 
-    let runtime_settings = configure_non_interactive_runtime(&logger, &args);
+    let runtime_profile = effective_runtime_profile(&args);
+    let runtime_settings = configure_non_interactive_runtime(&logger, runtime_profile.clone(), &args);
     log_argument_summary(&args);
 
     print_title_banner(runtime_settings.show_title);
     update_protocol_session_name_if_needed(&logger, args.command.as_ref());
 
     log_debug!("Starting configuration file watcher");
-    let _watcher = config::config_watcher(args.profile.clone());
+    let _watcher = config::config_watcher(runtime_profile);
 
     let Some(args::MainCommand::Protocol(protocol_command)) = args.command.clone() else {
         unreachable!("non-interactive dispatch requires a protocol command");

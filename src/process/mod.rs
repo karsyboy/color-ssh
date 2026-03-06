@@ -14,7 +14,7 @@ use crate::args::RdpCommandArgs;
 use crate::{Result, log_debug, log_debug_raw, log_error, log_info, log_warn, ssh_args};
 use std::process::ExitCode;
 
-pub(crate) use launch::{build_rdp_command_for_host, spawn_command};
+pub(crate) use launch::{build_rdp_command_for_host, resolve_host_by_destination, spawn_command};
 pub(crate) const DISABLE_VAULT_AUTOLOGIN_ENV: &str = "COSSH_DISABLE_VAULT_AUTOLOGIN";
 
 pub(crate) fn run_ssh_process(process_args: Vec<String>, is_non_interactive: bool, explicit_pass_entry: Option<String>) -> Result<ExitCode> {

@@ -1,5 +1,6 @@
 use super::{DebugModeSource, debug_mode_source, resolve_logging_settings};
 use crate::args::{MainArgs, MainCommand, ProtocolCommand, SshCommandArgs};
+use crate::inventory::{ConnectionProtocol, InventoryHost};
 use crate::log::DebugVerbosity;
 
 fn base_args(debug_count: u8, ssh_logging: bool, test_mode: bool) -> MainArgs {
@@ -27,4 +28,65 @@ fn resolve_logging_settings_core_modes() {
 fn debug_mode_source_prefers_cli_then_config() {
     assert_eq!(debug_mode_source(&base_args(2, false, false), true), Some(DebugModeSource::CliRaw));
     assert_eq!(debug_mode_source(&base_args(0, false, false), true), Some(DebugModeSource::ConfigSafe));
+}
+
+#[test]
+fn resolve_runtime_profile_for_command_prefers_explicit_cli_profile() {
+    let mut host = InventoryHost::new("router".to_string());
+    host.profile = Some("inventory".to_string());
+
+    let profile = super::dispatch::resolve_runtime_profile_for_command(Some("cli"), base_args(0, false, false).command.as_ref(), &[host]);
+
+    assert_eq!(profile.as_deref(), Some("cli"));
+}
+
+#[test]
+fn resolve_runtime_profile_for_command_uses_inventory_profile_for_direct_ssh_host() {
+    let mut host = InventoryHost::new("router".to_string());
+    host.host = "10.0.0.10".to_string();
+    host.profile = Some("network".to_string());
+
+    let command = MainCommand::Protocol(ProtocolCommand::Ssh(SshCommandArgs {
+        ssh_args: vec!["admin@router".to_string()],
+        is_non_interactive: false,
+    }));
+
+    let profile = super::dispatch::resolve_runtime_profile_for_command(None, Some(&command), &[host]);
+
+    assert_eq!(profile.as_deref(), Some("network"));
+}
+
+#[test]
+fn resolve_runtime_profile_for_command_uses_inventory_profile_for_direct_rdp_host() {
+    let mut host = InventoryHost::new("desktop01".to_string());
+    host.protocol = ConnectionProtocol::Rdp;
+    host.profile = Some("windows".to_string());
+
+    let command = MainCommand::Protocol(ProtocolCommand::Rdp(crate::args::RdpCommandArgs {
+        target: "desktop01".to_string(),
+        user: None,
+        domain: None,
+        port: None,
+        extra_args: Vec::new(),
+    }));
+
+    let profile = super::dispatch::resolve_runtime_profile_for_command(None, Some(&command), &[host]);
+
+    assert_eq!(profile.as_deref(), Some("windows"));
+}
+
+#[test]
+fn resolve_runtime_profile_for_command_ignores_inventory_hosts_with_wrong_protocol() {
+    let mut host = InventoryHost::new("desktop01".to_string());
+    host.protocol = ConnectionProtocol::Rdp;
+    host.profile = Some("windows".to_string());
+
+    let command = MainCommand::Protocol(ProtocolCommand::Ssh(SshCommandArgs {
+        ssh_args: vec!["desktop01".to_string()],
+        is_non_interactive: false,
+    }));
+
+    let profile = super::dispatch::resolve_runtime_profile_for_command(None, Some(&command), &[host]);
+
+    assert_eq!(profile, None);
 }
