@@ -75,7 +75,7 @@ Useful targeted checks:
 - Tag-triggered release workflow (`release.yml`) is for maintainers and publishing, not normal feature validation.
 
 ## Security Considerations
-- Never commit real credentials, vault data, or private inventory host data.
+- Never commit real credentials, vault data, or private inventory host data. Always make sure to use generic examples in test like 10.10.10.10 or 'user'.
 - Runtime data lives under `~/.color-ssh/` (config, logs, vault, inventory) and should remain local.
 - Prefer safe debug mode (`-d`) for diagnostics.
 - Raw debug (`-dd`) may capture terminal content, CLI args, and secrets in `~/.color-ssh/logs/cossh.log`; use only for short troubleshooting sessions.
