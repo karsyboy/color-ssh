@@ -58,10 +58,6 @@ cd color-ssh
 cargo build --release
 ```
 
-### Shell Completion
-Shell completion scripts are included for `fish` and `zsh`. For instructions see the [Shell Completion README](shell-completion/README.md).
-
-
 ## Usage
 
 ```bash
@@ -94,10 +90,6 @@ cossh ssh user@host -G                                    # Non-interactive comm
 cossh rdp desktop01                                       # Launch a configured RDP host
 cossh --migrate                                           # Import ~/.ssh/config into the YAML inventory
 ```
-
-## Documentation
-
-The full user wiki lives in [here](https://github.com/karsyboy/color-ssh/wiki).
 
 ## Configuration
 
@@ -136,6 +128,13 @@ Use this once to import your existing OpenSSH host entries into the YAML invento
 ```bash
 cossh --migrate
 ```
+
+## Documentation
+
+The full user wiki lives in [here](https://github.com/karsyboy/color-ssh/wiki).
+
+### Shell Completion
+Shell completion scripts are included for `fish` and `zsh`. For instructions see the [Shell Completion README](shell-completion/README.md).
 
 ## Uninstall
 
