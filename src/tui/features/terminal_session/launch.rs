@@ -20,13 +20,21 @@ struct SessionLaunchOptions {
     initial_cols: u16,
     pass_entry_override: Option<String>,
     pass_fallback_notice: Option<String>,
+    disable_vault_autologin: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct HostPassResolution {
+    pass_entry_override: Option<String>,
+    pass_fallback_notice: Option<String>,
+    disable_vault_autologin: bool,
 }
 
 fn auto_login_notice(host: &InventoryHost, detail: impl Into<String>) -> String {
     let detail = detail.into();
     match &host.protocol {
         ConnectionProtocol::Ssh => format!("{detail}; continuing with the standard SSH password prompt."),
-        ConnectionProtocol::Rdp => format!("{detail}; RDP launch requires vault-backed credentials."),
+        ConnectionProtocol::Rdp => format!("{detail}; continuing with the FreeRDP password prompt."),
         ConnectionProtocol::Other(protocol) => format!("{detail}; protocol '{}' is not supported for launch.", protocol),
     }
 }
@@ -42,38 +50,53 @@ impl AppState {
         crate::config::history_buffer_for_profile(host.profile.as_deref()).unwrap_or(self.history_buffer)
     }
 
-    fn resolve_host_pass_password(&mut self, host: &InventoryHost, action: VaultUnlockAction) -> Option<(Option<String>, Option<String>)> {
-        let auth_settings = crate::config::auth_settings();
-        if !auth_settings.tui_password_autologin {
-            let notice = match &host.protocol {
-                ConnectionProtocol::Ssh => None,
-                ConnectionProtocol::Rdp => {
-                    Some("TUI password auto-login is disabled in auth settings; enable it to launch RDP sessions from the session manager.".to_string())
-                }
-                ConnectionProtocol::Other(protocol) => Some(format!("Protocol '{}' is not supported for launch.", protocol)),
-            };
-            return Some((None, notice));
+    fn resolve_host_pass_password_with_autologin(
+        &mut self,
+        host: &InventoryHost,
+        action: VaultUnlockAction,
+        tui_password_autologin: bool,
+    ) -> Option<HostPassResolution> {
+        if !tui_password_autologin {
+            return Some(match &host.protocol {
+                ConnectionProtocol::Ssh | ConnectionProtocol::Rdp => HostPassResolution {
+                    pass_entry_override: None,
+                    pass_fallback_notice: None,
+                    disable_vault_autologin: true,
+                },
+                ConnectionProtocol::Other(protocol) => HostPassResolution {
+                    pass_entry_override: None,
+                    pass_fallback_notice: Some(format!("Protocol '{}' is not supported for launch.", protocol)),
+                    disable_vault_autologin: true,
+                },
+            });
         }
 
         let Some(pass_key) = host.vault_pass.as_deref() else {
-            let notice = match &host.protocol {
-                ConnectionProtocol::Ssh => None,
-                ConnectionProtocol::Rdp => Some("RDP launch requires a password vault entry; add `vault_pass: <name>` to the inventory host.".to_string()),
-                ConnectionProtocol::Other(protocol) => Some(format!("Protocol '{}' is not supported for launch.", protocol)),
-            };
-            return Some((None, notice));
+            return Some(match &host.protocol {
+                ConnectionProtocol::Ssh | ConnectionProtocol::Rdp => HostPassResolution {
+                    pass_entry_override: None,
+                    pass_fallback_notice: None,
+                    disable_vault_autologin: false,
+                },
+                ConnectionProtocol::Other(protocol) => HostPassResolution {
+                    pass_entry_override: None,
+                    pass_fallback_notice: Some(format!("Protocol '{}' is not supported for launch.", protocol)),
+                    disable_vault_autologin: false,
+                },
+            });
         };
 
         let client = match agent::AgentClient::new() {
             Ok(client) => client,
             Err(err) => {
-                return Some((
-                    None,
-                    Some(auto_login_notice(
+                return Some(HostPassResolution {
+                    pass_entry_override: None,
+                    pass_fallback_notice: Some(auto_login_notice(
                         host,
                         format!("Password auto-login is unavailable because the password vault agent could not be started ({err})"),
                     )),
-                ));
+                    disable_vault_autologin: true,
+                });
             }
         };
 
@@ -83,41 +106,54 @@ impl AppState {
                 let unlocked = entry_status.status.unlocked;
                 self.set_vault_status(entry_status.status);
                 if exists && unlocked {
-                    return Some((Some(pass_key.to_string()), None));
+                    return Some(HostPassResolution {
+                        pass_entry_override: Some(pass_key.to_string()),
+                        pass_fallback_notice: None,
+                        disable_vault_autologin: false,
+                    });
                 }
                 if !exists {
-                    return Some((
-                        None,
-                        Some(auto_login_notice(
+                    return Some(HostPassResolution {
+                        pass_entry_override: None,
+                        pass_fallback_notice: Some(auto_login_notice(
                             host,
                             format!("Password auto-login is unavailable because vault entry '{}' was not found", pass_key),
                         )),
-                    ));
+                        disable_vault_autologin: true,
+                    });
                 }
                 self.open_vault_unlock(pass_key.to_string(), action);
                 None
             }
-            Err(agent::AgentError::VaultNotInitialized) => Some((
-                None,
-                Some(match &host.protocol {
+            Err(agent::AgentError::VaultNotInitialized) => Some(HostPassResolution {
+                pass_entry_override: None,
+                pass_fallback_notice: Some(match &host.protocol {
                     ConnectionProtocol::Ssh => "Password vault is not initialized. Run `cossh vault init` or `cossh vault add <name>` first.".to_string(),
-                    ConnectionProtocol::Rdp => {
-                        "RDP launch requires an initialized password vault. Run `cossh vault init` or `cossh vault add <name>` first.".to_string()
-                    }
+                    ConnectionProtocol::Rdp => auto_login_notice(
+                        host,
+                        "the password vault is not initialized. Run `cossh vault init` or `cossh vault add <name>` first",
+                    ),
                     ConnectionProtocol::Other(protocol) => format!("Protocol '{}' is not supported for launch.", protocol),
                 }),
-            )),
+                disable_vault_autologin: true,
+            }),
             Err(err) => {
                 log_debug!("Password auto-login unavailable for host {}: {}", host.name, err);
-                Some((
-                    None,
-                    Some(auto_login_notice(
+                Some(HostPassResolution {
+                    pass_entry_override: None,
+                    pass_fallback_notice: Some(auto_login_notice(
                         host,
                         format!("Password auto-login is unavailable because the password vault could not be queried ({err})"),
                     )),
-                ))
+                    disable_vault_autologin: true,
+                })
             }
         }
+    }
+
+    fn resolve_host_pass_password(&mut self, host: &InventoryHost, action: VaultUnlockAction) -> Option<HostPassResolution> {
+        let auth_settings = crate::config::auth_settings();
+        self.resolve_host_pass_password_with_autologin(host, action, auth_settings.tui_password_autologin)
     }
 
     pub(crate) fn select_host_to_connect(&mut self) {
@@ -148,10 +184,16 @@ impl AppState {
             host: Box::new(host.clone()),
             force_ssh_logging,
         };
-        let Some((pass_entry_override, pass_fallback_notice)) = self.resolve_host_pass_password(&host, action) else {
+        let Some(auth_resolution) = self.resolve_host_pass_password(&host, action) else {
             return;
         };
-        self.open_host_tab_with_auth(host, force_ssh_logging, pass_entry_override, pass_fallback_notice);
+        self.open_host_tab_with_auth(
+            host,
+            force_ssh_logging,
+            auth_resolution.pass_entry_override,
+            auth_resolution.pass_fallback_notice,
+            auth_resolution.disable_vault_autologin,
+        );
     }
 
     fn open_host_tab_with_auth(
@@ -160,6 +202,7 @@ impl AppState {
         force_ssh_logging: bool,
         pass_entry_override: Option<String>,
         pass_fallback_notice: Option<String>,
+        disable_vault_autologin: bool,
     ) {
         let existing_count = self.tabs.iter().filter(|tab| tab.host.name == host.name).count();
         let tab_title = if existing_count == 0 {
@@ -177,6 +220,7 @@ impl AppState {
             initial_cols,
             pass_entry_override,
             pass_fallback_notice,
+            disable_vault_autologin,
         };
 
         let (session, session_error) = match Self::spawn_session(&host, &tab_title, history_buffer, session_launch_options) {
@@ -214,13 +258,14 @@ impl AppState {
         pass_entry_override: Option<String>,
         pass_fallback_notice: Option<String>,
     ) {
+        let disable_vault_autologin = pass_fallback_notice.is_some();
         match action {
             VaultUnlockAction::UnlockVault => {}
             VaultUnlockAction::OpenHostTab { host, force_ssh_logging } => {
-                self.open_host_tab_with_auth(*host, force_ssh_logging, pass_entry_override, pass_fallback_notice);
+                self.open_host_tab_with_auth(*host, force_ssh_logging, pass_entry_override, pass_fallback_notice, disable_vault_autologin);
             }
             VaultUnlockAction::ReconnectTab { tab_index } => {
-                self.reconnect_session_with_auth(tab_index, pass_entry_override, pass_fallback_notice);
+                self.reconnect_session_with_auth(tab_index, pass_entry_override, pass_fallback_notice, disable_vault_autologin);
             }
         }
     }
@@ -241,8 +286,8 @@ impl AppState {
             initial_cols,
             pass_entry_override,
             pass_fallback_notice,
+            disable_vault_autologin,
         } = launch_options;
-        let disable_vault_autologin = pass_fallback_notice.is_some();
         let rows = initial_rows.max(1);
         let cols = initial_cols.max(1);
 
@@ -360,17 +405,99 @@ impl AppState {
             initial_cols,
             pass_entry_override,
             pass_fallback_notice,
+            disable_vault_autologin,
             ..
         } = launch_options;
-        if let Some(notice) = pass_fallback_notice {
-            return Err(io::Error::other(notice));
+        let mut launch_host = host.clone();
+        let pass_entry_override = if disable_vault_autologin { None } else { pass_entry_override };
+        if disable_vault_autologin {
+            launch_host.vault_pass = None;
+        }
+        let mut command_spec = process::build_rdp_command_for_host(&launch_host, pass_entry_override.as_deref())?;
+        let launch_notice = pass_fallback_notice.or(command_spec.fallback_notice.take());
+
+        if command_spec.stdin_payload.is_none() {
+            let pty_system = native_pty_system();
+            let rows = initial_rows.max(1);
+            let cols = initial_cols.max(1);
+            let pty_pair = pty_system
+                .openpty(PtySize {
+                    rows,
+                    cols,
+                    pixel_width: 0,
+                    pixel_height: 0,
+                })
+                .map_err(|err| io::Error::other(err.to_string()))?;
+
+            let program_path = command_path::resolve_known_command_path(&command_spec.program)?;
+            let mut cmd = CommandBuilder::new(&program_path);
+            for arg in &command_spec.args {
+                cmd.arg(arg);
+            }
+            for (key, value) in &command_spec.env {
+                cmd.env(key, value);
+            }
+
+            let child = Arc::new(Mutex::new(pty_pair.slave.spawn_command(cmd).map_err(|err| io::Error::other(err.to_string()))?));
+            let mut reader = pty_pair.master.try_clone_reader().map_err(|err| io::Error::other(err.to_string()))?;
+            let writer = pty_pair.master.take_writer().map_err(|err| io::Error::other(err.to_string()))?;
+            let writer = Arc::new(Mutex::new(writer));
+
+            let parser = Arc::new(Mutex::new(Parser::new_with_pty_writer(rows, cols, history_buffer, writer.clone())));
+            let parser_clone = parser.clone();
+            let exited = Arc::new(Mutex::new(false));
+            let exited_clone = exited.clone();
+            let pty_master = Arc::new(Mutex::new(pty_pair.master));
+            let render_epoch = Arc::new(AtomicU64::new(0));
+            let render_epoch_clone = render_epoch.clone();
+
+            if let Some(notice) = launch_notice
+                && let Ok(mut parser) = parser.lock()
+            {
+                let message = format!("\r\n[color-ssh] {}\r\n", notice);
+                parser.process(message.as_bytes());
+                render_epoch.fetch_add(1, Ordering::Relaxed);
+            }
+
+            std::thread::spawn(move || {
+                let mut buf = [0u8; 8192];
+                loop {
+                    match reader.read(&mut buf) {
+                        Ok(0) => {
+                            if let Ok(mut exited) = exited_clone.lock() {
+                                *exited = true;
+                            }
+                            break;
+                        }
+                        Ok(bytes_read) => {
+                            if let Ok(mut parser) = parser_clone.lock() {
+                                parser.process(&buf[..bytes_read]);
+                                render_epoch_clone.fetch_add(1, Ordering::Relaxed);
+                            }
+                        }
+                        Err(err) => {
+                            log_error!("Error reading from PTY: {}", err);
+                            if let Ok(mut exited) = exited_clone.lock() {
+                                *exited = true;
+                            }
+                            break;
+                        }
+                    }
+                }
+                log_debug!("PTY reader thread exiting");
+            });
+
+            return Ok(ManagedSession {
+                pty_master: Some(pty_master),
+                writer: Some(writer),
+                child: ManagedChild::Pty(child),
+                parser,
+                exited,
+                render_epoch,
+            });
         }
 
-        let mut child = process::spawn_command(
-            process::build_rdp_command_for_host(host, pass_entry_override.as_deref())?,
-            Stdio::piped(),
-            Stdio::piped(),
-        )?;
+        let mut child = process::spawn_command(command_spec, Stdio::piped(), Stdio::piped())?;
         let stdout = child.stdout.take().ok_or_else(|| io::Error::other("failed to capture FreeRDP stdout"))?;
         let stderr = child.stderr.take().ok_or_else(|| io::Error::other("failed to capture FreeRDP stderr"))?;
 
@@ -384,6 +511,14 @@ impl AppState {
         spawn_output_reader("freerdp stdout", stdout, parser.clone(), render_epoch.clone());
         spawn_output_reader("freerdp stderr", stderr, parser.clone(), render_epoch.clone());
         spawn_process_exit_watcher(child.clone(), exited.clone());
+
+        if let Some(notice) = launch_notice
+            && let Ok(mut parser) = parser.lock()
+        {
+            let message = format!("\r\n[color-ssh] {}\r\n", notice);
+            parser.process(message.as_bytes());
+            render_epoch.fetch_add(1, Ordering::Relaxed);
+        }
 
         Ok(ManagedSession {
             pty_master: None,
@@ -406,13 +541,24 @@ impl AppState {
         log_debug!("Reconnecting session for host: {}", host.name);
 
         let action = VaultUnlockAction::ReconnectTab { tab_index };
-        let Some((pass_entry_override, pass_fallback_notice)) = self.resolve_host_pass_password(&host, action) else {
+        let Some(auth_resolution) = self.resolve_host_pass_password(&host, action) else {
             return;
         };
-        self.reconnect_session_with_auth(tab_index, pass_entry_override, pass_fallback_notice);
+        self.reconnect_session_with_auth(
+            tab_index,
+            auth_resolution.pass_entry_override,
+            auth_resolution.pass_fallback_notice,
+            auth_resolution.disable_vault_autologin,
+        );
     }
 
-    fn reconnect_session_with_auth(&mut self, tab_index: usize, pass_entry_override: Option<String>, pass_fallback_notice: Option<String>) {
+    fn reconnect_session_with_auth(
+        &mut self,
+        tab_index: usize,
+        pass_entry_override: Option<String>,
+        pass_fallback_notice: Option<String>,
+        disable_vault_autologin: bool,
+    ) {
         if self.tabs.is_empty() || tab_index >= self.tabs.len() {
             return;
         }
@@ -436,6 +582,7 @@ impl AppState {
             initial_cols,
             pass_entry_override,
             pass_fallback_notice,
+            disable_vault_autologin,
         };
 
         match Self::spawn_session(&host, &tab_title, history_buffer, session_launch_options) {
@@ -499,3 +646,7 @@ impl AppState {
         }
     }
 }
+
+#[cfg(test)]
+#[path = "../../../test/tui/terminal_launch.rs"]
+mod tests;

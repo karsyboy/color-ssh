@@ -127,7 +127,7 @@ fn build_cli_command() -> Command {
         .arg(
             Arg::new("pass_entry")
                 .long("pass-entry")
-                .help("Override the password vault entry used for a direct protocol launch")
+                .help("Override the optional password vault entry used for a direct protocol launch")
                 .num_args(1)
                 .value_name("name")
                 .value_parser(clap::builder::ValueParser::new(validation::parse_vault_entry_name)),

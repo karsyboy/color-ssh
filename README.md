@@ -124,7 +124,7 @@ If no configuration file is found the default configuration will be created at `
 | `host` | Actual destination hostname or IP address. |
 | `description` | Text shown in the TUI info/details view. |
 | `profile` | Uses the matching `cossh` runtime profile when opening the host. |
-| `vault_pass` | Password vault entry used for password auto-login. |
+| `vault_pass` | Optional password vault entry used for password auto-login.|
 | `hidden` | Hides the host from the interactive host list and search results. |
 | `identity_file`, `proxy_jump`, `proxy_command`, `forward_agent`, `local_forward`, `remote_forward`, `ssh_options` | SSH-specific connection settings. |
 | `rdp_domain`, `rdp_args` | RDP-specific connection settings. |

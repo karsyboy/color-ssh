@@ -68,6 +68,11 @@ pub(crate) fn run_rdp_process(rdp_args: RdpCommandArgs, explicit_pass_entry: Opt
         eprintln!("[color-ssh] {}", notice);
     }
 
+    if command_spec.stdin_payload.is_none() {
+        log_info!("Using passthrough mode for RDP command so FreeRDP can prompt on the controlling terminal");
+        return launch::spawn_passthrough(command_spec);
+    }
+
     let child = launch::spawn_command(command_spec, std::process::Stdio::piped(), std::process::Stdio::piped()).map_err(|err| {
         log_error!("Failed to spawn RDP process: {}", err);
         err

@@ -3,11 +3,11 @@
 use crate::auth::secret::ExposeSecret;
 use crate::auth::{agent, ipc::UnlockPolicy};
 use crate::config;
+use crate::inventory::ConnectionProtocol;
 use crate::log_debug;
 use crate::tui::{AppState, VaultStatusModalState, VaultUnlockAction, VaultUnlockState};
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
-const VAULT_UNLOCK_CANCEL_NOTICE: &str = "Password vault unlock canceled; falling back to the standard SSH password prompt.";
 const VAULT_UNLOCK_RETRY_NOTICE: &str = "Invalid master password. Try again.";
 const MANUAL_VAULT_UNLOCK_RETRY_NOTICE: &str = "Vault unlock failed after multiple attempts. Try again.";
 
@@ -17,6 +17,23 @@ fn current_unlock_policy() -> UnlockPolicy {
 }
 
 impl AppState {
+    fn launch_protocol_for_vault_action<'a>(&'a self, action: &'a VaultUnlockAction) -> Option<&'a ConnectionProtocol> {
+        match action {
+            VaultUnlockAction::UnlockVault => None,
+            VaultUnlockAction::OpenHostTab { host, .. } => Some(&host.protocol),
+            VaultUnlockAction::ReconnectTab { tab_index } => self.tabs.get(*tab_index).map(|tab| &tab.host.protocol),
+        }
+    }
+
+    fn vault_unlock_fallback_notice(&self, action: &VaultUnlockAction, detail: impl Into<String>) -> String {
+        let detail = detail.into();
+        match self.launch_protocol_for_vault_action(action) {
+            Some(ConnectionProtocol::Rdp) => format!("{detail}; continuing with the FreeRDP password prompt."),
+            Some(ConnectionProtocol::Other(protocol)) => format!("{detail}; protocol '{}' is not supported for launch.", protocol),
+            _ => format!("{detail}; continuing with the standard SSH password prompt."),
+        }
+    }
+
     pub(crate) fn open_vault_unlock(&mut self, entry_name: String, action: VaultUnlockAction) {
         log_debug!("Opening TUI password vault unlock prompt");
         self.quick_connect = None;
@@ -144,7 +161,7 @@ impl AppState {
                     self.restore_vault_status_modal(None);
                     return;
                 }
-                let cancel_notice = (!action.is_manual_unlock()).then(|| VAULT_UNLOCK_CANCEL_NOTICE.to_string());
+                let cancel_notice = (!action.is_manual_unlock()).then(|| self.vault_unlock_fallback_notice(&action, "Password vault unlock canceled"));
                 self.complete_vault_unlock_action(action, None, cancel_notice);
             }
             KeyCode::Enter => {
@@ -218,13 +235,11 @@ impl AppState {
                     self.vault_unlock = Some(prompt);
                     return;
                 }
-                self.complete_vault_unlock_action(
-                    action,
-                    None,
-                    Some(format!(
-                        "Password auto-login is unavailable because the password vault agent could not be started ({err}); continuing with the standard SSH password prompt."
-                    )),
+                let fallback_notice = self.vault_unlock_fallback_notice(
+                    &action,
+                    format!("Password auto-login is unavailable because the password vault agent could not be started ({err})"),
                 );
+                self.complete_vault_unlock_action(action, None, Some(fallback_notice));
                 return;
             }
         };
@@ -238,13 +253,11 @@ impl AppState {
                     self.vault_unlock = Some(prompt);
                     return;
                 }
-                self.complete_vault_unlock_action(
-                    action,
-                    None,
-                    Some(format!(
-                        "Password auto-login is unavailable because the password vault input could not be processed ({err}); continuing with the standard SSH password prompt."
-                    )),
+                let fallback_notice = self.vault_unlock_fallback_notice(
+                    &action,
+                    format!("Password auto-login is unavailable because the password vault input could not be processed ({err})"),
                 );
+                self.complete_vault_unlock_action(action, None, Some(fallback_notice));
                 return;
             }
         };
@@ -269,11 +282,11 @@ impl AppState {
                         self.close_manual_vault_unlock_after_attempt_limit(return_to_vault_status);
                         return;
                     }
-                    self.complete_vault_unlock_action(
-                        action,
-                        None,
-                        Some("Password auto-login is unavailable because vault unlock failed after multiple attempts; continuing with the standard SSH password prompt.".to_string()),
+                    let fallback_notice = self.vault_unlock_fallback_notice(
+                        &action,
+                        "Password auto-login is unavailable because vault unlock failed after multiple attempts",
                     );
+                    self.complete_vault_unlock_action(action, None, Some(fallback_notice));
                     return;
                 }
 
@@ -289,11 +302,11 @@ impl AppState {
                     self.vault_unlock = Some(prompt);
                     return;
                 }
-                self.complete_vault_unlock_action(
-                    action,
-                    None,
-                    Some("Password vault is not initialized. Run `cossh vault init` or `cossh vault add <name>` first.".to_string()),
+                let fallback_notice = self.vault_unlock_fallback_notice(
+                    &action,
+                    "Password vault is not initialized. Run `cossh vault init` or `cossh vault add <name>` first.",
                 );
+                self.complete_vault_unlock_action(action, None, Some(fallback_notice));
             }
             Err(err) => {
                 log_debug!("TUI password vault unlock failed: {}", err);
@@ -303,14 +316,16 @@ impl AppState {
                     self.vault_unlock = Some(prompt);
                     return;
                 }
-                self.complete_vault_unlock_action(
-                    action,
-                    None,
-                    Some(format!(
-                        "Password auto-login is unavailable because the password vault could not be unlocked ({err}); continuing with the standard SSH password prompt."
-                    )),
+                let fallback_notice = self.vault_unlock_fallback_notice(
+                    &action,
+                    format!("Password auto-login is unavailable because the password vault could not be unlocked ({err})"),
                 );
+                self.complete_vault_unlock_action(action, None, Some(fallback_notice));
             }
         }
     }
 }
+
+#[cfg(test)]
+#[path = "../../../test/tui/pass_prompt.rs"]
+mod tests;
