@@ -1,123 +1,70 @@
 # Terminal Core Architecture
 
-Color-SSH now has a dedicated `src/terminal_core/` layer for embedded terminal frontends.
+Color-SSH's interactive architecture is now PTY-centered. Interactive SSH display is derived from canonical terminal state, not from stdout rewriting.
 
-## Layers
+## PTY Ownership
 
-### `TerminalSession`
+- Direct `cossh ssh` in `src/process/pty_runtime.rs` opens the PTY and owns the local terminal mode while that session is active.
+- `TerminalSession` owns the PTY master handle when a session has one, plus the input writer, child handle, exit state, and render epoch for that session.
+- TUI-managed SSH tabs also wrap their per-tab PTY state in `TerminalSession`.
+- `src/process/interactive_passthrough.rs` is the only non-PTY interactive path that remains, and it exists only where a PTY-owned renderer is not yet available.
 
-- Owns PTY or child-process lifecycle.
-- Owns input transport back to the running session.
-- Owns resize coordination between the PTY surface and terminal engine.
-- Tracks exit state and render invalidation epoch.
+## Terminal State Ownership
 
-### `TerminalEngine`
+- `TerminalEngine` owns `alacritty_terminal::Term` and the VTE processor.
+- PTY bytes or managed-process output are applied to the engine exactly once.
+- `TerminalViewModel` exposes snapshot data for visible rows, cells, cursor state, selection helpers, alternate-screen state, and mouse protocol state.
+- Renderers do not read from PTY streams and do not mutate emulator state directly.
 
-- Owns `alacritty_terminal::Term` and the VTE processor.
-- Applies terminal output bytes to canonical terminal state.
-- Handles resize, scrollback offset, search, and selection extraction.
-- Is the source of truth for embedded interactive terminal state.
+## Renderer Responsibilities
 
-### `TerminalViewModel`
+- `src/terminal_ratatui.rs` converts `TerminalViewport` snapshots into ratatui buffer cells.
+- The renderer combines base terminal cell styling with optional overlay styling at paint time.
+- Cursor presentation, scrollback presentation, and viewport painting are renderer concerns.
+- Renderers never inject ANSI sequences back into a PTY or child stdout stream.
 
-- Exposes renderer-facing terminal data without exposing raw PTY streams.
-- Provides visible cells, cursor state, mouse protocol state, visible row text, and selection extraction helpers.
-- Can snapshot the visible grid into backend-neutral viewport rows/cells so ratatui today and a future GUI can render the same terminal state.
-- Is intended to be consumed by both the current TUI and a future GUI renderer.
+## Highlight Overlay Responsibilities
 
-### `HighlightOverlayEngine`
+- `HighlightOverlayEngine` consumes a `HighlightOverlayViewport` snapshot and returns additive highlight spans for visible rows.
+- It uses shared compiled regex/style data from `src/highlight_rules.rs`.
+- It decides suppression based on alternate-screen state, mouse reporting, fullscreen compatibility heuristics, volatile repaint detection, and config.
+- It does not rewrite PTY bytes and does not mutate `TerminalEngine` state.
 
-- Lives next to the terminal core, not inside process streaming.
-- Consumes viewport snapshots instead of raw stdout chunks.
-- Reuses the existing compiled regex rules, but converts their ANSI styles into frontend-neutral overlay styles.
-- Returns additive highlight spans for currently visible rows without mutating PTY bytes or `alacritty_terminal` state.
-- Is reusable by the ratatui frontend today and a future GUI renderer later.
+## Runtime Selection
 
-## Overlay Highlighting Behavior
+- Direct interactive SSH uses the PTY-centered runtime whenever stdin and stdout are attached to an interactive TTY and the session is not an embedded recursive launch.
+- Embedded recursive `cossh ssh` launches and direct SSH without a controlling TTY use `src/process/interactive_passthrough.rs`.
+- Direct RDP still uses the passthrough runner when Color-SSH must capture and forward FreeRDP stdout/stderr.
 
-- Highlighting now happens at render time on top of terminal grid state.
+## Overlay Behavior
+
+- Highlighting happens at render time on top of canonical terminal grid state.
 - Raw PTY bytes remain unchanged, so cursor control, alternate-screen programs, and terminal correctness continue to follow `alacritty_terminal` exactly.
-- Visible shell output still receives semantic keyword highlighting when the viewport is stable.
-- Highlighting is automatically suppressed in `interactive_settings.overlay_highlighting: auto` when:
-  - the terminal is in the alternate screen
-  - mouse-reporting modes indicate a TUI-style application
-  - a primary-screen viewport looks fullscreen and the remote app has hidden the cursor, which strongly suggests line-oriented semantic overlays are unreliable
-  - the visible viewport is repainting aggressively enough that semantic overlays become noisy or misleading
-- `interactive_settings.overlay_auto_policy` tunes how `overlay_highlighting: auto` reacts to suspicious primary-screen fullscreen apps:
-  - `safe` disables overlays for those views
-  - `reduced` limits overlays to the trailing shell-style rows instead of the full viewport
-  - `relaxed` ignores that heuristic and only applies the hard suppressions above
-- `interactive_settings.overlay_highlighting: always` forces overlays on even in those cases.
-- `interactive_settings.overlay_highlighting: off` disables the renderer-side overlay entirely.
+- Visible shell output still receives semantic keyword highlighting when the viewport is stable enough for additive decoration.
+- In `interactive_settings.overlay_highlighting: auto`, overlays are suppressed for alternate-screen sessions, mouse-reporting TUIs, suspicious primary-screen fullscreen views, and volatile repaint churn.
+- `interactive_settings.overlay_auto_policy` controls whether suspicious primary-screen fullscreen views are fully suppressed, reduced to trailing shell-like rows, or left enabled unless a hard suppression applies.
 
-## Overlay Performance Design
+## Overlay Performance Model
 
-- Overlay analysis now runs from a renderer-owned viewport snapshot (`HighlightOverlayViewport`) after the terminal engine lock is released.
-- The engine mutex is only held long enough to snapshot the visible cells, cursor visibility, mouse mode, and alternate-screen state.
-- Highlight analysis is row-local and cached by normalized visible row text (trailing padding is ignored because it does not affect regex matches or cell-column ranges).
-- Cache reuse is content-based rather than absolute-row-based, so repeated log lines, prompt redraws, and rows that shift during scrolling can reuse the same analyzed spans.
-- Cached row analyses are bounded to roughly `visible_rows * 8`, clamped to `[128, 1024]` entries, and pruned by recency to avoid unbounded memory growth during long log streams.
+- Overlay analysis runs from a renderer-owned viewport snapshot after the terminal engine lock is released.
+- The engine mutex is held only long enough to snapshot the visible grid, cursor visibility, alternate-screen state, and mouse protocol state.
+- Row analysis is cached by normalized visible text, so repeated prompt lines, log lines, and scroll shifts can reuse prior work.
+- Cache size is bounded to roughly `visible_rows * 8`, clamped to `[128, 1024]`, and pruned by recency.
+- Config reloads clear overlay caches because rules, styles, or suppression mode may have changed.
 
-## Overlay Invalidation Rules
+## Intentionally Retained Transitional Code
 
-- Reuse the entire cached overlay when the render epoch and scrollback position are unchanged and volatile-suppression state is still valid.
-- Reuse the entire cached overlay even across render-epoch changes when the normalized visible rows and suppression reason are unchanged.
-- Reanalyze only rows whose normalized visible text is not already present in the row-analysis cache.
-- Reuse cached row analyses for rows newly entering the viewport if their text was analyzed recently, which keeps scrolling and repeated output cheap.
-- Resize and wrap changes invalidate only the rows whose snapped visible text changes; unchanged snapped rows keep their cached analysis.
-- Config reloads clear all overlay caches because rule sets, styles, and suppression mode may have changed.
-- Alternate-screen mode, mouse-reporting mode, fullscreen-compatibility suppression, and volatile-repaint suppression return an empty overlay without preserving stale visible-row state.
-- In `overlay_auto_policy: reduced`, suspicious primary-screen fullscreen viewports only analyze the trailing shell-style rows instead of the whole screen.
+- `src/process/interactive_passthrough.rs`
+  - Required for embedded recursive TUI launches until tabs launch SSH directly instead of re-entering the CLI.
+  - Required for direct SSH when there is no interactive controlling TTY and the PTY renderer cannot own the local terminal surface.
+  - Required for direct RDP launches that still need captured stdout/stderr forwarding.
+- `COSSH_EMBEDDED_INTERACTIVE_SSH`
+  - Still marks recursive TUI-launched `cossh ssh` so direct CLI logic does not try to take over the already-managed outer terminal.
 
-## Overlay Profiling Hooks
+## Long-Term Design
 
-- `HighlightOverlayEngine` keeps in-memory counters for build kind, analyzed rows, row-cache hits/misses, cache size, and build duration.
-- Safe debug logging emits periodic perf summaries and always logs slow overlay builds.
-- The instrumentation is renderer-local and lock-free; it does not add cross-thread contention to the render hot path.
-
-## Overlay Tradeoffs
-
-- The cache is intentionally row-local and does not try to infer multi-line semantic state, which keeps correctness aligned with the current per-line regex rule model.
-- Trailing-space changes are ignored for cache keys so prompt redraws and wrap padding do not trigger pointless re-analysis.
-- The primary-screen fullscreen heuristic intentionally requires cursor hiding plus a dense, mostly non-empty viewport so normal shell/log output is not suppressed just because it fills the screen.
-- Overlay snapshots duplicate only the visible viewport state needed for rendering, trading a small amount of transient memory for less time spent holding the terminal engine mutex.
-
-Overlay mode is safer than stream rewriting because the renderer only changes presentation. It does not inject ANSI sequences back into the PTY stream, so remote programs and local terminal emulation continue to observe the original byte stream.
-
-## Transitional Code Still In Use
-
-The following code remains transitional in this phase:
-
-- `src/process/stream.rs`
-  - Still powers explicit legacy fallback selection for direct SSH launches.
-  - Still powers embedded recursive `cossh ssh` launches from the current TUI, but those embedded launches now run in plain stream mode so the outer renderer owns highlighting.
-  - Still contains the legacy stream-based stdout rewriting path for fallback use.
-
-- `src/highlighter/`
-  - Still contains the legacy ANSI-oriented highlighting implementation.
-  - Regex rule compilation and match ordering remain reusable, but renderer overlays are now the default direction for interactive terminal highlighting.
-
-- `src/tui/terminal_emulator.rs` and `src/tui/terminal/`
-  - Now act as compatibility facades so the current TUI can adopt the new core layer with minimal churn.
-
-## Immediate Intent
-
-Direct `cossh ssh` launches are now expected to prefer the PTY-centered runtime in `src/process/pty_runtime.rs`.
-
-That PTY runtime is now authoritative for direct interactive SSH behavior:
-
-1. SSH runs inside a PTY
-2. PTY bytes feed `alacritty_terminal`
-3. visible terminal state is rendered from the terminal engine
-4. terminal display no longer depends on stdout transformation
-
-The current TUI recursion path remains transitional for one reason: it still launches `cossh ssh` inside its own PTY. That recursive path is explicitly marked as embedded legacy mode until the session manager launches SSH directly instead of re-entering the CLI.
-
-This phase still does not replace every interactive session path end to end.
-
-It does establish the ownership boundaries needed for the next phases:
-
-1. direct PTY-backed session launching without recursive `cossh` embedding
-2. PTY-side logging for embedded sessions
-3. broader reuse of renderer-side syntax overlays across frontends
-4. alternate renderer support, including a future GUI frontend
+- Direct interactive SSH owns a PTY.
+- Terminal state lives in `TerminalEngine`.
+- Renderers consume snapshots from `TerminalViewModel`.
+- Semantic highlighting is an overlay applied during rendering.
+- No interactive SSH path depends on stdout rewriting.

@@ -1,7 +1,7 @@
 //! Config file loading and compile pipeline.
 
 use super::{Config, paths};
-use crate::highlighter::CompiledHighlightRule;
+use crate::highlight_rules::CompiledHighlightRule;
 use crate::{debug_enabled, log_debug, log_info, log_warn};
 use regex::{Regex, RegexSet};
 use std::{fs, io, path::PathBuf};
@@ -135,7 +135,7 @@ fn compile_rules(config: &Config) -> Vec<CompiledHighlightRule> {
             String::new()
         };
 
-        let ansi_code = if !fg_color.is_empty() && !bg_color.is_empty() {
+        let ansi_style = if !fg_color.is_empty() && !bg_color.is_empty() {
             let fg_params = &fg_color[2..fg_color.len() - 1]; // Remove \x1b[ and m
             let bg_params = &bg_color[2..bg_color.len() - 1];
             format!("\x1b[{};{}m", fg_params, bg_params)
@@ -151,7 +151,7 @@ fn compile_rules(config: &Config) -> Vec<CompiledHighlightRule> {
         let clean_regex = rule.regex.replace('\n', "").trim().to_string();
 
         match Regex::new(&clean_regex) {
-            Ok(regex) => rules.push(CompiledHighlightRule::new(regex, ansi_code)),
+            Ok(regex) => rules.push(CompiledHighlightRule::new(regex, ansi_style)),
             Err(err) => {
                 log_warn!("Invalid regex in rule #{} ('{}'): {}", idx + 1, clean_regex, err);
                 failed_rules.push((idx + 1, clean_regex));
@@ -168,13 +168,7 @@ fn compile_rules(config: &Config) -> Vec<CompiledHighlightRule> {
 
     if debug_enabled!() {
         for (i, rule) in rules.iter().enumerate() {
-            log_debug!(
-                "Rule {}: regex = {:?}, color = {:?}, reset_mode = {:?}",
-                i + 1,
-                rule.regex,
-                rule.style,
-                rule.reset_mode
-            );
+            log_debug!("Rule {}: regex = {:?}, ansi_style = {:?}", i + 1, rule.regex, rule.ansi_style,);
         }
     }
 

@@ -407,6 +407,8 @@ impl AppState {
 
         cmd.arg("ssh");
         cmd.arg(&host.name);
+        // Transitional: the TUI still re-enters `cossh ssh` inside a managed PTY
+        // until session tabs launch SSH directly.
         cmd.env(process::EMBEDDED_INTERACTIVE_SSH_ENV, "1");
         cmd.env("COSSH_SESSION_NAME", tab_title);
 

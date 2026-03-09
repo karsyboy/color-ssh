@@ -37,8 +37,8 @@ fn compile_rules_drops_invalid_regex_and_falls_back_for_missing_palette() {
 
     let compiled = compile_rules(&config);
     assert_eq!(compiled.len(), 2);
-    assert_eq!(compiled[0].style, "\x1b[38;2;0;255;0m");
-    assert_eq!(compiled[1].style, "\x1b[0m");
+    assert_eq!(compiled[0].ansi_style, "\x1b[38;2;0;255;0m");
+    assert_eq!(compiled[1].ansi_style, "\x1b[0m");
 }
 
 #[test]

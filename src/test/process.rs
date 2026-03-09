@@ -1,6 +1,6 @@
 use super::exit::map_exit_code;
+use super::interactive_passthrough::{requires_immediate_terminal_flush, should_flush_immediately};
 use super::launch::{build_plain_ssh_command, resolve_host_by_destination, resolve_pass_entry_from_hosts, synthesize_ssh_args};
-use super::stream::{requires_immediate_terminal_flush, should_flush_immediately};
 use crate::inventory::InventoryHost;
 use std::process::ExitCode;
 
@@ -36,17 +36,11 @@ fn map_exit_code_success_failure_and_missing_status_maps_to_expected_code() {
 }
 
 #[test]
-fn flush_decisions_prompt_signals_and_colored_prompt_changes_return_expected_booleans() {
+fn flush_decisions_prompt_signals_return_expected_booleans() {
     let immediate_flush_cases = [("\rprompt", true), ("plain text", false)];
     for (line, expected) in immediate_flush_cases {
         assert_eq!(requires_immediate_terminal_flush(line), expected);
-    }
-
-    let raw_prompt = "router# ";
-    let colored_prompt = "\x1b[38;2;255;0;0mrouter\x1b[0m# ";
-    let flush_cases = [((raw_prompt, colored_prompt, true), true), ((raw_prompt, raw_prompt, false), false)];
-    for ((raw, processed, host_changed), expected) in flush_cases {
-        assert_eq!(should_flush_immediately(raw, processed, host_changed), expected);
+        assert_eq!(should_flush_immediately(line), expected);
     }
 }
 

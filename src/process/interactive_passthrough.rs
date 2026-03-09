@@ -1,13 +1,16 @@
-//! Interactive process output streaming for SSH and RDP launches.
+//! Transitional captured-output runtime for interactive child processes.
 //!
-//! This remains the legacy direct-process path. Direct `cossh ssh` launches now
-//! prefer the PTY-centered runtime in `src/process/pty_runtime.rs`, while this
-//! module stays active for embedded transitional launches and explicit legacy
-//! fallback selection.
+//! This path remains only for interactive sessions that cannot yet use the
+//! PTY-centered renderer stack. It forwards captured child output to the local
+//! terminal without rewriting stdout bytes.
+//!
+//! Current callers:
+//! - embedded recursive `cossh ssh` launches from the TUI
+//! - direct SSH launches without an interactive controlling TTY
+//! - direct RDP launches that still need captured stdout/stderr forwarding
 
 use super::exit::map_exit_code;
-use crate::{Result, config, highlighter, log, log_debug, log_error};
-use std::borrow::Cow;
+use crate::{Result, log, log_debug, log_error};
 use std::io::{self, Read, Write};
 use std::process::{Child, ExitCode};
 use std::sync::{
@@ -17,11 +20,9 @@ use std::sync::{
 use std::thread;
 use std::time::{Duration, Instant};
 
-const STDOUT_FLUSH_BYTES: usize = 32 * 1024;
-const STDOUT_FLUSH_INTERVAL: Duration = Duration::from_millis(25);
-const HIGHLIGHT_FLUSH_HINT_BYTES: usize = 256;
+const OUTPUT_FLUSH_BYTES: usize = 32 * 1024;
+const OUTPUT_FLUSH_INTERVAL: Duration = Duration::from_millis(25);
 const OUTPUT_QUEUE_CAPACITY: usize = 256;
-const RESET_COLOR: &str = "\x1b[0m";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum OutputTarget {
@@ -72,9 +73,8 @@ impl OutputFlushState {
         self.pending_bytes = self.pending_bytes.saturating_add(bytes_written);
     }
 
-    fn flush_if_needed(&mut self, output: &mut impl Write, raw_chunk: &str, processed_chunk: &str, chunk_transformed: bool) -> io::Result<()> {
-        let immediate_flush = should_flush_immediately(raw_chunk, processed_chunk, chunk_transformed);
-        if immediate_flush || self.pending_bytes >= STDOUT_FLUSH_BYTES || self.last_flush_at.elapsed() >= STDOUT_FLUSH_INTERVAL {
+    fn flush_if_needed(&mut self, output: &mut impl Write, chunk: &str) -> io::Result<()> {
+        if should_flush_immediately(chunk) || self.pending_bytes >= OUTPUT_FLUSH_BYTES || self.last_flush_at.elapsed() >= OUTPUT_FLUSH_INTERVAL {
             output.flush()?;
             self.pending_bytes = 0;
             self.last_flush_at = Instant::now();
@@ -83,7 +83,7 @@ impl OutputFlushState {
     }
 
     fn flush_on_idle(&mut self, output: &mut impl Write) -> io::Result<()> {
-        if self.pending_bytes > 0 && self.last_flush_at.elapsed() >= STDOUT_FLUSH_INTERVAL {
+        if self.pending_bytes > 0 && self.last_flush_at.elapsed() >= OUTPUT_FLUSH_INTERVAL {
             output.flush()?;
             self.pending_bytes = 0;
             self.last_flush_at = Instant::now();
@@ -158,116 +158,41 @@ impl Utf8ChunkDecoder {
     }
 }
 
-#[derive(Debug, Default)]
-struct HighlightRuleCache {
-    rules: Vec<highlighter::CompiledHighlightRule>,
-    rule_set: Option<regex::RegexSet>,
-    version: u64,
-}
-
-impl HighlightRuleCache {
-    fn load() -> Self {
-        let (rules, rule_set) = config::with_current_config("loading highlight rules", |cfg| {
-            (cfg.metadata.compiled_rules.clone(), cfg.metadata.compiled_rule_set.clone())
-        });
-
-        Self {
-            rules,
-            rule_set,
-            version: config::current_config_version(),
-        }
-    }
-
-    fn refresh_if_changed(&mut self) {
-        let current_version = config::current_config_version();
-        if current_version == self.version {
-            return;
-        }
-
-        let (rules, rule_set) = config::with_current_config("reloading highlight rules", |cfg| {
-            (cfg.metadata.compiled_rules.clone(), cfg.metadata.compiled_rule_set.clone())
-        });
-        self.rules = rules;
-        self.rule_set = rule_set;
-        self.version = current_version;
-
-        log_debug!("Rules updated due to config reload (version {})", self.version);
-    }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum InteractiveStreamMode {
-    HighlightStdout,
-    Plain,
-}
-
 pub(super) fn requires_immediate_terminal_flush(output: &str) -> bool {
     output.as_bytes().iter().any(|byte| matches!(*byte, b'\r' | 0x1b | 0x08))
 }
 
-pub(super) fn should_flush_immediately(raw_chunk: &str, _processed_chunk: &str, chunk_transformed: bool) -> bool {
-    if requires_immediate_terminal_flush(raw_chunk) {
-        return true;
-    }
-
-    chunk_transformed && raw_chunk.len() <= HIGHLIGHT_FLUSH_HINT_BYTES && !raw_chunk.as_bytes().contains(&b'\n')
+pub(super) fn should_flush_immediately(output: &str) -> bool {
+    requires_immediate_terminal_flush(output)
 }
 
-fn chunk_was_transformed(raw_chunk: &str, processed_chunk: &str) -> bool {
-    !(processed_chunk.len() == raw_chunk.len() && processed_chunk.as_ptr() == raw_chunk.as_ptr())
-}
-
-fn spawn_output_processor(mode: InteractiveStreamMode, rx: Receiver<OutputChunk>) -> io::Result<thread::JoinHandle<()>> {
-    thread::Builder::new().name("output-processor".to_string()).spawn(move || {
-        log_debug!("Output processing thread started");
-        let mut chunk_id = 0;
-        let mut highlight_scratch = highlighter::HighlightScratch::default();
-        let mut color_state = highlighter::AnsiColorState::default();
-        let mut highlight_rules = HighlightRuleCache::load();
+fn spawn_output_forwarder(rx: Receiver<OutputChunk>) -> io::Result<thread::JoinHandle<()>> {
+    thread::Builder::new().name("output-forwarder".to_string()).spawn(move || {
+        log_debug!("Interactive passthrough output thread started");
         let stdout = io::stdout();
         let mut stdout = stdout.lock();
         let mut stdout_flush = OutputFlushState::new();
         let mut stderr_flush = OutputFlushState::new();
 
         loop {
-            match rx.recv_timeout(STDOUT_FLUSH_INTERVAL) {
+            match rx.recv_timeout(OUTPUT_FLUSH_INTERVAL) {
                 Ok(chunk) => {
-                    let raw_chunk = chunk.as_str();
-                    let (processed_chunk, chunk_transformed) = match (mode, chunk.target) {
-                        (InteractiveStreamMode::HighlightStdout, OutputTarget::Stdout) => {
-                            highlight_rules.refresh_if_changed();
-                            let processed_chunk = highlighter::process_chunk_with_scratch(
-                                raw_chunk,
-                                chunk_id,
-                                &highlight_rules.rules,
-                                highlight_rules.rule_set.as_ref(),
-                                RESET_COLOR,
-                                &mut color_state,
-                                &mut highlight_scratch,
-                            );
-                            chunk_id += 1;
-                            let chunk_transformed = chunk_was_transformed(raw_chunk, processed_chunk.as_ref());
-                            (processed_chunk, chunk_transformed)
-                        }
-                        _ => (Cow::Borrowed(raw_chunk), false),
-                    };
-
+                    let output = chunk.as_str();
                     let write_result = match chunk.target {
-                        OutputTarget::Stdout => match stdout.write_all(processed_chunk.as_bytes()) {
+                        OutputTarget::Stdout => match stdout.write_all(output.as_bytes()) {
                             Ok(()) => {
-                                stdout_flush.record_write(processed_chunk.len());
-                                stdout_flush.flush_if_needed(&mut stdout, raw_chunk, &processed_chunk, chunk_transformed)
+                                stdout_flush.record_write(output.len());
+                                stdout_flush.flush_if_needed(&mut stdout, output)
                             }
                             Err(err) => Err(err),
                         },
                         OutputTarget::Stderr => {
-                            // Keep stderr lock scoped to each write so reload notices can print concurrently.
                             let stderr = io::stderr();
                             let mut stderr = stderr.lock();
-                            match stderr.write_all(processed_chunk.as_bytes()) {
+                            match stderr.write_all(output.as_bytes()) {
                                 Ok(()) => {
-                                    stderr_flush.record_write(processed_chunk.len());
-                                    stderr_flush.flush_if_needed(&mut stderr, raw_chunk, &processed_chunk, chunk_transformed)
+                                    stderr_flush.record_write(output.len());
+                                    stderr_flush.flush_if_needed(&mut stderr, output)
                                 }
                                 Err(err) => Err(err),
                             }
@@ -275,7 +200,7 @@ fn spawn_output_processor(mode: InteractiveStreamMode, rx: Receiver<OutputChunk>
                     };
 
                     if let Err(err) = write_result {
-                        log_error!("Failed to write processed output: {}", err);
+                        log_error!("Failed to write interactive passthrough output: {}", err);
                         break;
                     }
                 }
@@ -307,7 +232,7 @@ fn spawn_output_processor(mode: InteractiveStreamMode, rx: Receiver<OutputChunk>
                 log_error!("Failed to flush stderr at thread end: {}", err);
             }
         }
-        log_debug!("Output processing thread finished (processed {} highlighted chunks)", chunk_id);
+        log_debug!("Interactive passthrough output thread finished");
     })
 }
 
@@ -375,7 +300,7 @@ where
     })
 }
 
-fn run_interactive_process(mut child: Child, mode: InteractiveStreamMode, capture_stderr: bool) -> Result<ExitCode> {
+fn run_interactive_passthrough(mut child: Child, capture_stderr: bool) -> Result<ExitCode> {
     let stdout = child.stdout.take().ok_or_else(|| {
         log_error!("Failed to capture child stdout");
         io::Error::other("Failed to capture stdout")
@@ -383,7 +308,7 @@ fn run_interactive_process(mut child: Child, mode: InteractiveStreamMode, captur
     let stderr = if capture_stderr { child.stderr.take() } else { None };
 
     let (tx, rx): (SyncSender<OutputChunk>, Receiver<OutputChunk>) = mpsc::sync_channel(OUTPUT_QUEUE_CAPACITY);
-    let processing_thread = spawn_output_processor(mode, rx).map_err(|err| {
+    let processing_thread = spawn_output_forwarder(rx).map_err(|err| {
         log_error!("Failed to spawn output processing thread: {}", err);
         io::Error::other("Failed to spawn processing thread")
     })?;
@@ -428,23 +353,15 @@ fn run_interactive_process(mut child: Child, mode: InteractiveStreamMode, captur
         err
     })?;
 
-    let exit_code = status.code().unwrap_or(1);
-    log_debug!("Interactive process exited with raw code: {}", exit_code);
-
     Ok(map_exit_code(status.success(), status.code()))
 }
 
-/// Stream interactive SSH output, apply highlighting, and return the final exit code.
+/// Forward interactive SSH output without mutating stdout content.
 pub(super) fn run_interactive_ssh(child: Child) -> Result<ExitCode> {
-    run_interactive_process(child, InteractiveStreamMode::HighlightStdout, false)
+    run_interactive_passthrough(child, false)
 }
 
-/// Stream interactive SSH output without applying renderer-hostile stdout mutation.
-pub(super) fn run_interactive_ssh_plain(child: Child) -> Result<ExitCode> {
-    run_interactive_process(child, InteractiveStreamMode::Plain, false)
-}
-
-/// Stream interactive RDP client output without shell highlighting.
+/// Forward interactive RDP client output without shell highlighting.
 pub(super) fn run_interactive_rdp(child: Child) -> Result<ExitCode> {
-    run_interactive_process(child, InteractiveStreamMode::Plain, true)
+    run_interactive_passthrough(child, true)
 }

@@ -13,7 +13,7 @@ pub use errors::ConfigError;
 pub use schema::{AuthSettings, Config, HighlightOverlayAutoPolicy, HighlightOverlayMode, HighlightRule, InteractiveSettings, Metadata, Settings};
 pub use watcher::config_watcher;
 
-use crate::highlighter::CompiledHighlightRule;
+use crate::highlight_rules::CompiledHighlightRule;
 use once_cell::sync::OnceCell;
 use regex::RegexSet;
 use std::io;

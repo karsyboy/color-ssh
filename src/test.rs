@@ -11,6 +11,6 @@
 //! - `src/test/log/*`
 //! - `src/test/ssh_config/*`
 //! - `src/test/tui/*`
-//! - `src/test/{args,highlighter,process,runtime,ssh_args}.rs`
+//! - `src/test/{args,process,runtime,ssh_args}.rs`
 
 pub(crate) mod support;

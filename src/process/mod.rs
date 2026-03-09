@@ -3,12 +3,12 @@
 mod command_spec;
 mod exit;
 mod interactive;
+mod interactive_passthrough;
 mod launch;
 mod pty_runtime;
 mod rdp_builder;
 mod spawn;
 mod ssh_builder;
-mod stream;
 mod vault;
 
 use crate::args::RdpCommandArgs;
@@ -18,7 +18,6 @@ use std::process::ExitCode;
 pub(crate) use launch::{build_rdp_command_for_host_with_auth_settings, resolve_host_by_destination, spawn_command};
 pub(crate) const DISABLE_VAULT_AUTOLOGIN_ENV: &str = "COSSH_DISABLE_VAULT_AUTOLOGIN";
 pub(crate) const EMBEDDED_INTERACTIVE_SSH_ENV: &str = "COSSH_EMBEDDED_INTERACTIVE_SSH";
-pub(crate) const LEGACY_STREAM_INTERACTIVE_SSH_ENV: &str = "COSSH_USE_LEGACY_STREAM_SSH";
 
 pub(crate) fn run_ssh_process(process_args: Vec<String>, is_non_interactive: bool, explicit_pass_entry: Option<String>) -> Result<ExitCode> {
     log_info!(

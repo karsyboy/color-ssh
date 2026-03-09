@@ -4,6 +4,11 @@
 //! the TUI today and a future GUI frontend later. The goal is to keep process
 //! management, terminal emulation, renderer-facing data extraction, and overlay
 //! logic explicit and independently evolvable.
+//!
+//! Ownership split:
+//! - `TerminalSession` owns PTY/process lifecycle, input transport, and render invalidation.
+//! - `TerminalEngine` owns canonical terminal state.
+//! - renderers consume viewport snapshots plus overlay spans and never rewrite PTY bytes.
 
 mod color;
 mod engine;

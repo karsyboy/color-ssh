@@ -38,7 +38,7 @@ const PTY_EVENT_QUEUE_CAPACITY: usize = 256;
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum InteractiveSshRuntime {
     PtyCentered,
-    LegacyStream,
+    CompatibilityPassthrough,
 }
 
 enum PtyRuntimeEvent {
@@ -86,11 +86,10 @@ impl Drop for TerminalModeGuard {
 
 pub(super) fn prefer_pty_centered_ssh_runtime() -> bool {
     let is_embedded = std::env::var_os(super::EMBEDDED_INTERACTIVE_SSH_ENV).is_some();
-    let force_legacy = std::env::var_os(super::LEGACY_STREAM_INTERACTIVE_SSH_ENV).is_some();
     let has_interactive_tty = io::stdin().is_terminal() && io::stdout().is_terminal();
 
     matches!(
-        select_interactive_ssh_runtime(is_embedded, force_legacy, has_interactive_tty),
+        select_interactive_ssh_runtime(is_embedded, has_interactive_tty),
         InteractiveSshRuntime::PtyCentered
     )
 }
@@ -117,9 +116,9 @@ pub(super) fn run_interactive_ssh(mut command_spec: PreparedCommand) -> Result<s
     result
 }
 
-fn select_interactive_ssh_runtime(is_embedded: bool, force_legacy: bool, has_interactive_tty: bool) -> InteractiveSshRuntime {
-    if force_legacy || is_embedded || !has_interactive_tty {
-        InteractiveSshRuntime::LegacyStream
+fn select_interactive_ssh_runtime(is_embedded: bool, has_interactive_tty: bool) -> InteractiveSshRuntime {
+    if is_embedded || !has_interactive_tty {
+        InteractiveSshRuntime::CompatibilityPassthrough
     } else {
         InteractiveSshRuntime::PtyCentered
     }

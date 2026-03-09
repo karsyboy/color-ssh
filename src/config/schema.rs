@@ -3,7 +3,7 @@
 //! This module defines stable user-facing config fields and runtime metadata
 //! attached after parsing.
 
-use crate::highlighter::CompiledHighlightRule;
+use crate::highlight_rules::CompiledHighlightRule;
 use regex::{Regex, RegexSet};
 use serde::{Deserialize, Deserializer};
 use std::{collections::HashMap, path::PathBuf};
@@ -249,7 +249,7 @@ pub struct Metadata {
     pub config_path: PathBuf,
     /// Name of the current SSH session (for log file naming)
     pub session_name: String,
-    /// Compiled regex rules (regex + ANSI color code)
+    /// Compiled regex rules shared by renderer overlays (regex + ANSI style descriptor)
     #[serde(skip)]
     pub(crate) compiled_rules: Vec<CompiledHighlightRule>,
     /// Regex-set prefilter used to cheaply identify rules that might match a chunk.

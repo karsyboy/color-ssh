@@ -3,7 +3,9 @@
 //! `terminal_core` remains renderer-neutral. This module is the current
 //! ratatui-specific bridge that paints backend-neutral viewport data into a
 //! ratatui buffer. A future GUI renderer should consume the same viewport model
-//! directly instead of re-reading terminal internals.
+//! directly instead of re-reading terminal internals. It is responsible only
+//! for presentation: it combines canonical cell styles with additive overlay
+//! styles and never writes back into the PTY or terminal engine.
 
 use crate::terminal_core::highlight_overlay::HighlightOverlayStyle;
 use crate::terminal_core::{AnsiColor, TerminalCellSnapshot, TerminalViewport};

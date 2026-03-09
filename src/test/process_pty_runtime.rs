@@ -21,10 +21,9 @@ fn trim_line(line: &str) -> &str {
 
 #[test]
 fn select_interactive_ssh_runtime_prefers_pty_only_for_direct_terminals() {
-    assert_eq!(select_interactive_ssh_runtime(false, false, true), InteractiveSshRuntime::PtyCentered);
-    assert_eq!(select_interactive_ssh_runtime(true, false, true), InteractiveSshRuntime::LegacyStream);
-    assert_eq!(select_interactive_ssh_runtime(false, true, true), InteractiveSshRuntime::LegacyStream);
-    assert_eq!(select_interactive_ssh_runtime(false, false, false), InteractiveSshRuntime::LegacyStream);
+    assert_eq!(select_interactive_ssh_runtime(false, true), InteractiveSshRuntime::PtyCentered);
+    assert_eq!(select_interactive_ssh_runtime(true, true), InteractiveSshRuntime::CompatibilityPassthrough);
+    assert_eq!(select_interactive_ssh_runtime(false, false), InteractiveSshRuntime::CompatibilityPassthrough);
 }
 
 #[test]

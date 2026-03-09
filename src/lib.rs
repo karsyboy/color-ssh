@@ -7,7 +7,7 @@ pub mod args;
 pub mod auth;
 mod command_path;
 pub mod config;
-mod highlighter;
+mod highlight_rules;
 pub mod inventory;
 pub mod log;
 mod process;

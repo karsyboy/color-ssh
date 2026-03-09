@@ -7,7 +7,7 @@
 
 use super::{AnsiColor, MouseProtocolMode, TerminalViewport};
 use crate::config::{self, HighlightOverlayAutoPolicy, HighlightOverlayMode};
-use crate::highlighter::CompiledHighlightRule;
+use crate::highlight_rules::CompiledHighlightRule;
 use crate::{debug_enabled, log_debug};
 use alacritty_terminal::vte::ansi::Rgb;
 use regex::RegexSet;
@@ -31,8 +31,8 @@ const ROW_ANALYSIS_CACHE_VIEWPORT_MULTIPLIER: usize = 8;
 const REDUCED_COMPAT_TRAILING_ROWS: usize = 4;
 const PERF_LOG_INTERVAL_BUILDS: u64 = 120;
 const PERF_SLOW_BUILD_THRESHOLD: Duration = Duration::from_millis(8);
-const VOLATILE_REPAINT_INTERVAL: Duration = Duration::from_millis(120);
-const VOLATILE_REPAINT_SUPPRESS_FOR: Duration = Duration::from_secs(2);
+const VOLATILE_REPAINT_INTERVAL: Duration = Duration::from_millis(10);
+const VOLATILE_REPAINT_SUPPRESS_FOR: Duration = Duration::from_millis(20);
 const VOLATILE_REPAINT_MIN_ROWS: usize = 6;
 const VOLATILE_REPAINT_STREAK_THRESHOLD: u8 = 3;
 const VOLATILE_REPAINT_RATIO_NUMERATOR: usize = 7;
@@ -917,7 +917,7 @@ fn build_overlay_styles(rules: &[CompiledHighlightRule]) -> (Vec<HighlightOverla
     let mut rule_style_indexes = Vec::with_capacity(rules.len());
 
     for rule in rules {
-        if let Some(style) = parse_overlay_style(&rule.style) {
+        if let Some(style) = parse_overlay_style(&rule.ansi_style) {
             let style_index = styles.len();
             styles.push(style);
             rule_style_indexes.push(Some(style_index));
