@@ -5,7 +5,7 @@ use crate::tui::AppState;
 use crate::tui::features::terminal_session::pty::encode_key_event_bytes;
 use crate::tui::ui::theme::display_width;
 use crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
-use std::io::{self, Write};
+use std::io;
 
 fn tab_title_display_width(title: &str) -> usize {
     display_width(title)
@@ -255,11 +255,7 @@ impl AppState {
             }
             KeyCode::Enter => {
                 let tab = &self.tabs[self.selected_tab];
-                let is_exited = tab
-                    .session
-                    .as_ref()
-                    .and_then(|session| session.exited.lock().ok().map(|exited| *exited))
-                    .unwrap_or(true);
+                let is_exited = tab.session.as_ref().map(|session| session.is_exited()).unwrap_or(true);
 
                 if is_exited {
                     self.reconnect_session();
@@ -289,23 +285,9 @@ impl AppState {
         let Some(session) = &mut tab.session else {
             return Ok(());
         };
-        let Some(writer) = session.writer.as_ref() else {
-            return Ok(());
-        };
-
-        let mut writer = match writer.lock() {
-            Ok(writer) => writer,
-            Err(lock_err) => {
-                log_error!("Failed to lock PTY writer: {}", lock_err);
-                return Ok(());
-            }
-        };
-
-        if let Err(err) = writer.write_all(bytes) {
+        if let Err(err) = session.write_input(bytes) {
             log_error!("Failed to write to PTY: {}", err);
-            if let Ok(mut exited) = session.exited.lock() {
-                *exited = true;
-            }
+            session.mark_exited();
             return Ok(());
         }
 
@@ -322,8 +304,8 @@ impl AppState {
             return false;
         };
 
-        if let Ok(parser) = session.parser.lock() {
-            return parser.screen().bracketed_paste_enabled();
+        if let Ok(engine) = session.engine().lock() {
+            return engine.screen().bracketed_paste_enabled();
         }
 
         false

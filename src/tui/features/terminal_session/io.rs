@@ -1,6 +1,6 @@
 use crate::log_debug;
 use crate::log_error;
-use crate::tui::terminal_emulator::Parser;
+use crate::terminal_core::TerminalEngine;
 use std::io::Read;
 use std::process::Child as ProcessChild;
 use std::sync::{
@@ -25,7 +25,7 @@ pub(crate) fn normalize_managed_output_newlines(bytes: &[u8], previous_ended_wit
     normalized
 }
 
-pub(crate) fn spawn_output_reader<R>(name: &'static str, mut reader: R, parser: Arc<Mutex<Parser>>, render_epoch: Arc<AtomicU64>)
+pub(crate) fn spawn_output_reader<R>(name: &'static str, mut reader: R, engine: Arc<Mutex<TerminalEngine>>, render_epoch: Arc<AtomicU64>)
 where
     R: Read + Send + 'static,
 {
@@ -37,8 +37,8 @@ where
                 Ok(0) => break,
                 Ok(bytes_read) => {
                     let normalized = normalize_managed_output_newlines(&buf[..bytes_read], &mut previous_ended_with_cr);
-                    if let Ok(mut parser) = parser.lock() {
-                        parser.process(&normalized);
+                    if let Ok(mut engine) = engine.lock() {
+                        engine.process_output(&normalized);
                         render_epoch.fetch_add(1, Ordering::Relaxed);
                     }
                 }

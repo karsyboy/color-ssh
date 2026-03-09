@@ -522,8 +522,8 @@ impl AppState {
             return 0;
         }
         if let Some(session) = &self.tabs[tab_idx].session {
-            if let Ok(parser) = session.parser.lock() {
-                parser.screen().scrollback()
+            if let Ok(engine) = session.engine().lock() {
+                engine.screen().scrollback()
             } else {
                 0
             }
@@ -542,9 +542,9 @@ impl AppState {
             return (terminal_emulator::MouseProtocolMode::None, terminal_emulator::MouseProtocolEncoding::Default);
         }
         if let Some(session) = &self.tabs[self.selected_tab].session
-            && let Ok(parser) = session.parser.lock()
+            && let Ok(engine) = session.engine().lock()
         {
-            return parser.screen().mouse_protocol();
+            return engine.screen().mouse_protocol();
         }
         (terminal_emulator::MouseProtocolMode::None, terminal_emulator::MouseProtocolEncoding::Default)
     }

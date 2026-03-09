@@ -1,4 +1,9 @@
 //! Interactive process output streaming for SSH and RDP launches.
+//!
+//! This remains the legacy direct-process path. Embedded terminal frontends are
+//! being moved toward `src/terminal_core/`, where PTY/session ownership,
+//! terminal emulation, renderer extraction, and future highlight overlays are
+//! modeled explicitly.
 
 use super::exit::map_exit_code;
 use crate::{Result, config, highlighter, log, log_debug, log_error};

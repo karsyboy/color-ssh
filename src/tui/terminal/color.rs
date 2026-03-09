@@ -1,7 +1,12 @@
-use alacritty_terminal::vte::ansi::{NamedColor, Rgb};
-use ratatui::style::Color as UiColor;
+//! Ratatui color adapter for the embedded terminal core.
+//!
+//! This file stays TUI-specific on purpose. `terminal_core` exposes terminal
+//! colors in a renderer-neutral form and the TUI maps them into ratatui styles
+//! here. A future GUI can add its own adapter without changing the engine.
 
-pub(crate) use alacritty_terminal::vte::ansi::Color as AnsiColor;
+use crate::terminal_core::AnsiColor;
+use alacritty_terminal::vte::ansi::NamedColor;
+use ratatui::style::Color as UiColor;
 
 pub(crate) fn to_ratatui_color(color: AnsiColor) -> UiColor {
     match color {
@@ -38,26 +43,5 @@ fn named_color_to_ansi_index(named: NamedColor) -> Option<u8> {
         NamedColor::BrightCyan => Some(14),
         NamedColor::BrightWhite | NamedColor::BrightForeground => Some(15),
         NamedColor::Foreground | NamedColor::Background | NamedColor::Cursor => None,
-    }
-}
-
-pub(super) fn ansi_index_to_rgb(index: u8) -> Rgb {
-    match index {
-        0 => Rgb { r: 0, g: 0, b: 0 },
-        1 => Rgb { r: 205, g: 0, b: 0 },
-        2 => Rgb { r: 0, g: 205, b: 0 },
-        3 => Rgb { r: 205, g: 205, b: 0 },
-        4 => Rgb { r: 0, g: 0, b: 238 },
-        5 => Rgb { r: 205, g: 0, b: 205 },
-        6 => Rgb { r: 0, g: 205, b: 205 },
-        7 => Rgb { r: 229, g: 229, b: 229 },
-        8 => Rgb { r: 127, g: 127, b: 127 },
-        9 => Rgb { r: 255, g: 0, b: 0 },
-        10 => Rgb { r: 0, g: 255, b: 0 },
-        11 => Rgb { r: 255, g: 255, b: 0 },
-        12 => Rgb { r: 92, g: 92, b: 255 },
-        13 => Rgb { r: 255, g: 0, b: 255 },
-        14 => Rgb { r: 0, g: 255, b: 255 },
-        _ => Rgb { r: 255, g: 255, b: 255 },
     }
 }

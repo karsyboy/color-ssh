@@ -3,7 +3,7 @@ use super::Parser;
 #[test]
 fn terminal_cell_tab_character_renders_as_space_without_contents() {
     let mut parser = Parser::new(2, 16, 100);
-    parser.process(b"A\tB");
+    parser.process_output(b"A\tB");
 
     let screen = parser.screen();
     let tab_cell = screen.cell(0, 1).expect("tab cell");
@@ -18,7 +18,7 @@ fn terminal_cell_tab_character_renders_as_space_without_contents() {
 #[test]
 fn terminal_cell_plain_ascii_renders_normally() {
     let mut parser = Parser::new(2, 16, 100);
-    parser.process(b"Z");
+    parser.process_output(b"Z");
 
     let screen = parser.screen();
     let cell = screen.cell(0, 0).expect("cell");
@@ -33,7 +33,7 @@ fn terminal_cell_plain_ascii_renders_normally() {
 #[test]
 fn terminal_cell_symbol_combining_mark_is_included_in_rendered_symbol() {
     let mut parser = Parser::new(2, 16, 100);
-    parser.process("e\u{0301}".as_bytes());
+    parser.process_output("e\u{0301}".as_bytes());
 
     let screen = parser.screen();
     let cell = screen.cell(0, 0).expect("cell");

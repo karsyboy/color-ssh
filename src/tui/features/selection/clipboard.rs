@@ -41,8 +41,8 @@ impl AppState {
             None => return,
         };
 
-        let text = if let Ok(parser) = session.parser.lock() {
-            extract_selection_text(&parser, start, end)
+        let text = if let Ok(engine) = session.engine().lock() {
+            extract_selection_text(&engine, start, end)
         } else {
             return;
         };

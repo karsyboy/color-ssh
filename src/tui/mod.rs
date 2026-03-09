@@ -11,8 +11,8 @@ mod terminal_emulator;
 mod ui;
 
 pub(crate) use state::{
-    AppState, ConnectRequest, HostTab, HostTreeRow, HostTreeRowKind, ManagedChild, ManagedSession, QuickConnectField, QuickConnectState, TerminalSearchState,
-    VaultStatusModalState, VaultUnlockAction, VaultUnlockState,
+    AppState, ConnectRequest, HostTab, HostTreeRow, HostTreeRowKind, QuickConnectField, QuickConnectState, TerminalSearchState, VaultStatusModalState,
+    VaultUnlockAction, VaultUnlockState,
 };
 
 /// Run the interactive session manager.

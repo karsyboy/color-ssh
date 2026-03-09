@@ -3,7 +3,6 @@
 use crate::tui::AppState;
 use crate::tui::features::terminal_search::render_highlight::build_search_row_ranges_from_matches;
 use crate::{debug_enabled, log_debug};
-use std::sync::atomic::Ordering as AtomicOrdering;
 use std::time::Instant;
 
 impl AppState {
@@ -11,7 +10,7 @@ impl AppState {
         self.tabs
             .get(tab_idx)
             .and_then(|tab| tab.session.as_ref())
-            .map_or(0, |session| session.render_epoch.load(AtomicOrdering::Relaxed))
+            .map_or(0, |session| session.render_epoch())
     }
 
     pub(crate) fn refresh_current_terminal_search_range(&mut self) {
@@ -96,7 +95,7 @@ impl AppState {
         };
 
         let parser_arc = match self.tabs[selected_tab].session.as_ref() {
-            Some(session) => session.parser.clone(),
+            Some(session) => session.engine_handle(),
             None => {
                 if let Some(search) = self.tabs.get_mut(selected_tab).map(|tab| &mut tab.terminal_search) {
                     search.last_search_query = query;
@@ -151,7 +150,7 @@ impl AppState {
             let Some(session) = &tab.session else {
                 return;
             };
-            (tab.terminal_search.matches[tab.terminal_search.current].0, session.parser.clone())
+            (tab.terminal_search.matches[tab.terminal_search.current].0, session.engine_handle())
         };
 
         let tab = &mut self.tabs[selected_tab];

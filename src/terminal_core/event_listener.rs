@@ -1,5 +1,12 @@
-use super::color::ansi_index_to_rgb;
-use super::parser::PtyWriter;
+//! Event bridge between `alacritty_terminal` and the host application.
+//!
+//! This listener intentionally stays small. The terminal engine owns the core
+//! terminal state, while the listener only translates terminal-originated
+//! events, such as PTY writes and clipboard requests, back to the embedding
+//! session/frontend.
+
+use super::ansi_index_to_rgb;
+use super::types::TerminalInputWriter;
 use crate::config;
 use alacritty_terminal::event::{Event, EventListener, WindowSize};
 use alacritty_terminal::vte::ansi::Rgb;
@@ -9,21 +16,21 @@ use std::io::{Write, stdout};
 use std::sync::{Arc, Mutex};
 
 #[derive(Default)]
-struct ParserEventState {
-    pty_writer: Option<PtyWriter>,
+struct TerminalEventState {
+    input_writer: Option<TerminalInputWriter>,
     rows: u16,
     cols: u16,
 }
 
 #[derive(Clone)]
-pub(super) struct ParserEventListener {
-    state: Arc<Mutex<ParserEventState>>,
+pub(super) struct TerminalEventListener {
+    state: Arc<Mutex<TerminalEventState>>,
 }
 
-impl ParserEventListener {
-    pub(super) fn new(rows: u16, cols: u16, pty_writer: Option<PtyWriter>) -> Self {
-        let state = ParserEventState {
-            pty_writer,
+impl TerminalEventListener {
+    pub(super) fn new(rows: u16, cols: u16, input_writer: Option<TerminalInputWriter>) -> Self {
+        let state = TerminalEventState {
+            input_writer,
             rows: rows.max(1),
             cols: cols.max(1),
         };
@@ -32,7 +39,7 @@ impl ParserEventListener {
         }
     }
 
-    pub(super) fn set_size(&self, rows: u16, cols: u16) {
+    pub(super) fn resize_surface(&self, rows: u16, cols: u16) {
         if let Ok(mut state) = self.state.lock() {
             state.rows = rows.max(1);
             state.cols = cols.max(1);
@@ -47,10 +54,10 @@ impl ParserEventListener {
         }
     }
 
-    fn write_pty(&self, bytes: &[u8]) {
+    fn write_input(&self, bytes: &[u8]) {
         if let Ok(state) = self.state.lock()
-            && let Some(pty_writer) = &state.pty_writer
-            && let Ok(mut guard) = pty_writer.lock()
+            && let Some(input_writer) = &state.input_writer
+            && let Ok(mut guard) = input_writer.lock()
         {
             let _ = guard.write_all(bytes);
             let _ = guard.flush();
@@ -85,10 +92,10 @@ impl ParserEventListener {
     }
 }
 
-impl EventListener for ParserEventListener {
+impl EventListener for TerminalEventListener {
     fn send_event(&self, event: Event) {
         match event {
-            Event::PtyWrite(text) => self.write_pty(text.as_bytes()),
+            Event::PtyWrite(text) => self.write_input(text.as_bytes()),
             Event::ClipboardStore(_, text) => {
                 let (enabled, max_bytes) = Self::remote_clipboard_policy();
                 if enabled && Self::allow_remote_clipboard_write(&text, max_bytes) {
@@ -97,7 +104,7 @@ impl EventListener for ParserEventListener {
             }
             Event::ClipboardLoad(_, formatter) => {
                 let response = formatter("");
-                self.write_pty(response.as_bytes());
+                self.write_input(response.as_bytes());
             }
             Event::TextAreaSizeRequest(formatter) => {
                 let (rows, cols) = self.size();
@@ -107,11 +114,11 @@ impl EventListener for ParserEventListener {
                     cell_width: 0,
                     cell_height: 0,
                 });
-                self.write_pty(response.as_bytes());
+                self.write_input(response.as_bytes());
             }
             Event::ColorRequest(index, formatter) => {
                 let response = formatter(Self::color_index_rgb(index));
-                self.write_pty(response.as_bytes());
+                self.write_input(response.as_bytes());
             }
             _ => {}
         }

@@ -2,8 +2,8 @@ use super::io::{spawn_output_reader, spawn_process_exit_watcher};
 use crate::auth::agent;
 use crate::inventory::{ConnectionProtocol, InventoryHost};
 use crate::process;
-use crate::tui::terminal_emulator::Parser;
-use crate::tui::{AppState, HostTab, ManagedChild, ManagedSession, TerminalSearchState, VaultUnlockAction};
+use crate::terminal_core::{TerminalChild, TerminalEngine, TerminalSession};
+use crate::tui::{AppState, HostTab, TerminalSearchState, VaultUnlockAction};
 use crate::{command_path, debug_enabled, log_debug, log_error};
 use portable_pty::{CommandBuilder, PtySize, native_pty_system};
 use std::io::{self, Read};
@@ -270,7 +270,7 @@ impl AppState {
         }
     }
 
-    fn spawn_session(host: &InventoryHost, tab_title: &str, history_buffer: usize, launch_options: SessionLaunchOptions) -> io::Result<ManagedSession> {
+    fn spawn_session(host: &InventoryHost, tab_title: &str, history_buffer: usize, launch_options: SessionLaunchOptions) -> io::Result<TerminalSession> {
         match &host.protocol {
             ConnectionProtocol::Ssh => Self::spawn_ssh_session(host, tab_title, history_buffer, launch_options),
             ConnectionProtocol::Rdp => Self::spawn_rdp_session(host, tab_title, history_buffer, launch_options),
@@ -278,7 +278,7 @@ impl AppState {
         }
     }
 
-    fn spawn_ssh_session(host: &InventoryHost, tab_title: &str, history_buffer: usize, launch_options: SessionLaunchOptions) -> io::Result<ManagedSession> {
+    fn spawn_ssh_session(host: &InventoryHost, tab_title: &str, history_buffer: usize, launch_options: SessionLaunchOptions) -> io::Result<TerminalSession> {
         let pty_system = native_pty_system();
         let SessionLaunchOptions {
             force_ssh_logging,
@@ -345,8 +345,8 @@ impl AppState {
         let writer = pty_pair.master.take_writer().map_err(|err| io::Error::other(err.to_string()))?;
         let writer = Arc::new(Mutex::new(writer));
 
-        let parser = Arc::new(Mutex::new(Parser::new_with_pty_writer(rows, cols, history_buffer, writer.clone())));
-        let parser_clone = parser.clone();
+        let engine = Arc::new(Mutex::new(TerminalEngine::new_with_input_writer(rows, cols, history_buffer, writer.clone())));
+        let engine_clone = engine.clone();
         let exited = Arc::new(Mutex::new(false));
         let exited_clone = exited.clone();
         let pty_master = Arc::new(Mutex::new(pty_pair.master));
@@ -354,10 +354,10 @@ impl AppState {
         let render_epoch_clone = render_epoch.clone();
 
         if let Some(notice) = pass_fallback_notice
-            && let Ok(mut parser) = parser.lock()
+            && let Ok(mut engine) = engine.lock()
         {
             let message = format!("\r\n[color-ssh] {}\r\n", notice);
-            parser.process(message.as_bytes());
+            engine.process_output(message.as_bytes());
             render_epoch.fetch_add(1, Ordering::Relaxed);
         }
 
@@ -372,8 +372,8 @@ impl AppState {
                         break;
                     }
                     Ok(bytes_read) => {
-                        if let Ok(mut parser) = parser_clone.lock() {
-                            parser.process(&buf[..bytes_read]);
+                        if let Ok(mut engine) = engine_clone.lock() {
+                            engine.process_output(&buf[..bytes_read]);
                             render_epoch_clone.fetch_add(1, Ordering::Relaxed);
                         }
                     }
@@ -389,17 +389,17 @@ impl AppState {
             log_debug!("PTY reader thread exiting");
         });
 
-        Ok(ManagedSession {
-            pty_master: Some(pty_master),
-            writer: Some(writer),
-            child: ManagedChild::Pty(child),
-            parser,
+        Ok(TerminalSession::new(
+            Some(pty_master),
+            Some(writer),
+            TerminalChild::Pty(child),
+            engine,
             exited,
             render_epoch,
-        })
+        ))
     }
 
-    fn spawn_rdp_session(host: &InventoryHost, _tab_title: &str, history_buffer: usize, launch_options: SessionLaunchOptions) -> io::Result<ManagedSession> {
+    fn spawn_rdp_session(host: &InventoryHost, _tab_title: &str, history_buffer: usize, launch_options: SessionLaunchOptions) -> io::Result<TerminalSession> {
         let SessionLaunchOptions {
             initial_rows,
             initial_cols,
@@ -443,8 +443,8 @@ impl AppState {
             let writer = pty_pair.master.take_writer().map_err(|err| io::Error::other(err.to_string()))?;
             let writer = Arc::new(Mutex::new(writer));
 
-            let parser = Arc::new(Mutex::new(Parser::new_with_pty_writer(rows, cols, history_buffer, writer.clone())));
-            let parser_clone = parser.clone();
+            let engine = Arc::new(Mutex::new(TerminalEngine::new_with_input_writer(rows, cols, history_buffer, writer.clone())));
+            let engine_clone = engine.clone();
             let exited = Arc::new(Mutex::new(false));
             let exited_clone = exited.clone();
             let pty_master = Arc::new(Mutex::new(pty_pair.master));
@@ -452,10 +452,10 @@ impl AppState {
             let render_epoch_clone = render_epoch.clone();
 
             if let Some(notice) = launch_notice
-                && let Ok(mut parser) = parser.lock()
+                && let Ok(mut engine) = engine.lock()
             {
                 let message = format!("\r\n[color-ssh] {}\r\n", notice);
-                parser.process(message.as_bytes());
+                engine.process_output(message.as_bytes());
                 render_epoch.fetch_add(1, Ordering::Relaxed);
             }
 
@@ -470,8 +470,8 @@ impl AppState {
                             break;
                         }
                         Ok(bytes_read) => {
-                            if let Ok(mut parser) = parser_clone.lock() {
-                                parser.process(&buf[..bytes_read]);
+                            if let Ok(mut engine) = engine_clone.lock() {
+                                engine.process_output(&buf[..bytes_read]);
                                 render_epoch_clone.fetch_add(1, Ordering::Relaxed);
                             }
                         }
@@ -487,14 +487,14 @@ impl AppState {
                 log_debug!("PTY reader thread exiting");
             });
 
-            return Ok(ManagedSession {
-                pty_master: Some(pty_master),
-                writer: Some(writer),
-                child: ManagedChild::Pty(child),
-                parser,
+            return Ok(TerminalSession::new(
+                Some(pty_master),
+                Some(writer),
+                TerminalChild::Pty(child),
+                engine,
                 exited,
                 render_epoch,
-            });
+            ));
         }
 
         let mut child = process::spawn_command(command_spec, Stdio::piped(), Stdio::piped())?;
@@ -503,31 +503,24 @@ impl AppState {
 
         let rows = initial_rows.max(1);
         let cols = initial_cols.max(1);
-        let parser = Arc::new(Mutex::new(Parser::new(rows, cols, history_buffer)));
+        let engine = Arc::new(Mutex::new(TerminalEngine::new(rows, cols, history_buffer)));
         let exited = Arc::new(Mutex::new(false));
         let render_epoch = Arc::new(AtomicU64::new(0));
         let child = Arc::new(Mutex::new(child));
 
-        spawn_output_reader("freerdp stdout", stdout, parser.clone(), render_epoch.clone());
-        spawn_output_reader("freerdp stderr", stderr, parser.clone(), render_epoch.clone());
+        spawn_output_reader("freerdp stdout", stdout, engine.clone(), render_epoch.clone());
+        spawn_output_reader("freerdp stderr", stderr, engine.clone(), render_epoch.clone());
         spawn_process_exit_watcher(child.clone(), exited.clone());
 
         if let Some(notice) = launch_notice
-            && let Ok(mut parser) = parser.lock()
+            && let Ok(mut engine) = engine.lock()
         {
             let message = format!("\r\n[color-ssh] {}\r\n", notice);
-            parser.process(message.as_bytes());
+            engine.process_output(message.as_bytes());
             render_epoch.fetch_add(1, Ordering::Relaxed);
         }
 
-        Ok(ManagedSession {
-            pty_master: None,
-            writer: None,
-            child: ManagedChild::Process(child),
-            parser,
-            exited,
-            render_epoch,
-        })
+        Ok(TerminalSession::new(None, None, TerminalChild::Process(child), engine, exited, render_epoch))
     }
 
     pub(crate) fn reconnect_session(&mut self) {
@@ -623,21 +616,7 @@ impl AppState {
             }
             let resize_started_at = Instant::now();
 
-            if let Some(pty_master) = session.pty_master.as_ref()
-                && let Ok(pty_master) = pty_master.lock()
-            {
-                let _ = pty_master.resize(PtySize {
-                    rows,
-                    cols,
-                    pixel_width: 0,
-                    pixel_height: 0,
-                });
-            }
-
-            if let Ok(mut parser) = session.parser.lock() {
-                parser.set_size(rows, cols);
-            }
-            session.render_epoch.fetch_add(1, Ordering::Relaxed);
+            session.resize(rows, cols);
 
             tab.last_pty_size = Some((rows, cols));
             if debug_enabled!() {

@@ -239,11 +239,7 @@ impl AppState {
         }
 
         let tab = &self.tabs[self.selected_tab];
-        let is_exited = tab
-            .session
-            .as_ref()
-            .and_then(|session| session.exited.lock().ok().map(|exited| *exited))
-            .unwrap_or(true);
+        let is_exited = tab.session.as_ref().map(|session| session.is_exited()).unwrap_or(true);
 
         let status_icon_color = if is_exited { theme::ansi_red() } else { theme::ansi_green() };
         let scroll_info = if tab.scroll_offset > 0 {

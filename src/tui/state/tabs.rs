@@ -1,59 +1,9 @@
 //! Per-tab session state.
 
 use crate::inventory::InventoryHost;
-use crate::log_error;
-use crate::tui::terminal_emulator::{Parser, PtyWriter};
-use portable_pty::{Child as PtyChild, MasterPty};
 use std::collections::HashMap;
-use std::process::Child as ProcessChild;
-use std::sync::{Arc, Mutex, atomic::AtomicU64};
 
-pub(crate) enum ManagedChild {
-    Pty(Arc<Mutex<Box<dyn PtyChild + Send + Sync>>>),
-    Process(Arc<Mutex<ProcessChild>>),
-}
-
-/// Represents an active tab session output buffer.
-pub(crate) struct ManagedSession {
-    pub(crate) pty_master: Option<Arc<Mutex<Box<dyn MasterPty + Send>>>>,
-    pub(crate) writer: Option<PtyWriter>,
-    pub(crate) child: ManagedChild,
-    pub(crate) parser: Arc<Mutex<Parser>>,
-    pub(crate) exited: Arc<Mutex<bool>>,
-    pub(crate) render_epoch: Arc<AtomicU64>,
-}
-
-impl ManagedSession {
-    // Lifecycle management.
-    // Closing a tab should always terminate the underlying managed process tree.
-    pub(crate) fn terminate(&mut self) {
-        let terminate_result = match &self.child {
-            ManagedChild::Pty(child) => match child.lock() {
-                Ok(mut child) => {
-                    let result = child.kill();
-                    let _ = child.try_wait();
-                    result
-                }
-                Err(err) => Err(std::io::Error::other(err.to_string())),
-            },
-            ManagedChild::Process(child) => match child.lock() {
-                Ok(mut child) => {
-                    let result = child.kill();
-                    let _ = child.try_wait();
-                    result
-                }
-                Err(err) => Err(std::io::Error::other(err.to_string())),
-            },
-        };
-
-        if let Err(err) = terminate_result {
-            log_error!("Failed to terminate managed session: {}", err);
-        }
-        if let Ok(mut exited) = self.exited.lock() {
-            *exited = true;
-        }
-    }
-}
+pub(crate) use crate::terminal_core::TerminalSession as ManagedSession;
 
 #[derive(Debug, Clone, Default)]
 pub(crate) struct TerminalSearchState {

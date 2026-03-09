@@ -293,10 +293,10 @@ impl AppState {
         if session_active {
             let tab = &self.tabs[tab_idx];
             if let Some(session) = &tab.session
-                && let Ok(mut parser) = session.parser.lock()
+                && let Ok(mut engine) = session.engine().lock()
             {
-                parser.set_scrollback(scroll_offset);
-                let screen = parser.screen();
+                engine.set_display_scrollback(scroll_offset);
+                let screen = engine.screen();
                 let (vt_rows, vt_cols) = screen.size();
                 let cursor_position = screen.cursor_position();
                 let hide_cursor = screen.hide_cursor();

@@ -12,7 +12,6 @@ use crate::log_debug;
 use ratatui::layout::Rect;
 use std::collections::{HashMap, HashSet};
 use std::io;
-use std::sync::atomic::Ordering as AtomicOrdering;
 use std::time::{Duration, Instant};
 
 use self::init::{AppStateInit, VaultStatusEventWatcher, load_app_state_init, load_vault_status};
@@ -110,7 +109,7 @@ impl AppState {
         self.tabs
             .iter()
             .filter_map(|tab| tab.session.as_ref())
-            .fold(0u64, |acc, session| acc.wrapping_add(session.render_epoch.load(AtomicOrdering::Relaxed)))
+            .fold(0u64, |acc, session| acc.wrapping_add(session.render_epoch()))
     }
 
     pub(crate) fn should_draw(&self, heartbeat: Duration) -> bool {

@@ -1,3 +1,10 @@
+//! Legacy stream-oriented syntax highlighting.
+//!
+//! This module still powers the direct stdout-rewriting path in
+//! `src/process/stream.rs`. Embedded terminal frontends should move toward
+//! renderer overlays built from `src/terminal_core/highlight_overlay.rs`
+//! instead of mutating the byte stream itself.
+
 mod ansi;
 mod matcher;
 mod render;

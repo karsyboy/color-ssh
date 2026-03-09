@@ -14,6 +14,7 @@ mod process;
 pub mod runtime;
 pub mod ssh_args;
 pub mod ssh_config;
+pub(crate) mod terminal_core;
 pub mod tui;
 mod validation;
 

@@ -31,5 +31,5 @@ pub(crate) fn is_cell_in_selection(row: i64, col: u16, start: Option<(i64, u16)>
 }
 
 pub(crate) fn extract_selection_text(parser: &Parser, start: (i64, u16), end: (i64, u16)) -> String {
-    parser.selection_text(start, end)
+    parser.view_model().selection_text(start, end)
 }
