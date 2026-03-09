@@ -88,7 +88,6 @@ impl VaultStatusEventWatcher {
 
 #[derive(Debug, Clone, Copy)]
 struct AppStateConfig {
-    history_buffer: usize,
     host_tree_uncollapsed: bool,
     host_info_visible: bool,
     host_view_size_percent: u16,
@@ -99,7 +98,6 @@ struct AppStateConfig {
 impl Default for AppStateConfig {
     fn default() -> Self {
         Self {
-            history_buffer: 1000,
             host_tree_uncollapsed: false,
             host_info_visible: true,
             host_view_size_percent: 25,
@@ -118,7 +116,6 @@ impl AppStateConfig {
             };
 
             if let Some(interactive) = cfg.interactive_settings.as_ref() {
-                session_config.history_buffer = interactive.history_buffer;
                 session_config.host_tree_uncollapsed = interactive.host_tree_uncollapsed;
                 session_config.host_info_visible = interactive.info_view;
                 session_config.host_view_size_percent = interactive.host_view_size;
@@ -135,7 +132,6 @@ pub(super) struct AppStateInit {
     pub(super) host_tree_root: TreeFolder,
     pub(super) inventory_load_error: Option<String>,
     pub(super) collapsed_folders: HashSet<FolderId>,
-    pub(super) history_buffer: usize,
     pub(super) host_panel_width: u16,
     pub(super) host_panel_default_percent: u16,
     pub(super) host_info_height: u16,
@@ -226,7 +222,6 @@ pub(super) fn load_app_state_init() -> AppStateInit {
         host_tree_root,
         inventory_load_error,
         collapsed_folders,
-        history_buffer: session_config.history_buffer,
         host_panel_width,
         host_panel_default_percent: session_config.host_view_size_percent,
         host_info_height: compute_host_info_height(term_height, session_config.info_view_size_percent),
@@ -245,7 +240,6 @@ pub(super) fn test_app_state_init() -> AppStateInit {
         host_tree_root: fallback_host_tree_root(),
         inventory_load_error: None,
         collapsed_folders: HashSet::new(),
-        history_buffer: 1000,
         host_panel_width: 25,
         host_panel_default_percent: 25,
         host_info_height: 10,

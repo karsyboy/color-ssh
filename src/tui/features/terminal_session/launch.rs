@@ -47,8 +47,53 @@ impl AppState {
         (rows, cols)
     }
 
-    fn resolved_history_buffer_for_host(&self, host: &InventoryHost) -> usize {
-        crate::config::history_buffer_for_profile(host.profile.as_deref()).unwrap_or(self.history_buffer)
+    fn resolve_session_profile(host: &InventoryHost) -> io::Result<crate::config::InteractiveProfileSnapshot> {
+        crate::config::interactive_profile_snapshot(host.profile.as_deref())
+    }
+
+    fn next_tab_title(&self, host: &InventoryHost) -> String {
+        let existing_count = self.tabs.iter().filter(|tab| tab.host.name == host.name).count();
+        if existing_count == 0 {
+            host.name.clone()
+        } else {
+            format!("{}_{}", host.name, existing_count)
+        }
+    }
+
+    fn push_host_tab(
+        &mut self,
+        host: InventoryHost,
+        title: String,
+        session: Option<TerminalSession>,
+        session_error: Option<String>,
+        highlight_overlay: HighlightOverlayEngine,
+        force_ssh_logging: bool,
+    ) {
+        let tab = HostTab {
+            title,
+            host,
+            session,
+            session_error,
+            highlight_overlay,
+            scroll_offset: 0,
+            terminal_search: TerminalSearchState::default(),
+            force_ssh_logging,
+            last_pty_size: None,
+        };
+
+        self.tabs.push(tab);
+        self.selected_tab = self.tabs.len() - 1;
+        self.focus_on_manager = false;
+        self.search_mode = false;
+        self.quick_connect = None;
+
+        log_debug!("Created new tab at index {}", self.selected_tab);
+    }
+
+    fn open_host_tab_error(&mut self, host: InventoryHost, force_ssh_logging: bool, err_message: String) {
+        log_error!("Failed to prepare {} session: {}", host.protocol.display_name(), err_message);
+        let title = self.next_tab_title(&host);
+        self.push_host_tab(host, title, None, Some(err_message), HighlightOverlayEngine::new(), force_ssh_logging);
     }
 
     fn resolve_host_pass_password_with_autologin(
@@ -152,8 +197,12 @@ impl AppState {
         }
     }
 
-    fn resolve_host_pass_password(&mut self, host: &InventoryHost, action: VaultUnlockAction) -> Option<HostPassResolution> {
-        let auth_settings = crate::config::auth_settings();
+    fn resolve_host_pass_password(
+        &mut self,
+        host: &InventoryHost,
+        action: VaultUnlockAction,
+        auth_settings: &crate::config::AuthSettings,
+    ) -> Option<HostPassResolution> {
         self.resolve_host_pass_password_with_autologin(host, action, auth_settings.tui_password_autologin)
     }
 
@@ -181,11 +230,19 @@ impl AppState {
 
     fn open_host_tab(&mut self, host: InventoryHost, force_ssh_logging: bool) {
         log_debug!("Opening {} tab for host: {}", host.protocol.as_str(), host.name);
+        let session_profile = match Self::resolve_session_profile(&host) {
+            Ok(session_profile) => session_profile,
+            Err(err) => {
+                self.open_host_tab_error(host, force_ssh_logging, err.to_string());
+                return;
+            }
+        };
         let action = VaultUnlockAction::OpenHostTab {
             host: Box::new(host.clone()),
             force_ssh_logging,
+            auth_settings: session_profile.auth_settings.clone(),
         };
-        let Some(auth_resolution) = self.resolve_host_pass_password(&host, action) else {
+        let Some(auth_resolution) = self.resolve_host_pass_password(&host, action, &session_profile.auth_settings) else {
             return;
         };
         self.open_host_tab_with_auth(
@@ -194,6 +251,7 @@ impl AppState {
             auth_resolution.pass_entry_override,
             auth_resolution.pass_fallback_notice,
             auth_resolution.disable_vault_autologin,
+            session_profile,
         );
     }
 
@@ -204,15 +262,15 @@ impl AppState {
         pass_entry_override: Option<String>,
         pass_fallback_notice: Option<String>,
         disable_vault_autologin: bool,
+        session_profile: crate::config::InteractiveProfileSnapshot,
     ) {
-        let existing_count = self.tabs.iter().filter(|tab| tab.host.name == host.name).count();
-        let tab_title = if existing_count == 0 {
-            host.name.clone()
-        } else {
-            format!("{}_{}", host.name, existing_count)
-        };
-        let history_buffer = self.resolved_history_buffer_for_host(&host);
-        log_debug!("Using history buffer {} for tab '{}' (profile: {:?})", history_buffer, tab_title, host.profile);
+        let tab_title = self.next_tab_title(&host);
+        log_debug!(
+            "Using history buffer {} for tab '{}' (profile: {:?})",
+            session_profile.history_buffer,
+            tab_title,
+            host.profile
+        );
         let (initial_rows, initial_cols) = self.initial_pty_size();
 
         let session_launch_options = SessionLaunchOptions {
@@ -224,7 +282,7 @@ impl AppState {
             disable_vault_autologin,
         };
 
-        let (session, session_error) = match Self::spawn_session(&host, &tab_title, history_buffer, session_launch_options) {
+        let (session, session_error) = match Self::spawn_session(&host, &tab_title, &session_profile, session_launch_options) {
             Ok(session) => (Some(session), None),
             Err(err) => {
                 let err_message = err.to_string();
@@ -233,25 +291,14 @@ impl AppState {
             }
         };
 
-        let tab = HostTab {
-            title: tab_title,
-            host: host.clone(),
+        self.push_host_tab(
+            host,
+            tab_title,
             session,
             session_error,
-            highlight_overlay: HighlightOverlayEngine::new(),
-            scroll_offset: 0,
-            terminal_search: TerminalSearchState::default(),
+            HighlightOverlayEngine::from_snapshot(&session_profile),
             force_ssh_logging,
-            last_pty_size: None,
-        };
-
-        self.tabs.push(tab);
-        self.selected_tab = self.tabs.len() - 1;
-        self.focus_on_manager = false;
-        self.search_mode = false;
-        self.quick_connect = None;
-
-        log_debug!("Created new tab at index {}", self.selected_tab);
+        );
     }
 
     pub(crate) fn complete_vault_unlock_action(
@@ -263,24 +310,59 @@ impl AppState {
         let disable_vault_autologin = pass_fallback_notice.is_some();
         match action {
             VaultUnlockAction::UnlockVault => {}
-            VaultUnlockAction::OpenHostTab { host, force_ssh_logging } => {
-                self.open_host_tab_with_auth(*host, force_ssh_logging, pass_entry_override, pass_fallback_notice, disable_vault_autologin);
-            }
-            VaultUnlockAction::ReconnectTab { tab_index } => {
-                self.reconnect_session_with_auth(tab_index, pass_entry_override, pass_fallback_notice, disable_vault_autologin);
+            VaultUnlockAction::OpenHostTab { host, force_ssh_logging, .. } => match Self::resolve_session_profile(&host) {
+                Ok(session_profile) => {
+                    self.open_host_tab_with_auth(
+                        *host,
+                        force_ssh_logging,
+                        pass_entry_override,
+                        pass_fallback_notice,
+                        disable_vault_autologin,
+                        session_profile,
+                    );
+                }
+                Err(err) => self.open_host_tab_error(*host, force_ssh_logging, err.to_string()),
+            },
+            VaultUnlockAction::ReconnectTab { tab_index, .. } => {
+                let Some(host) = self.tabs.get(tab_index).map(|tab| tab.host.clone()) else {
+                    return;
+                };
+                match Self::resolve_session_profile(&host) {
+                    Ok(session_profile) => {
+                        self.reconnect_session_with_auth(tab_index, pass_entry_override, pass_fallback_notice, disable_vault_autologin, session_profile);
+                    }
+                    Err(err) => {
+                        let err_message = err.to_string();
+                        log_error!("Failed to prepare {} reconnect: {}", host.protocol.display_name(), err_message);
+                        if let Some(tab) = self.tabs.get_mut(tab_index) {
+                            tab.session = None;
+                            tab.session_error = Some(err_message);
+                        }
+                    }
+                }
             }
         }
     }
 
-    fn spawn_session(host: &InventoryHost, tab_title: &str, history_buffer: usize, launch_options: SessionLaunchOptions) -> io::Result<TerminalSession> {
+    fn spawn_session(
+        host: &InventoryHost,
+        tab_title: &str,
+        session_profile: &crate::config::InteractiveProfileSnapshot,
+        launch_options: SessionLaunchOptions,
+    ) -> io::Result<TerminalSession> {
         match &host.protocol {
-            ConnectionProtocol::Ssh => Self::spawn_ssh_session(host, tab_title, history_buffer, launch_options),
-            ConnectionProtocol::Rdp => Self::spawn_rdp_session(host, tab_title, history_buffer, launch_options),
+            ConnectionProtocol::Ssh => Self::spawn_ssh_session(host, tab_title, session_profile, launch_options),
+            ConnectionProtocol::Rdp => Self::spawn_rdp_session(host, tab_title, session_profile, launch_options),
             ConnectionProtocol::Other(protocol) => Err(io::Error::other(format!("unsupported protocol '{}'", protocol))),
         }
     }
 
-    fn spawn_ssh_session(host: &InventoryHost, tab_title: &str, history_buffer: usize, launch_options: SessionLaunchOptions) -> io::Result<TerminalSession> {
+    fn spawn_ssh_session(
+        host: &InventoryHost,
+        tab_title: &str,
+        session_profile: &crate::config::InteractiveProfileSnapshot,
+        launch_options: SessionLaunchOptions,
+    ) -> io::Result<TerminalSession> {
         let pty_system = native_pty_system();
         let SessionLaunchOptions {
             force_ssh_logging,
@@ -348,7 +430,14 @@ impl AppState {
         let writer = pty_pair.master.take_writer().map_err(|err| io::Error::other(err.to_string()))?;
         let writer = Arc::new(Mutex::new(writer));
 
-        let engine = Arc::new(Mutex::new(TerminalEngine::new_with_input_writer(rows, cols, history_buffer, writer.clone())));
+        let engine = Arc::new(Mutex::new(TerminalEngine::new_with_input_writer_and_remote_clipboard_policy(
+            rows,
+            cols,
+            session_profile.history_buffer,
+            writer.clone(),
+            session_profile.remote_clipboard_write,
+            session_profile.remote_clipboard_max_bytes,
+        )));
         let engine_clone = engine.clone();
         let exited = Arc::new(Mutex::new(false));
         let exited_clone = exited.clone();
@@ -402,7 +491,12 @@ impl AppState {
         ))
     }
 
-    fn spawn_rdp_session(host: &InventoryHost, _tab_title: &str, history_buffer: usize, launch_options: SessionLaunchOptions) -> io::Result<TerminalSession> {
+    fn spawn_rdp_session(
+        host: &InventoryHost,
+        _tab_title: &str,
+        session_profile: &crate::config::InteractiveProfileSnapshot,
+        launch_options: SessionLaunchOptions,
+    ) -> io::Result<TerminalSession> {
         let SessionLaunchOptions {
             initial_rows,
             initial_cols,
@@ -416,7 +510,8 @@ impl AppState {
         if disable_vault_autologin {
             launch_host.vault_pass = None;
         }
-        let mut command_spec = process::build_rdp_command_for_host(&launch_host, pass_entry_override.as_deref())?;
+        let mut command_spec =
+            process::build_rdp_command_for_host_with_auth_settings(&launch_host, pass_entry_override.as_deref(), &session_profile.auth_settings)?;
         let launch_notice = pass_fallback_notice.or(command_spec.fallback_notice.take());
 
         if command_spec.stdin_payload.is_none() {
@@ -446,7 +541,14 @@ impl AppState {
             let writer = pty_pair.master.take_writer().map_err(|err| io::Error::other(err.to_string()))?;
             let writer = Arc::new(Mutex::new(writer));
 
-            let engine = Arc::new(Mutex::new(TerminalEngine::new_with_input_writer(rows, cols, history_buffer, writer.clone())));
+            let engine = Arc::new(Mutex::new(TerminalEngine::new_with_input_writer_and_remote_clipboard_policy(
+                rows,
+                cols,
+                session_profile.history_buffer,
+                writer.clone(),
+                session_profile.remote_clipboard_write,
+                session_profile.remote_clipboard_max_bytes,
+            )));
             let engine_clone = engine.clone();
             let exited = Arc::new(Mutex::new(false));
             let exited_clone = exited.clone();
@@ -506,7 +608,13 @@ impl AppState {
 
         let rows = initial_rows.max(1);
         let cols = initial_cols.max(1);
-        let engine = Arc::new(Mutex::new(TerminalEngine::new(rows, cols, history_buffer)));
+        let engine = Arc::new(Mutex::new(TerminalEngine::new_with_remote_clipboard_policy(
+            rows,
+            cols,
+            session_profile.history_buffer,
+            session_profile.remote_clipboard_write,
+            session_profile.remote_clipboard_max_bytes,
+        )));
         let exited = Arc::new(Mutex::new(false));
         let render_epoch = Arc::new(AtomicU64::new(0));
         let child = Arc::new(Mutex::new(child));
@@ -533,11 +641,26 @@ impl AppState {
 
         let tab_index = self.selected_tab;
         let host = self.tabs[tab_index].host.clone();
+        let session_profile = match Self::resolve_session_profile(&host) {
+            Ok(session_profile) => session_profile,
+            Err(err) => {
+                let err_message = err.to_string();
+                log_error!("Failed to prepare {} reconnect: {}", host.protocol.display_name(), err_message);
+                if let Some(tab) = self.tabs.get_mut(tab_index) {
+                    tab.session = None;
+                    tab.session_error = Some(err_message);
+                }
+                return;
+            }
+        };
 
         log_debug!("Reconnecting session for host: {}", host.name);
 
-        let action = VaultUnlockAction::ReconnectTab { tab_index };
-        let Some(auth_resolution) = self.resolve_host_pass_password(&host, action) else {
+        let action = VaultUnlockAction::ReconnectTab {
+            tab_index,
+            auth_settings: session_profile.auth_settings.clone(),
+        };
+        let Some(auth_resolution) = self.resolve_host_pass_password(&host, action, &session_profile.auth_settings) else {
             return;
         };
         self.reconnect_session_with_auth(
@@ -545,6 +668,7 @@ impl AppState {
             auth_resolution.pass_entry_override,
             auth_resolution.pass_fallback_notice,
             auth_resolution.disable_vault_autologin,
+            session_profile,
         );
     }
 
@@ -554,6 +678,7 @@ impl AppState {
         pass_entry_override: Option<String>,
         pass_fallback_notice: Option<String>,
         disable_vault_autologin: bool,
+        session_profile: crate::config::InteractiveProfileSnapshot,
     ) {
         if self.tabs.is_empty() || tab_index >= self.tabs.len() {
             return;
@@ -563,12 +688,11 @@ impl AppState {
         let host = tab.host.clone();
         let tab_title = tab.title.clone();
         let force_ssh_logging = tab.force_ssh_logging;
-        let history_buffer = self.resolved_history_buffer_for_host(&host);
         let (initial_rows, initial_cols) = tab.last_pty_size.unwrap_or_else(|| self.initial_pty_size());
 
         log_debug!(
             "Using history buffer {} for reconnect tab '{}' (profile: {:?})",
-            history_buffer,
+            session_profile.history_buffer,
             tab_title,
             host.profile
         );
@@ -581,12 +705,12 @@ impl AppState {
             disable_vault_autologin,
         };
 
-        match Self::spawn_session(&host, &tab_title, history_buffer, session_launch_options) {
+        match Self::spawn_session(&host, &tab_title, &session_profile, session_launch_options) {
             Ok(session) => {
                 let tab = &mut self.tabs[tab_index];
                 tab.session = Some(session);
                 tab.session_error = None;
-                tab.highlight_overlay = HighlightOverlayEngine::new();
+                tab.highlight_overlay = HighlightOverlayEngine::from_snapshot(&session_profile);
                 tab.scroll_offset = 0;
                 tab.terminal_search.matches.clear();
                 tab.terminal_search.current = 0;

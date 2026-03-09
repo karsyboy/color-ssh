@@ -25,10 +25,23 @@ struct TerminalEventState {
 #[derive(Clone)]
 pub(super) struct TerminalEventListener {
     state: Arc<Mutex<TerminalEventState>>,
+    allow_remote_clipboard_write: bool,
+    remote_clipboard_max_bytes: usize,
 }
 
 impl TerminalEventListener {
     pub(super) fn new(rows: u16, cols: u16, input_writer: Option<TerminalInputWriter>) -> Self {
+        let (allow_remote_clipboard_write, remote_clipboard_max_bytes) = Self::current_remote_clipboard_policy();
+        Self::new_with_remote_clipboard_policy(rows, cols, input_writer, allow_remote_clipboard_write, remote_clipboard_max_bytes)
+    }
+
+    pub(super) fn new_with_remote_clipboard_policy(
+        rows: u16,
+        cols: u16,
+        input_writer: Option<TerminalInputWriter>,
+        allow_remote_clipboard_write: bool,
+        remote_clipboard_max_bytes: usize,
+    ) -> Self {
         let state = TerminalEventState {
             input_writer,
             rows: rows.max(1),
@@ -36,6 +49,8 @@ impl TerminalEventListener {
         };
         Self {
             state: Arc::new(Mutex::new(state)),
+            allow_remote_clipboard_write,
+            remote_clipboard_max_bytes,
         }
     }
 
@@ -70,7 +85,7 @@ impl TerminalEventListener {
         let _ = out.flush();
     }
 
-    fn remote_clipboard_policy() -> (bool, usize) {
+    fn current_remote_clipboard_policy() -> (bool, usize) {
         config::with_current_config("reading remote clipboard policy", |cfg| {
             cfg.interactive_settings
                 .as_ref()
@@ -97,8 +112,7 @@ impl EventListener for TerminalEventListener {
         match event {
             Event::PtyWrite(text) => self.write_input(text.as_bytes()),
             Event::ClipboardStore(_, text) => {
-                let (enabled, max_bytes) = Self::remote_clipboard_policy();
-                if enabled && Self::allow_remote_clipboard_write(&text, max_bytes) {
+                if self.allow_remote_clipboard_write && Self::allow_remote_clipboard_write(&text, self.remote_clipboard_max_bytes) {
                     Self::copy_to_clipboard(&text);
                 }
             }

@@ -291,6 +291,7 @@ pub(crate) struct HighlightOverlayEngine {
     mode: HighlightOverlayMode,
     auto_policy: HighlightOverlayAutoPolicy,
     config_version: u64,
+    refresh_from_current_config: bool,
     cached_overlay: HighlightOverlay,
     cached_render_epoch: Option<u64>,
     cached_display_scrollback: usize,
@@ -308,9 +309,39 @@ pub(crate) struct HighlightOverlayEngine {
 impl HighlightOverlayEngine {
     /// Create an overlay engine loaded from the current runtime configuration.
     pub(crate) fn new() -> Self {
-        let mut engine = Self::default();
+        let mut engine = Self {
+            refresh_from_current_config: true,
+            ..Self::default()
+        };
         engine.reload_rules();
         engine
+    }
+
+    /// Create an overlay engine from a profile snapshot captured at launch time.
+    pub(crate) fn from_snapshot(snapshot: &config::InteractiveProfileSnapshot) -> Self {
+        let (styles, rule_style_indexes) = build_overlay_styles(&snapshot.overlay_rules);
+        Self {
+            rules: snapshot.overlay_rules.clone(),
+            rule_set: snapshot.overlay_rule_set.clone(),
+            styles,
+            rule_style_indexes,
+            mode: snapshot.overlay_mode,
+            auto_policy: snapshot.overlay_auto_policy,
+            config_version: snapshot.config_version,
+            refresh_from_current_config: false,
+            cached_overlay: HighlightOverlay::default(),
+            cached_render_epoch: None,
+            cached_display_scrollback: 0,
+            last_compatibility_action: HighlightCompatibilityAction::Full,
+            last_overlay_rows: Vec::new(),
+            row_analysis_cache: HashMap::new(),
+            row_cache_generation: 0,
+            last_visible_rows: Vec::new(),
+            last_analysis_at: None,
+            volatile_repaint_streak: 0,
+            volatile_suppressed_until: None,
+            profiler: HighlightOverlayProfiler::default(),
+        }
     }
 
     /// Rebuild renderer-side highlight spans for the currently visible rows.
@@ -738,6 +769,10 @@ impl HighlightOverlayEngine {
     }
 
     fn refresh_rules_if_needed(&mut self) {
+        if !self.refresh_from_current_config {
+            return;
+        }
+
         let current_version = config::current_config_version();
         if current_version != self.config_version {
             self.reload_rules();
@@ -764,6 +799,7 @@ impl HighlightOverlayEngine {
         self.mode = mode;
         self.auto_policy = auto_policy;
         self.config_version = config::current_config_version();
+        self.refresh_from_current_config = true;
         self.cached_overlay = HighlightOverlay::default();
         self.cached_render_epoch = None;
         self.cached_display_scrollback = 0;
@@ -799,6 +835,7 @@ impl HighlightOverlayEngine {
             mode,
             auto_policy,
             config_version,
+            refresh_from_current_config: false,
             cached_overlay: HighlightOverlay::default(),
             cached_render_epoch: None,
             cached_display_scrollback: 0,

@@ -54,13 +54,47 @@ pub(crate) struct TerminalEngine {
 
 impl TerminalEngine {
     /// Create a terminal engine without a host input channel.
+    #[cfg_attr(not(test), allow(dead_code))]
     pub(crate) fn new(rows: u16, cols: u16, history: usize) -> Self {
         Self::new_with_listener(rows, cols, history, TerminalEventListener::new(rows, cols, None))
+    }
+
+    /// Create a terminal engine with an explicit remote clipboard policy.
+    pub(crate) fn new_with_remote_clipboard_policy(
+        rows: u16,
+        cols: u16,
+        history: usize,
+        allow_remote_clipboard_write: bool,
+        remote_clipboard_max_bytes: usize,
+    ) -> Self {
+        Self::new_with_listener(
+            rows,
+            cols,
+            history,
+            TerminalEventListener::new_with_remote_clipboard_policy(rows, cols, None, allow_remote_clipboard_write, remote_clipboard_max_bytes),
+        )
     }
 
     /// Create a terminal engine that can answer PTY-originated writes.
     pub(crate) fn new_with_input_writer(rows: u16, cols: u16, history: usize, input_writer: TerminalInputWriter) -> Self {
         Self::new_with_listener(rows, cols, history, TerminalEventListener::new(rows, cols, Some(input_writer)))
+    }
+
+    /// Create a terminal engine that can answer PTY-originated writes with an explicit remote clipboard policy.
+    pub(crate) fn new_with_input_writer_and_remote_clipboard_policy(
+        rows: u16,
+        cols: u16,
+        history: usize,
+        input_writer: TerminalInputWriter,
+        allow_remote_clipboard_write: bool,
+        remote_clipboard_max_bytes: usize,
+    ) -> Self {
+        Self::new_with_listener(
+            rows,
+            cols,
+            history,
+            TerminalEventListener::new_with_remote_clipboard_policy(rows, cols, Some(input_writer), allow_remote_clipboard_write, remote_clipboard_max_bytes),
+        )
     }
 
     fn new_with_listener(rows: u16, cols: u16, history: usize, event_listener: TerminalEventListener) -> Self {

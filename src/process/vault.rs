@@ -34,8 +34,7 @@ fn current_unlock_policy() -> UnlockPolicy {
     UnlockPolicy::new(auth_settings.idle_timeout_seconds, auth_settings.session_timeout_seconds)
 }
 
-fn unlock_agent_interactively(client: &agent::AgentClient) -> io::Result<()> {
-    let policy = current_unlock_policy();
+fn unlock_agent_interactively(client: &agent::AgentClient, policy: UnlockPolicy) -> io::Result<()> {
     for attempt in 1..=3 {
         log_debug!("Prompting for password vault unlock (attempt {} of 3)", attempt);
         let master_password = auth::prompt_hidden_secret("Enter vault master password: ")?;
@@ -78,7 +77,11 @@ fn unlock_agent_interactively(client: &agent::AgentClient) -> io::Result<()> {
     ))
 }
 
-pub(super) fn query_vault_entry_status(client: &agent::AgentClient, pass_entry_name: &str) -> std::result::Result<agent::AgentEntryStatus, VaultAccessError> {
+fn query_vault_entry_status_with_policy(
+    client: &agent::AgentClient,
+    pass_entry_name: &str,
+    policy: &UnlockPolicy,
+) -> std::result::Result<agent::AgentEntryStatus, VaultAccessError> {
     let entry_status = match client.entry_status(pass_entry_name) {
         Ok(status) => status,
         Err(agent::AgentError::VaultNotInitialized) => return Err(VaultAccessError::VaultNotInitialized),
@@ -91,7 +94,7 @@ pub(super) fn query_vault_entry_status(client: &agent::AgentClient, pass_entry_n
         if !io::stdin().is_terminal() {
             return Err(VaultAccessError::LockedWithoutTerminal);
         }
-        unlock_agent_interactively(client).map_err(|err| VaultAccessError::UnlockFailed(err.to_string()))?;
+        unlock_agent_interactively(client, policy.clone()).map_err(|err| VaultAccessError::UnlockFailed(err.to_string()))?;
         log_debug!("Retrying password vault entry lookup after unlock");
         let entry_status = client
             .entry_status(pass_entry_name)
@@ -105,13 +108,18 @@ pub(super) fn query_vault_entry_status(client: &agent::AgentClient, pass_entry_n
     Ok(entry_status)
 }
 
-pub(super) fn resolve_vault_password(pass_entry_name: &str) -> io::Result<SensitiveString> {
+pub(super) fn query_vault_entry_status(client: &agent::AgentClient, pass_entry_name: &str) -> std::result::Result<agent::AgentEntryStatus, VaultAccessError> {
+    let policy = current_unlock_policy();
+    query_vault_entry_status_with_policy(client, pass_entry_name, &policy)
+}
+
+pub(super) fn resolve_vault_password_with_policy(pass_entry_name: &str, policy: UnlockPolicy) -> io::Result<SensitiveString> {
     if !validate_vault_entry_name(pass_entry_name) {
         return Err(io::Error::new(io::ErrorKind::InvalidInput, "invalid password vault entry name for RDP launch"));
     }
 
     let client = agent::AgentClient::new().map_err(|err| io::Error::other(err.to_string()))?;
-    let entry_status = match query_vault_entry_status(&client, pass_entry_name) {
+    let entry_status = match query_vault_entry_status_with_policy(&client, pass_entry_name, &policy) {
         Ok(status) => status,
         Err(VaultAccessError::VaultNotInitialized) => {
             return Err(io::Error::new(

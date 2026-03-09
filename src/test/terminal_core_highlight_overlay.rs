@@ -2,7 +2,7 @@ use super::{
     HighlightCompatibilityAction, HighlightOverlayBuildKind, HighlightOverlayContext, HighlightOverlayEngine, HighlightOverlayViewport,
     HighlightSuppressionReason, viewport_changed_aggressively,
 };
-use crate::config::{HighlightOverlayAutoPolicy, HighlightOverlayMode};
+use crate::config::{HighlightOverlayAutoPolicy, HighlightOverlayMode, InteractiveProfileSnapshot};
 use crate::highlighter::CompiledHighlightRule;
 use crate::terminal_core::{AnsiColor, TerminalEngine};
 use alacritty_terminal::vte::ansi::Rgb;
@@ -67,6 +67,37 @@ fn overlay_highlights_visible_rows_with_renderer_side_styles() {
     assert!(matches!(style.bg_color(), Some(AnsiColor::Spec(Rgb { r: 12, g: 12, b: 12 }))));
 
     assert!(visible_text.starts_with("user@host:~$ error"));
+}
+
+#[test]
+fn overlay_from_profile_snapshot_uses_snapshot_rules() {
+    let mut terminal_engine = TerminalEngine::new(3, 32, 128);
+    terminal_engine.process_output(b"status: warn\r\n");
+
+    let snapshot = InteractiveProfileSnapshot {
+        auth_settings: crate::config::AuthSettings::default(),
+        history_buffer: 128,
+        remote_clipboard_write: false,
+        remote_clipboard_max_bytes: 4096,
+        overlay_rules: vec![compiled_rule("warn", "\x1b[38;2;255;200;0m")],
+        overlay_rule_set: Some(regex::RegexSet::new(["warn"]).expect("rule set")),
+        overlay_mode: HighlightOverlayMode::Always,
+        overlay_auto_policy: HighlightOverlayAutoPolicy::Safe,
+        config_version: 0,
+    };
+    let mut overlay_engine = HighlightOverlayEngine::from_snapshot(&snapshot);
+
+    let overlay = build_overlay_for_engine(&terminal_engine, &mut overlay_engine, 1, 0);
+
+    assert_eq!(overlay.suppression_reason, None);
+    let view = terminal_engine.view_model();
+    let visible_rows = view.visible_row_texts();
+    let (highlight_row, visible_text) = visible_rows
+        .iter()
+        .find(|(_, text)| text.contains("warn"))
+        .expect("visible row with snapshot rule target");
+    let highlight_col = visible_text.find("warn").expect("highlight column") as u16;
+    assert!(overlay.style_for_cell(*highlight_row, highlight_col).is_some());
 }
 
 #[test]

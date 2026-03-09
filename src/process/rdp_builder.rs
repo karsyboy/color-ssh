@@ -2,9 +2,11 @@
 
 use super::command_spec::PreparedCommand;
 use super::ssh_builder::resolve_host_by_destination;
-use super::vault::resolve_vault_password;
+use super::vault::resolve_vault_password_with_policy;
 use crate::args::RdpCommandArgs;
+use crate::auth::ipc::UnlockPolicy;
 use crate::auth::secret::{ExposeSecret, SensitiveString};
+use crate::config::AuthSettings;
 use crate::inventory::{ConnectionProtocol, InventoryHost};
 use std::io;
 
@@ -83,12 +85,6 @@ where
     }
 }
 
-fn resolve_rdp_auth_mode(host: &InventoryHost, explicit_pass_entry: Option<&str>) -> (RdpAuthMode, Option<String>) {
-    resolve_rdp_auth_mode_with(host, explicit_pass_entry, |pass_entry_name| {
-        resolve_vault_password(pass_entry_name).map_err(|err| err.to_string())
-    })
-}
-
 fn build_prepared_rdp_command(host: &InventoryHost, auth_mode: RdpAuthMode, fallback_notice: Option<String>) -> io::Result<PreparedCommand> {
     match auth_mode {
         RdpAuthMode::NativePrompt => {
@@ -107,7 +103,19 @@ fn build_prepared_rdp_command(host: &InventoryHost, auth_mode: RdpAuthMode, fall
 }
 
 pub(crate) fn build_rdp_command_for_host(host: &InventoryHost, explicit_pass_entry: Option<&str>) -> io::Result<PreparedCommand> {
-    let (auth_mode, fallback_notice) = resolve_rdp_auth_mode(host, explicit_pass_entry);
+    let auth_settings = crate::config::auth_settings();
+    build_rdp_command_for_host_with_auth_settings(host, explicit_pass_entry, &auth_settings)
+}
+
+pub(crate) fn build_rdp_command_for_host_with_auth_settings(
+    host: &InventoryHost,
+    explicit_pass_entry: Option<&str>,
+    auth_settings: &AuthSettings,
+) -> io::Result<PreparedCommand> {
+    let unlock_policy = UnlockPolicy::new(auth_settings.idle_timeout_seconds, auth_settings.session_timeout_seconds);
+    let (auth_mode, fallback_notice) = resolve_rdp_auth_mode_with(host, explicit_pass_entry, |pass_entry_name| {
+        resolve_vault_password_with_policy(pass_entry_name, unlock_policy.clone()).map_err(|err| err.to_string())
+    });
     build_prepared_rdp_command(host, auth_mode, fallback_notice)
 }
 

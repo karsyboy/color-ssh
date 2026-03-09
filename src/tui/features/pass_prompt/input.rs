@@ -11,17 +11,21 @@ use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 const VAULT_UNLOCK_RETRY_NOTICE: &str = "Invalid master password. Try again.";
 const MANUAL_VAULT_UNLOCK_RETRY_NOTICE: &str = "Vault unlock failed after multiple attempts. Try again.";
 
-fn current_unlock_policy() -> UnlockPolicy {
-    let auth_settings = config::auth_settings();
-    UnlockPolicy::new(auth_settings.idle_timeout_seconds, auth_settings.session_timeout_seconds)
-}
-
 impl AppState {
+    fn unlock_policy_for_action(&self, action: &VaultUnlockAction) -> UnlockPolicy {
+        let auth_settings = match action {
+            VaultUnlockAction::UnlockVault => config::auth_settings(),
+            VaultUnlockAction::OpenHostTab { auth_settings, .. } | VaultUnlockAction::ReconnectTab { auth_settings, .. } => auth_settings.clone(),
+        };
+
+        UnlockPolicy::new(auth_settings.idle_timeout_seconds, auth_settings.session_timeout_seconds)
+    }
+
     fn launch_protocol_for_vault_action<'a>(&'a self, action: &'a VaultUnlockAction) -> Option<&'a ConnectionProtocol> {
         match action {
             VaultUnlockAction::UnlockVault => None,
             VaultUnlockAction::OpenHostTab { host, .. } => Some(&host.protocol),
-            VaultUnlockAction::ReconnectTab { tab_index } => self.tabs.get(*tab_index).map(|tab| &tab.host.protocol),
+            VaultUnlockAction::ReconnectTab { tab_index, .. } => self.tabs.get(*tab_index).map(|tab| &tab.host.protocol),
         }
     }
 
@@ -261,7 +265,7 @@ impl AppState {
                 return;
             }
         };
-        let unlock_result = client.unlock(master_password.expose_secret(), current_unlock_policy());
+        let unlock_result = client.unlock(master_password.expose_secret(), self.unlock_policy_for_action(&action));
 
         match unlock_result {
             Ok(status) => {
