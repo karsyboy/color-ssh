@@ -34,13 +34,14 @@ Color-SSH's interactive architecture is now PTY-centered. Interactive SSH displa
 
 - Direct interactive SSH uses the PTY-centered runtime whenever stdin and stdout are attached to an interactive TTY.
 - Direct SSH without a controlling TTY uses `src/process/interactive_passthrough.rs`.
-- Direct RDP still uses the passthrough runner when Color-SSH must capture and forward FreeRDP stdout/stderr.
+- Direct RDP still uses a captured-output fallback when Color-SSH must inject auth data and forward FreeRDP stdout/stderr instead of handing the session to a PTY-owned renderer.
 
 ## Overlay Behavior
 
 - Highlighting happens at render time on top of canonical terminal grid state.
 - Raw PTY bytes remain unchanged, so cursor control, alternate-screen programs, and terminal correctness continue to follow `alacritty_terminal` exactly.
 - Visible shell output still receives semantic keyword highlighting when the viewport is stable enough for additive decoration.
+- Matching is row-local to the terminal grid. Soft-wrapped logical lines are highlighted per visible terminal row rather than across wrap boundaries.
 - In `interactive_settings.overlay_highlighting: auto`, overlays are suppressed for alternate-screen sessions, mouse-reporting TUIs, suspicious primary-screen fullscreen views, and volatile repaint churn.
 - `interactive_settings.overlay_auto_policy` controls whether suspicious primary-screen fullscreen views are fully suppressed, reduced to trailing shell-like rows, or left enabled unless a hard suppression applies.
 
@@ -56,7 +57,7 @@ Color-SSH's interactive architecture is now PTY-centered. Interactive SSH displa
 
 - `src/process/interactive_passthrough.rs`
   - Required for direct SSH when there is no interactive controlling TTY and the PTY renderer cannot own the local terminal surface.
-  - Required for direct RDP launches that still need captured stdout/stderr forwarding.
+  - Required for the explicit RDP compatibility exception where FreeRDP still needs captured stdout/stderr forwarding.
 
 ## Long-Term Design
 

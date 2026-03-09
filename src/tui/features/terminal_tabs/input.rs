@@ -305,7 +305,7 @@ impl AppState {
         };
 
         if let Ok(engine) = session.engine().lock() {
-            return engine.screen().bracketed_paste_enabled();
+            return engine.view_model().bracketed_paste_enabled();
         }
 
         false

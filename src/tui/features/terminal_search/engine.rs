@@ -94,7 +94,7 @@ impl AppState {
             SearchDecision::Recompute { query, query_changed } => (query, query_changed),
         };
 
-        let parser_arc = match self.tabs[selected_tab].session.as_ref() {
+        let engine_handle = match self.tabs[selected_tab].session.as_ref() {
             Some(session) => session.engine_handle(),
             None => {
                 if let Some(search) = self.tabs.get_mut(selected_tab).map(|tab| &mut tab.terminal_search) {
@@ -105,8 +105,8 @@ impl AppState {
             }
         };
 
-        let matches = if let Ok(parser) = parser_arc.lock() {
-            parser.search_literal_matches(&query)
+        let matches = if let Ok(engine) = engine_handle.lock() {
+            engine.search_literal_matches(&query)
         } else {
             Vec::new()
         };
@@ -142,7 +142,7 @@ impl AppState {
         }
 
         let selected_tab = self.selected_tab;
-        let (abs_row, parser_arc) = {
+        let (abs_row, engine_handle) = {
             let tab = &self.tabs[selected_tab];
             if tab.terminal_search.matches.is_empty() {
                 return;
@@ -156,8 +156,8 @@ impl AppState {
         let tab = &mut self.tabs[selected_tab];
         let tab_height = self.tab_content_area.height as i64;
 
-        if let Ok(parser) = parser_arc.lock() {
-            let max_scrollback = parser.max_scrollback();
+        if let Ok(engine) = engine_handle.lock() {
+            let max_scrollback = engine.max_scrollback();
 
             let target_screen_row = tab_height / 3;
             let needed_scroll = target_screen_row - abs_row;

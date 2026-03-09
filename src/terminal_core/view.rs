@@ -31,6 +31,7 @@ pub(crate) enum MouseProtocolMode {
 ///
 /// Wrapped lines stay split at terminal row boundaries so renderers can honor
 /// the emulator's layout rather than attempting to reflow text themselves.
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct TerminalViewport {
     size: (u16, u16),
     cursor: Option<TerminalCursorSnapshot>,
@@ -51,7 +52,7 @@ impl TerminalViewport {
     }
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) struct TerminalCursorSnapshot {
     row: u16,
     col: u16,
@@ -67,6 +68,7 @@ impl TerminalCursorSnapshot {
     }
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct TerminalViewportRow {
     absolute_row: i64,
     cells: Vec<TerminalCellSnapshot>,
@@ -96,7 +98,7 @@ impl TerminalViewportRow {
 /// Most cells avoid allocation by storing either a blank marker or a single
 /// primary character. A `Cluster` is only allocated when combining characters
 /// need to be preserved together for rendering.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum TerminalGlyph {
     Blank,
     Char(char),
@@ -117,7 +119,7 @@ impl TerminalGlyph {
     }
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) struct TerminalCellStyle {
     fg_color: AnsiColor,
     bg_color: AnsiColor,
@@ -166,6 +168,7 @@ impl TerminalCellStyle {
     }
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct TerminalCellSnapshot {
     glyph: TerminalGlyph,
     style: TerminalCellStyle,
@@ -339,6 +342,23 @@ impl<'a> TerminalViewModel<'a> {
             }
         }
         visible_rows
+    }
+
+    /// Return logical buffer row identities in top-to-bottom order.
+    ///
+    /// These identities are stable only for the lifetime of the current grid
+    /// storage and are intended for local change detection, not persistence.
+    pub(crate) fn buffer_row_storage_ids(&self) -> Vec<usize> {
+        let grid = self.engine.term.grid();
+        let top = grid.topmost_line().0;
+        let bottom = grid.bottommost_line().0;
+        let mut row_ids = Vec::with_capacity((bottom - top + 1).max(0) as usize);
+
+        for row in top..=bottom {
+            row_ids.push(std::ptr::from_ref(&grid[Line(row)]).cast::<()>() as usize);
+        }
+
+        row_ids
     }
 
     /// Return the active mouse reporting mode as seen by the terminal.

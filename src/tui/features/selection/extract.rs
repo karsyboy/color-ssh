@@ -1,6 +1,6 @@
 //! Selection extraction helpers.
 
-use crate::tui::terminal_emulator::Parser;
+use crate::terminal_core::TerminalEngine;
 
 /// Check if a cell at `(row, col)` is within the current text selection.
 pub(crate) fn is_cell_in_selection(row: i64, col: u16, start: Option<(i64, u16)>, end: Option<(i64, u16)>) -> bool {
@@ -30,6 +30,6 @@ pub(crate) fn is_cell_in_selection(row: i64, col: u16, start: Option<(i64, u16)>
     }
 }
 
-pub(crate) fn extract_selection_text(parser: &Parser, start: (i64, u16), end: (i64, u16)) -> String {
-    parser.view_model().selection_text(start, end)
+pub(crate) fn extract_selection_text(engine: &TerminalEngine, start: (i64, u16), end: (i64, u16)) -> String {
+    engine.view_model().selection_text(start, end)
 }

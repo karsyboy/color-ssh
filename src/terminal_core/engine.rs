@@ -140,11 +140,6 @@ impl TerminalEngine {
         TerminalViewModel { engine: self }
     }
 
-    /// Transitional alias retained while existing TUI code still calls `screen`.
-    pub(crate) fn screen(&self) -> TerminalViewModel<'_> {
-        self.view_model()
-    }
-
     /// Return the maximum available scrollback depth.
     pub(crate) fn max_scrollback(&self) -> usize {
         self.term.grid().history_size()

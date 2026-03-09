@@ -1,12 +1,12 @@
-use super::Parser;
+use super::TerminalEngine;
 
 #[test]
 fn terminal_cell_tab_character_renders_as_space_without_contents() {
-    let mut parser = Parser::new(2, 16, 100);
-    parser.process_output(b"A\tB");
+    let mut engine = TerminalEngine::new(2, 16, 100);
+    engine.process_output(b"A\tB");
 
-    let screen = parser.screen();
-    let tab_cell = screen.cell(0, 1).expect("tab cell");
+    let view = engine.view_model();
+    let tab_cell = view.cell(0, 1).expect("tab cell");
 
     assert!(!tab_cell.has_contents());
     assert_eq!(tab_cell.contents(), " ");
@@ -17,11 +17,11 @@ fn terminal_cell_tab_character_renders_as_space_without_contents() {
 
 #[test]
 fn terminal_cell_plain_ascii_renders_normally() {
-    let mut parser = Parser::new(2, 16, 100);
-    parser.process_output(b"Z");
+    let mut engine = TerminalEngine::new(2, 16, 100);
+    engine.process_output(b"Z");
 
-    let screen = parser.screen();
-    let cell = screen.cell(0, 0).expect("cell");
+    let view = engine.view_model();
+    let cell = view.cell(0, 0).expect("cell");
 
     assert!(cell.has_contents());
     assert_eq!(cell.contents(), "Z");
@@ -32,11 +32,11 @@ fn terminal_cell_plain_ascii_renders_normally() {
 
 #[test]
 fn terminal_cell_symbol_combining_mark_is_included_in_rendered_symbol() {
-    let mut parser = Parser::new(2, 16, 100);
-    parser.process_output("e\u{0301}".as_bytes());
+    let mut engine = TerminalEngine::new(2, 16, 100);
+    engine.process_output("e\u{0301}".as_bytes());
 
-    let screen = parser.screen();
-    let cell = screen.cell(0, 0).expect("cell");
+    let view = engine.view_model();
+    let cell = view.cell(0, 0).expect("cell");
 
     let mut scratch = String::new();
     assert_eq!(cell.symbol(&mut scratch), "e\u{0301}");
@@ -44,11 +44,11 @@ fn terminal_cell_symbol_combining_mark_is_included_in_rendered_symbol() {
 
 #[test]
 fn terminal_viewport_snapshot_preserves_rows_glyphs_and_cursor_state() {
-    let mut parser = Parser::new(3, 8, 100);
-    parser.process_output("e\u{0301}".as_bytes());
-    parser.process_output(b"\r\nok");
+    let mut engine = TerminalEngine::new(3, 8, 100);
+    engine.process_output("e\u{0301}".as_bytes());
+    engine.process_output(b"\r\nok");
 
-    let viewport = parser.view_model().viewport_snapshot(3, 8);
+    let viewport = engine.view_model().viewport_snapshot(3, 8);
     let mut scratch = String::new();
 
     assert_eq!(viewport.size(), (3, 8));

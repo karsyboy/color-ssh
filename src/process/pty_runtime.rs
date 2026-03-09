@@ -6,6 +6,7 @@
 
 use super::command_spec::PreparedCommand;
 use super::exit::map_exit_code;
+use super::{PtyLogTarget, spawn_pty_output_reader};
 use crate::auth::secret::ExposeSecret;
 use crate::reload_notice::{ReloadNoticeToast, format_reload_notice};
 use crate::terminal_core::highlight_overlay::{HighlightOverlay, HighlightOverlayContext, HighlightOverlayEngine, HighlightOverlayViewport};
@@ -27,7 +28,7 @@ use ratatui::{
     Frame, Terminal, TerminalOptions, Viewport,
     layout::{Position, Rect},
 };
-use std::io::{self, IsTerminal, Read};
+use std::io::{self, IsTerminal};
 use std::sync::{
     Arc, Mutex,
     atomic::AtomicU64,
@@ -65,7 +66,10 @@ struct InteractivePtyRuntime {
 struct HostScrollbackMirror {
     history_capacity: usize,
     last_history_size: usize,
-    last_live_rows: Vec<String>,
+    last_viewport_rows: u16,
+    last_viewport_cols: u16,
+    last_buffer_row_ids: Vec<usize>,
+    valid: bool,
 }
 
 impl HostScrollbackMirror {
@@ -73,7 +77,50 @@ impl HostScrollbackMirror {
         Self {
             history_capacity,
             last_history_size: 0,
-            last_live_rows: Vec::new(),
+            last_viewport_rows: 0,
+            last_viewport_cols: 0,
+            last_buffer_row_ids: Vec::new(),
+            valid: false,
+        }
+    }
+
+    fn invalidate(&mut self) {
+        self.valid = false;
+        self.last_buffer_row_ids.clear();
+    }
+
+    fn sync_history(&mut self, history_size: usize) {
+        self.last_history_size = history_size;
+    }
+
+    fn sync(&mut self, history_size: usize, viewport_rows: u16, viewport_cols: u16, buffer_row_ids: Vec<usize>) {
+        self.last_history_size = history_size;
+        self.last_viewport_rows = viewport_rows;
+        self.last_viewport_cols = viewport_cols;
+        self.last_buffer_row_ids = buffer_row_ids;
+        self.valid = true;
+    }
+}
+
+struct PendingScrollbackInsertion {
+    viewport: TerminalViewport,
+    display_scrollback: usize,
+}
+
+struct CapturedScrollbackInsertions {
+    alternate_screen: bool,
+    mouse_mode: MouseProtocolMode,
+    cursor_hidden: bool,
+    pending: Vec<PendingScrollbackInsertion>,
+}
+
+impl CapturedScrollbackInsertions {
+    fn empty(alternate_screen: bool, mouse_mode: MouseProtocolMode, cursor_hidden: bool) -> Self {
+        Self {
+            alternate_screen,
+            mouse_mode,
+            cursor_hidden,
+            pending: Vec::new(),
         }
     }
 }
@@ -220,7 +267,21 @@ fn spawn_interactive_pty_runtime(command_spec: PreparedCommand, history_buffer: 
     );
 
     let (event_tx, event_rx) = mpsc::sync_channel(PTY_EVENT_QUEUE_CAPACITY);
-    spawn_pty_reader(reader_thread_name(&command_spec.program), reader, event_tx.clone())?;
+    spawn_pty_output_reader(
+        reader_thread_name(&command_spec.program),
+        reader,
+        {
+            let output_tx = event_tx.clone();
+            move |bytes| output_tx.send(PtyRuntimeEvent::Output(bytes.to_vec())).is_ok()
+        },
+        {
+            let closed_tx = event_tx.clone();
+            move || {
+                let _ = closed_tx.send(PtyRuntimeEvent::ReaderClosed);
+            }
+        },
+        PtyLogTarget::global_ssh(),
+    )?;
     spawn_exit_watcher(child, exited, event_tx)?;
 
     Ok(InteractivePtyRuntime {
@@ -246,32 +307,6 @@ fn command_builder_from_spec(command_spec: &PreparedCommand) -> io::Result<Comma
         builder.env(key, value);
     }
     Ok(builder)
-}
-
-fn spawn_pty_reader(name: String, mut reader: Box<dyn Read + Send>, event_tx: SyncSender<PtyRuntimeEvent>) -> io::Result<()> {
-    thread::Builder::new().name(name).spawn(move || {
-        let mut buf = [0u8; 8192];
-        loop {
-            match reader.read(&mut buf) {
-                Ok(0) => {
-                    let _ = event_tx.send(PtyRuntimeEvent::ReaderClosed);
-                    break;
-                }
-                Ok(bytes_read) => {
-                    if event_tx.send(PtyRuntimeEvent::Output(buf[..bytes_read].to_vec())).is_err() {
-                        break;
-                    }
-                }
-                Err(err) => {
-                    log_error!("Error reading from PTY: {}", err);
-                    let _ = event_tx.send(PtyRuntimeEvent::ReaderClosed);
-                    break;
-                }
-            }
-        }
-        log_debug!("PTY reader thread exiting");
-    })?;
-    Ok(())
 }
 
 fn spawn_exit_watcher(
@@ -333,16 +368,11 @@ fn run_pty_event_loop(runtime: &mut InteractivePtyRuntime) -> Result<std::proces
         let current_epoch = runtime.session.render_epoch();
         let current_config_version = config::current_config_version();
         if force_redraw || current_epoch != last_drawn_epoch || current_config_version != last_config_version || last_draw_at.elapsed() >= RENDER_HEARTBEAT {
-            let scrollback_insertions = {
+            let captured_scrollback = {
                 let mut engine = runtime.session.engine().lock().map_err(|err| io::Error::other(err.to_string()))?;
-                collect_host_scrollback_insertions(
-                    &mut engine,
-                    &mut runtime.highlight_overlay,
-                    current_epoch,
-                    &mut runtime.host_scrollback,
-                    scroll_offset,
-                )
+                capture_host_scrollback_insertions(&mut engine, &mut runtime.host_scrollback, scroll_offset)
             };
+            let scrollback_insertions = build_host_scrollback_insertions(captured_scrollback, &mut runtime.highlight_overlay, current_epoch);
 
             for insertion in scrollback_insertions {
                 let insertion_height = insertion.viewport.size().0;
@@ -426,6 +456,7 @@ fn run_pty_event_loop(runtime: &mut InteractivePtyRuntime) -> Result<std::proces
             }
             Event::Resize(width, height) => {
                 runtime.session.resize(height.max(1), width.max(1));
+                runtime.host_scrollback.invalidate();
                 force_redraw = true;
             }
             Event::Mouse(mouse) => {
@@ -494,13 +525,6 @@ fn process_pty_output(session: &TerminalSession, bytes: &[u8]) -> io::Result<()>
         return Ok(());
     }
 
-    if log::LOGGER.is_ssh_logging_enabled() {
-        let chunk = String::from_utf8_lossy(bytes);
-        if let Err(err) = log::LOGGER.log_ssh_raw(chunk.as_ref()) {
-            log_error!("Failed to write session log data: {}", err);
-        }
-    }
-
     let mut engine = session.engine().lock().map_err(|err| io::Error::other(err.to_string()))?;
     engine.process_output(bytes);
     drop(engine);
@@ -523,6 +547,7 @@ fn expire_reload_notice_toast(reload_notice_toast: &mut Option<ReloadNoticeToast
     should_clear
 }
 
+#[cfg_attr(not(test), allow(dead_code))]
 fn collect_host_scrollback_insertions(
     engine: &mut TerminalEngine,
     highlight_overlay: &mut HighlightOverlayEngine,
@@ -530,19 +555,41 @@ fn collect_host_scrollback_insertions(
     host_scrollback: &mut HostScrollbackMirror,
     restore_scrollback: usize,
 ) -> Vec<ScrollbackInsertion> {
+    let captured = capture_host_scrollback_insertions(engine, host_scrollback, restore_scrollback);
+    build_host_scrollback_insertions(captured, highlight_overlay, render_epoch)
+}
+
+fn capture_host_scrollback_insertions(
+    engine: &mut TerminalEngine,
+    host_scrollback: &mut HostScrollbackMirror,
+    restore_scrollback: usize,
+) -> CapturedScrollbackInsertions {
     engine.set_display_scrollback(0);
-    let (viewport_rows, viewport_cols, current_history_size, alternate_screen, current_live_rows) = {
+    let (viewport_rows, viewport_cols, current_history_size, alternate_screen, mouse_mode, cursor_hidden, buffer_row_ids) = {
         let view = engine.view_model();
         let (rows, cols) = view.size();
-        let current_live_rows = view.visible_row_texts().into_iter().map(|(_, text)| text).collect::<Vec<_>>();
-        (rows, cols, view.scrollback(), view.is_alternate_screen(), current_live_rows)
+        (
+            rows,
+            cols,
+            view.scrollback(),
+            view.is_alternate_screen(),
+            view.mouse_protocol().0,
+            view.cursor_hidden(),
+            view.buffer_row_storage_ids(),
+        )
     };
 
     if alternate_screen || viewport_rows == 0 || viewport_cols == 0 {
         engine.set_display_scrollback(restore_scrollback);
-        host_scrollback.last_history_size = current_history_size;
-        host_scrollback.last_live_rows = current_live_rows;
-        return Vec::new();
+        host_scrollback.sync_history(current_history_size);
+        host_scrollback.invalidate();
+        return CapturedScrollbackInsertions::empty(alternate_screen, mouse_mode, cursor_hidden);
+    }
+
+    if !host_scrollback.valid || host_scrollback.last_viewport_rows != viewport_rows || host_scrollback.last_viewport_cols != viewport_cols {
+        engine.set_display_scrollback(restore_scrollback);
+        host_scrollback.sync(current_history_size, viewport_rows, viewport_cols, buffer_row_ids);
+        return CapturedScrollbackInsertions::empty(alternate_screen, mouse_mode, cursor_hidden);
     }
 
     let mut scrolled_line_count = current_history_size.saturating_sub(host_scrollback.last_history_size);
@@ -550,40 +597,60 @@ fn collect_host_scrollback_insertions(
         && current_history_size == host_scrollback.history_capacity
         && host_scrollback.last_history_size == host_scrollback.history_capacity
     {
-        scrolled_line_count = infer_scrolled_line_count(&host_scrollback.last_live_rows, &current_live_rows);
+        scrolled_line_count = infer_scrolled_line_count(&host_scrollback.last_buffer_row_ids, &buffer_row_ids);
     }
 
-    let mut insertions = Vec::new();
+    let mut pending = Vec::new();
     if scrolled_line_count > 0 {
         let mut remaining = scrolled_line_count;
         while remaining > 0 {
             let chunk_rows = remaining.min(viewport_rows as usize) as u16;
             engine.set_display_scrollback(remaining);
-            let (viewport, overlay) = {
-                let view = engine.view_model();
-                let viewport = view.viewport_snapshot(chunk_rows, viewport_cols);
-                let overlay_view = HighlightOverlayViewport::new(&viewport, view.is_alternate_screen(), view.mouse_protocol().0, view.cursor_hidden());
-                let overlay = highlight_overlay.build_visible_overlay(
-                    &overlay_view,
-                    HighlightOverlayContext {
-                        render_epoch,
-                        display_scrollback: remaining,
-                    },
-                );
-                (viewport, overlay)
-            };
-            insertions.push(ScrollbackInsertion { viewport, overlay });
+            let viewport = engine.view_model().viewport_snapshot(chunk_rows, viewport_cols);
+            pending.push(PendingScrollbackInsertion {
+                viewport,
+                display_scrollback: remaining,
+            });
             remaining = remaining.saturating_sub(chunk_rows as usize);
         }
     }
 
     engine.set_display_scrollback(restore_scrollback);
-    host_scrollback.last_history_size = current_history_size;
-    host_scrollback.last_live_rows = current_live_rows;
-    insertions
+    host_scrollback.sync(current_history_size, viewport_rows, viewport_cols, buffer_row_ids);
+    CapturedScrollbackInsertions {
+        alternate_screen,
+        mouse_mode,
+        cursor_hidden,
+        pending,
+    }
 }
 
-fn infer_scrolled_line_count(previous_rows: &[String], current_rows: &[String]) -> usize {
+fn build_host_scrollback_insertions(
+    captured: CapturedScrollbackInsertions,
+    highlight_overlay: &mut HighlightOverlayEngine,
+    render_epoch: u64,
+) -> Vec<ScrollbackInsertion> {
+    captured
+        .pending
+        .into_iter()
+        .map(|pending| {
+            let overlay_view = HighlightOverlayViewport::new(&pending.viewport, captured.alternate_screen, captured.mouse_mode, captured.cursor_hidden);
+            let overlay = highlight_overlay.build_visible_overlay(
+                &overlay_view,
+                HighlightOverlayContext {
+                    render_epoch,
+                    display_scrollback: pending.display_scrollback,
+                },
+            );
+            ScrollbackInsertion {
+                viewport: pending.viewport,
+                overlay,
+            }
+        })
+        .collect()
+}
+
+fn infer_scrolled_line_count<T: Eq>(previous_rows: &[T], current_rows: &[T]) -> usize {
     if previous_rows.is_empty() || current_rows.is_empty() || previous_rows.len() != current_rows.len() {
         return 0;
     }
@@ -607,12 +674,12 @@ fn max_scrollback(session: &TerminalSession) -> usize {
 
 fn bracketed_paste_enabled(session: &TerminalSession) -> io::Result<bool> {
     let engine = session.engine().lock().map_err(|err| io::Error::other(err.to_string()))?;
-    Ok(engine.screen().bracketed_paste_enabled())
+    Ok(engine.view_model().bracketed_paste_enabled())
 }
 
 fn current_mouse_protocol(session: &TerminalSession) -> io::Result<(MouseProtocolMode, MouseProtocolEncoding)> {
     let engine = session.engine().lock().map_err(|err| io::Error::other(err.to_string()))?;
-    Ok(engine.screen().mouse_protocol())
+    Ok(engine.view_model().mouse_protocol())
 }
 
 fn restore_host_terminal_prompt_line(viewport_area: Rect) -> io::Result<()> {

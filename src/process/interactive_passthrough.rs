@@ -8,6 +8,7 @@
 //! - direct SSH launches without an interactive controlling TTY
 //! - direct RDP launches that still need captured stdout/stderr forwarding
 
+use super::Utf8ChunkDecoder;
 use super::exit::map_exit_code;
 use crate::{Result, log, log_debug, log_error};
 use std::io::{self, Read, Write};
@@ -88,72 +89,6 @@ impl OutputFlushState {
             self.last_flush_at = Instant::now();
         }
         Ok(())
-    }
-}
-
-#[derive(Debug)]
-struct Utf8ChunkDecoder {
-    pending_utf8: Vec<u8>,
-}
-
-impl Utf8ChunkDecoder {
-    fn with_capacity(capacity: usize) -> Self {
-        Self {
-            pending_utf8: Vec::with_capacity(capacity),
-        }
-    }
-
-    fn decode_read(&mut self, bytes: &[u8]) -> Option<String> {
-        if self.pending_utf8.is_empty()
-            && let Ok(valid_chunk) = std::str::from_utf8(bytes)
-        {
-            return Some(valid_chunk.to_string());
-        }
-
-        self.pending_utf8.extend_from_slice(bytes);
-        self.take_decoded_chunk()
-    }
-
-    fn finish(&mut self) -> Option<String> {
-        if self.pending_utf8.is_empty() {
-            None
-        } else {
-            let chunk = String::from_utf8_lossy(&self.pending_utf8).to_string();
-            self.pending_utf8.clear();
-            Some(chunk)
-        }
-    }
-
-    fn take_decoded_chunk(&mut self) -> Option<String> {
-        let mut chunk = String::new();
-
-        loop {
-            match std::str::from_utf8(&self.pending_utf8) {
-                Ok(valid) => {
-                    chunk.push_str(valid);
-                    self.pending_utf8.clear();
-                    break;
-                }
-                Err(err) => {
-                    let valid_up_to = err.valid_up_to();
-                    if valid_up_to > 0
-                        && let Ok(valid) = std::str::from_utf8(&self.pending_utf8[..valid_up_to])
-                    {
-                        chunk.push_str(valid);
-                        self.pending_utf8.drain(..valid_up_to);
-                        continue;
-                    }
-                    if let Some(error_len) = err.error_len() {
-                        chunk.push('\u{FFFD}');
-                        self.pending_utf8.drain(..error_len);
-                        continue;
-                    }
-                    break;
-                }
-            }
-        }
-
-        (!chunk.is_empty()).then_some(chunk)
     }
 }
 

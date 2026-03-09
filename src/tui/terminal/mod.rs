@@ -1,1 +1,6 @@
-pub(crate) use crate::terminal_core::{MouseProtocolEncoding, MouseProtocolMode, TerminalEngine as Parser};
+#[cfg(test)]
+pub(crate) use crate::terminal_core::TerminalEngine;
+
+#[cfg(test)]
+#[path = "../../test/tui/terminal_emulator.rs"]
+mod tests;

@@ -3,12 +3,13 @@ use crate::auth::agent;
 use crate::inventory::{ConnectionProtocol, InventoryHost};
 use crate::log::SessionSshLogger;
 use crate::process;
+use crate::process::{PtyLogTarget, spawn_pty_output_reader};
 use crate::terminal_core::highlight_overlay::HighlightOverlayEngine;
 use crate::terminal_core::{TerminalChild, TerminalEngine, TerminalSession};
 use crate::tui::{AppState, HostTab, TerminalSearchState, VaultUnlockAction};
 use crate::{command_path, debug_enabled, log_debug, log_error};
 use portable_pty::{CommandBuilder, PtySize, native_pty_system};
-use std::io::{self, Read};
+use std::io;
 use std::process::Stdio;
 use std::sync::{
     Arc, Mutex,
@@ -55,56 +56,6 @@ fn inject_launch_notice(engine: &Arc<Mutex<TerminalEngine>>, render_epoch: &Arc<
         engine.process_output(message.as_bytes());
         render_epoch.fetch_add(1, Ordering::Relaxed);
     }
-}
-
-fn spawn_pty_output_reader(
-    mut reader: Box<dyn Read + Send>,
-    engine: Arc<Mutex<TerminalEngine>>,
-    exited: Arc<Mutex<bool>>,
-    render_epoch: Arc<AtomicU64>,
-    session_logger: Option<SessionSshLogger>,
-) {
-    std::thread::spawn(move || {
-        let mut buf = [0u8; 8192];
-        loop {
-            match reader.read(&mut buf) {
-                Ok(0) => {
-                    if let Ok(mut exited) = exited.lock() {
-                        *exited = true;
-                    }
-                    break;
-                }
-                Ok(bytes_read) => {
-                    if let Some(session_logger) = session_logger.as_ref() {
-                        let shared_chunk = Arc::new(String::from_utf8_lossy(&buf[..bytes_read]).into_owned());
-                        if let Err(err) = session_logger.log_raw_shared(shared_chunk) {
-                            log_error!("Failed to write session log data: {}", err);
-                        }
-                    }
-
-                    if let Ok(mut engine) = engine.lock() {
-                        engine.process_output(&buf[..bytes_read]);
-                        render_epoch.fetch_add(1, Ordering::Relaxed);
-                    }
-                }
-                Err(err) => {
-                    log_error!("Error reading from PTY: {}", err);
-                    if let Ok(mut exited) = exited.lock() {
-                        *exited = true;
-                    }
-                    break;
-                }
-            }
-        }
-
-        if let Some(session_logger) = session_logger
-            && let Err(err) = session_logger.flush()
-        {
-            log_error!("Failed to flush session logs: {}", err);
-        }
-
-        log_debug!("PTY reader thread exiting");
-    });
 }
 
 fn spawn_pty_terminal_session(
@@ -158,7 +109,32 @@ fn spawn_pty_terminal_session(
         inject_launch_notice(&engine, &render_epoch, notice);
     }
 
-    spawn_pty_output_reader(reader, engine.clone(), exited.clone(), render_epoch.clone(), command.session_logger);
+    spawn_pty_output_reader(
+        format!("pty-reader-{}", command.program),
+        reader,
+        {
+            let engine = engine.clone();
+            let render_epoch = render_epoch.clone();
+            move |bytes| {
+                if let Ok(mut engine) = engine.lock() {
+                    engine.process_output(bytes);
+                    render_epoch.fetch_add(1, Ordering::Relaxed);
+                    true
+                } else {
+                    false
+                }
+            }
+        },
+        {
+            let exited = exited.clone();
+            move || {
+                if let Ok(mut exited) = exited.lock() {
+                    *exited = true;
+                }
+            }
+        },
+        PtyLogTarget::session(command.session_logger),
+    )?;
 
     Ok(TerminalSession::new(
         Some(pty_master),
@@ -584,6 +560,9 @@ impl AppState {
             );
         }
 
+        // Explicit compatibility exception: when FreeRDP launch still depends on
+        // injected stdin payload, Color-SSH cannot hand ownership to a PTY-backed
+        // terminal session and must temporarily capture stdout/stderr instead.
         let mut child = process::spawn_command(command_spec, Stdio::piped(), Stdio::piped())?;
         let stdout = child.stdout.take().ok_or_else(|| io::Error::other("failed to capture FreeRDP stdout"))?;
         let stderr = child.stderr.take().ok_or_else(|| io::Error::other("failed to capture FreeRDP stderr"))?;
@@ -730,7 +709,7 @@ impl AppState {
 
             tab.last_pty_size = Some((rows, cols));
             if debug_enabled!() {
-                log_debug!("Resized session/parser to {}x{} in {:?}", cols, rows, resize_started_at.elapsed());
+                log_debug!("Resized session/engine to {}x{} in {:?}", cols, rows, resize_started_at.elapsed());
             }
         }
     }

@@ -1,7 +1,7 @@
 //! Mouse input handling and PTY mouse forwarding.
 
+use crate::terminal_core::{MouseProtocolEncoding, MouseProtocolMode};
 use crate::tui::state::{HOST_PANEL_MAX_WIDTH, HOST_PANEL_MIN_WIDTH};
-use crate::tui::terminal_emulator;
 use crate::tui::{AppState, HostTreeRowKind};
 use crossterm::event::{self, KeyModifiers, MouseButton, MouseEventKind};
 use ratatui::layout::Rect;
@@ -321,7 +321,7 @@ impl AppState {
                     self.selection_end = Some((abs_row, vt_col));
                 } else if self.is_pty_mouse_mode_active() && !force_local_selection(mouse.modifiers) {
                     let mode = self.pty_mouse_mode();
-                    if (mode == terminal_emulator::MouseProtocolMode::AnyMotion || mode == terminal_emulator::MouseProtocolMode::ButtonMotion)
+                    if (mode == MouseProtocolMode::AnyMotion || mode == MouseProtocolMode::ButtonMotion)
                         && let Some((col, row)) = self.mouse_to_vt_coords(mouse.column, mouse.row)
                     {
                         self.send_mouse_to_pty(32, col, row, false)?;
@@ -357,7 +357,7 @@ impl AppState {
                     }
                 } else if self.is_pty_mouse_mode_active() {
                     let mode = self.pty_mouse_mode();
-                    if mode != terminal_emulator::MouseProtocolMode::Press
+                    if mode != MouseProtocolMode::Press
                         && let Some((col, row)) = self.mouse_to_vt_coords(mouse.column, mouse.row)
                     {
                         self.send_mouse_to_pty(0, col, row, true)?;
@@ -448,7 +448,7 @@ impl AppState {
             MouseEventKind::Up(MouseButton::Middle) => {
                 if self.is_pty_mouse_mode_active() {
                     let mode = self.pty_mouse_mode();
-                    if mode != terminal_emulator::MouseProtocolMode::Press
+                    if mode != MouseProtocolMode::Press
                         && let Some((col, row)) = self.mouse_to_vt_coords(mouse.column, mouse.row)
                     {
                         self.send_mouse_to_pty(1, col, row, true)?;
@@ -464,7 +464,7 @@ impl AppState {
 
                 if self.is_pty_mouse_mode_active() {
                     let mode = self.pty_mouse_mode();
-                    if mode != terminal_emulator::MouseProtocolMode::Press
+                    if mode != MouseProtocolMode::Press
                         && let Some((col, row)) = self.mouse_to_vt_coords(mouse.column, mouse.row)
                     {
                         self.send_mouse_to_pty(2, col, row, true)?;
@@ -474,7 +474,7 @@ impl AppState {
             MouseEventKind::Moved => {
                 if self.is_pty_mouse_mode_active() {
                     let mode = self.pty_mouse_mode();
-                    if mode == terminal_emulator::MouseProtocolMode::AnyMotion
+                    if mode == MouseProtocolMode::AnyMotion
                         && let Some((col, row)) = self.mouse_to_vt_coords(mouse.column, mouse.row)
                     {
                         self.send_mouse_to_pty(35, col, row, false)?;
@@ -547,7 +547,7 @@ impl AppState {
         }
         if let Some(session) = &self.tabs[tab_idx].session {
             if let Ok(engine) = session.engine().lock() {
-                engine.screen().scrollback()
+                engine.view_model().scrollback()
             } else {
                 0
             }
@@ -558,22 +558,22 @@ impl AppState {
 
     // PTY mouse mode helpers.
     pub(crate) fn is_pty_mouse_mode_active(&self) -> bool {
-        self.pty_mouse_mode() != terminal_emulator::MouseProtocolMode::None
+        self.pty_mouse_mode() != MouseProtocolMode::None
     }
 
-    fn pty_mouse_protocol(&self) -> (terminal_emulator::MouseProtocolMode, terminal_emulator::MouseProtocolEncoding) {
+    fn pty_mouse_protocol(&self) -> (MouseProtocolMode, MouseProtocolEncoding) {
         if self.tabs.is_empty() || self.selected_tab >= self.tabs.len() {
-            return (terminal_emulator::MouseProtocolMode::None, terminal_emulator::MouseProtocolEncoding::Default);
+            return (MouseProtocolMode::None, MouseProtocolEncoding::Default);
         }
         if let Some(session) = &self.tabs[self.selected_tab].session
             && let Ok(engine) = session.engine().lock()
         {
-            return engine.screen().mouse_protocol();
+            return engine.view_model().mouse_protocol();
         }
-        (terminal_emulator::MouseProtocolMode::None, terminal_emulator::MouseProtocolEncoding::Default)
+        (MouseProtocolMode::None, MouseProtocolEncoding::Default)
     }
 
-    fn pty_mouse_mode(&self) -> terminal_emulator::MouseProtocolMode {
+    fn pty_mouse_mode(&self) -> MouseProtocolMode {
         self.pty_mouse_protocol().0
     }
 
@@ -628,9 +628,9 @@ impl AppState {
     }
 
     // Encode mouse reporting bytes for default and SGR modes.
-    fn encode_mouse_event_bytes(encoding: terminal_emulator::MouseProtocolEncoding, button: u8, col: u16, row: u16, is_release: bool) -> Vec<u8> {
+    fn encode_mouse_event_bytes(encoding: MouseProtocolEncoding, button: u8, col: u16, row: u16, is_release: bool) -> Vec<u8> {
         match encoding {
-            terminal_emulator::MouseProtocolEncoding::Sgr => {
+            MouseProtocolEncoding::Sgr => {
                 let suffix = if is_release { 'm' } else { 'M' };
                 format!("\x1b[<{};{};{}{}", button, col, row, suffix).into_bytes()
             }

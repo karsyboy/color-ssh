@@ -160,6 +160,24 @@ fn collect_host_scrollback_insertions_returns_scrolled_primary_rows() {
 }
 
 #[test]
+fn collect_host_scrollback_insertions_handles_saturated_history_with_repeated_rows() {
+    let mut engine = TerminalEngine::new(2, 20, 2);
+    let mut highlight_overlay = HighlightOverlayEngine::new();
+    let mut host_scrollback = HostScrollbackMirror::new(2);
+
+    engine.process_output(b"same\r\nsame\r\nsame\r\nsame");
+    let initial_insertions = collect_host_scrollback_insertions(&mut engine, &mut highlight_overlay, 1, &mut host_scrollback, 0);
+    assert!(initial_insertions.is_empty());
+
+    engine.process_output(b"\r\nsame");
+    let insertions = collect_host_scrollback_insertions(&mut engine, &mut highlight_overlay, 2, &mut host_scrollback, 0);
+
+    assert_eq!(insertions.len(), 1);
+    assert_eq!(insertions[0].viewport.size().0, 1);
+    assert_eq!(trim_line(&insertions[0].viewport.rows()[0].display_text()), "same");
+}
+
+#[test]
 fn format_reload_notice_prefixes_message() {
     assert_eq!(format_reload_notice("Config reloaded successfully"), "[color-ssh] Config reloaded successfully");
 }
