@@ -1,13 +1,13 @@
 //! Terminal-tabs and root layout rendering.
 
+use crate::terminal_ratatui::paint_terminal_viewport;
 use crate::tui::AppState;
 use crate::tui::features::selection::extract::is_cell_in_selection;
-use crate::tui::terminal_emulator;
 use crate::tui::ui::theme::{self, display_width, truncate_to_display_width};
 use ratatui::{
     Frame,
     layout::{Constraint, Direction, Layout, Rect},
-    style::{Color, Modifier, Style},
+    style::{Modifier, Style},
     text::{Line, Span},
     widgets::{Paragraph, Wrap},
 };
@@ -288,120 +288,41 @@ impl AppState {
             .current_tab_search()
             .map_or((None, None), |search| (Some(&search.highlight_row_ranges), search.current_highlight_range));
 
-        let session_active = tab.session.is_some();
-
-        if session_active {
-            let tab = &self.tabs[tab_idx];
-            if let Some(session) = &tab.session
-                && let Ok(mut engine) = session.engine().lock()
-            {
+        if let Some(session) = &tab.session {
+            let viewport = if let Ok(mut engine) = session.engine().lock() {
                 engine.set_display_scrollback(scroll_offset);
-                let screen = engine.screen();
-                let (vt_rows, vt_cols) = screen.size();
-                let cursor_position = screen.cursor_position();
-                let hide_cursor = screen.hide_cursor();
+                Some(engine.view_model().viewport_snapshot(area.height, area.width))
+            } else {
+                None
+            };
 
-                let buf = frame.buffer_mut();
-
-                let render_rows = area.height.min(vt_rows);
-                let render_cols = area.width.min(vt_cols);
-                let mut cell_symbol = String::new();
-
-                for row in 0..render_rows {
-                    let abs_row = row as i64 - scroll_offset as i64;
-                    let row_ranges = search_row_ranges.and_then(|ranges| ranges.get(&abs_row));
-                    let current_row_range =
-                        current_search_range.and_then(|(match_row, start_col, end_col)| (abs_row == match_row).then_some((start_col, end_col)));
-                    let mut row_range_idx = 0usize;
-
-                    for col in 0..render_cols {
-                        let cell = match screen.cell(row, col) {
-                            Some(cell) => cell,
-                            None => continue,
-                        };
-
-                        let ch = cell.symbol(&mut cell_symbol);
-
-                        let is_cursor = !hide_cursor && scroll_offset == 0 && row == cursor_position.0 && col == cursor_position.1;
-                        let is_selected = is_cell_in_selection(abs_row, col, sel_start, sel_end);
-
-                        if let Some(ranges) = row_ranges {
-                            while row_range_idx < ranges.len() && col >= ranges[row_range_idx].1 {
-                                row_range_idx += 1;
-                            }
-                        }
-                        let is_search_match =
-                            row_ranges.is_some_and(|ranges| row_range_idx < ranges.len() && col >= ranges[row_range_idx].0 && col < ranges[row_range_idx].1);
+            if let Some(viewport) = viewport {
+                let _ = paint_terminal_viewport(
+                    frame.buffer_mut(),
+                    area,
+                    &viewport,
+                    scroll_offset == 0,
+                    |absolute_row, col, _cell, is_cursor, base_style| {
+                        let row_ranges = search_row_ranges.and_then(|ranges| ranges.get(&absolute_row));
+                        let current_row_range =
+                            current_search_range.and_then(|(match_row, start_col, end_col)| (absolute_row == match_row).then_some((start_col, end_col)));
+                        let is_selected = is_cell_in_selection(absolute_row, col, sel_start, sel_end);
+                        let is_search_match = row_ranges.is_some_and(|ranges| ranges.iter().any(|(start_col, end_col)| col >= *start_col && col < *end_col));
                         let is_current_search_match = current_row_range.is_some_and(|(start_col, end_col)| col >= start_col && col < end_col);
 
-                        let style = if is_current_search_match {
-                            let mut s = Style::default().bg(theme::ansi_yellow()).fg(theme::ansi_black());
-                            if cell.bold() {
-                                s = s.add_modifier(Modifier::BOLD);
-                            }
-                            s
+                        if is_current_search_match {
+                            base_style.bg(theme::ansi_yellow()).fg(theme::ansi_black())
                         } else if is_search_match {
-                            let mut s = Style::default().bg(theme::ansi_bright_black()).fg(theme::ansi_yellow());
-                            if cell.bold() {
-                                s = s.add_modifier(Modifier::BOLD);
-                            }
-                            s
+                            base_style.bg(theme::ansi_bright_black()).fg(theme::ansi_yellow())
                         } else if is_selected {
-                            let mut s = Style::default().bg(theme::selection_bg()).fg(theme::selection_fg());
-                            if cell.bold() {
-                                s = s.add_modifier(Modifier::BOLD);
-                            }
-                            s
+                            base_style.bg(theme::selection_bg()).fg(theme::selection_fg())
                         } else if is_cursor {
-                            let mut s = Style::default().bg(theme::ansi_bright_white()).fg(theme::ansi_black());
-                            if cell.bold() {
-                                s = s.add_modifier(Modifier::BOLD);
-                            }
-                            s
+                            base_style.bg(theme::ansi_bright_white()).fg(theme::ansi_black())
                         } else {
-                            let mut fg_color = terminal_emulator::to_ratatui_color(cell.fgcolor());
-                            let mut bg_color = terminal_emulator::to_ratatui_background_color(cell.bgcolor());
-
-                            if cell.inverse() {
-                                std::mem::swap(&mut fg_color, &mut bg_color);
-                                if fg_color == Color::Reset {
-                                    fg_color = theme::ansi_black();
-                                }
-                                if bg_color == Color::Reset {
-                                    bg_color = theme::ansi_bright_white();
-                                }
-                            }
-
-                            let mut s = Style::default();
-
-                            if fg_color != Color::Reset {
-                                s = s.fg(fg_color);
-                            }
-                            if bg_color != Color::Reset {
-                                s = s.bg(bg_color);
-                            }
-                            if cell.bold() {
-                                s = s.add_modifier(Modifier::BOLD);
-                            }
-                            if cell.italic() {
-                                s = s.add_modifier(Modifier::ITALIC);
-                            }
-                            if cell.underline() {
-                                s = s.add_modifier(Modifier::UNDERLINED);
-                            }
-                            s
-                        };
-
-                        let buf_x = area.x + col;
-                        let buf_y = area.y + row;
-
-                        if buf_x < area.x + area.width && buf_y < area.y + area.height {
-                            let buf_cell = &mut buf[(buf_x, buf_y)];
-                            buf_cell.set_symbol(ch);
-                            buf_cell.set_style(style);
+                            base_style
                         }
-                    }
-                }
+                    },
+                );
             }
         } else {
             let reason = self.tabs[tab_idx]

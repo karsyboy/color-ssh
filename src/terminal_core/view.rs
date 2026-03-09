@@ -10,6 +10,7 @@ use alacritty_terminal::grid::Dimensions;
 use alacritty_terminal::index::{Column, Line};
 use alacritty_terminal::term::TermMode;
 use alacritty_terminal::term::cell::{Cell as TermCell, Flags};
+use alacritty_terminal::vte::ansi::NamedColor;
 use unicode_width::UnicodeWidthChar;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -24,6 +25,178 @@ pub(crate) enum MouseProtocolMode {
     Press,
     ButtonMotion,
     AnyMotion,
+}
+
+/// Backend-neutral snapshot of the currently visible terminal viewport.
+///
+/// Wrapped lines stay split at terminal row boundaries so renderers can honor
+/// the emulator's layout rather than attempting to reflow text themselves.
+pub(crate) struct TerminalViewport {
+    size: (u16, u16),
+    cursor: Option<TerminalCursorSnapshot>,
+    rows: Vec<TerminalViewportRow>,
+}
+
+impl TerminalViewport {
+    pub(crate) fn size(&self) -> (u16, u16) {
+        self.size
+    }
+
+    pub(crate) fn cursor(&self) -> Option<TerminalCursorSnapshot> {
+        self.cursor
+    }
+
+    pub(crate) fn rows(&self) -> &[TerminalViewportRow] {
+        &self.rows
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct TerminalCursorSnapshot {
+    row: u16,
+    col: u16,
+}
+
+impl TerminalCursorSnapshot {
+    pub(crate) fn row(&self) -> u16 {
+        self.row
+    }
+
+    pub(crate) fn col(&self) -> u16 {
+        self.col
+    }
+}
+
+pub(crate) struct TerminalViewportRow {
+    absolute_row: i64,
+    cells: Vec<TerminalCellSnapshot>,
+}
+
+impl TerminalViewportRow {
+    pub(crate) fn absolute_row(&self) -> i64 {
+        self.absolute_row
+    }
+
+    pub(crate) fn cells(&self) -> &[TerminalCellSnapshot] {
+        &self.cells
+    }
+}
+
+/// Owned cell content extracted from the emulator.
+///
+/// Most cells avoid allocation by storing either a blank marker or a single
+/// primary character. A `Cluster` is only allocated when combining characters
+/// need to be preserved together for rendering.
+#[derive(Debug, Clone)]
+pub(crate) enum TerminalGlyph {
+    Blank,
+    Char(char),
+    Cluster(String),
+}
+
+impl TerminalGlyph {
+    pub(crate) fn as_str<'a>(&'a self, scratch: &'a mut String) -> &'a str {
+        match self {
+            Self::Blank => " ",
+            Self::Char(ch) => {
+                scratch.clear();
+                scratch.push(*ch);
+                scratch.as_str()
+            }
+            Self::Cluster(cluster) => cluster.as_str(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct TerminalCellStyle {
+    fg_color: AnsiColor,
+    bg_color: AnsiColor,
+    bold: bool,
+    italic: bool,
+    underline: bool,
+    inverse: bool,
+}
+
+impl Default for TerminalCellStyle {
+    fn default() -> Self {
+        Self {
+            fg_color: AnsiColor::Named(NamedColor::Foreground),
+            bg_color: AnsiColor::Named(NamedColor::Background),
+            bold: false,
+            italic: false,
+            underline: false,
+            inverse: false,
+        }
+    }
+}
+
+impl TerminalCellStyle {
+    pub(crate) fn fg_color(&self) -> AnsiColor {
+        self.fg_color
+    }
+
+    pub(crate) fn bg_color(&self) -> AnsiColor {
+        self.bg_color
+    }
+
+    pub(crate) fn bold(&self) -> bool {
+        self.bold
+    }
+
+    pub(crate) fn italic(&self) -> bool {
+        self.italic
+    }
+
+    pub(crate) fn underline(&self) -> bool {
+        self.underline
+    }
+
+    pub(crate) fn inverse(&self) -> bool {
+        self.inverse
+    }
+}
+
+pub(crate) struct TerminalCellSnapshot {
+    glyph: TerminalGlyph,
+    style: TerminalCellStyle,
+}
+
+impl TerminalCellSnapshot {
+    pub(crate) fn glyph(&self) -> &TerminalGlyph {
+        &self.glyph
+    }
+
+    pub(crate) fn fg_color(&self) -> AnsiColor {
+        self.style.fg_color()
+    }
+
+    pub(crate) fn bg_color(&self) -> AnsiColor {
+        self.style.bg_color()
+    }
+
+    pub(crate) fn bold(&self) -> bool {
+        self.style.bold()
+    }
+
+    pub(crate) fn italic(&self) -> bool {
+        self.style.italic()
+    }
+
+    pub(crate) fn underline(&self) -> bool {
+        self.style.underline()
+    }
+
+    pub(crate) fn inverse(&self) -> bool {
+        self.style.inverse()
+    }
+
+    fn blank() -> Self {
+        Self {
+            glyph: TerminalGlyph::Blank,
+            style: TerminalCellStyle::default(),
+        }
+    }
 }
 
 pub(crate) struct TerminalViewModel<'a> {
@@ -53,14 +226,44 @@ impl<'a> TerminalViewModel<'a> {
         !self.engine.term.mode().contains(TermMode::SHOW_CURSOR)
     }
 
-    /// Transitional alias retained while existing TUI code still calls `hide_cursor`.
-    pub(crate) fn hide_cursor(&self) -> bool {
-        self.cursor_hidden()
-    }
-
     /// Whether bracketed paste is enabled by the remote application.
     pub(crate) fn bracketed_paste_enabled(&self) -> bool {
         self.engine.term.mode().contains(TermMode::BRACKETED_PASTE)
+    }
+
+    /// Snapshot the visible viewport into backend-neutral rows, cells, and
+    /// cursor metadata for renderers.
+    pub(crate) fn viewport_snapshot(&self, max_rows: u16, max_cols: u16) -> TerminalViewport {
+        let (vt_rows, vt_cols) = self.size();
+        let render_rows = max_rows.min(vt_rows);
+        let render_cols = max_cols.min(vt_cols);
+        let display_offset = self.engine.term.grid().display_offset() as i64;
+        let cursor = (!self.cursor_hidden())
+            .then(|| TerminalCursorSnapshot {
+                row: self.cursor_position().0,
+                col: self.cursor_position().1,
+            })
+            .filter(|cursor| cursor.row < render_rows && cursor.col < render_cols);
+
+        let mut rows = Vec::with_capacity(render_rows as usize);
+        for row in 0..render_rows {
+            let mut cells = Vec::with_capacity(render_cols as usize);
+            for col in 0..render_cols {
+                let snapshot = self.cell(row, col).map(|cell| cell.snapshot()).unwrap_or_else(TerminalCellSnapshot::blank);
+                cells.push(snapshot);
+            }
+
+            rows.push(TerminalViewportRow {
+                absolute_row: row as i64 - display_offset,
+                cells,
+            });
+        }
+
+        TerminalViewport {
+            size: (render_rows, render_cols),
+            cursor,
+            rows,
+        }
     }
 
     /// Convert a visible row index into an absolute terminal line index.
@@ -191,28 +394,56 @@ impl<'a> TerminalCellView<'a> {
         scratch.as_str()
     }
 
+    fn glyph(&self) -> TerminalGlyph {
+        if self.cell.flags.intersects(Flags::WIDE_CHAR_SPACER | Flags::LEADING_WIDE_CHAR_SPACER) {
+            return TerminalGlyph::Blank;
+        }
+        if !Self::is_renderable_primary_char(self.cell.c) {
+            return TerminalGlyph::Blank;
+        }
+
+        let mut cluster = None;
+        if let Some(zerowidth) = self.cell.zerowidth() {
+            let mut text = String::new();
+            text.push(self.cell.c);
+            for c in zerowidth {
+                if Self::is_renderable_zero_width(*c) {
+                    text.push(*c);
+                }
+            }
+            if text.chars().count() > 1 {
+                cluster = Some(text);
+            }
+        }
+
+        match cluster {
+            Some(text) => TerminalGlyph::Cluster(text),
+            None => TerminalGlyph::Char(self.cell.c),
+        }
+    }
+
+    fn style(&self) -> TerminalCellStyle {
+        TerminalCellStyle {
+            fg_color: self.cell.fg,
+            bg_color: self.cell.bg,
+            bold: self.bold(),
+            italic: self.italic(),
+            underline: self.underline(),
+            inverse: self.inverse(),
+        }
+    }
+
+    fn snapshot(&self) -> TerminalCellSnapshot {
+        TerminalCellSnapshot {
+            glyph: self.glyph(),
+            style: self.style(),
+        }
+    }
+
     #[cfg(test)]
     pub(crate) fn contents(&self) -> String {
         let mut scratch = String::new();
         self.symbol(&mut scratch).to_owned()
-    }
-
-    pub(crate) fn fg_color(&self) -> AnsiColor {
-        self.cell.fg
-    }
-
-    /// Transitional alias retained while existing TUI code still calls `fgcolor`.
-    pub(crate) fn fgcolor(&self) -> AnsiColor {
-        self.fg_color()
-    }
-
-    pub(crate) fn bg_color(&self) -> AnsiColor {
-        self.cell.bg
-    }
-
-    /// Transitional alias retained while existing TUI code still calls `bgcolor`.
-    pub(crate) fn bgcolor(&self) -> AnsiColor {
-        self.bg_color()
     }
 
     pub(crate) fn bold(&self) -> bool {

@@ -7,9 +7,9 @@
 use super::command_spec::PreparedCommand;
 use super::exit::map_exit_code;
 use crate::auth::secret::ExposeSecret;
-use crate::terminal_core::{AnsiColor, TerminalChild, TerminalEngine, TerminalInputWriter, TerminalSession, TerminalViewModel};
+use crate::terminal_core::{TerminalChild, TerminalEngine, TerminalInputWriter, TerminalSession, TerminalViewport};
+use crate::terminal_ratatui::paint_terminal_viewport;
 use crate::{Result, command_path, config, log, log_debug, log_error};
-use alacritty_terminal::vte::ansi::NamedColor;
 use crossterm::{
     event::{self, DisableBracketedPaste, EnableBracketedPaste, Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers},
     execute,
@@ -18,9 +18,8 @@ use crossterm::{
 use portable_pty::{CommandBuilder, PtySize, native_pty_system};
 use ratatui::{
     Frame, Terminal,
-    buffer::Buffer,
     layout::{Position, Rect},
-    style::{Color, Modifier, Style},
+    style::{Modifier, Style},
 };
 use std::io::{self, IsTerminal, Read};
 use std::sync::{
@@ -401,130 +400,28 @@ fn render_terminal_frame(frame: &mut Frame, session: &TerminalSession, scroll_of
     let area = frame.area();
     let mut engine = session.engine().lock().map_err(|err| io::Error::other(err.to_string()))?;
     engine.set_display_scrollback(scroll_offset);
-    let cursor = paint_terminal_view(frame.buffer_mut(), area, &engine.view_model(), scroll_offset);
+    let viewport = engine.view_model().viewport_snapshot(area.height, area.width);
+    drop(engine);
+
+    let cursor = paint_terminal_view(frame.buffer_mut(), area, &viewport, scroll_offset == 0);
     if let Some(cursor) = cursor {
         frame.set_cursor_position(cursor);
     }
     Ok(())
 }
 
-fn paint_terminal_view(buffer: &mut Buffer, area: Rect, view: &TerminalViewModel<'_>, scroll_offset: usize) -> Option<Position> {
-    clear_buffer_area(buffer, area);
-
-    let (vt_rows, vt_cols) = view.size();
-    let cursor_position = view.cursor_position();
-    let render_rows = area.height.min(vt_rows);
-    let render_cols = area.width.min(vt_cols);
-    let show_cursor = !view.cursor_hidden() && scroll_offset == 0;
-    let mut cell_symbol = String::new();
-    let mut cursor = None;
-
-    for row in 0..render_rows {
-        for col in 0..render_cols {
-            let Some(cell) = view.cell(row, col) else {
-                continue;
-            };
-
-            let is_cursor = show_cursor && row == cursor_position.0 && col == cursor_position.1;
-            let symbol = cell.symbol(&mut cell_symbol);
-            let style = if is_cursor {
-                let mut style = Style::default().bg(Color::White).fg(Color::Black);
-                if cell.bold() {
-                    style = style.add_modifier(Modifier::BOLD);
-                }
-                style
-            } else {
-                let mut fg_color = to_ratatui_color(cell.fg_color());
-                let mut bg_color = to_ratatui_background_color(cell.bg_color());
-
-                if cell.inverse() {
-                    std::mem::swap(&mut fg_color, &mut bg_color);
-                    if fg_color == Color::Reset {
-                        fg_color = Color::Black;
-                    }
-                    if bg_color == Color::Reset {
-                        bg_color = Color::Indexed(15);
-                    }
-                }
-
-                let mut style = Style::default();
-                if fg_color != Color::Reset {
-                    style = style.fg(fg_color);
-                }
-                if bg_color != Color::Reset {
-                    style = style.bg(bg_color);
-                }
-                if cell.bold() {
-                    style = style.add_modifier(Modifier::BOLD);
-                }
-                if cell.italic() {
-                    style = style.add_modifier(Modifier::ITALIC);
-                }
-                if cell.underline() {
-                    style = style.add_modifier(Modifier::UNDERLINED);
-                }
-                style
-            };
-
-            let buf_cell = &mut buffer[(area.x + col, area.y + row)];
-            buf_cell.set_symbol(symbol);
-            buf_cell.set_style(style);
-
-            if is_cursor {
-                cursor = Some(Position::new(area.x + col, area.y + row));
+fn paint_terminal_view(buffer: &mut ratatui::buffer::Buffer, area: Rect, viewport: &TerminalViewport, show_cursor: bool) -> Option<Position> {
+    paint_terminal_viewport(buffer, area, viewport, show_cursor, |_absolute_row, _col, cell, is_cursor, base_style| {
+        if is_cursor {
+            let mut style = Style::default().bg(ratatui::style::Color::White).fg(ratatui::style::Color::Black);
+            if cell.bold() {
+                style = style.add_modifier(Modifier::BOLD);
             }
+            style
+        } else {
+            base_style
         }
-    }
-
-    cursor
-}
-
-fn clear_buffer_area(buffer: &mut Buffer, area: Rect) {
-    for row in area.y..area.y.saturating_add(area.height) {
-        for col in area.x..area.x.saturating_add(area.width) {
-            let cell = &mut buffer[(col, row)];
-            cell.set_symbol(" ");
-            cell.set_style(Style::default());
-        }
-    }
-}
-
-fn to_ratatui_color(color: AnsiColor) -> Color {
-    match color {
-        AnsiColor::Named(named) => named_color_to_ansi_index(named).map(Color::Indexed).unwrap_or(Color::Reset),
-        AnsiColor::Indexed(idx) => Color::Indexed(idx),
-        AnsiColor::Spec(rgb) => Color::Rgb(rgb.r, rgb.g, rgb.b),
-    }
-}
-
-fn to_ratatui_background_color(color: AnsiColor) -> Color {
-    match color {
-        AnsiColor::Named(named) => named_color_to_ansi_index(named).map(Color::Indexed).unwrap_or(Color::Reset),
-        AnsiColor::Indexed(idx) => Color::Indexed(idx),
-        AnsiColor::Spec(rgb) => Color::Rgb(rgb.r, rgb.g, rgb.b),
-    }
-}
-
-fn named_color_to_ansi_index(named: NamedColor) -> Option<u8> {
-    match named {
-        NamedColor::Black | NamedColor::DimBlack => Some(0),
-        NamedColor::Red | NamedColor::DimRed => Some(1),
-        NamedColor::Green | NamedColor::DimGreen => Some(2),
-        NamedColor::Yellow | NamedColor::DimYellow => Some(3),
-        NamedColor::Blue | NamedColor::DimBlue => Some(4),
-        NamedColor::Magenta | NamedColor::DimMagenta => Some(5),
-        NamedColor::Cyan | NamedColor::DimCyan => Some(6),
-        NamedColor::White | NamedColor::DimWhite => Some(7),
-        NamedColor::BrightBlack | NamedColor::DimForeground => Some(8),
-        NamedColor::BrightRed => Some(9),
-        NamedColor::BrightGreen => Some(10),
-        NamedColor::BrightYellow => Some(11),
-        NamedColor::BrightBlue => Some(12),
-        NamedColor::BrightMagenta => Some(13),
-        NamedColor::BrightCyan => Some(14),
-        NamedColor::BrightWhite | NamedColor::BrightForeground => Some(15),
-        NamedColor::Foreground | NamedColor::Background | NamedColor::Cursor => None,
-    }
+    })
 }
 
 fn encode_paste_bytes(pasted: &str, bracketed: bool) -> Vec<u8> {

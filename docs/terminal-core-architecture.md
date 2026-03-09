@@ -22,6 +22,7 @@ Color-SSH now has a dedicated `src/terminal_core/` layer for embedded terminal f
 
 - Exposes renderer-facing terminal data without exposing raw PTY streams.
 - Provides visible cells, cursor state, mouse protocol state, visible row text, and selection extraction helpers.
+- Can snapshot the visible grid into backend-neutral viewport rows/cells so ratatui today and a future GUI can render the same terminal state.
 - Is intended to be consumed by both the current TUI and a future GUI renderer.
 
 ### `HighlightOverlayEngine`
