@@ -38,6 +38,7 @@ interactive_settings:
   allow_remote_clipboard_write: false
   remote_clipboard_max_bytes: 4096
   overlay_highlighting: auto
+  overlay_auto_policy: safe
 
 # ============================================================================
 # COLOR PALETTE

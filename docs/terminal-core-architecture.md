@@ -41,14 +41,19 @@ Color-SSH now has a dedicated `src/terminal_core/` layer for embedded terminal f
 - Highlighting is automatically suppressed in `interactive_settings.overlay_highlighting: auto` when:
   - the terminal is in the alternate screen
   - mouse-reporting modes indicate a TUI-style application
+  - a primary-screen viewport looks fullscreen and the remote app has hidden the cursor, which strongly suggests line-oriented semantic overlays are unreliable
   - the visible viewport is repainting aggressively enough that semantic overlays become noisy or misleading
+- `interactive_settings.overlay_auto_policy` tunes how `overlay_highlighting: auto` reacts to suspicious primary-screen fullscreen apps:
+  - `safe` disables overlays for those views
+  - `reduced` limits overlays to the trailing shell-style rows instead of the full viewport
+  - `relaxed` ignores that heuristic and only applies the hard suppressions above
 - `interactive_settings.overlay_highlighting: always` forces overlays on even in those cases.
 - `interactive_settings.overlay_highlighting: off` disables the renderer-side overlay entirely.
 
 ## Overlay Performance Design
 
 - Overlay analysis now runs from a renderer-owned viewport snapshot (`HighlightOverlayViewport`) after the terminal engine lock is released.
-- The engine mutex is only held long enough to snapshot the visible cells, cursor, mouse mode, and alternate-screen state.
+- The engine mutex is only held long enough to snapshot the visible cells, cursor visibility, mouse mode, and alternate-screen state.
 - Highlight analysis is row-local and cached by normalized visible row text (trailing padding is ignored because it does not affect regex matches or cell-column ranges).
 - Cache reuse is content-based rather than absolute-row-based, so repeated log lines, prompt redraws, and rows that shift during scrolling can reuse the same analyzed spans.
 - Cached row analyses are bounded to roughly `visible_rows * 8`, clamped to `[128, 1024]` entries, and pruned by recency to avoid unbounded memory growth during long log streams.
@@ -61,7 +66,8 @@ Color-SSH now has a dedicated `src/terminal_core/` layer for embedded terminal f
 - Reuse cached row analyses for rows newly entering the viewport if their text was analyzed recently, which keeps scrolling and repeated output cheap.
 - Resize and wrap changes invalidate only the rows whose snapped visible text changes; unchanged snapped rows keep their cached analysis.
 - Config reloads clear all overlay caches because rule sets, styles, and suppression mode may have changed.
-- Alternate-screen mode, mouse-reporting mode, and volatile-repaint suppression return an empty overlay without preserving stale visible-row state.
+- Alternate-screen mode, mouse-reporting mode, fullscreen-compatibility suppression, and volatile-repaint suppression return an empty overlay without preserving stale visible-row state.
+- In `overlay_auto_policy: reduced`, suspicious primary-screen fullscreen viewports only analyze the trailing shell-style rows instead of the whole screen.
 
 ## Overlay Profiling Hooks
 
@@ -73,6 +79,7 @@ Color-SSH now has a dedicated `src/terminal_core/` layer for embedded terminal f
 
 - The cache is intentionally row-local and does not try to infer multi-line semantic state, which keeps correctness aligned with the current per-line regex rule model.
 - Trailing-space changes are ignored for cache keys so prompt redraws and wrap padding do not trigger pointless re-analysis.
+- The primary-screen fullscreen heuristic intentionally requires cursor hiding plus a dense, mostly non-empty viewport so normal shell/log output is not suppressed just because it fills the screen.
 - Overlay snapshots duplicate only the visible viewport state needed for rendering, trading a small amount of transient memory for less time spent holding the terminal engine mutex.
 
 Overlay mode is safer than stream rewriting because the renderer only changes presentation. It does not inject ANSI sequences back into the PTY stream, so remote programs and local terminal emulation continue to observe the original byte stream.

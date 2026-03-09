@@ -32,6 +32,7 @@ interactive_settings:
   allow_remote_clipboard_write: false # Accept remote OSC 52 clipboard writes (disabled by default)
   remote_clipboard_max_bytes: 4096 # Max bytes accepted for remote clipboard writes (64-1048576)
   overlay_highlighting: auto # auto = suppress for alternate-screen/TUI-like views, always = force, off = disable
+  overlay_auto_policy: safe # safe = suppress suspicious fullscreen primary-screen apps, reduced = highlight only trailing shell rows, relaxed = only suppress hard terminal-mode conflicts
 
 # ============================================================================
 # COLOR PALETTE

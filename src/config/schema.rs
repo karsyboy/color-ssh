@@ -118,6 +118,9 @@ pub struct InteractiveSettings {
     /// Highlight overlay behavior for embedded terminal rendering.
     #[serde(default)]
     pub overlay_highlighting: HighlightOverlayMode,
+    /// Compatibility policy applied when `overlay_highlighting` is set to `auto`.
+    #[serde(default)]
+    pub overlay_auto_policy: HighlightOverlayAutoPolicy,
 }
 
 /// Renderer-side syntax highlighting policy for embedded terminal views.
@@ -131,6 +134,19 @@ pub enum HighlightOverlayMode {
     Always,
     /// Disable renderer-side overlay highlighting entirely.
     Off,
+}
+
+/// Compatibility fallback policy used by `overlay_highlighting: auto`.
+#[derive(Debug, Clone, Copy, Deserialize, PartialEq, Eq, Default)]
+#[serde(rename_all = "kebab-case")]
+pub enum HighlightOverlayAutoPolicy {
+    /// Prefer suppressing overlays rather than risking incorrect decoration.
+    #[default]
+    Safe,
+    /// Keep a small trailing shell region highlighted when a primary-screen fullscreen app is suspected.
+    Reduced,
+    /// Only honor hard suppressions like alternate-screen, mouse-reporting, and volatile repaint churn.
+    Relaxed,
 }
 
 fn default_show_title() -> bool {

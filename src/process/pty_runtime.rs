@@ -403,16 +403,17 @@ fn bracketed_paste_enabled(session: &TerminalSession) -> io::Result<bool> {
 
 fn render_terminal_frame(frame: &mut Frame, session: &TerminalSession, highlight_overlay: &mut HighlightOverlayEngine, scroll_offset: usize) -> io::Result<()> {
     let area = frame.area();
-    let (viewport, alternate_screen, mouse_mode) = {
+    let (viewport, alternate_screen, mouse_mode, cursor_hidden) = {
         let mut engine = session.engine().lock().map_err(|err| io::Error::other(err.to_string()))?;
         engine.set_display_scrollback(scroll_offset);
         let view = engine.view_model();
         let alternate_screen = view.is_alternate_screen();
         let mouse_mode = view.mouse_protocol().0;
+        let cursor_hidden = view.cursor_hidden();
         let viewport = view.viewport_snapshot(area.height, area.width);
-        (viewport, alternate_screen, mouse_mode)
+        (viewport, alternate_screen, mouse_mode, cursor_hidden)
     };
-    let overlay_view = HighlightOverlayViewport::new(&viewport, alternate_screen, mouse_mode);
+    let overlay_view = HighlightOverlayViewport::new(&viewport, alternate_screen, mouse_mode, cursor_hidden);
     let overlay = highlight_overlay.build_visible_overlay(
         &overlay_view,
         HighlightOverlayContext {

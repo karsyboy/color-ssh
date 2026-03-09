@@ -1,5 +1,5 @@
 use super::{ColorType, compile_rule_set, compile_rules, compile_secret_patterns, hex_to_ansi, is_valid_hex_color};
-use crate::config::{Config, HighlightRule};
+use crate::config::{Config, HighlightOverlayAutoPolicy, HighlightRule};
 use crate::test::support::config::base_config;
 
 #[test]
@@ -74,4 +74,21 @@ unknown_top_level: true
 
     let err = serde_yml::from_str::<Config>(yaml).expect_err("unknown field should fail schema validation");
     assert!(err.to_string().contains("unknown field"));
+}
+
+#[test]
+fn config_schema_accepts_overlay_auto_policy_variants() {
+    let yaml = r##"
+settings: {}
+interactive_settings:
+    overlay_highlighting: auto
+    overlay_auto_policy: reduced
+palette:
+    ok_fg: "#00ff00"
+rules: []
+"##;
+
+    let config = serde_yml::from_str::<Config>(yaml).expect("overlay auto policy should deserialize");
+    let interactive = config.interactive_settings.expect("interactive settings");
+    assert_eq!(interactive.overlay_auto_policy, HighlightOverlayAutoPolicy::Reduced);
 }

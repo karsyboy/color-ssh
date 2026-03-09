@@ -10,7 +10,7 @@ mod schema;
 mod watcher;
 
 pub use errors::ConfigError;
-pub use schema::{AuthSettings, Config, HighlightOverlayMode, HighlightRule, InteractiveSettings, Metadata, Settings};
+pub use schema::{AuthSettings, Config, HighlightOverlayAutoPolicy, HighlightOverlayMode, HighlightRule, InteractiveSettings, Metadata, Settings};
 pub use watcher::config_watcher;
 
 use once_cell::sync::OnceCell;

@@ -296,14 +296,15 @@ impl AppState {
                 let view = engine.view_model();
                 let alternate_screen = view.is_alternate_screen();
                 let mouse_mode = view.mouse_protocol().0;
+                let cursor_hidden = view.cursor_hidden();
                 let viewport = view.viewport_snapshot(area.height, area.width);
-                Some((viewport, alternate_screen, mouse_mode))
+                Some((viewport, alternate_screen, mouse_mode, cursor_hidden))
             } else {
                 None
             };
 
-            if let Some((viewport, alternate_screen, mouse_mode)) = render_state {
-                let overlay_view = HighlightOverlayViewport::new(&viewport, alternate_screen, mouse_mode);
+            if let Some((viewport, alternate_screen, mouse_mode, cursor_hidden)) = render_state {
+                let overlay_view = HighlightOverlayViewport::new(&viewport, alternate_screen, mouse_mode, cursor_hidden);
                 let highlight_overlay = highlight_overlay_engine.build_visible_overlay(
                     &overlay_view,
                     HighlightOverlayContext {
