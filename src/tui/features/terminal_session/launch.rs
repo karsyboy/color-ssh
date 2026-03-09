@@ -1,6 +1,7 @@
 use super::io::{spawn_output_reader, spawn_process_exit_watcher};
 use crate::auth::agent;
 use crate::inventory::{ConnectionProtocol, InventoryHost};
+use crate::log::SessionSshLogger;
 use crate::process;
 use crate::terminal_core::highlight_overlay::HighlightOverlayEngine;
 use crate::terminal_core::{TerminalChild, TerminalEngine, TerminalSession};
@@ -31,6 +32,14 @@ struct HostPassResolution {
     disable_vault_autologin: bool,
 }
 
+struct PtySessionLaunch<'a> {
+    program: &'a str,
+    args: &'a [String],
+    env: &'a [(String, String)],
+    launch_notice: Option<String>,
+    session_logger: Option<SessionSshLogger>,
+}
+
 fn auto_login_notice(host: &InventoryHost, detail: impl Into<String>) -> String {
     let detail = detail.into();
     match &host.protocol {
@@ -38,6 +47,127 @@ fn auto_login_notice(host: &InventoryHost, detail: impl Into<String>) -> String 
         ConnectionProtocol::Rdp => format!("{detail}; continuing with the FreeRDP password prompt."),
         ConnectionProtocol::Other(protocol) => format!("{detail}; protocol '{}' is not supported for launch.", protocol),
     }
+}
+
+fn inject_launch_notice(engine: &Arc<Mutex<TerminalEngine>>, render_epoch: &Arc<AtomicU64>, notice: String) {
+    if let Ok(mut engine) = engine.lock() {
+        let message = format!("\r\n[color-ssh] {}\r\n", notice);
+        engine.process_output(message.as_bytes());
+        render_epoch.fetch_add(1, Ordering::Relaxed);
+    }
+}
+
+fn spawn_pty_output_reader(
+    mut reader: Box<dyn Read + Send>,
+    engine: Arc<Mutex<TerminalEngine>>,
+    exited: Arc<Mutex<bool>>,
+    render_epoch: Arc<AtomicU64>,
+    session_logger: Option<SessionSshLogger>,
+) {
+    std::thread::spawn(move || {
+        let mut buf = [0u8; 8192];
+        loop {
+            match reader.read(&mut buf) {
+                Ok(0) => {
+                    if let Ok(mut exited) = exited.lock() {
+                        *exited = true;
+                    }
+                    break;
+                }
+                Ok(bytes_read) => {
+                    if let Some(session_logger) = session_logger.as_ref() {
+                        let shared_chunk = Arc::new(String::from_utf8_lossy(&buf[..bytes_read]).into_owned());
+                        if let Err(err) = session_logger.log_raw_shared(shared_chunk) {
+                            log_error!("Failed to write session log data: {}", err);
+                        }
+                    }
+
+                    if let Ok(mut engine) = engine.lock() {
+                        engine.process_output(&buf[..bytes_read]);
+                        render_epoch.fetch_add(1, Ordering::Relaxed);
+                    }
+                }
+                Err(err) => {
+                    log_error!("Error reading from PTY: {}", err);
+                    if let Ok(mut exited) = exited.lock() {
+                        *exited = true;
+                    }
+                    break;
+                }
+            }
+        }
+
+        if let Some(session_logger) = session_logger
+            && let Err(err) = session_logger.flush()
+        {
+            log_error!("Failed to flush session logs: {}", err);
+        }
+
+        log_debug!("PTY reader thread exiting");
+    });
+}
+
+fn spawn_pty_terminal_session(
+    command: PtySessionLaunch<'_>,
+    session_profile: &crate::config::InteractiveProfileSnapshot,
+    initial_rows: u16,
+    initial_cols: u16,
+) -> io::Result<TerminalSession> {
+    let pty_system = native_pty_system();
+    let rows = initial_rows.max(1);
+    let cols = initial_cols.max(1);
+
+    let pty_pair = pty_system
+        .openpty(PtySize {
+            rows,
+            cols,
+            pixel_width: 0,
+            pixel_height: 0,
+        })
+        .map_err(|err| io::Error::other(err.to_string()))?;
+
+    let program_path = command_path::resolve_known_command_path(command.program)?;
+    let mut cmd = CommandBuilder::new(&program_path);
+    for arg in command.args {
+        cmd.arg(arg);
+    }
+    for (key, value) in command.env {
+        cmd.env(key, value);
+    }
+
+    let child = Arc::new(Mutex::new(pty_pair.slave.spawn_command(cmd).map_err(|err| io::Error::other(err.to_string()))?));
+    drop(pty_pair.slave);
+
+    let reader = pty_pair.master.try_clone_reader().map_err(|err| io::Error::other(err.to_string()))?;
+    let writer = pty_pair.master.take_writer().map_err(|err| io::Error::other(err.to_string()))?;
+    let writer = Arc::new(Mutex::new(writer));
+
+    let engine = Arc::new(Mutex::new(TerminalEngine::new_with_input_writer_and_remote_clipboard_policy(
+        rows,
+        cols,
+        session_profile.history_buffer,
+        writer.clone(),
+        session_profile.remote_clipboard_write,
+        session_profile.remote_clipboard_max_bytes,
+    )));
+    let exited = Arc::new(Mutex::new(false));
+    let pty_master = Arc::new(Mutex::new(pty_pair.master));
+    let render_epoch = Arc::new(AtomicU64::new(0));
+
+    if let Some(notice) = command.launch_notice {
+        inject_launch_notice(&engine, &render_epoch, notice);
+    }
+
+    spawn_pty_output_reader(reader, engine.clone(), exited.clone(), render_epoch.clone(), command.session_logger);
+
+    Ok(TerminalSession::new(
+        Some(pty_master),
+        Some(writer),
+        TerminalChild::Pty(child),
+        engine,
+        exited,
+        render_epoch,
+    ))
 }
 
 impl AppState {
@@ -363,7 +493,6 @@ impl AppState {
         session_profile: &crate::config::InteractiveProfileSnapshot,
         launch_options: SessionLaunchOptions,
     ) -> io::Result<TerminalSession> {
-        let pty_system = native_pty_system();
         let SessionLaunchOptions {
             force_ssh_logging,
             initial_rows,
@@ -372,52 +501,27 @@ impl AppState {
             pass_fallback_notice,
             disable_vault_autologin,
         } = launch_options;
-        let rows = initial_rows.max(1);
-        let cols = initial_cols.max(1);
-
-        let pty_pair = pty_system
-            .openpty(PtySize {
-                rows,
-                cols,
-                pixel_width: 0,
-                pixel_height: 0,
-            })
-            .map_err(|err| io::Error::other(err.to_string()))?;
-
-        let cossh_path = command_path::cossh_path()?;
-        let using_pass_entry = pass_entry_override.is_some();
-        let mut cmd = CommandBuilder::new(&cossh_path);
-
-        if force_ssh_logging {
-            cmd.arg("-l");
-        }
-
-        if let Some(pass_entry_override) = &pass_entry_override {
-            cmd.arg("--pass-entry");
-            cmd.arg(pass_entry_override);
-        }
+        let mut launch_host = host.clone();
         if disable_vault_autologin {
-            cmd.env(process::DISABLE_VAULT_AUTOLOGIN_ENV, "1");
+            launch_host.vault_pass = None;
         }
 
-        if let Some(profile) = &host.profile {
-            cmd.arg("-P");
-            cmd.arg(profile);
+        let mut command_spec = process::build_ssh_command_for_host(&launch_host, pass_entry_override.as_deref())?;
+        if command_spec.stdin_payload.is_some() {
+            return Err(io::Error::other("unexpected stdin payload for SSH PTY launch"));
         }
 
-        cmd.arg("ssh");
-        cmd.arg(&host.name);
-        // Transitional: the TUI still re-enters `cossh ssh` inside a managed PTY
-        // until session tabs launch SSH directly.
-        cmd.env(process::EMBEDDED_INTERACTIVE_SSH_ENV, "1");
-        cmd.env("COSSH_SESSION_NAME", tab_title);
+        let using_pass_entry = pass_entry_override.is_some();
+        let ssh_logging_enabled = force_ssh_logging || session_profile.ssh_logging_enabled;
+        let launch_notice = pass_fallback_notice.or(command_spec.fallback_notice.take());
+        let session_logger = ssh_logging_enabled.then(|| SessionSshLogger::new(tab_title, session_profile.secret_patterns.clone()));
 
         let pass_info = if using_pass_entry { " (via vault)" } else { "" };
         let profile_info = host.profile.as_ref().map_or(String::new(), |profile| format!(" [profile: {}]", profile));
-        let logging_info = if force_ssh_logging { " [ssh-logging]" } else { "" };
+        let logging_info = if ssh_logging_enabled { " [ssh-logging]" } else { "" };
         let vault_info = if disable_vault_autologin { " [no-vault-autologin]" } else { "" };
         log_debug!(
-            "Spawning cossh command: cossh ssh {}{}{}{}{} (session: {})",
+            "Spawning SSH PTY command: ssh {}{}{}{}{} (session: {})",
             host.name,
             pass_info,
             profile_info,
@@ -426,71 +530,18 @@ impl AppState {
             tab_title
         );
 
-        let child = Arc::new(Mutex::new(pty_pair.slave.spawn_command(cmd).map_err(|err| io::Error::other(err.to_string()))?));
-
-        let mut reader = pty_pair.master.try_clone_reader().map_err(|err| io::Error::other(err.to_string()))?;
-        let writer = pty_pair.master.take_writer().map_err(|err| io::Error::other(err.to_string()))?;
-        let writer = Arc::new(Mutex::new(writer));
-
-        let engine = Arc::new(Mutex::new(TerminalEngine::new_with_input_writer_and_remote_clipboard_policy(
-            rows,
-            cols,
-            session_profile.history_buffer,
-            writer.clone(),
-            session_profile.remote_clipboard_write,
-            session_profile.remote_clipboard_max_bytes,
-        )));
-        let engine_clone = engine.clone();
-        let exited = Arc::new(Mutex::new(false));
-        let exited_clone = exited.clone();
-        let pty_master = Arc::new(Mutex::new(pty_pair.master));
-        let render_epoch = Arc::new(AtomicU64::new(0));
-        let render_epoch_clone = render_epoch.clone();
-
-        if let Some(notice) = pass_fallback_notice
-            && let Ok(mut engine) = engine.lock()
-        {
-            let message = format!("\r\n[color-ssh] {}\r\n", notice);
-            engine.process_output(message.as_bytes());
-            render_epoch.fetch_add(1, Ordering::Relaxed);
-        }
-
-        std::thread::spawn(move || {
-            let mut buf = [0u8; 8192];
-            loop {
-                match reader.read(&mut buf) {
-                    Ok(0) => {
-                        if let Ok(mut exited) = exited_clone.lock() {
-                            *exited = true;
-                        }
-                        break;
-                    }
-                    Ok(bytes_read) => {
-                        if let Ok(mut engine) = engine_clone.lock() {
-                            engine.process_output(&buf[..bytes_read]);
-                            render_epoch_clone.fetch_add(1, Ordering::Relaxed);
-                        }
-                    }
-                    Err(err) => {
-                        log_error!("Error reading from PTY: {}", err);
-                        if let Ok(mut exited) = exited_clone.lock() {
-                            *exited = true;
-                        }
-                        break;
-                    }
-                }
-            }
-            log_debug!("PTY reader thread exiting");
-        });
-
-        Ok(TerminalSession::new(
-            Some(pty_master),
-            Some(writer),
-            TerminalChild::Pty(child),
-            engine,
-            exited,
-            render_epoch,
-        ))
+        spawn_pty_terminal_session(
+            PtySessionLaunch {
+                program: &command_spec.program,
+                args: &command_spec.args,
+                env: &command_spec.env,
+                launch_notice,
+                session_logger,
+            },
+            session_profile,
+            initial_rows,
+            initial_cols,
+        )
     }
 
     fn spawn_rdp_session(
@@ -517,91 +568,18 @@ impl AppState {
         let launch_notice = pass_fallback_notice.or(command_spec.fallback_notice.take());
 
         if command_spec.stdin_payload.is_none() {
-            let pty_system = native_pty_system();
-            let rows = initial_rows.max(1);
-            let cols = initial_cols.max(1);
-            let pty_pair = pty_system
-                .openpty(PtySize {
-                    rows,
-                    cols,
-                    pixel_width: 0,
-                    pixel_height: 0,
-                })
-                .map_err(|err| io::Error::other(err.to_string()))?;
-
-            let program_path = command_path::resolve_known_command_path(&command_spec.program)?;
-            let mut cmd = CommandBuilder::new(&program_path);
-            for arg in &command_spec.args {
-                cmd.arg(arg);
-            }
-            for (key, value) in &command_spec.env {
-                cmd.env(key, value);
-            }
-
-            let child = Arc::new(Mutex::new(pty_pair.slave.spawn_command(cmd).map_err(|err| io::Error::other(err.to_string()))?));
-            let mut reader = pty_pair.master.try_clone_reader().map_err(|err| io::Error::other(err.to_string()))?;
-            let writer = pty_pair.master.take_writer().map_err(|err| io::Error::other(err.to_string()))?;
-            let writer = Arc::new(Mutex::new(writer));
-
-            let engine = Arc::new(Mutex::new(TerminalEngine::new_with_input_writer_and_remote_clipboard_policy(
-                rows,
-                cols,
-                session_profile.history_buffer,
-                writer.clone(),
-                session_profile.remote_clipboard_write,
-                session_profile.remote_clipboard_max_bytes,
-            )));
-            let engine_clone = engine.clone();
-            let exited = Arc::new(Mutex::new(false));
-            let exited_clone = exited.clone();
-            let pty_master = Arc::new(Mutex::new(pty_pair.master));
-            let render_epoch = Arc::new(AtomicU64::new(0));
-            let render_epoch_clone = render_epoch.clone();
-
-            if let Some(notice) = launch_notice
-                && let Ok(mut engine) = engine.lock()
-            {
-                let message = format!("\r\n[color-ssh] {}\r\n", notice);
-                engine.process_output(message.as_bytes());
-                render_epoch.fetch_add(1, Ordering::Relaxed);
-            }
-
-            std::thread::spawn(move || {
-                let mut buf = [0u8; 8192];
-                loop {
-                    match reader.read(&mut buf) {
-                        Ok(0) => {
-                            if let Ok(mut exited) = exited_clone.lock() {
-                                *exited = true;
-                            }
-                            break;
-                        }
-                        Ok(bytes_read) => {
-                            if let Ok(mut engine) = engine_clone.lock() {
-                                engine.process_output(&buf[..bytes_read]);
-                                render_epoch_clone.fetch_add(1, Ordering::Relaxed);
-                            }
-                        }
-                        Err(err) => {
-                            log_error!("Error reading from PTY: {}", err);
-                            if let Ok(mut exited) = exited_clone.lock() {
-                                *exited = true;
-                            }
-                            break;
-                        }
-                    }
-                }
-                log_debug!("PTY reader thread exiting");
-            });
-
-            return Ok(TerminalSession::new(
-                Some(pty_master),
-                Some(writer),
-                TerminalChild::Pty(child),
-                engine,
-                exited,
-                render_epoch,
-            ));
+            return spawn_pty_terminal_session(
+                PtySessionLaunch {
+                    program: &command_spec.program,
+                    args: &command_spec.args,
+                    env: &command_spec.env,
+                    launch_notice,
+                    session_logger: None,
+                },
+                session_profile,
+                initial_rows,
+                initial_cols,
+            );
         }
 
         let mut child = process::spawn_command(command_spec, Stdio::piped(), Stdio::piped())?;

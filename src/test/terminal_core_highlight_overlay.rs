@@ -79,6 +79,8 @@ fn overlay_from_profile_snapshot_uses_snapshot_rules() {
         history_buffer: 128,
         remote_clipboard_write: false,
         remote_clipboard_max_bytes: 4096,
+        ssh_logging_enabled: false,
+        secret_patterns: Vec::new(),
         overlay_rules: vec![compiled_rule("warn", "\x1b[38;2;255;200;0m")],
         overlay_rule_set: Some(regex::RegexSet::new(["warn"]).expect("rule set")),
         overlay_mode: HighlightOverlayMode::Always,

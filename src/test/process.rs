@@ -1,6 +1,6 @@
 use super::exit::map_exit_code;
 use super::interactive_passthrough::{requires_immediate_terminal_flush, should_flush_immediately};
-use super::launch::{build_plain_ssh_command, resolve_host_by_destination, resolve_pass_entry_from_hosts, synthesize_ssh_args};
+use super::launch::{build_plain_ssh_command, build_ssh_command_for_host, resolve_host_by_destination, resolve_pass_entry_from_hosts, synthesize_ssh_args};
 use crate::inventory::InventoryHost;
 use std::process::ExitCode;
 
@@ -100,4 +100,20 @@ fn synthesize_ssh_args_inventory_defaults_and_cli_overrides_apply_expected_prece
     assert_pair(&overridden_args, "-l", "override");
     assert_contains(&overridden_args, "ProxyJump=direct");
     assert_contains(&overridden_args, "user@10.0.0.10");
+}
+
+#[test]
+fn build_ssh_command_for_host_uses_synthesized_inventory_defaults() {
+    let mut host = InventoryHost::new("switch".to_string());
+    host.host = "10.0.0.10".to_string();
+    host.user = Some("admin".to_string());
+    host.port = Some(2222);
+
+    let command = build_ssh_command_for_host(&host, None).expect("build ssh command for host");
+
+    assert_eq!(command.program, "ssh");
+    assert_pair(&command.args, "-l", "admin");
+    assert_pair(&command.args, "-p", "2222");
+    assert_contains(&command.args, "10.0.0.10");
+    assert!(command.stdin_payload.is_none());
 }

@@ -1,4 +1,6 @@
-use super::{LogFileFactory, SshLogCommand, create_private_directory, extract_complete_lines, open_private_append_file, run_worker, sanitize_line};
+use super::{
+    LogFileFactory, SecretPatternSource, SshLogCommand, create_private_directory, extract_complete_lines, open_private_append_file, run_worker, sanitize_line,
+};
 use crate::test::support::fs::TestWorkspace;
 use regex::Regex;
 use std::fs;
@@ -21,7 +23,7 @@ fn spawn_worker(log_path: std::path::PathBuf) -> (mpsc::SyncSender<SshLogCommand
             .map_err(crate::log::LogError::from)
     });
 
-    let worker = std::thread::spawn(move || run_worker(rx, formatter, file_factory));
+    let worker = std::thread::spawn(move || run_worker(rx, formatter, file_factory, SecretPatternSource::Fixed(Vec::new())));
     (tx, worker)
 }
 

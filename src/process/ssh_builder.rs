@@ -380,6 +380,29 @@ fn inject_ssh_option(args: &mut Vec<String>, key: &str, value: impl Into<String>
     args.push(format!("{key}={}", value.into()));
 }
 
+fn configure_internal_askpass_for_entry(command: &mut PreparedCommand, pass_entry_name: &str) -> io::Result<()> {
+    if !validate_vault_entry_name(pass_entry_name) {
+        log_debug!("Resolved password vault entry name was invalid");
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "password auto-login requires a valid vault entry name",
+        ));
+    }
+
+    let client = agent::AgentClient::new().map_err(|err| io::Error::other(err.to_string()))?;
+    let askpass_token = client.authorize_askpass(pass_entry_name).map_err(|err| {
+        log_debug!("Failed to authorize internal askpass token: {}", err);
+        io::Error::new(io::ErrorKind::PermissionDenied, format!("failed to authorize vault askpass token: {err}"))
+    })?;
+
+    if let Err(err) = transport::configure_internal_askpass_env(&mut command.env, askpass_token.expose_secret()) {
+        log_debug!("Failed to configure internal askpass helper: {}", err);
+        return Err(io::Error::other(format!("failed to configure internal askpass helper: {err}")));
+    }
+
+    Ok(())
+}
+
 pub(crate) fn synthesize_ssh_args(args: &[String], host: &InventoryHost) -> Vec<String> {
     let inspection = inspect_ssh_args(args);
     let Some(destination_index) = inspection.destination_index else {
@@ -561,22 +584,21 @@ pub(crate) fn build_ssh_command(args: &[String], explicit_pass_entry: Option<&st
         ));
     }
 
-    let askpass_token = match client.authorize_askpass(&pass_entry_name) {
-        Ok(token) => token,
-        Err(err) => {
-            log_debug!("Failed to authorize internal askpass token: {}", err);
-            return Err(io::Error::new(
-                io::ErrorKind::PermissionDenied,
-                format!("failed to authorize vault askpass token: {err}"),
-            ));
-        }
-    };
-
-    if let Err(err) = transport::configure_internal_askpass_env(&mut command.env, askpass_token.expose_secret()) {
-        log_debug!("Failed to configure internal askpass helper: {}", err);
-        return Err(io::Error::other(format!("failed to configure internal askpass helper: {err}")));
-    }
+    configure_internal_askpass_for_entry(&mut command, &pass_entry_name)?;
     // At this point SSH can request password prompts through the internal helper.
     log_debug!("Configured internal askpass helper for direct SSH launch");
+    Ok(command)
+}
+
+pub(crate) fn build_ssh_command_for_host(host: &InventoryHost, explicit_pass_entry: Option<&str>) -> io::Result<PreparedCommand> {
+    let effective_args = synthesize_ssh_args(std::slice::from_ref(&host.name), host);
+    let mut command = build_plain_ssh_command(&effective_args);
+
+    let Some(pass_entry_name) = explicit_pass_entry.map(|name| name.to_string()).or_else(|| host.vault_pass.clone()) else {
+        return Ok(command);
+    };
+
+    configure_internal_askpass_for_entry(&mut command, &pass_entry_name)?;
+    log_debug!("Configured internal askpass helper for TUI SSH host launch");
     Ok(command)
 }

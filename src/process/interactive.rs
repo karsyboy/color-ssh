@@ -1,8 +1,8 @@
 //! Interactive SSH/RDP runtime selection.
 //!
 //! Direct `cossh ssh` prefers the PTY-centered runtime. The compatibility
-//! passthrough runtime remains only for embedded recursive SSH launches and
-//! environments without an interactive controlling TTY.
+//! passthrough runtime remains only for environments without an interactive
+//! controlling TTY.
 
 use super::command_spec::PreparedCommand;
 use super::spawn::spawn_command;
@@ -15,11 +15,7 @@ pub(super) fn run_interactive_ssh_session(command_spec: PreparedCommand) -> Resu
         return super::pty_runtime::run_interactive_ssh(command_spec);
     }
 
-    if std::env::var_os(super::EMBEDDED_INTERACTIVE_SSH_ENV).is_some() {
-        log_info!("Using embedded interactive SSH passthrough runtime");
-    } else {
-        log_info!("Using compatibility interactive SSH passthrough runtime");
-    }
+    log_info!("Using compatibility interactive SSH passthrough runtime");
 
     let child = spawn_command(command_spec, Stdio::piped(), Stdio::inherit()).map_err(|err| {
         log_error!("Failed to spawn SSH process: {}", err);

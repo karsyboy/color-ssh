@@ -5,7 +5,6 @@
 //! terminal without rewriting stdout bytes.
 //!
 //! Current callers:
-//! - embedded recursive `cossh ssh` launches from the TUI
 //! - direct SSH launches without an interactive controlling TTY
 //! - direct RDP launches that still need captured stdout/stderr forwarding
 

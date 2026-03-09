@@ -85,13 +85,9 @@ impl Drop for TerminalModeGuard {
 }
 
 pub(super) fn prefer_pty_centered_ssh_runtime() -> bool {
-    let is_embedded = std::env::var_os(super::EMBEDDED_INTERACTIVE_SSH_ENV).is_some();
     let has_interactive_tty = io::stdin().is_terminal() && io::stdout().is_terminal();
 
-    matches!(
-        select_interactive_ssh_runtime(is_embedded, has_interactive_tty),
-        InteractiveSshRuntime::PtyCentered
-    )
+    matches!(select_interactive_ssh_runtime(has_interactive_tty), InteractiveSshRuntime::PtyCentered)
 }
 
 pub(super) fn run_interactive_ssh(mut command_spec: PreparedCommand) -> Result<std::process::ExitCode> {
@@ -116,8 +112,8 @@ pub(super) fn run_interactive_ssh(mut command_spec: PreparedCommand) -> Result<s
     result
 }
 
-fn select_interactive_ssh_runtime(is_embedded: bool, has_interactive_tty: bool) -> InteractiveSshRuntime {
-    if is_embedded || !has_interactive_tty {
+fn select_interactive_ssh_runtime(has_interactive_tty: bool) -> InteractiveSshRuntime {
+    if !has_interactive_tty {
         InteractiveSshRuntime::CompatibilityPassthrough
     } else {
         InteractiveSshRuntime::PtyCentered

@@ -9,6 +9,7 @@ mod ssh;
 pub use errors::LogError;
 
 use once_cell::sync::Lazy;
+use regex::Regex;
 use std::sync::{
     Arc,
     atomic::{AtomicBool, AtomicU8, Ordering},
@@ -98,6 +99,27 @@ impl LogLevel {
 pub struct Logger {
     debug_logger: debug::DebugLogger,
     ssh_logger: ssh::SshLogger,
+}
+
+#[derive(Clone)]
+pub(crate) struct SessionSshLogger {
+    ssh_logger: ssh::SshLogger,
+}
+
+impl SessionSshLogger {
+    pub(crate) fn new(session_name: &str, secret_patterns: Vec<Regex>) -> Self {
+        Self {
+            ssh_logger: ssh::SshLogger::with_session_name_and_secret_patterns(session_name, secret_patterns),
+        }
+    }
+
+    pub(crate) fn log_raw_shared(&self, message: Arc<String>) -> Result<(), LogError> {
+        self.ssh_logger.log_raw_shared(message)
+    }
+
+    pub(crate) fn flush(&self) -> Result<(), LogError> {
+        self.ssh_logger.flush()
+    }
 }
 
 impl Logger {

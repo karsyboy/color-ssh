@@ -15,6 +15,7 @@ pub use watcher::config_watcher;
 
 use crate::highlight_rules::CompiledHighlightRule;
 use once_cell::sync::OnceCell;
+use regex::Regex;
 use regex::RegexSet;
 use std::io;
 use std::sync::{
@@ -46,6 +47,8 @@ pub(crate) struct InteractiveProfileSnapshot {
     pub(crate) history_buffer: usize,
     pub(crate) remote_clipboard_write: bool,
     pub(crate) remote_clipboard_max_bytes: usize,
+    pub(crate) ssh_logging_enabled: bool,
+    pub(crate) secret_patterns: Vec<Regex>,
     pub(crate) overlay_rules: Vec<CompiledHighlightRule>,
     pub(crate) overlay_rule_set: Option<RegexSet>,
     pub(crate) overlay_mode: HighlightOverlayMode,
@@ -116,14 +119,23 @@ fn install_config(config: Config) {
 }
 
 fn snapshot_from_loaded_config(config: Config, config_version: u64) -> InteractiveProfileSnapshot {
-    let interactive = config.interactive_settings.unwrap_or_default();
+    let Config {
+        settings,
+        auth_settings,
+        interactive_settings,
+        metadata,
+        ..
+    } = config;
+    let interactive = interactive_settings.unwrap_or_default();
     InteractiveProfileSnapshot {
-        auth_settings: config.auth_settings,
+        auth_settings,
         history_buffer: interactive.history_buffer,
         remote_clipboard_write: interactive.allow_remote_clipboard_write,
         remote_clipboard_max_bytes: interactive.remote_clipboard_max_bytes,
-        overlay_rules: config.metadata.compiled_rules,
-        overlay_rule_set: config.metadata.compiled_rule_set,
+        ssh_logging_enabled: settings.ssh_logging,
+        secret_patterns: metadata.compiled_secret_patterns,
+        overlay_rules: metadata.compiled_rules,
+        overlay_rule_set: metadata.compiled_rule_set,
         overlay_mode: interactive.overlay_highlighting,
         overlay_auto_policy: interactive.overlay_auto_policy,
         config_version,
@@ -138,6 +150,8 @@ fn current_interactive_profile_snapshot() -> InteractiveProfileSnapshot {
             history_buffer: interactive.map(|interactive| interactive.history_buffer).unwrap_or(1000),
             remote_clipboard_write: interactive.map(|interactive| interactive.allow_remote_clipboard_write).unwrap_or(false),
             remote_clipboard_max_bytes: interactive.map(|interactive| interactive.remote_clipboard_max_bytes).unwrap_or(4096),
+            ssh_logging_enabled: cfg.settings.ssh_logging,
+            secret_patterns: cfg.metadata.compiled_secret_patterns.clone(),
             overlay_rules: cfg.metadata.compiled_rules.clone(),
             overlay_rule_set: cfg.metadata.compiled_rule_set.clone(),
             overlay_mode: interactive.map(|interactive| interactive.overlay_highlighting).unwrap_or_default(),

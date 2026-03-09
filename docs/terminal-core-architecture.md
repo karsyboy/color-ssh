@@ -32,8 +32,8 @@ Color-SSH's interactive architecture is now PTY-centered. Interactive SSH displa
 
 ## Runtime Selection
 
-- Direct interactive SSH uses the PTY-centered runtime whenever stdin and stdout are attached to an interactive TTY and the session is not an embedded recursive launch.
-- Embedded recursive `cossh ssh` launches and direct SSH without a controlling TTY use `src/process/interactive_passthrough.rs`.
+- Direct interactive SSH uses the PTY-centered runtime whenever stdin and stdout are attached to an interactive TTY.
+- Direct SSH without a controlling TTY uses `src/process/interactive_passthrough.rs`.
 - Direct RDP still uses the passthrough runner when Color-SSH must capture and forward FreeRDP stdout/stderr.
 
 ## Overlay Behavior
@@ -55,11 +55,8 @@ Color-SSH's interactive architecture is now PTY-centered. Interactive SSH displa
 ## Intentionally Retained Transitional Code
 
 - `src/process/interactive_passthrough.rs`
-  - Required for embedded recursive TUI launches until tabs launch SSH directly instead of re-entering the CLI.
   - Required for direct SSH when there is no interactive controlling TTY and the PTY renderer cannot own the local terminal surface.
   - Required for direct RDP launches that still need captured stdout/stderr forwarding.
-- `COSSH_EMBEDDED_INTERACTIVE_SSH`
-  - Still marks recursive TUI-launched `cossh ssh` so direct CLI logic does not try to take over the already-managed outer terminal.
 
 ## Long-Term Design
 

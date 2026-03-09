@@ -38,6 +38,12 @@ enum SshLogCommand {
 
 type LogFileFactory = Arc<dyn Fn() -> Result<File, LogError> + Send + Sync>;
 
+#[derive(Clone)]
+enum SecretPatternSource {
+    DynamicConfig,
+    Fixed(Vec<Regex>),
+}
+
 struct SshLogWorkerState {
     line_buffer: String,
     writer: Option<BufWriter<File>>,
@@ -85,6 +91,8 @@ static ANSI_ESCAPE_REGEX: Lazy<Option<Regex>> = Lazy::new(|| {
 pub(super) struct SshLogger {
     formatter: LogFormatter,
     worker_tx: Arc<Mutex<Option<SyncSender<SshLogCommand>>>>,
+    file_factory: LogFileFactory,
+    secret_pattern_source: SecretPatternSource,
 }
 
 impl Default for SshLogger {
@@ -103,6 +111,24 @@ impl SshLogger {
         Self {
             formatter,
             worker_tx: Arc::new(Mutex::new(None)),
+            file_factory: Arc::new(SshLogger::create_log_file),
+            secret_pattern_source: SecretPatternSource::DynamicConfig,
+        }
+    }
+
+    pub(super) fn with_session_name_and_secret_patterns(session_name: impl Into<String>, secret_patterns: Vec<Regex>) -> Self {
+        let mut formatter = LogFormatter::new();
+        formatter.set_include_timestamp(true);
+        formatter.set_include_break(true);
+
+        let session_name = session_name.into();
+        let file_factory: LogFileFactory = Arc::new(move || SshLogger::create_log_file_for_session_name(&session_name));
+
+        Self {
+            formatter,
+            worker_tx: Arc::new(Mutex::new(None)),
+            file_factory,
+            secret_pattern_source: SecretPatternSource::Fixed(secret_patterns),
         }
     }
 
@@ -150,11 +176,12 @@ impl SshLogger {
 
         let (tx, rx) = mpsc::sync_channel(SSH_LOG_QUEUE_CAPACITY);
         let formatter = self.formatter.clone();
-        let file_factory: LogFileFactory = Arc::new(SshLogger::create_log_file);
+        let file_factory = self.file_factory.clone();
+        let secret_pattern_source = self.secret_pattern_source.clone();
 
         thread::Builder::new()
             .name("ssh-log-writer".to_string())
-            .spawn(move || run_worker(rx, formatter, file_factory))
+            .spawn(move || run_worker(rx, formatter, file_factory, secret_pattern_source))
             .map_err(|err| LogError::FormattingError(format!("failed to spawn ssh log worker: {}", err)))?;
 
         *worker_tx_guard = Some(tx.clone());
@@ -166,20 +193,25 @@ impl SshLogger {
         let log_path = get_ssh_log_path()?;
         open_private_append_file(&log_path)
     }
+
+    fn create_log_file_for_session_name(session_name: &str) -> Result<File, LogError> {
+        let log_path = get_ssh_log_path_for_session_name(session_name)?;
+        open_private_append_file(&log_path)
+    }
 }
 
-fn run_worker(receiver: Receiver<SshLogCommand>, formatter: LogFormatter, file_factory: LogFileFactory) {
+fn run_worker(receiver: Receiver<SshLogCommand>, formatter: LogFormatter, file_factory: LogFileFactory, secret_pattern_source: SecretPatternSource) {
     let mut state = SshLogWorkerState::new();
 
     loop {
         match receiver.recv_timeout(SSH_LOG_FLUSH_INTERVAL) {
             Ok(SshLogCommand::Chunk(message)) => {
-                if let Err(err) = process_chunk_message(&mut state, &formatter, message.as_ref(), file_factory.as_ref()) {
+                if let Err(err) = process_chunk_message(&mut state, &formatter, message.as_ref(), file_factory.as_ref(), &secret_pattern_source) {
                     state.last_error = Some(err.to_string());
                 }
             }
             Ok(SshLogCommand::Flush(ack_tx)) => {
-                let flush_result = flush_worker(&mut state, &formatter, file_factory.as_ref()).map_err(|err| err.to_string());
+                let flush_result = flush_worker(&mut state, &formatter, file_factory.as_ref(), &secret_pattern_source).map_err(|err| err.to_string());
                 let _ = ack_tx.send(flush_result);
             }
             Err(RecvTimeoutError::Timeout) => {
@@ -188,7 +220,7 @@ fn run_worker(receiver: Receiver<SshLogCommand>, formatter: LogFormatter, file_f
                 }
             }
             Err(RecvTimeoutError::Disconnected) => {
-                let _ = flush_worker(&mut state, &formatter, file_factory.as_ref());
+                let _ = flush_worker(&mut state, &formatter, file_factory.as_ref(), &secret_pattern_source);
                 break;
             }
         }
@@ -200,6 +232,7 @@ fn process_chunk_message(
     formatter: &LogFormatter,
     message: &str,
     create_log_file: &dyn Fn() -> Result<File, LogError>,
+    secret_pattern_source: &SecretPatternSource,
 ) -> Result<(), LogError> {
     state.line_buffer.push_str(message);
     let lines = extract_complete_lines(&mut state.line_buffer);
@@ -208,12 +241,7 @@ fn process_chunk_message(
         return Ok(());
     }
 
-    refresh_secret_patterns_if_needed(
-        &mut state.cached_config_version,
-        crate::config::current_config_version(),
-        &mut state.cached_secret_patterns,
-        current_secret_patterns,
-    );
+    ensure_secret_patterns_loaded(&mut state.cached_config_version, &mut state.cached_secret_patterns, secret_pattern_source);
 
     if state.writer.is_none() {
         state.writer = Some(BufWriter::new(create_log_file()?));
@@ -278,8 +306,13 @@ fn flush_writer(state: &mut SshLogWorkerState) -> Result<(), LogError> {
     Ok(())
 }
 
-fn flush_worker(state: &mut SshLogWorkerState, formatter: &LogFormatter, create_log_file: &dyn Fn() -> Result<File, LogError>) -> Result<(), LogError> {
-    flush_partial_line(state, formatter, create_log_file)?;
+fn flush_worker(
+    state: &mut SshLogWorkerState,
+    formatter: &LogFormatter,
+    create_log_file: &dyn Fn() -> Result<File, LogError>,
+    secret_pattern_source: &SecretPatternSource,
+) -> Result<(), LogError> {
+    flush_partial_line(state, formatter, create_log_file, secret_pattern_source)?;
     flush_writer(state)?;
     if let Some(last_error) = state.last_error.take() {
         return Err(LogError::FormattingError(last_error));
@@ -287,17 +320,17 @@ fn flush_worker(state: &mut SshLogWorkerState, formatter: &LogFormatter, create_
     Ok(())
 }
 
-fn flush_partial_line(state: &mut SshLogWorkerState, formatter: &LogFormatter, create_log_file: &dyn Fn() -> Result<File, LogError>) -> Result<(), LogError> {
+fn flush_partial_line(
+    state: &mut SshLogWorkerState,
+    formatter: &LogFormatter,
+    create_log_file: &dyn Fn() -> Result<File, LogError>,
+    secret_pattern_source: &SecretPatternSource,
+) -> Result<(), LogError> {
     if state.line_buffer.is_empty() {
         return Ok(());
     }
 
-    refresh_secret_patterns_if_needed(
-        &mut state.cached_config_version,
-        crate::config::current_config_version(),
-        &mut state.cached_secret_patterns,
-        current_secret_patterns,
-    );
+    ensure_secret_patterns_loaded(&mut state.cached_config_version, &mut state.cached_secret_patterns, secret_pattern_source);
 
     let tail_line = std::mem::take(&mut state.line_buffer);
     let sanitized = sanitize_line(tail_line.trim_end_matches('\r'), &state.cached_secret_patterns);
@@ -319,29 +352,47 @@ fn flush_partial_line(state: &mut SshLogWorkerState, formatter: &LogFormatter, c
     Ok(())
 }
 
-fn refresh_secret_patterns_if_needed<F>(cached_version: &mut Option<u64>, current_version: u64, cached_patterns: &mut Vec<Regex>, mut load_patterns: F)
-where
-    F: FnMut() -> Vec<Regex>,
-{
-    if cached_version.is_some_and(|version| version == current_version) {
-        return;
-    }
+fn ensure_secret_patterns_loaded(cached_version: &mut Option<u64>, cached_patterns: &mut Vec<Regex>, secret_pattern_source: &SecretPatternSource) {
+    match secret_pattern_source {
+        SecretPatternSource::DynamicConfig => {
+            let current_version = crate::config::current_config_version();
+            if cached_version.is_some_and(|version| version == current_version) {
+                return;
+            }
 
-    *cached_patterns = load_patterns();
-    *cached_version = Some(current_version);
+            *cached_patterns = current_secret_patterns();
+            *cached_version = Some(current_version);
+        }
+        SecretPatternSource::Fixed(patterns) => {
+            if cached_version.is_some() {
+                return;
+            }
+
+            *cached_patterns = patterns.clone();
+            *cached_version = Some(u64::MAX);
+        }
+    }
 }
 
 fn get_ssh_log_path() -> Result<PathBuf, LogError> {
+    let session_name = crate::config::with_current_config("reading SSH session name", |cfg| cfg.metadata.session_name.clone());
+    get_ssh_log_path_for_session_name(&session_name)
+}
+
+fn get_ssh_log_path_for_session_name(session_name: &str) -> Result<PathBuf, LogError> {
+    let log_dir = ssh_log_directory()?;
+    let sanitized = sanitize_session_name(session_name);
+    Ok(log_dir.join(format!("{sanitized}.log")))
+}
+
+fn ssh_log_directory() -> Result<PathBuf, LogError> {
     let home_dir = dirs::home_dir().ok_or_else(|| LogError::DirectoryCreationError("Home directory not found".to_string()))?;
 
     let date = Local::now().format("%Y-%m-%d");
     let log_dir = home_dir.join(".color-ssh").join("logs").join("ssh_sessions").join(date.to_string());
 
     create_private_directory(&log_dir)?;
-
-    let session_name = crate::config::with_current_config("reading SSH session name", |cfg| cfg.metadata.session_name.clone());
-    let sanitized = sanitize_session_name(&session_name);
-    Ok(log_dir.join(format!("{sanitized}.log")))
+    Ok(log_dir)
 }
 
 fn create_private_directory(path: &Path) -> Result<(), LogError> {
