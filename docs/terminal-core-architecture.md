@@ -28,7 +28,7 @@ Color-SSH now has a dedicated `src/terminal_core/` layer for embedded terminal f
 ### `HighlightOverlayEngine`
 
 - Lives next to the terminal core, not inside process streaming.
-- Consumes `TerminalViewModel` text instead of raw stdout chunks.
+- Consumes viewport snapshots instead of raw stdout chunks.
 - Reuses the existing compiled regex rules, but converts their ANSI styles into frontend-neutral overlay styles.
 - Returns additive highlight spans for currently visible rows without mutating PTY bytes or `alacritty_terminal` state.
 - Is reusable by the ratatui frontend today and a future GUI renderer later.
@@ -44,6 +44,36 @@ Color-SSH now has a dedicated `src/terminal_core/` layer for embedded terminal f
   - the visible viewport is repainting aggressively enough that semantic overlays become noisy or misleading
 - `interactive_settings.overlay_highlighting: always` forces overlays on even in those cases.
 - `interactive_settings.overlay_highlighting: off` disables the renderer-side overlay entirely.
+
+## Overlay Performance Design
+
+- Overlay analysis now runs from a renderer-owned viewport snapshot (`HighlightOverlayViewport`) after the terminal engine lock is released.
+- The engine mutex is only held long enough to snapshot the visible cells, cursor, mouse mode, and alternate-screen state.
+- Highlight analysis is row-local and cached by normalized visible row text (trailing padding is ignored because it does not affect regex matches or cell-column ranges).
+- Cache reuse is content-based rather than absolute-row-based, so repeated log lines, prompt redraws, and rows that shift during scrolling can reuse the same analyzed spans.
+- Cached row analyses are bounded to roughly `visible_rows * 8`, clamped to `[128, 1024]` entries, and pruned by recency to avoid unbounded memory growth during long log streams.
+
+## Overlay Invalidation Rules
+
+- Reuse the entire cached overlay when the render epoch and scrollback position are unchanged and volatile-suppression state is still valid.
+- Reuse the entire cached overlay even across render-epoch changes when the normalized visible rows and suppression reason are unchanged.
+- Reanalyze only rows whose normalized visible text is not already present in the row-analysis cache.
+- Reuse cached row analyses for rows newly entering the viewport if their text was analyzed recently, which keeps scrolling and repeated output cheap.
+- Resize and wrap changes invalidate only the rows whose snapped visible text changes; unchanged snapped rows keep their cached analysis.
+- Config reloads clear all overlay caches because rule sets, styles, and suppression mode may have changed.
+- Alternate-screen mode, mouse-reporting mode, and volatile-repaint suppression return an empty overlay without preserving stale visible-row state.
+
+## Overlay Profiling Hooks
+
+- `HighlightOverlayEngine` keeps in-memory counters for build kind, analyzed rows, row-cache hits/misses, cache size, and build duration.
+- Safe debug logging emits periodic perf summaries and always logs slow overlay builds.
+- The instrumentation is renderer-local and lock-free; it does not add cross-thread contention to the render hot path.
+
+## Overlay Tradeoffs
+
+- The cache is intentionally row-local and does not try to infer multi-line semantic state, which keeps correctness aligned with the current per-line regex rule model.
+- Trailing-space changes are ignored for cache keys so prompt redraws and wrap padding do not trigger pointless re-analysis.
+- Overlay snapshots duplicate only the visible viewport state needed for rendering, trading a small amount of transient memory for less time spent holding the terminal engine mutex.
 
 Overlay mode is safer than stream rewriting because the renderer only changes presentation. It does not inject ANSI sequences back into the PTY stream, so remote programs and local terminal emulation continue to observe the original byte stream.
 

@@ -17,4 +17,4 @@ pub(crate) use color::{AnsiColor, ansi_index_to_rgb};
 pub(crate) use engine::TerminalEngine;
 pub(crate) use session::{TerminalChild, TerminalSession};
 pub(crate) use types::TerminalInputWriter;
-pub(crate) use view::{MouseProtocolEncoding, MouseProtocolMode, TerminalCellSnapshot, TerminalViewModel, TerminalViewport};
+pub(crate) use view::{MouseProtocolEncoding, MouseProtocolMode, TerminalCellSnapshot, TerminalViewport};

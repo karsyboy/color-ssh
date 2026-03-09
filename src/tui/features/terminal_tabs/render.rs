@@ -1,6 +1,6 @@
 //! Terminal-tabs and root layout rendering.
 
-use crate::terminal_core::highlight_overlay::HighlightOverlayContext;
+use crate::terminal_core::highlight_overlay::{HighlightOverlayContext, HighlightOverlayViewport};
 use crate::terminal_ratatui::{apply_overlay_style, paint_terminal_viewport};
 use crate::tui::AppState;
 use crate::tui::features::selection::extract::is_cell_in_selection;
@@ -294,22 +294,24 @@ impl AppState {
             let render_state = if let Ok(mut engine) = session.engine().lock() {
                 engine.set_display_scrollback(scroll_offset);
                 let view = engine.view_model();
-                let overlay = highlight_overlay_engine.build_visible_overlay(
-                    &view,
+                let alternate_screen = view.is_alternate_screen();
+                let mouse_mode = view.mouse_protocol().0;
+                let viewport = view.viewport_snapshot(area.height, area.width);
+                Some((viewport, alternate_screen, mouse_mode))
+            } else {
+                None
+            };
+
+            if let Some((viewport, alternate_screen, mouse_mode)) = render_state {
+                let overlay_view = HighlightOverlayViewport::new(&viewport, alternate_screen, mouse_mode);
+                let highlight_overlay = highlight_overlay_engine.build_visible_overlay(
+                    &overlay_view,
                     HighlightOverlayContext {
                         render_epoch,
                         display_scrollback: scroll_offset,
                     },
                 );
-                let viewport = view.viewport_snapshot(area.height, area.width);
-                Some((viewport, overlay))
-            } else {
-                None
-            };
-
-            self.tabs[tab_idx].highlight_overlay = highlight_overlay_engine;
-
-            if let Some((viewport, highlight_overlay)) = render_state {
+                self.tabs[tab_idx].highlight_overlay = highlight_overlay_engine;
                 let _ = paint_terminal_viewport(
                     frame.buffer_mut(),
                     area,
@@ -339,6 +341,8 @@ impl AppState {
                         }
                     },
                 );
+            } else {
+                self.tabs[tab_idx].highlight_overlay = highlight_overlay_engine;
             }
         } else {
             self.tabs[tab_idx].highlight_overlay = highlight_overlay_engine;

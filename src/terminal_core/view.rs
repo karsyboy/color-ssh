@@ -80,6 +80,15 @@ impl TerminalViewportRow {
     pub(crate) fn cells(&self) -> &[TerminalCellSnapshot] {
         &self.cells
     }
+
+    pub(crate) fn display_text(&self) -> String {
+        let mut line = String::new();
+        let mut scratch = String::new();
+        for cell in &self.cells {
+            line.push_str(cell.glyph().as_str(&mut scratch));
+        }
+        line
+    }
 }
 
 /// Owned cell content extracted from the emulator.

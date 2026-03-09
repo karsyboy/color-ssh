@@ -5,22 +5,61 @@
 //! viewport text from `TerminalViewModel`, build highlight spans, and paint
 //! them additively during rendering.
 
-use super::{AnsiColor, MouseProtocolMode, TerminalViewModel};
+use super::{AnsiColor, MouseProtocolMode, TerminalViewport};
 use crate::config::{self, HighlightOverlayMode};
 use crate::highlighter::CompiledHighlightRule;
+use crate::{debug_enabled, log_debug};
 use alacritty_terminal::vte::ansi::Rgb;
 use regex::RegexSet;
 use std::collections::HashMap;
+use std::sync::Arc;
 use std::time::{Duration, Instant};
 use unicode_width::UnicodeWidthChar;
 
 const MAX_RULES_FOR_REGEXSET_PREFILTER: usize = 24;
+const MIN_ROW_ANALYSIS_CACHE_ENTRIES: usize = 128;
+const MAX_ROW_ANALYSIS_CACHE_ENTRIES: usize = 1024;
+const ROW_ANALYSIS_CACHE_VIEWPORT_MULTIPLIER: usize = 8;
+const PERF_LOG_INTERVAL_BUILDS: u64 = 120;
+const PERF_SLOW_BUILD_THRESHOLD: Duration = Duration::from_millis(8);
 const VOLATILE_REPAINT_INTERVAL: Duration = Duration::from_millis(120);
 const VOLATILE_REPAINT_SUPPRESS_FOR: Duration = Duration::from_secs(2);
 const VOLATILE_REPAINT_MIN_ROWS: usize = 6;
 const VOLATILE_REPAINT_STREAK_THRESHOLD: u8 = 3;
 const VOLATILE_REPAINT_RATIO_NUMERATOR: usize = 7;
 const VOLATILE_REPAINT_RATIO_DENOMINATOR: usize = 10;
+
+pub(crate) struct HighlightOverlayViewport<'a> {
+    viewport: &'a TerminalViewport,
+    alternate_screen: bool,
+    mouse_mode: MouseProtocolMode,
+}
+
+impl<'a> HighlightOverlayViewport<'a> {
+    pub(crate) fn new(viewport: &'a TerminalViewport, alternate_screen: bool, mouse_mode: MouseProtocolMode) -> Self {
+        Self {
+            viewport,
+            alternate_screen,
+            mouse_mode,
+        }
+    }
+
+    fn visible_row_count(&self) -> usize {
+        self.viewport.rows().len()
+    }
+
+    fn visible_row_texts(&self) -> Vec<(i64, String)> {
+        self.viewport.rows().iter().map(|row| (row.absolute_row(), row.display_text())).collect()
+    }
+
+    fn is_alternate_screen(&self) -> bool {
+        self.alternate_screen
+    }
+
+    fn mouse_protocol_mode(&self) -> MouseProtocolMode {
+        self.mouse_mode
+    }
+}
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub(crate) struct HighlightOverlayContext {
@@ -80,7 +119,7 @@ pub(crate) struct HighlightCellRange {
 
 #[derive(Debug, Default, Clone)]
 pub(crate) struct HighlightOverlay {
-    row_ranges: HashMap<i64, Vec<HighlightCellRange>>,
+    row_ranges: HashMap<i64, Arc<[HighlightCellRange]>>,
     styles: Vec<HighlightOverlayStyle>,
     suppression_reason: Option<HighlightSuppressionReason>,
     pub(crate) config_version: u64,
@@ -91,6 +130,109 @@ impl HighlightOverlay {
         let row_ranges = self.row_ranges.get(&absolute_row)?;
         let range = row_ranges.iter().find(|range| col >= range.start_col && col < range.end_col)?;
         self.styles.get(range.style_index)
+    }
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+struct OverlayVisibleRow {
+    absolute_row: i64,
+    text: String,
+}
+
+#[derive(Debug, Clone)]
+struct CachedRowAnalysis {
+    ranges: Arc<[HighlightCellRange]>,
+    last_used_generation: u64,
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+enum HighlightOverlayBuildKind {
+    StrictReuse,
+    SnapshotReuse,
+    #[default]
+    IncrementalAnalysis,
+    EmptyOverlay,
+}
+
+#[derive(Debug, Clone, Default)]
+struct HighlightOverlayBuildMetrics {
+    kind: HighlightOverlayBuildKind,
+    visible_rows: usize,
+    analyzed_rows: usize,
+    row_cache_hits: usize,
+    row_cache_misses: usize,
+    cache_entries: usize,
+    duration: Duration,
+    suppression_reason: Option<HighlightSuppressionReason>,
+}
+
+#[derive(Debug, Default)]
+struct HighlightOverlayProfiler {
+    build_count: u64,
+    strict_reuse_count: u64,
+    snapshot_reuse_count: u64,
+    incremental_analysis_count: u64,
+    empty_overlay_count: u64,
+    total_visible_rows: u64,
+    total_analyzed_rows: u64,
+    total_row_cache_hits: u64,
+    total_row_cache_misses: u64,
+    total_duration: Duration,
+    last_logged_build: u64,
+    last_build: HighlightOverlayBuildMetrics,
+}
+
+impl HighlightOverlayProfiler {
+    fn record_build(&mut self, metrics: HighlightOverlayBuildMetrics) {
+        self.build_count = self.build_count.saturating_add(1);
+        self.total_visible_rows = self.total_visible_rows.saturating_add(metrics.visible_rows as u64);
+        self.total_analyzed_rows = self.total_analyzed_rows.saturating_add(metrics.analyzed_rows as u64);
+        self.total_row_cache_hits = self.total_row_cache_hits.saturating_add(metrics.row_cache_hits as u64);
+        self.total_row_cache_misses = self.total_row_cache_misses.saturating_add(metrics.row_cache_misses as u64);
+        self.total_duration += metrics.duration;
+
+        match metrics.kind {
+            HighlightOverlayBuildKind::StrictReuse => self.strict_reuse_count = self.strict_reuse_count.saturating_add(1),
+            HighlightOverlayBuildKind::SnapshotReuse => self.snapshot_reuse_count = self.snapshot_reuse_count.saturating_add(1),
+            HighlightOverlayBuildKind::IncrementalAnalysis => self.incremental_analysis_count = self.incremental_analysis_count.saturating_add(1),
+            HighlightOverlayBuildKind::EmptyOverlay => self.empty_overlay_count = self.empty_overlay_count.saturating_add(1),
+        }
+
+        self.last_build = metrics;
+        self.maybe_log();
+    }
+
+    fn maybe_log(&mut self) {
+        if !debug_enabled!() {
+            return;
+        }
+
+        let should_log =
+            self.last_build.duration >= PERF_SLOW_BUILD_THRESHOLD || self.build_count.saturating_sub(self.last_logged_build) >= PERF_LOG_INTERVAL_BUILDS;
+        if !should_log {
+            return;
+        }
+
+        self.last_logged_build = self.build_count;
+        log_debug!(
+            "Highlight overlay perf: kind={:?} suppression={:?} visible_rows={} analyzed_rows={} row_cache_hits={} row_cache_misses={} cache_entries={} duration_us={} totals(builds={}, strict_reuse={}, snapshot_reuse={}, active={}, empty={}, analyzed_rows={}, row_cache_hits={}, row_cache_misses={})",
+            self.last_build.kind,
+            self.last_build.suppression_reason,
+            self.last_build.visible_rows,
+            self.last_build.analyzed_rows,
+            self.last_build.row_cache_hits,
+            self.last_build.row_cache_misses,
+            self.last_build.cache_entries,
+            self.last_build.duration.as_micros(),
+            self.build_count,
+            self.strict_reuse_count,
+            self.snapshot_reuse_count,
+            self.incremental_analysis_count,
+            self.empty_overlay_count,
+            self.total_analyzed_rows,
+            self.total_row_cache_hits,
+            self.total_row_cache_misses,
+        );
     }
 }
 
@@ -105,10 +247,14 @@ pub(crate) struct HighlightOverlayEngine {
     cached_overlay: HighlightOverlay,
     cached_render_epoch: Option<u64>,
     cached_display_scrollback: usize,
+    last_overlay_rows: Vec<OverlayVisibleRow>,
+    row_analysis_cache: HashMap<String, CachedRowAnalysis>,
+    row_cache_generation: u64,
     last_visible_rows: Vec<(i64, String)>,
     last_analysis_at: Option<Instant>,
     volatile_repaint_streak: u8,
     volatile_suppressed_until: Option<Instant>,
+    profiler: HighlightOverlayProfiler,
 }
 
 impl HighlightOverlayEngine {
@@ -120,32 +266,130 @@ impl HighlightOverlayEngine {
     }
 
     /// Rebuild renderer-side highlight spans for the currently visible rows.
-    pub(crate) fn build_visible_overlay(&mut self, view: &TerminalViewModel<'_>, context: HighlightOverlayContext) -> HighlightOverlay {
+    pub(crate) fn build_visible_overlay(&mut self, view: &HighlightOverlayViewport<'_>, context: HighlightOverlayContext) -> HighlightOverlay {
+        let build_started_at = Instant::now();
         self.refresh_rules_if_needed();
-        let now = Instant::now();
+        let now = build_started_at;
 
         if self.can_reuse_cached(context, now) {
-            return self.cached_overlay.clone();
+            return self.finish_cached_reuse(
+                context,
+                HighlightOverlayBuildMetrics {
+                    kind: HighlightOverlayBuildKind::StrictReuse,
+                    visible_rows: self.last_overlay_rows.len(),
+                    ..HighlightOverlayBuildMetrics::default()
+                },
+                build_started_at,
+            );
+        }
+
+        if self.mode == HighlightOverlayMode::Off {
+            self.clear_volatility_tracking();
+            return self.finish_overlay_build(
+                self.empty_overlay(Some(HighlightSuppressionReason::DisabledByConfig)),
+                &[],
+                context,
+                HighlightOverlayBuildMetrics {
+                    kind: HighlightOverlayBuildKind::EmptyOverlay,
+                    visible_rows: view.visible_row_count(),
+                    suppression_reason: Some(HighlightSuppressionReason::DisabledByConfig),
+                    ..HighlightOverlayBuildMetrics::default()
+                },
+                build_started_at,
+            );
+        }
+
+        if self.styles.is_empty() {
+            self.clear_volatility_tracking();
+            return self.finish_overlay_build(
+                self.empty_overlay(None),
+                &[],
+                context,
+                HighlightOverlayBuildMetrics {
+                    kind: HighlightOverlayBuildKind::EmptyOverlay,
+                    visible_rows: view.visible_row_count(),
+                    ..HighlightOverlayBuildMetrics::default()
+                },
+                build_started_at,
+            );
+        }
+
+        if self.mode == HighlightOverlayMode::Auto {
+            if view.is_alternate_screen() {
+                self.clear_volatility_tracking();
+                return self.finish_overlay_build(
+                    self.empty_overlay(Some(HighlightSuppressionReason::AlternateScreen)),
+                    &[],
+                    context,
+                    HighlightOverlayBuildMetrics {
+                        kind: HighlightOverlayBuildKind::EmptyOverlay,
+                        visible_rows: view.visible_row_count(),
+                        suppression_reason: Some(HighlightSuppressionReason::AlternateScreen),
+                        ..HighlightOverlayBuildMetrics::default()
+                    },
+                    build_started_at,
+                );
+            }
+
+            if view.mouse_protocol_mode() != MouseProtocolMode::None {
+                self.clear_volatility_tracking();
+                return self.finish_overlay_build(
+                    self.empty_overlay(Some(HighlightSuppressionReason::MouseReporting)),
+                    &[],
+                    context,
+                    HighlightOverlayBuildMetrics {
+                        kind: HighlightOverlayBuildKind::EmptyOverlay,
+                        visible_rows: view.visible_row_count(),
+                        suppression_reason: Some(HighlightSuppressionReason::MouseReporting),
+                        ..HighlightOverlayBuildMetrics::default()
+                    },
+                    build_started_at,
+                );
+            }
         }
 
         let visible_rows = view.visible_row_texts();
-        let suppression_reason = self.suppression_reason(view, &visible_rows, context, now);
+        let suppression_reason = self.suppression_reason(&visible_rows, context, now);
+        let overlay_rows = normalized_visible_rows(&visible_rows);
+
+        if self.can_reuse_visible_overlay(&overlay_rows, suppression_reason) {
+            return self.finish_cached_reuse(
+                context,
+                HighlightOverlayBuildMetrics {
+                    kind: HighlightOverlayBuildKind::SnapshotReuse,
+                    visible_rows: overlay_rows.len(),
+                    suppression_reason,
+                    ..HighlightOverlayBuildMetrics::default()
+                },
+                build_started_at,
+            );
+        }
 
         let overlay = if suppression_reason.is_some() || self.styles.is_empty() {
-            HighlightOverlay {
-                row_ranges: HashMap::new(),
-                styles: self.styles.clone(),
-                suppression_reason,
-                config_version: self.config_version,
-            }
+            self.empty_overlay(suppression_reason)
         } else {
-            self.build_active_overlay(&visible_rows)
+            let mut metrics = HighlightOverlayBuildMetrics {
+                kind: HighlightOverlayBuildKind::IncrementalAnalysis,
+                visible_rows: overlay_rows.len(),
+                suppression_reason,
+                ..HighlightOverlayBuildMetrics::default()
+            };
+            let overlay = self.build_active_overlay(&overlay_rows, &mut metrics);
+            return self.finish_overlay_build(overlay, &overlay_rows, context, metrics, build_started_at);
         };
 
-        self.cached_overlay = overlay.clone();
-        self.cached_render_epoch = Some(context.render_epoch);
-        self.cached_display_scrollback = context.display_scrollback;
-        overlay
+        self.finish_overlay_build(
+            overlay,
+            &overlay_rows,
+            context,
+            HighlightOverlayBuildMetrics {
+                kind: HighlightOverlayBuildKind::EmptyOverlay,
+                visible_rows: overlay_rows.len(),
+                suppression_reason,
+                ..HighlightOverlayBuildMetrics::default()
+            },
+            build_started_at,
+        )
     }
 
     fn can_reuse_cached(&self, context: HighlightOverlayContext, now: Instant) -> bool {
@@ -166,58 +410,111 @@ impl HighlightOverlayEngine {
         true
     }
 
-    fn build_active_overlay(&self, visible_rows: &[(i64, String)]) -> HighlightOverlay {
+    fn can_reuse_visible_overlay(&self, visible_rows: &[OverlayVisibleRow], suppression_reason: Option<HighlightSuppressionReason>) -> bool {
+        self.cached_overlay.config_version == self.config_version
+            && self.cached_overlay.suppression_reason == suppression_reason
+            && self.last_overlay_rows == visible_rows
+    }
+
+    fn build_active_overlay(&mut self, visible_rows: &[OverlayVisibleRow], metrics: &mut HighlightOverlayBuildMetrics) -> HighlightOverlay {
         let mut overlay = HighlightOverlay {
-            row_ranges: HashMap::new(),
+            row_ranges: HashMap::with_capacity(visible_rows.len()),
             styles: self.styles.clone(),
             suppression_reason: None,
             config_version: self.config_version,
         };
 
-        for (absolute_row, line_text) in visible_rows {
-            let line_text = line_text.trim_end_matches(' ');
-            if line_text.is_empty() {
+        for row in visible_rows {
+            if row.text.is_empty() {
                 continue;
             }
 
-            let mut row_ranges = Vec::new();
-            let use_prefilter = self.rule_set.is_some() && self.rules.len() <= MAX_RULES_FOR_REGEXSET_PREFILTER;
-
-            if use_prefilter {
-                if let Some(rule_set) = self.rule_set.as_ref() {
-                    for rule_index in rule_set.matches(line_text).iter() {
-                        self.collect_row_ranges(line_text, rule_index, &mut row_ranges);
-                    }
-                }
-            } else {
-                for rule_index in 0..self.rules.len() {
-                    self.collect_row_ranges(line_text, rule_index, &mut row_ranges);
-                }
-            }
-
-            row_ranges.sort_unstable_by(|left, right| {
-                left.start_col
-                    .cmp(&right.start_col)
-                    .then(left.style_index.cmp(&right.style_index))
-                    .then(left.end_col.cmp(&right.end_col))
-            });
-
-            let mut accepted = Vec::with_capacity(row_ranges.len());
-            let mut last_end = 0u16;
-            for range in row_ranges {
-                if range.start_col < last_end {
-                    continue;
-                }
-                last_end = range.end_col;
-                accepted.push(range);
-            }
-
-            if !accepted.is_empty() {
-                overlay.row_ranges.insert(*absolute_row, accepted);
+            let row_ranges = self.row_analysis_for_text(&row.text, metrics);
+            if !row_ranges.is_empty() {
+                overlay.row_ranges.insert(row.absolute_row, row_ranges);
             }
         }
 
+        self.prune_row_analysis_cache(visible_rows.len());
+        metrics.cache_entries = self.row_analysis_cache.len();
+
         overlay
+    }
+
+    fn row_analysis_for_text(&mut self, line_text: &str, metrics: &mut HighlightOverlayBuildMetrics) -> Arc<[HighlightCellRange]> {
+        let generation = self.next_row_cache_generation();
+        if let Some(cached) = self.row_analysis_cache.get_mut(line_text) {
+            cached.last_used_generation = generation;
+            metrics.row_cache_hits = metrics.row_cache_hits.saturating_add(1);
+            return cached.ranges.clone();
+        }
+
+        metrics.row_cache_misses = metrics.row_cache_misses.saturating_add(1);
+        metrics.analyzed_rows = metrics.analyzed_rows.saturating_add(1);
+
+        let ranges = self.analyze_row_ranges(line_text);
+        self.row_analysis_cache.insert(
+            line_text.to_owned(),
+            CachedRowAnalysis {
+                ranges: ranges.clone(),
+                last_used_generation: generation,
+            },
+        );
+        ranges
+    }
+
+    fn analyze_row_ranges(&self, line_text: &str) -> Arc<[HighlightCellRange]> {
+        let mut row_ranges = Vec::new();
+        let use_prefilter = self.rule_set.is_some() && self.rules.len() <= MAX_RULES_FOR_REGEXSET_PREFILTER;
+
+        if use_prefilter {
+            if let Some(rule_set) = self.rule_set.as_ref() {
+                for rule_index in rule_set.matches(line_text).iter() {
+                    self.collect_row_ranges(line_text, rule_index, &mut row_ranges);
+                }
+            }
+        } else {
+            for rule_index in 0..self.rules.len() {
+                self.collect_row_ranges(line_text, rule_index, &mut row_ranges);
+            }
+        }
+
+        row_ranges.sort_unstable_by(|left, right| {
+            left.start_col
+                .cmp(&right.start_col)
+                .then(left.style_index.cmp(&right.style_index))
+                .then(left.end_col.cmp(&right.end_col))
+        });
+
+        let mut accepted = Vec::with_capacity(row_ranges.len());
+        let mut last_end = 0u16;
+        for range in row_ranges {
+            if range.start_col < last_end {
+                continue;
+            }
+            last_end = range.end_col;
+            accepted.push(range);
+        }
+
+        accepted.into()
+    }
+
+    fn next_row_cache_generation(&mut self) -> u64 {
+        self.row_cache_generation = self.row_cache_generation.wrapping_add(1);
+        self.row_cache_generation
+    }
+
+    fn prune_row_analysis_cache(&mut self, visible_rows: usize) {
+        let target_entries = visible_rows
+            .saturating_mul(ROW_ANALYSIS_CACHE_VIEWPORT_MULTIPLIER)
+            .clamp(MIN_ROW_ANALYSIS_CACHE_ENTRIES, MAX_ROW_ANALYSIS_CACHE_ENTRIES);
+
+        if self.row_analysis_cache.len() <= target_entries {
+            return;
+        }
+
+        let min_generation = self.row_cache_generation.saturating_sub(target_entries as u64);
+        self.row_analysis_cache.retain(|_, cached| cached.last_used_generation >= min_generation);
     }
 
     fn collect_row_ranges(&self, line_text: &str, rule_index: usize, out: &mut Vec<HighlightCellRange>) {
@@ -238,16 +535,10 @@ impl HighlightOverlayEngine {
         }
     }
 
-    fn suppression_reason(
-        &mut self,
-        view: &TerminalViewModel<'_>,
-        visible_rows: &[(i64, String)],
-        context: HighlightOverlayContext,
-        now: Instant,
-    ) -> Option<HighlightSuppressionReason> {
+    fn suppression_reason(&mut self, visible_rows: &[(i64, String)], context: HighlightOverlayContext, now: Instant) -> Option<HighlightSuppressionReason> {
         match self.mode {
             HighlightOverlayMode::Off => {
-                self.reset_volatility_tracking(visible_rows, now);
+                self.clear_volatility_tracking();
                 Some(HighlightSuppressionReason::DisabledByConfig)
             }
             HighlightOverlayMode::Always => {
@@ -255,16 +546,6 @@ impl HighlightOverlayEngine {
                 None
             }
             HighlightOverlayMode::Auto => {
-                if view.is_alternate_screen() {
-                    self.reset_volatility_tracking(visible_rows, now);
-                    return Some(HighlightSuppressionReason::AlternateScreen);
-                }
-
-                if view.mouse_protocol().0 != MouseProtocolMode::None {
-                    self.reset_volatility_tracking(visible_rows, now);
-                    return Some(HighlightSuppressionReason::MouseReporting);
-                }
-
                 if context.display_scrollback == 0 && self.should_suppress_for_volatile_repaints(visible_rows, now) {
                     return Some(HighlightSuppressionReason::VolatileRepaint);
                 }
@@ -318,6 +599,13 @@ impl HighlightOverlayEngine {
         self.record_visible_rows(visible_rows, now);
     }
 
+    fn clear_volatility_tracking(&mut self) {
+        self.volatile_repaint_streak = 0;
+        self.volatile_suppressed_until = None;
+        self.last_visible_rows.clear();
+        self.last_analysis_at = None;
+    }
+
     fn refresh_rules_if_needed(&mut self) {
         let current_version = config::current_config_version();
         if current_version != self.config_version {
@@ -348,10 +636,14 @@ impl HighlightOverlayEngine {
         self.cached_overlay = HighlightOverlay::default();
         self.cached_render_epoch = None;
         self.cached_display_scrollback = 0;
+        self.last_overlay_rows.clear();
+        self.row_analysis_cache.clear();
+        self.row_cache_generation = 0;
         self.volatile_repaint_streak = 0;
         self.volatile_suppressed_until = None;
         self.last_visible_rows.clear();
         self.last_analysis_at = None;
+        self.profiler = HighlightOverlayProfiler::default();
     }
 
     #[cfg(test)]
@@ -372,12 +664,70 @@ impl HighlightOverlayEngine {
             cached_overlay: HighlightOverlay::default(),
             cached_render_epoch: None,
             cached_display_scrollback: 0,
+            last_overlay_rows: Vec::new(),
+            row_analysis_cache: HashMap::new(),
+            row_cache_generation: 0,
             last_visible_rows: Vec::new(),
             last_analysis_at: None,
             volatile_repaint_streak: 0,
             volatile_suppressed_until: None,
+            profiler: HighlightOverlayProfiler::default(),
         }
     }
+}
+
+impl HighlightOverlayEngine {
+    fn empty_overlay(&self, suppression_reason: Option<HighlightSuppressionReason>) -> HighlightOverlay {
+        HighlightOverlay {
+            row_ranges: HashMap::new(),
+            styles: self.styles.clone(),
+            suppression_reason,
+            config_version: self.config_version,
+        }
+    }
+
+    fn finish_cached_reuse(
+        &mut self,
+        context: HighlightOverlayContext,
+        mut metrics: HighlightOverlayBuildMetrics,
+        build_started_at: Instant,
+    ) -> HighlightOverlay {
+        self.cached_render_epoch = Some(context.render_epoch);
+        self.cached_display_scrollback = context.display_scrollback;
+        metrics.cache_entries = self.row_analysis_cache.len();
+        metrics.duration = build_started_at.elapsed();
+        self.profiler.record_build(metrics);
+        self.cached_overlay.clone()
+    }
+
+    fn finish_overlay_build(
+        &mut self,
+        overlay: HighlightOverlay,
+        visible_rows: &[OverlayVisibleRow],
+        context: HighlightOverlayContext,
+        mut metrics: HighlightOverlayBuildMetrics,
+        build_started_at: Instant,
+    ) -> HighlightOverlay {
+        self.cached_overlay = overlay.clone();
+        self.cached_render_epoch = Some(context.render_epoch);
+        self.cached_display_scrollback = context.display_scrollback;
+        self.last_overlay_rows.clear();
+        self.last_overlay_rows.extend_from_slice(visible_rows);
+        metrics.cache_entries = self.row_analysis_cache.len();
+        metrics.duration = build_started_at.elapsed();
+        self.profiler.record_build(metrics);
+        overlay
+    }
+}
+
+fn normalized_visible_rows(visible_rows: &[(i64, String)]) -> Vec<OverlayVisibleRow> {
+    visible_rows
+        .iter()
+        .map(|(absolute_row, text)| OverlayVisibleRow {
+            absolute_row: *absolute_row,
+            text: text.trim_end_matches(' ').to_string(),
+        })
+        .collect()
 }
 
 fn build_overlay_styles(rules: &[CompiledHighlightRule]) -> (Vec<HighlightOverlayStyle>, Vec<Option<usize>>) {

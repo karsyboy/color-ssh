@@ -7,7 +7,7 @@
 use super::command_spec::PreparedCommand;
 use super::exit::map_exit_code;
 use crate::auth::secret::ExposeSecret;
-use crate::terminal_core::highlight_overlay::{HighlightOverlay, HighlightOverlayContext, HighlightOverlayEngine};
+use crate::terminal_core::highlight_overlay::{HighlightOverlay, HighlightOverlayContext, HighlightOverlayEngine, HighlightOverlayViewport};
 use crate::terminal_core::{TerminalChild, TerminalEngine, TerminalInputWriter, TerminalSession, TerminalViewport};
 use crate::terminal_ratatui::{apply_overlay_style, paint_terminal_viewport};
 use crate::{Result, command_path, config, log, log_debug, log_error};
@@ -403,18 +403,23 @@ fn bracketed_paste_enabled(session: &TerminalSession) -> io::Result<bool> {
 
 fn render_terminal_frame(frame: &mut Frame, session: &TerminalSession, highlight_overlay: &mut HighlightOverlayEngine, scroll_offset: usize) -> io::Result<()> {
     let area = frame.area();
-    let mut engine = session.engine().lock().map_err(|err| io::Error::other(err.to_string()))?;
-    engine.set_display_scrollback(scroll_offset);
-    let view = engine.view_model();
+    let (viewport, alternate_screen, mouse_mode) = {
+        let mut engine = session.engine().lock().map_err(|err| io::Error::other(err.to_string()))?;
+        engine.set_display_scrollback(scroll_offset);
+        let view = engine.view_model();
+        let alternate_screen = view.is_alternate_screen();
+        let mouse_mode = view.mouse_protocol().0;
+        let viewport = view.viewport_snapshot(area.height, area.width);
+        (viewport, alternate_screen, mouse_mode)
+    };
+    let overlay_view = HighlightOverlayViewport::new(&viewport, alternate_screen, mouse_mode);
     let overlay = highlight_overlay.build_visible_overlay(
-        &view,
+        &overlay_view,
         HighlightOverlayContext {
             render_epoch: session.render_epoch(),
             display_scrollback: scroll_offset,
         },
     );
-    let viewport = view.viewport_snapshot(area.height, area.width);
-    drop(engine);
 
     let cursor = paint_terminal_view(frame.buffer_mut(), area, &viewport, &overlay, scroll_offset == 0);
     if let Some(cursor) = cursor {
