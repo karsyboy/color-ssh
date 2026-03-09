@@ -1,6 +1,7 @@
 //! Terminal-tabs and root layout rendering.
 
-use crate::terminal_ratatui::paint_terminal_viewport;
+use crate::terminal_core::highlight_overlay::HighlightOverlayContext;
+use crate::terminal_ratatui::{apply_overlay_style, paint_terminal_viewport};
 use crate::tui::AppState;
 use crate::tui::features::selection::extract::is_cell_in_selection;
 use crate::tui::ui::theme::{self, display_width, truncate_to_display_width};
@@ -279,52 +280,69 @@ impl AppState {
         self.resize_current_pty(area);
         self.tab_content_area = area;
 
-        let tab = &self.tabs[tab_idx];
-        let host = &tab.host;
-        let scroll_offset = tab.scroll_offset;
+        let scroll_offset = self.tabs[tab_idx].scroll_offset;
         let sel_start = self.selection_start;
         let sel_end = self.selection_end;
-        let (search_row_ranges, current_search_range) = self
-            .current_tab_search()
-            .map_or((None, None), |search| (Some(&search.highlight_row_ranges), search.current_highlight_range));
+        let (search_row_ranges, current_search_range) = self.current_tab_search().map_or((None, None), |search| {
+            (Some(search.highlight_row_ranges.clone()), search.current_highlight_range)
+        });
 
-        if let Some(session) = &tab.session {
-            let viewport = if let Ok(mut engine) = session.engine().lock() {
+        let mut highlight_overlay_engine = std::mem::take(&mut self.tabs[tab_idx].highlight_overlay);
+
+        if let Some(session) = self.tabs[tab_idx].session.as_ref() {
+            let render_epoch = session.render_epoch();
+            let render_state = if let Ok(mut engine) = session.engine().lock() {
                 engine.set_display_scrollback(scroll_offset);
-                Some(engine.view_model().viewport_snapshot(area.height, area.width))
+                let view = engine.view_model();
+                let overlay = highlight_overlay_engine.build_visible_overlay(
+                    &view,
+                    HighlightOverlayContext {
+                        render_epoch,
+                        display_scrollback: scroll_offset,
+                    },
+                );
+                let viewport = view.viewport_snapshot(area.height, area.width);
+                Some((viewport, overlay))
             } else {
                 None
             };
 
-            if let Some(viewport) = viewport {
+            self.tabs[tab_idx].highlight_overlay = highlight_overlay_engine;
+
+            if let Some((viewport, highlight_overlay)) = render_state {
                 let _ = paint_terminal_viewport(
                     frame.buffer_mut(),
                     area,
                     &viewport,
                     scroll_offset == 0,
                     |absolute_row, col, _cell, is_cursor, base_style| {
-                        let row_ranges = search_row_ranges.and_then(|ranges| ranges.get(&absolute_row));
+                        let row_ranges = search_row_ranges.as_ref().and_then(|ranges| ranges.get(&absolute_row));
                         let current_row_range =
                             current_search_range.and_then(|(match_row, start_col, end_col)| (absolute_row == match_row).then_some((start_col, end_col)));
                         let is_selected = is_cell_in_selection(absolute_row, col, sel_start, sel_end);
                         let is_search_match = row_ranges.is_some_and(|ranges| ranges.iter().any(|(start_col, end_col)| col >= *start_col && col < *end_col));
                         let is_current_search_match = current_row_range.is_some_and(|(start_col, end_col)| col >= start_col && col < end_col);
+                        let syntax_style = highlight_overlay
+                            .style_for_cell(absolute_row, col)
+                            .map_or(base_style, |overlay_style| apply_overlay_style(base_style, overlay_style));
 
                         if is_current_search_match {
-                            base_style.bg(theme::ansi_yellow()).fg(theme::ansi_black())
+                            syntax_style.bg(theme::ansi_yellow()).fg(theme::ansi_black())
                         } else if is_search_match {
-                            base_style.bg(theme::ansi_bright_black()).fg(theme::ansi_yellow())
+                            syntax_style.bg(theme::ansi_bright_black()).fg(theme::ansi_yellow())
                         } else if is_selected {
-                            base_style.bg(theme::selection_bg()).fg(theme::selection_fg())
+                            syntax_style.bg(theme::selection_bg()).fg(theme::selection_fg())
                         } else if is_cursor {
-                            base_style.bg(theme::ansi_bright_white()).fg(theme::ansi_black())
+                            syntax_style.bg(theme::ansi_bright_white()).fg(theme::ansi_black())
                         } else {
-                            base_style
+                            syntax_style
                         }
                     },
                 );
             }
         } else {
+            self.tabs[tab_idx].highlight_overlay = highlight_overlay_engine;
+            let host_name = self.tabs[tab_idx].host.name.clone();
             let reason = self.tabs[tab_idx]
                 .session_error
                 .as_deref()
@@ -333,7 +351,7 @@ impl AppState {
                 Line::from(""),
                 Line::from(vec![
                     Span::styled("Failed to start session for ", Style::default().fg(theme::ansi_red())),
-                    Span::styled(&host.name, Style::default().fg(theme::ansi_yellow()).add_modifier(Modifier::BOLD)),
+                    Span::styled(host_name, Style::default().fg(theme::ansi_yellow()).add_modifier(Modifier::BOLD)),
                 ]),
                 Line::from(""),
                 Line::from(vec![Span::styled(reason, Style::default().fg(theme::ansi_bright_white()))]),

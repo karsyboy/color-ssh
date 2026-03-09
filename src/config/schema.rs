@@ -115,6 +115,22 @@ pub struct InteractiveSettings {
     /// Maximum clipboard payload size accepted from remote OSC 52 requests.
     #[serde(default = "default_remote_clipboard_max_bytes", deserialize_with = "deserialize_remote_clipboard_max_bytes")]
     pub remote_clipboard_max_bytes: usize,
+    /// Highlight overlay behavior for embedded terminal rendering.
+    #[serde(default)]
+    pub overlay_highlighting: HighlightOverlayMode,
+}
+
+/// Renderer-side syntax highlighting policy for embedded terminal views.
+#[derive(Debug, Clone, Copy, Deserialize, PartialEq, Eq, Default)]
+#[serde(rename_all = "kebab-case")]
+pub enum HighlightOverlayMode {
+    /// Enable highlighting when the renderer considers the viewport safe.
+    #[default]
+    Auto,
+    /// Always attempt overlay highlighting, even for alternate-screen apps.
+    Always,
+    /// Disable renderer-side overlay highlighting entirely.
+    Off,
 }
 
 fn default_show_title() -> bool {

@@ -4,6 +4,16 @@ use crate::{Result, log_error, log_info};
 use std::process::{Child, ExitCode, Stdio};
 
 pub(super) fn run_interactive_ssh_session(command_spec: PreparedCommand) -> Result<ExitCode> {
+    if std::env::var_os(super::EMBEDDED_INTERACTIVE_SSH_ENV).is_some() {
+        log_info!("Using embedded plain interactive SSH runtime");
+        let child = spawn_command(command_spec, Stdio::piped(), Stdio::inherit()).map_err(|err| {
+            log_error!("Failed to spawn SSH process: {}", err);
+            err
+        })?;
+
+        return super::stream::run_interactive_ssh_plain(child);
+    }
+
     if super::pty_runtime::prefer_pty_centered_ssh_runtime() {
         log_info!("Using PTY-centered interactive SSH runtime");
         return super::pty_runtime::run_interactive_ssh(command_spec);

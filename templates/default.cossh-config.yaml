@@ -7,30 +7,31 @@
 # ============================================================================
 # Configure any of these settings to customize cossh behavior:
 settings:
-  show_title: true              # Display a colored title banner at session start
-  debug_mode: false             # Enable safe debug logging to ~/.color-ssh/logs/cossh.log (`-dd` enables raw debug for a single run)
-  ssh_logging: false            # Enable SSH session logging by default
+  show_title: true # Display a colored title banner at session start
+  debug_mode: false # Enable safe debug logging to ~/.color-ssh/logs/cossh.log (`-dd` enables raw debug for a single run)
+  ssh_logging: false # Enable SSH session logging by default
   # remove_secrets:             # Regex patterns to redact from logs (useful for passwords/keys)
   #   - '9[\s]\$9\$.*'          # Example: Juniper type 9 secrets
   #   - 'sha512[\s]\$6\$.*'     # Example: SHA-512 password hashes
 
 auth_settings:
-  idle_timeout_seconds: 900          # Relock after 15 minutes of idle time
-  session_timeout_seconds: 3600    # Relock after 1 hour total
-  direct_password_autologin: true           # Allow direct `cossh host` password auto-login
-  tui_password_autologin: true              # Allow TUI password auto-login
+  idle_timeout_seconds: 900 # Relock after 15 minutes of idle time
+  session_timeout_seconds: 3600 # Relock after 1 hour total
+  direct_password_autologin: true # Allow direct `cossh host` password auto-login
+  tui_password_autologin: true # Allow TUI password auto-login
 
 # ============================================================================
 # INTERACTIVE SETTINGS SECTION (Optional)
 # ============================================================================
 interactive_settings:
-  history_buffer: 1000                      # Scrollback buffer size for session manager tabs
-  host_tree_uncollapsed: false              # Start SSH host tree folders expanded (false = collapsed)
-  info_view: true                           # Show host info pane by default
-  host_view_size: 15                        # Host panel width (% of terminal width, clamped 10-70)
-  info_view_size: 25                        # Host info height (% of host panel height, clamped 10-80)
-  allow_remote_clipboard_write: false       # Accept remote OSC 52 clipboard writes (disabled by default)
-  remote_clipboard_max_bytes: 4096          # Max bytes accepted for remote clipboard writes (64-1048576)
+  history_buffer: 1000 # Scrollback buffer size for session manager tabs
+  host_tree_uncollapsed: false # Start SSH host tree folders expanded (false = collapsed)
+  info_view: true # Show host info pane by default
+  host_view_size: 15 # Host panel width (% of terminal width, clamped 10-70)
+  info_view_size: 25 # Host info height (% of host panel height, clamped 10-80)
+  allow_remote_clipboard_write: false # Accept remote OSC 52 clipboard writes (disabled by default)
+  remote_clipboard_max_bytes: 4096 # Max bytes accepted for remote clipboard writes (64-1048576)
+  overlay_highlighting: auto # auto = suppress for alternate-screen/TUI-like views, always = force, off = disable
 
 # ============================================================================
 # COLOR PALETTE
@@ -62,21 +63,21 @@ palette:
 #   - Combine flags like (?ix) for both case-insensitive and extended mode
 
 rules:
-  # Highlight positive/success indicators in green
-  - description: Match on good keywords
-    regex: (?ix)\b(good|up|success|ok|connected)\b
-    color: Green
+# Highlight positive/success indicators in green
+- description: Match on good keywords
+  regex: (?ix)\b(good|up|success|ok|connected)\b
+  color: Green
 
-  # Highlight neutral/informational keywords in blue
-  - description: Match on neutral keywords
-    regex: (?ix)\b(neutral|info|status)\b
-    color: Blue
+# Highlight neutral/informational keywords in blue
+- description: Match on neutral keywords
+  regex: (?ix)\b(neutral|info|status)\b
+  color: Blue
 
-  # Highlight negative/error indicators in red with dark red background for emphasis
-  - description: Match on bad keywords
-    regex: (?ix)\b(down|error|disabled|fail|denied)\b
-    color: Red
-    bg_color: DarkRed
+# Highlight negative/error indicators in red with dark red background for emphasis
+- description: Match on bad keywords
+  regex: (?ix)\b(down|error|disabled|fail|denied)\b
+  color: Red
+  bg_color: DarkRed
 
 # ============================================================================
 # EXAMPLE: Multi-line Regex Rule

@@ -2,6 +2,7 @@ use super::io::{spawn_output_reader, spawn_process_exit_watcher};
 use crate::auth::agent;
 use crate::inventory::{ConnectionProtocol, InventoryHost};
 use crate::process;
+use crate::terminal_core::highlight_overlay::HighlightOverlayEngine;
 use crate::terminal_core::{TerminalChild, TerminalEngine, TerminalSession};
 use crate::tui::{AppState, HostTab, TerminalSearchState, VaultUnlockAction};
 use crate::{command_path, debug_enabled, log_debug, log_error};
@@ -237,6 +238,7 @@ impl AppState {
             host: host.clone(),
             session,
             session_error,
+            highlight_overlay: HighlightOverlayEngine::new(),
             scroll_offset: 0,
             terminal_search: TerminalSearchState::default(),
             force_ssh_logging,
@@ -584,6 +586,7 @@ impl AppState {
                 let tab = &mut self.tabs[tab_index];
                 tab.session = Some(session);
                 tab.session_error = None;
+                tab.highlight_overlay = HighlightOverlayEngine::new();
                 tab.scroll_offset = 0;
                 tab.terminal_search.matches.clear();
                 tab.terminal_search.current = 0;

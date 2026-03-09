@@ -5,6 +5,7 @@
 //! ratatui buffer. A future GUI renderer should consume the same viewport model
 //! directly instead of re-reading terminal internals.
 
+use crate::terminal_core::highlight_overlay::HighlightOverlayStyle;
 use crate::terminal_core::{AnsiColor, TerminalCellSnapshot, TerminalViewport};
 use alacritty_terminal::vte::ansi::NamedColor;
 use ratatui::{
@@ -98,6 +99,34 @@ fn base_style_for_cell(cell: &TerminalCellSnapshot) -> Style {
         style = style.add_modifier(Modifier::UNDERLINED);
     }
     style
+}
+
+pub(crate) fn apply_overlay_style(mut base_style: Style, overlay_style: &HighlightOverlayStyle) -> Style {
+    if let Some(fg_color) = overlay_style.fg_color() {
+        let fg_color = to_ratatui_color(fg_color);
+        if fg_color != Color::Reset {
+            base_style = base_style.fg(fg_color);
+        }
+    }
+
+    if let Some(bg_color) = overlay_style.bg_color() {
+        let bg_color = to_ratatui_background_color(bg_color);
+        if bg_color != Color::Reset {
+            base_style = base_style.bg(bg_color);
+        }
+    }
+
+    if overlay_style.bold() {
+        base_style = base_style.add_modifier(Modifier::BOLD);
+    }
+    if overlay_style.italic() {
+        base_style = base_style.add_modifier(Modifier::ITALIC);
+    }
+    if overlay_style.underline() {
+        base_style = base_style.add_modifier(Modifier::UNDERLINED);
+    }
+
+    base_style
 }
 
 fn to_ratatui_color(color: AnsiColor) -> Color {

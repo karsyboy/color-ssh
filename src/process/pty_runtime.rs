@@ -7,8 +7,9 @@
 use super::command_spec::PreparedCommand;
 use super::exit::map_exit_code;
 use crate::auth::secret::ExposeSecret;
+use crate::terminal_core::highlight_overlay::{HighlightOverlay, HighlightOverlayContext, HighlightOverlayEngine};
 use crate::terminal_core::{TerminalChild, TerminalEngine, TerminalInputWriter, TerminalSession, TerminalViewport};
-use crate::terminal_ratatui::paint_terminal_viewport;
+use crate::terminal_ratatui::{apply_overlay_style, paint_terminal_viewport};
 use crate::{Result, command_path, config, log, log_debug, log_error};
 use crossterm::{
     event::{self, DisableBracketedPaste, EnableBracketedPaste, Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers},
@@ -19,7 +20,6 @@ use portable_pty::{CommandBuilder, PtySize, native_pty_system};
 use ratatui::{
     Frame, Terminal,
     layout::{Position, Rect},
-    style::{Modifier, Style},
 };
 use std::io::{self, IsTerminal, Read};
 use std::sync::{
@@ -50,6 +50,7 @@ enum PtyRuntimeEvent {
 struct InteractivePtyRuntime {
     session: TerminalSession,
     event_rx: Receiver<PtyRuntimeEvent>,
+    highlight_overlay: HighlightOverlayEngine,
 }
 
 #[derive(Debug, Default)]
@@ -172,7 +173,11 @@ fn spawn_interactive_pty_runtime(command_spec: PreparedCommand, history_buffer: 
     spawn_pty_reader(reader_thread_name(&command_spec.program), reader, event_tx.clone())?;
     spawn_exit_watcher(child, exited, event_tx)?;
 
-    Ok(InteractivePtyRuntime { session, event_rx })
+    Ok(InteractivePtyRuntime {
+        session,
+        event_rx,
+        highlight_overlay: HighlightOverlayEngine::new(),
+    })
 }
 
 fn reader_thread_name(program: &str) -> String {
@@ -258,7 +263,7 @@ fn run_pty_event_loop(runtime: &mut InteractivePtyRuntime) -> Result<std::proces
         if force_redraw || current_epoch != last_drawn_epoch || last_draw_at.elapsed() >= RENDER_HEARTBEAT {
             let mut render_error = None;
             terminal.draw(|frame| {
-                if let Err(err) = render_terminal_frame(frame, &runtime.session, scroll_offset) {
+                if let Err(err) = render_terminal_frame(frame, &runtime.session, &mut runtime.highlight_overlay, scroll_offset) {
                     render_error = Some(err);
                 }
             })?;
@@ -396,30 +401,44 @@ fn bracketed_paste_enabled(session: &TerminalSession) -> io::Result<bool> {
     Ok(engine.screen().bracketed_paste_enabled())
 }
 
-fn render_terminal_frame(frame: &mut Frame, session: &TerminalSession, scroll_offset: usize) -> io::Result<()> {
+fn render_terminal_frame(frame: &mut Frame, session: &TerminalSession, highlight_overlay: &mut HighlightOverlayEngine, scroll_offset: usize) -> io::Result<()> {
     let area = frame.area();
     let mut engine = session.engine().lock().map_err(|err| io::Error::other(err.to_string()))?;
     engine.set_display_scrollback(scroll_offset);
-    let viewport = engine.view_model().viewport_snapshot(area.height, area.width);
+    let view = engine.view_model();
+    let overlay = highlight_overlay.build_visible_overlay(
+        &view,
+        HighlightOverlayContext {
+            render_epoch: session.render_epoch(),
+            display_scrollback: scroll_offset,
+        },
+    );
+    let viewport = view.viewport_snapshot(area.height, area.width);
     drop(engine);
 
-    let cursor = paint_terminal_view(frame.buffer_mut(), area, &viewport, scroll_offset == 0);
+    let cursor = paint_terminal_view(frame.buffer_mut(), area, &viewport, &overlay, scroll_offset == 0);
     if let Some(cursor) = cursor {
         frame.set_cursor_position(cursor);
     }
     Ok(())
 }
 
-fn paint_terminal_view(buffer: &mut ratatui::buffer::Buffer, area: Rect, viewport: &TerminalViewport, show_cursor: bool) -> Option<Position> {
-    paint_terminal_viewport(buffer, area, viewport, show_cursor, |_absolute_row, _col, cell, is_cursor, base_style| {
+fn paint_terminal_view(
+    buffer: &mut ratatui::buffer::Buffer,
+    area: Rect,
+    viewport: &TerminalViewport,
+    highlight_overlay: &HighlightOverlay,
+    show_cursor: bool,
+) -> Option<Position> {
+    paint_terminal_viewport(buffer, area, viewport, show_cursor, |absolute_row, col, _cell, is_cursor, base_style| {
+        let syntax_style = highlight_overlay
+            .style_for_cell(absolute_row, col)
+            .map_or(base_style, |overlay_style| apply_overlay_style(base_style, overlay_style));
+
         if is_cursor {
-            let mut style = Style::default().bg(ratatui::style::Color::White).fg(ratatui::style::Color::Black);
-            if cell.bold() {
-                style = style.add_modifier(Modifier::BOLD);
-            }
-            style
+            syntax_style.bg(ratatui::style::Color::White).fg(ratatui::style::Color::Black)
         } else {
-            base_style
+            syntax_style
         }
     })
 }

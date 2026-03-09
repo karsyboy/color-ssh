@@ -439,6 +439,11 @@ pub(super) fn run_interactive_ssh(child: Child) -> Result<ExitCode> {
     run_interactive_process(child, InteractiveStreamMode::HighlightStdout, false)
 }
 
+/// Stream interactive SSH output without applying renderer-hostile stdout mutation.
+pub(super) fn run_interactive_ssh_plain(child: Child) -> Result<ExitCode> {
+    run_interactive_process(child, InteractiveStreamMode::Plain, false)
+}
+
 /// Stream interactive RDP client output without shell highlighting.
 pub(super) fn run_interactive_rdp(child: Child) -> Result<ExitCode> {
     run_interactive_process(child, InteractiveStreamMode::Plain, true)

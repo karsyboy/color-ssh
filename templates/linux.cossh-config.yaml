@@ -27,6 +27,7 @@ interactive_settings:
   info_view_size: 25
   allow_remote_clipboard_write: false
   remote_clipboard_max_bytes: 4096
+  overlay_highlighting: auto
 
 # ============================================================================
 # COLOR PALETTE
@@ -46,17 +47,17 @@ palette:
 # HIGHLIGHTING RULES
 # ============================================================================
 rules:
-  # Highlight positive/success indicators in green
-  - description: Match on good keywords
-    regex: (?ix)\b(good|up|success|ok|connected)\b
-    color: Green
+# Highlight positive/success indicators in green
+- description: Match on good keywords
+  regex: (?ix)\b(good|up|success|ok|connected)\b
+  color: Green
 
-  # Highlight neutral/informational keywords in blue
-  - description: Match on neutral keywords
-    regex: (?ix)\b(neutral|info|status)\b
-    color: Blue
+# Highlight neutral/informational keywords in blue
+- description: Match on neutral keywords
+  regex: (?ix)\b(neutral|info|status)\b
+  color: Blue
 
-  # Highlight negative/error indicators in red with dark red background for emphasis
-  - description: Match on bad keywords
-    regex: (?ix)\b(down|error|disabled|fail|denied)\b
-    color: Red
+# Highlight negative/error indicators in red with dark red background for emphasis
+- description: Match on bad keywords
+  regex: (?ix)\b(down|error|disabled|fail|denied)\b
+  color: Red

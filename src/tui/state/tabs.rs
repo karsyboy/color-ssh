@@ -1,6 +1,7 @@
 //! Per-tab session state.
 
 use crate::inventory::InventoryHost;
+use crate::terminal_core::highlight_overlay::HighlightOverlayEngine;
 use std::collections::HashMap;
 
 pub(crate) use crate::terminal_core::TerminalSession as ManagedSession;
@@ -25,6 +26,7 @@ pub(crate) struct HostTab {
     pub(crate) title: String,
     pub(crate) session: Option<ManagedSession>,
     pub(crate) session_error: Option<String>,
+    pub(crate) highlight_overlay: HighlightOverlayEngine,
     pub(crate) scroll_offset: usize,
     pub(crate) terminal_search: TerminalSearchState,
     pub(crate) force_ssh_logging: bool,

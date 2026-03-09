@@ -231,6 +231,11 @@ impl<'a> TerminalViewModel<'a> {
         self.engine.term.mode().contains(TermMode::BRACKETED_PASTE)
     }
 
+    /// Whether the terminal is currently rendering into the alternate screen.
+    pub(crate) fn is_alternate_screen(&self) -> bool {
+        self.engine.term.mode().contains(TermMode::ALT_SCREEN)
+    }
+
     /// Snapshot the visible viewport into backend-neutral rows, cells, and
     /// cursor metadata for renderers.
     pub(crate) fn viewport_snapshot(&self, max_rows: u16, max_cols: u16) -> TerminalViewport {
