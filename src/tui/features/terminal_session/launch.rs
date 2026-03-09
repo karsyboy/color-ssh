@@ -170,6 +170,14 @@ fn spawn_pty_terminal_session(
     ))
 }
 
+fn highlight_overlay_for_host(host: &InventoryHost, session_profile: &crate::config::InteractiveProfileSnapshot) -> HighlightOverlayEngine {
+    if host.profile.is_some() {
+        HighlightOverlayEngine::from_snapshot(session_profile)
+    } else {
+        HighlightOverlayEngine::new()
+    }
+}
+
 impl AppState {
     fn initial_pty_size(&self) -> (u16, u16) {
         let rows = self.tab_content_area.height.max(1);
@@ -420,15 +428,9 @@ impl AppState {
                 (None, Some(err_message))
             }
         };
+        let highlight_overlay = highlight_overlay_for_host(&host, &session_profile);
 
-        self.push_host_tab(
-            host,
-            tab_title,
-            session,
-            session_error,
-            HighlightOverlayEngine::from_snapshot(&session_profile),
-            force_ssh_logging,
-        );
+        self.push_host_tab(host, tab_title, session, session_error, highlight_overlay, force_ssh_logging);
     }
 
     pub(crate) fn complete_vault_unlock_action(
@@ -690,7 +692,7 @@ impl AppState {
                 let tab = &mut self.tabs[tab_index];
                 tab.session = Some(session);
                 tab.session_error = None;
-                tab.highlight_overlay = HighlightOverlayEngine::from_snapshot(&session_profile);
+                tab.highlight_overlay = highlight_overlay_for_host(&host, &session_profile);
                 tab.scroll_offset = 0;
                 tab.terminal_search.matches.clear();
                 tab.terminal_search.current = 0;

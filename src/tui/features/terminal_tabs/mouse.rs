@@ -4,6 +4,7 @@ use crate::tui::state::{HOST_PANEL_MAX_WIDTH, HOST_PANEL_MIN_WIDTH};
 use crate::tui::terminal_emulator;
 use crate::tui::{AppState, HostTreeRowKind};
 use crossterm::event::{self, KeyModifiers, MouseButton, MouseEventKind};
+use ratatui::layout::Rect;
 use std::io;
 use std::time::Instant;
 
@@ -45,6 +46,7 @@ impl AppState {
         match mouse.kind {
             MouseEventKind::Down(MouseButton::Left) => {
                 self.is_dragging_host_scrollbar = false;
+                self.is_dragging_tab_scrollbar = false;
                 self.is_dragging_host_info_divider = false;
                 self.dragging_tab = None;
 
@@ -181,6 +183,24 @@ impl AppState {
                 }
 
                 let area = self.tab_content_area;
+                let scrollbar_area = self.tab_scrollbar_area;
+                if !self.tabs.is_empty()
+                    && self.selected_tab < self.tabs.len()
+                    && scrollbar_area.width > 0
+                    && scrollbar_area.height > 0
+                    && mouse.column >= scrollbar_area.x
+                    && mouse.column < scrollbar_area.x + scrollbar_area.width
+                    && mouse.row >= scrollbar_area.y
+                    && mouse.row < scrollbar_area.y + scrollbar_area.height
+                {
+                    self.focus_on_manager = false;
+                    self.search_mode = false;
+                    self.is_dragging_tab_scrollbar = true;
+                    self.set_tab_scroll_from_scrollbar_row(mouse.row);
+                    self.clear_selection_state();
+                    return Ok(());
+                }
+
                 if !self.tabs.is_empty()
                     && self.selected_tab < self.tabs.len()
                     && area.width > 0
@@ -236,6 +256,8 @@ impl AppState {
                     }
                 } else if self.is_dragging_host_scrollbar {
                     self.set_host_scroll_from_scrollbar_row(mouse.row);
+                } else if self.is_dragging_tab_scrollbar {
+                    self.set_tab_scroll_from_scrollbar_row(mouse.row);
                 } else if let Some(drag_idx) = self.dragging_tab {
                     let tab_area = self.tab_bar_area;
                     if !self.tabs.is_empty()
@@ -324,6 +346,8 @@ impl AppState {
                     self.is_dragging_host_info_divider = false;
                 } else if self.is_dragging_host_scrollbar {
                     self.is_dragging_host_scrollbar = false;
+                } else if self.is_dragging_tab_scrollbar {
+                    self.is_dragging_tab_scrollbar = false;
                 } else if self.dragging_tab.take().is_some() {
                     self.ensure_tab_visible();
                 } else if self.is_selecting {
@@ -551,6 +575,44 @@ impl AppState {
 
     fn pty_mouse_mode(&self) -> terminal_emulator::MouseProtocolMode {
         self.pty_mouse_protocol().0
+    }
+
+    fn active_tab_scrollbar_metrics(&self) -> Option<(Rect, u16, usize)> {
+        if self.tabs.is_empty() || self.selected_tab >= self.tabs.len() {
+            return None;
+        }
+
+        let area = self.tab_scrollbar_area;
+        if area.width == 0 || area.height == 0 || self.tab_content_area.height == 0 {
+            return None;
+        }
+
+        let max_scrollback = self.max_scrollback_for_tab(self.selected_tab);
+        let scrollbar_height = area.height as usize;
+        let viewport_height = self.tab_content_area.height as usize;
+        let total_rows = max_scrollback.saturating_add(viewport_height).max(1);
+        let thumb_height = (scrollbar_height.saturating_mul(viewport_height) / total_rows).max(1).min(scrollbar_height) as u16;
+
+        Some((area, thumb_height, max_scrollback))
+    }
+
+    pub(crate) fn set_tab_scroll_from_scrollbar_row(&mut self, mouse_row: u16) {
+        let Some((area, thumb_height, max_scrollback)) = self.active_tab_scrollbar_metrics() else {
+            return;
+        };
+
+        let available_track = area.height.saturating_sub(thumb_height);
+        let new_offset = if available_track == 0 || max_scrollback == 0 {
+            0
+        } else {
+            let relative_row = mouse_row.saturating_sub(area.y).min(area.height.saturating_sub(1));
+            let thumb_anchor = relative_row.saturating_sub(thumb_height / 2).min(available_track);
+            max_scrollback.saturating_sub((thumb_anchor as usize).saturating_mul(max_scrollback) / available_track as usize)
+        };
+
+        if let Some(tab) = self.tabs.get_mut(self.selected_tab) {
+            tab.scroll_offset = new_offset.min(max_scrollback);
+        }
     }
 
     // Convert screen coords to VT (1-based) coordinates.

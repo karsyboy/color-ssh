@@ -4,12 +4,33 @@ use super::loader::ConfigLoader;
 use crate::{log_debug, log_error, log_info, log_warn};
 use notify::{Error, Event, RecommendedWatcher, RecursiveMode, Watcher};
 use std::{
+    collections::VecDeque,
     io::{self, Write},
     path::{Path, PathBuf},
-    sync::mpsc,
+    sync::{Mutex, OnceLock, mpsc},
     thread,
     time::Duration,
 };
+
+const MAX_PENDING_RELOAD_NOTICES: usize = 16;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ReloadNoticeTarget {
+    Stderr,
+    Queue,
+}
+
+static RELOAD_NOTICE_QUEUE: OnceLock<Mutex<VecDeque<String>>> = OnceLock::new();
+
+fn with_reload_notice_queue<T>(f: impl FnOnce(&mut VecDeque<String>) -> T) -> T {
+    match RELOAD_NOTICE_QUEUE.get_or_init(|| Mutex::new(VecDeque::new())).lock() {
+        Ok(mut queue) => f(&mut queue),
+        Err(poisoned) => {
+            let mut queue = poisoned.into_inner();
+            f(&mut queue)
+        }
+    }
+}
 
 fn event_targets_config_file(event: &Event, config_path: &Path) -> bool {
     let config_file_name = config_path.file_name();
@@ -26,14 +47,33 @@ fn should_reload_for_event(event: &Event, config_path: &Path) -> bool {
     (event.kind.is_modify() || event.kind.is_create() || event.kind.is_remove()) && event_targets_config_file(event, config_path)
 }
 
-fn print_reload_notice(message: &str) {
-    // Render notices on a clean line so they do not collide with remote shell prompts.
-    eprint!("\r\n[color-ssh] {}\r\n", message);
-    let _ = io::stderr().flush();
+pub(crate) fn queue_reload_notice(message: impl Into<String>) {
+    let message = message.into();
+    with_reload_notice_queue(|queue| {
+        if queue.len() >= MAX_PENDING_RELOAD_NOTICES {
+            queue.pop_front();
+        }
+        queue.push_back(message);
+    });
+}
+
+pub(crate) fn take_reload_notices() -> Vec<String> {
+    with_reload_notice_queue(|queue| queue.drain(..).collect())
+}
+
+fn emit_reload_notice(message: &str, target: ReloadNoticeTarget) {
+    match target {
+        ReloadNoticeTarget::Stderr => {
+            // Render notices on a clean line so they do not collide with remote shell prompts.
+            eprint!("\r\n[color-ssh] {}\r\n", message);
+            let _ = io::stderr().flush();
+        }
+        ReloadNoticeTarget::Queue => queue_reload_notice(message.to_string()),
+    }
 }
 
 /// Start watching the active config file for changes.
-pub fn config_watcher(profile: Option<String>) -> Option<RecommendedWatcher> {
+pub fn config_watcher(profile: Option<String>, notice_target: ReloadNoticeTarget) -> Option<RecommendedWatcher> {
     let (tx, rx) = mpsc::channel();
 
     log_debug!("Initializing configuration file watcher");
@@ -85,16 +125,16 @@ pub fn config_watcher(profile: Option<String>) -> Option<RecommendedWatcher> {
                         Ok(loader) => loader,
                         Err(err) => {
                             log_error!("Error creating config loader for reload: {}", err);
-                            print_reload_notice(&format!("Config reload failed: {}", err));
+                            emit_reload_notice(&format!("Config reload failed: {}", err), notice_target);
                             continue;
                         }
                     };
                     if let Err(err) = config_loader.reload_config() {
                         log_error!("Error reloading config: {}", err);
-                        print_reload_notice(&format!("Config reload failed: {}", err));
+                        emit_reload_notice(&format!("Config reload failed: {}", err), notice_target);
                     } else {
                         log_info!("Configuration reloaded successfully");
-                        print_reload_notice("Config reloaded successfully");
+                        emit_reload_notice("Config reloaded successfully", notice_target);
                     }
                 }
                 Err(err) => {

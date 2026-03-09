@@ -11,7 +11,10 @@ mod watcher;
 
 pub use errors::ConfigError;
 pub use schema::{AuthSettings, Config, HighlightOverlayAutoPolicy, HighlightOverlayMode, HighlightRule, InteractiveSettings, Metadata, Settings};
-pub use watcher::config_watcher;
+#[cfg(test)]
+pub(crate) use watcher::queue_reload_notice;
+pub(crate) use watcher::take_reload_notices;
+pub use watcher::{ReloadNoticeTarget, config_watcher};
 
 use crate::highlight_rules::CompiledHighlightRule;
 use once_cell::sync::OnceCell;

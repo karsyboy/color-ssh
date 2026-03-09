@@ -12,7 +12,7 @@ fn run_interactive_session(logger: &log::Logger, args: &args::MainArgs) -> Resul
     let (final_debug, _) = resolve_logging_settings(args, debug_from_config, false);
     apply_debug_logging(logger, args, final_debug, debug_from_config);
 
-    if let Err(err) = tui::run_session_manager() {
+    if let Err(err) = tui::run_session_manager(args.profile.clone()) {
         exit_with_logged_error(logger, format!("Session manager error: {err}"));
     }
 
@@ -222,7 +222,7 @@ pub(crate) fn run() -> Result<ExitCode> {
     update_protocol_session_name_if_needed(&logger, args.command.as_ref());
 
     log_debug!("Starting configuration file watcher");
-    let _watcher = config::config_watcher(runtime_profile);
+    let _watcher = config::config_watcher(runtime_profile, config::ReloadNoticeTarget::Stderr);
 
     let Some(args::MainCommand::Protocol(protocol_command)) = args.command.clone() else {
         unreachable!("non-interactive dispatch requires a protocol command");

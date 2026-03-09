@@ -7,6 +7,7 @@ use super::quick_connect::QuickConnectState;
 use super::tabs::{HostTab, TerminalSearchState};
 use super::vault::{VaultStatusModalState, VaultUnlockState};
 use crate::auth::ipc::{self, VaultStatus, VaultStatusEvent, VaultStatusEventKind};
+use crate::config;
 use crate::inventory::{ConnectionProtocol, FolderId, InventoryHost, TreeFolder};
 use crate::log_debug;
 use ratatui::layout::Rect;
@@ -58,11 +59,13 @@ pub(crate) struct AppState {
     pub(crate) is_selecting: bool,
     pub(crate) selection_dragged: bool,
     pub(crate) tab_content_area: Rect,
+    pub(crate) tab_scrollbar_area: Rect,
     pub(crate) tab_bar_area: Rect,
     pub(crate) host_panel_area: Rect,
     pub(crate) last_click: Option<(Instant, u16, u16)>,
     pub(crate) is_dragging_divider: bool,
     pub(crate) is_dragging_host_scrollbar: bool,
+    pub(crate) is_dragging_tab_scrollbar: bool,
     pub(crate) is_dragging_host_info_divider: bool,
     pub(crate) dragging_tab: Option<usize>,
     pub(crate) tab_scroll_offset: usize,
@@ -74,9 +77,11 @@ pub(crate) struct AppState {
     pub(crate) vault_status: VaultStatus,
     pub(crate) quick_connect_default_ssh_logging: bool,
     pub(crate) last_terminal_size: (u16, u16),
+    pending_config_reload_notices: Vec<String>,
     pub(crate) ui_dirty: bool,
     pub(crate) last_draw_at: Instant,
     pub(crate) last_seen_render_epoch: u64,
+    pub(crate) last_seen_config_version: u64,
     pub(crate) last_vault_status_refresh_at: Instant,
     vault_status_events: Option<VaultStatusEventWatcher>,
 }
@@ -112,7 +117,10 @@ impl AppState {
     }
 
     pub(crate) fn should_draw(&self, heartbeat: Duration) -> bool {
-        self.ui_dirty || self.current_render_epoch() != self.last_seen_render_epoch || self.last_draw_at.elapsed() >= heartbeat
+        self.ui_dirty
+            || self.current_render_epoch() != self.last_seen_render_epoch
+            || config::current_config_version() != self.last_seen_config_version
+            || self.last_draw_at.elapsed() >= heartbeat
     }
 
     pub(crate) fn mark_ui_dirty(&mut self) {
@@ -122,6 +130,7 @@ impl AppState {
     pub(crate) fn mark_drawn(&mut self) {
         self.last_draw_at = Instant::now();
         self.last_seen_render_epoch = self.current_render_epoch();
+        self.last_seen_config_version = config::current_config_version();
         self.ui_dirty = false;
     }
 
@@ -217,6 +226,44 @@ impl AppState {
         }
     }
 
+    pub(crate) fn apply_config_reload_notifications(&mut self) {
+        let notices = config::take_reload_notices();
+        if !notices.is_empty() {
+            self.pending_config_reload_notices.extend(notices);
+        }
+        if self.pending_config_reload_notices.is_empty() {
+            return;
+        }
+
+        let pending_notices = std::mem::take(&mut self.pending_config_reload_notices);
+        let injected = {
+            let Some(session) = self.tabs.get(self.selected_tab).and_then(|tab| tab.session.as_ref()) else {
+                self.pending_config_reload_notices = pending_notices;
+                return;
+            };
+
+            match session.engine().lock() {
+                Ok(mut engine) => {
+                    for notice in &pending_notices {
+                        let message = format!("\r\n[color-ssh] {}\r\n", notice);
+                        engine.process_output(message.as_bytes());
+                    }
+                    drop(engine);
+                    session.bump_render_epoch();
+                    true
+                }
+                Err(_) => {
+                    self.pending_config_reload_notices = pending_notices;
+                    return;
+                }
+            }
+        };
+
+        if injected {
+            self.mark_ui_dirty();
+        }
+    }
+
     // Construction.
     fn build_from_init(init: AppStateInit) -> Self {
         let host_search_index = Self::build_host_search_index(&init.hosts);
@@ -250,11 +297,13 @@ impl AppState {
             is_selecting: false,
             selection_dragged: false,
             tab_content_area: Rect::default(),
+            tab_scrollbar_area: Rect::default(),
             tab_bar_area: Rect::default(),
             host_panel_area: Rect::default(),
             last_click: None,
             is_dragging_divider: false,
             is_dragging_host_scrollbar: false,
+            is_dragging_tab_scrollbar: false,
             is_dragging_host_info_divider: false,
             dragging_tab: None,
             tab_scroll_offset: 0,
@@ -266,9 +315,11 @@ impl AppState {
             vault_status: init.vault_status,
             quick_connect_default_ssh_logging: init.quick_connect_default_ssh_logging,
             last_terminal_size: init.last_terminal_size,
+            pending_config_reload_notices: Vec::new(),
             ui_dirty: true,
             last_draw_at: now,
             last_seen_render_epoch: 0,
+            last_seen_config_version: config::current_config_version(),
             last_vault_status_refresh_at: now,
             vault_status_events: init.vault_status_events,
         };

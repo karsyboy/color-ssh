@@ -1,7 +1,12 @@
-use super::{InteractiveSshRuntime, paint_terminal_view, select_interactive_ssh_runtime};
-use crate::terminal_core::TerminalEngine;
+use super::{InteractiveSshRuntime, encode_mouse_event, paint_terminal_view, select_interactive_ssh_runtime};
 use crate::terminal_core::highlight_overlay::HighlightOverlay;
-use ratatui::{buffer::Buffer, layout::Rect};
+use crate::terminal_core::{MouseProtocolEncoding, MouseProtocolMode, TerminalEngine};
+use crossterm::event::{KeyModifiers, MouseButton, MouseEvent, MouseEventKind};
+use ratatui::{
+    buffer::Buffer,
+    layout::Rect,
+    style::{Color, Modifier},
+};
 
 fn buffer_lines(buffer: &Buffer) -> Vec<String> {
     let mut lines = Vec::with_capacity(buffer.area.height as usize);
@@ -81,4 +86,44 @@ fn terminal_view_switches_between_primary_and_alternate_screen() {
     );
     let primary_lines = buffer_lines(&primary_buffer);
     assert_eq!(trim_line(&primary_lines[0]), "primary screen");
+}
+
+#[test]
+fn terminal_view_preserves_background_and_underline_styles() {
+    let mut engine = TerminalEngine::new(2, 10, 128);
+    engine.process_output(b"\x1b[41;4mA\x1b[0m");
+
+    let mut buffer = Buffer::empty(Rect::new(0, 0, 10, 2));
+    let viewport = engine.view_model().viewport_snapshot(2, 10);
+    paint_terminal_view(&mut buffer, Rect::new(0, 0, 10, 2), &viewport, &HighlightOverlay::default(), true);
+
+    let cell = &buffer[(0, 0)];
+    assert_eq!(cell.bg, Color::Indexed(1));
+    assert!(cell.modifier.contains(Modifier::UNDERLINED));
+}
+
+#[test]
+fn mouse_event_encoding_uses_sgr_release_suffix_for_release_events() {
+    let mouse = MouseEvent {
+        kind: MouseEventKind::Up(MouseButton::Left),
+        column: 1,
+        row: 1,
+        modifiers: KeyModifiers::empty(),
+    };
+
+    let bytes = encode_mouse_event(mouse, Rect::new(0, 0, 20, 5), MouseProtocolMode::ButtonMotion, MouseProtocolEncoding::Sgr).expect("encoded mouse release");
+
+    assert_eq!(String::from_utf8(bytes).expect("utf8 mouse release"), "\x1b[<0;2;2m");
+}
+
+#[test]
+fn mouse_event_encoding_ignores_events_outside_viewport() {
+    let mouse = MouseEvent {
+        kind: MouseEventKind::Down(MouseButton::Left),
+        column: 30,
+        row: 10,
+        modifiers: KeyModifiers::empty(),
+    };
+
+    assert!(encode_mouse_event(mouse, Rect::new(0, 0, 20, 5), MouseProtocolMode::Press, MouseProtocolEncoding::Default).is_none());
 }

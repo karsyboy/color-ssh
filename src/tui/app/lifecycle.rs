@@ -2,7 +2,7 @@
 
 use super::event_loop::run_app;
 use crate::tui::AppState;
-use crate::{command_path, inventory::ConnectionProtocol, log_debug, log_error};
+use crate::{command_path, config, inventory::ConnectionProtocol, log_debug, log_error};
 use crossterm::{
     event::{DisableBracketedPaste, DisableMouseCapture, EnableBracketedPaste, EnableMouseCapture},
     execute,
@@ -44,13 +44,14 @@ impl Drop for TerminalModeGuard {
 }
 
 /// Run the interactive session manager.
-pub fn run_session_manager() -> io::Result<()> {
+pub fn run_session_manager(runtime_profile: Option<String>) -> io::Result<()> {
     log_debug!("Starting interactive session manager");
 
     let mut mode_guard = TerminalModeGuard::enter()?;
     let stdout = io::stdout();
     let backend = CrosstermBackend::new(stdout);
     let mut terminal = Terminal::new(backend)?;
+    let _watcher = config::config_watcher(runtime_profile, config::ReloadNoticeTarget::Queue);
 
     let mut app = AppState::new()?;
     let result = run_app(&mut terminal, &mut app);

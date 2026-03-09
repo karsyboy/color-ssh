@@ -13,6 +13,7 @@ pub(crate) fn run_app(terminal: &mut DefaultTerminal, app: &mut AppState) -> io:
 
     loop {
         app.apply_vault_status_notifications();
+        app.apply_config_reload_notifications();
         app.refresh_vault_status_if_stale(VAULT_STATUS_MODAL_POLL_INTERVAL);
         app.refresh_active_terminal_search_if_needed();
 

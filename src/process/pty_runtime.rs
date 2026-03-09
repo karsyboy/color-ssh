@@ -8,17 +8,22 @@ use super::command_spec::PreparedCommand;
 use super::exit::map_exit_code;
 use crate::auth::secret::ExposeSecret;
 use crate::terminal_core::highlight_overlay::{HighlightOverlay, HighlightOverlayContext, HighlightOverlayEngine, HighlightOverlayViewport};
-use crate::terminal_core::{TerminalChild, TerminalEngine, TerminalInputWriter, TerminalSession, TerminalViewport};
+use crate::terminal_core::{MouseProtocolEncoding, MouseProtocolMode, TerminalChild, TerminalEngine, TerminalInputWriter, TerminalSession, TerminalViewport};
 use crate::terminal_ratatui::{apply_overlay_style, paint_terminal_viewport};
 use crate::{Result, command_path, config, log, log_debug, log_error};
 use crossterm::{
-    event::{self, DisableBracketedPaste, EnableBracketedPaste, Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers},
+    cursor::MoveTo,
+    event::{
+        self, DisableBracketedPaste, DisableMouseCapture, EnableBracketedPaste, EnableMouseCapture, Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers,
+        MouseButton, MouseEvent, MouseEventKind,
+    },
     execute,
-    terminal::{EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode},
+    style::Print,
+    terminal::{disable_raw_mode, enable_raw_mode},
 };
 use portable_pty::{CommandBuilder, PtySize, native_pty_system};
 use ratatui::{
-    Frame, Terminal,
+    Frame, Terminal, TerminalOptions, Viewport,
     layout::{Position, Rect},
 };
 use std::io::{self, IsTerminal, Read};
@@ -56,14 +61,35 @@ struct InteractivePtyRuntime {
 #[derive(Debug, Default)]
 struct TerminalModeGuard {
     active: bool,
+    mouse_capture_enabled: bool,
 }
 
 impl TerminalModeGuard {
     fn enter() -> io::Result<Self> {
         enable_raw_mode()?;
         let mut stdout = io::stdout();
-        execute!(stdout, EnterAlternateScreen, EnableBracketedPaste)?;
-        Ok(Self { active: true })
+        execute!(stdout, EnableBracketedPaste)?;
+        Ok(Self {
+            active: true,
+            mouse_capture_enabled: false,
+        })
+    }
+
+    fn sync_mouse_capture(&mut self, enabled: bool) -> io::Result<()> {
+        if !self.active || self.mouse_capture_enabled == enabled {
+            return Ok(());
+        }
+
+        let mut stdout = io::stdout();
+        if enabled {
+            execute!(stdout, EnableMouseCapture)?;
+            log_debug!("Enabled direct-mode mouse capture for PTY mouse reporting");
+        } else {
+            execute!(stdout, DisableMouseCapture)?;
+            log_debug!("Disabled direct-mode mouse capture after PTY mouse reporting stopped");
+        }
+        self.mouse_capture_enabled = enabled;
+        Ok(())
     }
 
     fn cleanup(&mut self) {
@@ -71,9 +97,13 @@ impl TerminalModeGuard {
             return;
         }
 
-        let _ = disable_raw_mode();
         let mut stdout = io::stdout();
-        let _ = execute!(stdout, LeaveAlternateScreen, DisableBracketedPaste);
+        if self.mouse_capture_enabled {
+            let _ = execute!(stdout, DisableMouseCapture);
+            self.mouse_capture_enabled = false;
+        }
+        let _ = execute!(stdout, DisableBracketedPaste);
+        let _ = disable_raw_mode();
         self.active = false;
     }
 }
@@ -240,24 +270,37 @@ fn run_pty_event_loop(runtime: &mut InteractivePtyRuntime) -> Result<std::proces
     let mut mode_guard = TerminalModeGuard::enter()?;
     let stdout = io::stdout();
     let backend = ratatui::backend::CrosstermBackend::new(stdout);
-    let mut terminal = Terminal::new(backend)?;
-    let terminal_size = terminal.size()?;
-    runtime.session.resize(terminal_size.height.max(1), terminal_size.width.max(1));
+    let (width, height) = crossterm::terminal::size().unwrap_or((80, 24));
+    let mut terminal = Terminal::with_options(
+        backend,
+        TerminalOptions {
+            viewport: Viewport::Inline(height.max(1)),
+        },
+    )?;
+    runtime.session.resize(height.max(1), width.max(1));
 
     let mut scroll_offset = 0usize;
     let mut last_drawn_epoch = u64::MAX;
     let mut last_draw_at = Instant::now();
+    let mut last_config_version = u64::MAX;
     let mut exit_status = None;
     let mut reader_closed = false;
     let mut force_redraw = true;
+    let mut viewport_area = Rect::new(0, 0, width.max(1), height.max(1));
 
     loop {
         drain_pty_runtime_events(runtime, &mut exit_status, &mut reader_closed)?;
 
+        let (mouse_mode, _) = current_mouse_protocol(&runtime.session)?;
+        mode_guard.sync_mouse_capture(mouse_mode != MouseProtocolMode::None)?;
+
         let current_epoch = runtime.session.render_epoch();
-        if force_redraw || current_epoch != last_drawn_epoch || last_draw_at.elapsed() >= RENDER_HEARTBEAT {
+        let current_config_version = config::current_config_version();
+        if force_redraw || current_epoch != last_drawn_epoch || current_config_version != last_config_version || last_draw_at.elapsed() >= RENDER_HEARTBEAT {
             let mut render_error = None;
+            let mut drawn_area = viewport_area;
             terminal.draw(|frame| {
+                drawn_area = frame.area();
                 if let Err(err) = render_terminal_frame(frame, &runtime.session, &mut runtime.highlight_overlay, scroll_offset) {
                     render_error = Some(err);
                 }
@@ -265,8 +308,10 @@ fn run_pty_event_loop(runtime: &mut InteractivePtyRuntime) -> Result<std::proces
             if let Some(err) = render_error {
                 return Err(err.into());
             }
+            viewport_area = drawn_area;
             last_drawn_epoch = runtime.session.render_epoch();
             last_draw_at = Instant::now();
+            last_config_version = current_config_version;
             force_redraw = false;
         }
 
@@ -323,13 +368,32 @@ fn run_pty_event_loop(runtime: &mut InteractivePtyRuntime) -> Result<std::proces
                 runtime.session.resize(height.max(1), width.max(1));
                 force_redraw = true;
             }
+            Event::Mouse(mouse) => {
+                let (mouse_mode, mouse_encoding) = current_mouse_protocol(&runtime.session)?;
+                if mouse_mode == MouseProtocolMode::None {
+                    continue;
+                }
+
+                if scroll_offset > 0 {
+                    scroll_offset = 0;
+                    force_redraw = true;
+                }
+
+                if let Some(bytes) = encode_mouse_event(mouse, viewport_area, mouse_mode, mouse_encoding) {
+                    runtime.session.write_input(&bytes)?;
+                }
+            }
             _ => {}
         }
     }
 
     let show_cursor_result = terminal.show_cursor();
     mode_guard.cleanup();
+    let restore_prompt_result = restore_host_terminal_prompt_line(viewport_area);
     if let Err(err) = show_cursor_result {
+        return Err(err.into());
+    }
+    if let Err(err) = restore_prompt_result {
         return Err(err.into());
     }
     if let Err(err) = log::LOGGER.flush_ssh() {
@@ -396,6 +460,22 @@ fn bracketed_paste_enabled(session: &TerminalSession) -> io::Result<bool> {
     Ok(engine.screen().bracketed_paste_enabled())
 }
 
+fn current_mouse_protocol(session: &TerminalSession) -> io::Result<(MouseProtocolMode, MouseProtocolEncoding)> {
+    let engine = session.engine().lock().map_err(|err| io::Error::other(err.to_string()))?;
+    Ok(engine.screen().mouse_protocol())
+}
+
+fn restore_host_terminal_prompt_line(viewport_area: Rect) -> io::Result<()> {
+    if viewport_area.height == 0 {
+        return Ok(());
+    }
+
+    let mut stdout = io::stdout();
+    let bottom_row = viewport_area.y.saturating_add(viewport_area.height.saturating_sub(1));
+    execute!(stdout, MoveTo(0, bottom_row), Print("\x1b[0m\r\n"))?;
+    Ok(())
+}
+
 fn render_terminal_frame(frame: &mut Frame, session: &TerminalSession, highlight_overlay: &mut HighlightOverlayEngine, scroll_offset: usize) -> io::Result<()> {
     let area = frame.area();
     let (viewport, alternate_screen, mouse_mode, cursor_hidden) = {
@@ -442,6 +522,54 @@ fn paint_terminal_view(
             syntax_style
         }
     })
+}
+
+fn mouse_to_vt_coords(area: Rect, mouse: MouseEvent) -> Option<(u16, u16)> {
+    if area.width == 0 || area.height == 0 {
+        return None;
+    }
+    if mouse.column < area.x || mouse.column >= area.x + area.width || mouse.row < area.y || mouse.row >= area.y + area.height {
+        return None;
+    }
+
+    Some(((mouse.column - area.x) + 1, (mouse.row - area.y) + 1))
+}
+
+fn encode_mouse_event_bytes(encoding: MouseProtocolEncoding, button: u8, col: u16, row: u16, is_release: bool) -> Vec<u8> {
+    match encoding {
+        MouseProtocolEncoding::Sgr => {
+            let suffix = if is_release { 'm' } else { 'M' };
+            format!("\x1b[<{};{};{}{}", button, col, row, suffix).into_bytes()
+        }
+        MouseProtocolEncoding::Default => {
+            let clamped_col = col.clamp(1, 223) as u8;
+            let clamped_row = row.clamp(1, 223) as u8;
+            let cb = if is_release { 3u8 + 32 } else { button.saturating_add(32) };
+            let cx = clamped_col.saturating_add(32);
+            let cy = clamped_row.saturating_add(32);
+            vec![0x1b, b'[', b'M', cb, cx, cy]
+        }
+    }
+}
+
+fn encode_mouse_event(mouse: MouseEvent, area: Rect, mode: MouseProtocolMode, encoding: MouseProtocolEncoding) -> Option<Vec<u8>> {
+    let (col, row) = mouse_to_vt_coords(area, mouse)?;
+
+    match mouse.kind {
+        MouseEventKind::Down(MouseButton::Left) => Some(encode_mouse_event_bytes(encoding, 0, col, row, false)),
+        MouseEventKind::Down(MouseButton::Middle) => Some(encode_mouse_event_bytes(encoding, 1, col, row, false)),
+        MouseEventKind::Down(MouseButton::Right) => Some(encode_mouse_event_bytes(encoding, 2, col, row, false)),
+        MouseEventKind::Up(MouseButton::Left) if mode != MouseProtocolMode::Press => Some(encode_mouse_event_bytes(encoding, 0, col, row, true)),
+        MouseEventKind::Up(MouseButton::Middle) if mode != MouseProtocolMode::Press => Some(encode_mouse_event_bytes(encoding, 1, col, row, true)),
+        MouseEventKind::Up(MouseButton::Right) if mode != MouseProtocolMode::Press => Some(encode_mouse_event_bytes(encoding, 2, col, row, true)),
+        MouseEventKind::Drag(MouseButton::Left) if matches!(mode, MouseProtocolMode::AnyMotion | MouseProtocolMode::ButtonMotion) => {
+            Some(encode_mouse_event_bytes(encoding, 32, col, row, false))
+        }
+        MouseEventKind::ScrollUp => Some(encode_mouse_event_bytes(encoding, 64, col, row, false)),
+        MouseEventKind::ScrollDown => Some(encode_mouse_event_bytes(encoding, 65, col, row, false)),
+        MouseEventKind::Moved if mode == MouseProtocolMode::AnyMotion => Some(encode_mouse_event_bytes(encoding, 35, col, row, false)),
+        _ => None,
+    }
 }
 
 fn encode_paste_bytes(pasted: &str, bracketed: bool) -> Vec<u8> {

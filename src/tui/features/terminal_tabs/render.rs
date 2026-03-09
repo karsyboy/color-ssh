@@ -13,6 +13,64 @@ use ratatui::{
     widgets::{Paragraph, Wrap},
 };
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct TerminalScrollbarGeometry {
+    area: Rect,
+    thumb_top: u16,
+    thumb_height: u16,
+}
+
+fn split_terminal_content_and_scrollbar(area: Rect) -> (Rect, Rect) {
+    if area.width > 1 {
+        (
+            Rect::new(area.x, area.y, area.width.saturating_sub(1), area.height),
+            Rect::new(area.x + area.width.saturating_sub(1), area.y, 1, area.height),
+        )
+    } else {
+        (area, Rect::default())
+    }
+}
+
+fn terminal_scrollbar_geometry(scrollbar_area: Rect, viewport_height: u16, max_scrollback: usize, scroll_offset: usize) -> Option<TerminalScrollbarGeometry> {
+    if scrollbar_area.width == 0 || scrollbar_area.height == 0 || viewport_height == 0 {
+        return None;
+    }
+
+    let scrollbar_height = scrollbar_area.height as usize;
+    let viewport_height = viewport_height as usize;
+    let total_rows = max_scrollback.saturating_add(viewport_height).max(1);
+    let thumb_height = (scrollbar_height.saturating_mul(viewport_height) / total_rows).max(1).min(scrollbar_height) as u16;
+    let available_track = scrollbar_area.height.saturating_sub(thumb_height);
+    let clamped_offset = scroll_offset.min(max_scrollback);
+    let thumb_offset = if max_scrollback == 0 || available_track == 0 {
+        0
+    } else {
+        ((available_track as usize).saturating_mul(max_scrollback.saturating_sub(clamped_offset)) / max_scrollback) as u16
+    };
+
+    Some(TerminalScrollbarGeometry {
+        area: scrollbar_area,
+        thumb_top: scrollbar_area.y + thumb_offset,
+        thumb_height,
+    })
+}
+
+fn draw_terminal_scrollbar(frame: &mut Frame, geometry: TerminalScrollbarGeometry) {
+    let buffer = frame.buffer_mut();
+    let thumb_bottom = geometry.thumb_top.saturating_add(geometry.thumb_height);
+    for row_idx in 0..geometry.area.height {
+        let row_y = geometry.area.y + row_idx;
+        let cell = &mut buffer[(geometry.area.x, row_y)];
+        if row_y >= geometry.thumb_top && row_y < thumb_bottom {
+            cell.set_symbol("█");
+            cell.set_style(Style::default().fg(theme::ansi_cyan()).add_modifier(Modifier::BOLD));
+        } else {
+            cell.set_symbol("│");
+            cell.set_style(Style::default().fg(theme::ansi_bright_black()));
+        }
+    }
+}
+
 fn draw_vertical_rule(frame: &mut Frame, x: u16, y: u16, height: u16, style: Style) {
     if height == 0 {
         return;
@@ -277,8 +335,10 @@ impl AppState {
             return;
         }
 
-        self.resize_current_pty(area);
-        self.tab_content_area = area;
+        let (content_area, scrollbar_area) = split_terminal_content_and_scrollbar(area);
+        self.resize_current_pty(content_area);
+        self.tab_content_area = content_area;
+        self.tab_scrollbar_area = scrollbar_area;
 
         let scroll_offset = self.tabs[tab_idx].scroll_offset;
         let sel_start = self.selection_start;
@@ -297,13 +357,14 @@ impl AppState {
                 let alternate_screen = view.is_alternate_screen();
                 let mouse_mode = view.mouse_protocol().0;
                 let cursor_hidden = view.cursor_hidden();
-                let viewport = view.viewport_snapshot(area.height, area.width);
-                Some((viewport, alternate_screen, mouse_mode, cursor_hidden))
+                let viewport = view.viewport_snapshot(content_area.height, content_area.width);
+                let max_scrollback = engine.max_scrollback();
+                Some((viewport, alternate_screen, mouse_mode, cursor_hidden, max_scrollback))
             } else {
                 None
             };
 
-            if let Some((viewport, alternate_screen, mouse_mode, cursor_hidden)) = render_state {
+            if let Some((viewport, alternate_screen, mouse_mode, cursor_hidden, max_scrollback)) = render_state {
                 let overlay_view = HighlightOverlayViewport::new(&viewport, alternate_screen, mouse_mode, cursor_hidden);
                 let highlight_overlay = highlight_overlay_engine.build_visible_overlay(
                     &overlay_view,
@@ -315,7 +376,7 @@ impl AppState {
                 self.tabs[tab_idx].highlight_overlay = highlight_overlay_engine;
                 let _ = paint_terminal_viewport(
                     frame.buffer_mut(),
-                    area,
+                    content_area,
                     &viewport,
                     scroll_offset == 0,
                     |absolute_row, col, _cell, is_cursor, base_style| {
@@ -342,6 +403,10 @@ impl AppState {
                         }
                     },
                 );
+
+                if let Some(scrollbar) = terminal_scrollbar_geometry(scrollbar_area, content_area.height, max_scrollback, scroll_offset) {
+                    draw_terminal_scrollbar(frame, scrollbar);
+                }
             } else {
                 self.tabs[tab_idx].highlight_overlay = highlight_overlay_engine;
             }
@@ -371,7 +436,11 @@ impl AppState {
             let paragraph = Paragraph::new(error_lines)
                 .style(Style::default().fg(theme::ansi_red()))
                 .wrap(Wrap { trim: false });
-            frame.render_widget(paragraph, area);
+            frame.render_widget(paragraph, content_area);
         }
     }
 }
+
+#[cfg(test)]
+#[path = "../../../test/tui/terminal_tabs_render.rs"]
+mod tests;

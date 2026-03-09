@@ -1,8 +1,11 @@
 use super::*;
 use crate::config::{self, AuthSettings};
+use crate::highlight_rules::CompiledHighlightRule;
 use crate::inventory::{ConnectionProtocol, InventoryHost};
+use crate::terminal_core::{TerminalEngine, highlight_overlay::HighlightOverlayContext, highlight_overlay::HighlightOverlayViewport};
 use crate::test::support::{config::base_config, fs::TestWorkspace};
 use crate::tui::VaultUnlockAction;
+use regex::Regex;
 use std::ffi::OsString;
 use std::path::PathBuf;
 use std::sync::{Mutex, MutexGuard, OnceLock};
@@ -67,6 +70,10 @@ fn sample_rdp_host() -> InventoryHost {
     host.host = "rdp.internal".to_string();
     host.user = Some("alice".to_string());
     host
+}
+
+fn compiled_rule(pattern: &str, style: &str) -> CompiledHighlightRule {
+    CompiledHighlightRule::new(Regex::new(pattern).expect("regex"), style.to_string())
 }
 
 #[test]
@@ -182,4 +189,55 @@ fn resolve_session_profile_includes_profile_logging_settings_and_secret_patterns
 
     assert!(session_profile.ssh_logging_enabled);
     assert_eq!(session_profile.secret_patterns.len(), 1);
+}
+
+#[test]
+fn no_profile_tabs_use_live_current_config_overlay_rules() {
+    let _lock = PROFILE_TEST_LOCK.get_or_init(|| Mutex::new(())).lock().expect("profile test lock");
+    let mut config = base_config();
+    config.metadata.compiled_rules = vec![compiled_rule("error", "\x1b[38;2;255;0;0m")];
+    config.metadata.compiled_rule_set = Some(regex::RegexSet::new(["error"]).expect("rule set"));
+    config::with_current_config_mut("install test overlay config", |current| *current = config);
+    config::set_config_version(1);
+
+    let host = InventoryHost::new("router01".to_string());
+    let session_profile = AppState::resolve_session_profile(&host).expect("resolve current profile settings");
+    let mut overlay_engine = highlight_overlay_for_host(&host, &session_profile);
+
+    let mut terminal_engine = TerminalEngine::new(2, 20, 128);
+    terminal_engine.process_output(b"error");
+    let view = terminal_engine.view_model();
+    let viewport = view.viewport_snapshot(2, 20);
+    let overlay_view = HighlightOverlayViewport::new(&viewport, view.is_alternate_screen(), view.mouse_protocol().0, view.cursor_hidden());
+    let first_overlay = overlay_engine.build_visible_overlay(
+        &overlay_view,
+        HighlightOverlayContext {
+            render_epoch: 1,
+            display_scrollback: 0,
+        },
+    );
+    assert!(first_overlay.style_for_cell(0, 0).is_some());
+
+    config::with_current_config_mut("update test overlay config", |current| {
+        current.metadata.compiled_rules = vec![compiled_rule("warn", "\x1b[38;2;0;255;0m")];
+        current.metadata.compiled_rule_set = Some(regex::RegexSet::new(["warn"]).expect("rule set"));
+    });
+    config::set_config_version(2);
+
+    terminal_engine.process_output(b"\rwarn\x1b[K");
+    let view = terminal_engine.view_model();
+    let viewport = view.viewport_snapshot(2, 20);
+    let overlay_view = HighlightOverlayViewport::new(&viewport, view.is_alternate_screen(), view.mouse_protocol().0, view.cursor_hidden());
+    let second_overlay = overlay_engine.build_visible_overlay(
+        &overlay_view,
+        HighlightOverlayContext {
+            render_epoch: 2,
+            display_scrollback: 0,
+        },
+    );
+
+    assert!(second_overlay.style_for_cell(0, 0).is_some());
+
+    config::with_current_config_mut("reset test overlay config", |current| *current = base_config());
+    config::set_config_version(0);
 }
