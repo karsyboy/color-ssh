@@ -1,9 +1,9 @@
 //! Interactive process output streaming for SSH and RDP launches.
 //!
-//! This remains the legacy direct-process path. Embedded terminal frontends are
-//! being moved toward `src/terminal_core/`, where PTY/session ownership,
-//! terminal emulation, renderer extraction, and future highlight overlays are
-//! modeled explicitly.
+//! This remains the legacy direct-process path. Direct `cossh ssh` launches now
+//! prefer the PTY-centered runtime in `src/process/pty_runtime.rs`, while this
+//! module stays active for embedded transitional launches and explicit legacy
+//! fallback selection.
 
 use super::exit::map_exit_code;
 use crate::{Result, config, highlighter, log, log_debug, log_error};

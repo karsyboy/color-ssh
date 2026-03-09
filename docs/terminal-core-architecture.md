@@ -36,7 +36,8 @@ Color-SSH now has a dedicated `src/terminal_core/` layer for embedded terminal f
 The following code remains transitional in this phase:
 
 - `src/process/stream.rs`
-  - Still powers the direct interactive SSH/RDP path.
+  - Still powers embedded recursive `cossh ssh` launches from the current TUI.
+  - Still powers explicit legacy fallback selection for direct SSH launches.
   - Still performs stream-based stdout rewriting for syntax highlighting.
 
 - `src/highlighter/`
@@ -48,7 +49,18 @@ The following code remains transitional in this phase:
 
 ## Immediate Intent
 
-This phase does not replace the interactive session path end to end.
+Direct `cossh ssh` launches are now expected to prefer the PTY-centered runtime in `src/process/pty_runtime.rs`.
+
+That PTY runtime is now authoritative for direct interactive SSH behavior:
+
+1. SSH runs inside a PTY
+2. PTY bytes feed `alacritty_terminal`
+3. visible terminal state is rendered from the terminal engine
+4. terminal display no longer depends on stdout transformation
+
+The current TUI recursion path remains transitional for one reason: it still launches `cossh ssh` inside its own PTY. That recursive path is explicitly marked as embedded legacy mode until the session manager launches SSH directly instead of re-entering the CLI.
+
+This phase still does not replace every interactive session path end to end.
 
 It does establish the ownership boundaries needed for the next phases:
 

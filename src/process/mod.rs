@@ -4,6 +4,7 @@ mod command_spec;
 mod exit;
 mod interactive;
 mod launch;
+mod pty_runtime;
 mod rdp_builder;
 mod spawn;
 mod ssh_builder;
@@ -16,6 +17,8 @@ use std::process::ExitCode;
 
 pub(crate) use launch::{build_rdp_command_for_host, resolve_host_by_destination, spawn_command};
 pub(crate) const DISABLE_VAULT_AUTOLOGIN_ENV: &str = "COSSH_DISABLE_VAULT_AUTOLOGIN";
+pub(crate) const EMBEDDED_INTERACTIVE_SSH_ENV: &str = "COSSH_EMBEDDED_INTERACTIVE_SSH";
+pub(crate) const LEGACY_STREAM_INTERACTIVE_SSH_ENV: &str = "COSSH_USE_LEGACY_STREAM_SSH";
 
 pub(crate) fn run_ssh_process(process_args: Vec<String>, is_non_interactive: bool, explicit_pass_entry: Option<String>) -> Result<ExitCode> {
     log_info!(
@@ -34,23 +37,20 @@ pub(crate) fn run_ssh_process(process_args: Vec<String>, is_non_interactive: boo
         launch::build_ssh_command(&process_args, explicit_pass_entry.as_deref())?
     };
 
-    if let Some(notice) = &command_spec.fallback_notice {
-        log_warn!("{}", notice);
-        eprintln!("[color-ssh] {}", notice);
-    }
-
     if is_non_interactive {
+        if let Some(notice) = &command_spec.fallback_notice {
+            log_warn!("{}", notice);
+            eprintln!("[color-ssh] {}", notice);
+        }
         log_info!("Using passthrough mode for non-interactive command");
         return launch::spawn_passthrough(command_spec);
     }
 
-    let child = launch::spawn_command(command_spec, std::process::Stdio::piped(), std::process::Stdio::inherit()).map_err(|err| {
-        log_error!("Failed to spawn SSH process: {}", err);
-        err
-    })?;
-    log_debug!("SSH process spawned successfully (PID: {:?})", child.id());
+    if let Some(notice) = &command_spec.fallback_notice {
+        log_warn!("{}", notice);
+    }
 
-    interactive::run_interactive_ssh_session(child)
+    interactive::run_interactive_ssh_session(command_spec)
 }
 
 pub(crate) fn run_rdp_process(rdp_args: RdpCommandArgs, explicit_pass_entry: Option<String>) -> Result<ExitCode> {

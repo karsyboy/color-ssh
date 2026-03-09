@@ -323,6 +323,7 @@ impl AppState {
 
         cmd.arg("ssh");
         cmd.arg(&host.name);
+        cmd.env(process::EMBEDDED_INTERACTIVE_SSH_ENV, "1");
         cmd.env("COSSH_SESSION_NAME", tab_title);
 
         let pass_info = if using_pass_entry { " (via vault)" } else { "" };
