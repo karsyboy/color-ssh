@@ -1,5 +1,8 @@
-use super::{InteractiveSshRuntime, encode_mouse_event, paint_terminal_view, select_interactive_ssh_runtime};
-use crate::terminal_core::highlight_overlay::HighlightOverlay;
+use super::{
+    HostScrollbackMirror, InteractiveSshRuntime, collect_host_scrollback_insertions, encode_mouse_event, infer_scrolled_line_count, paint_terminal_view,
+    select_interactive_ssh_runtime,
+};
+use crate::terminal_core::highlight_overlay::{HighlightOverlay, HighlightOverlayEngine};
 use crate::terminal_core::{MouseProtocolEncoding, MouseProtocolMode, TerminalEngine};
 use crossterm::event::{KeyModifiers, MouseButton, MouseEvent, MouseEventKind};
 use ratatui::{
@@ -126,4 +129,30 @@ fn mouse_event_encoding_ignores_events_outside_viewport() {
     };
 
     assert!(encode_mouse_event(mouse, Rect::new(0, 0, 20, 5), MouseProtocolMode::Press, MouseProtocolEncoding::Default).is_none());
+}
+
+#[test]
+fn infer_scrolled_line_count_detects_simple_terminal_scroll() {
+    let previous = vec!["line1".to_string(), "line2".to_string(), "line3".to_string()];
+    let current = vec!["line2".to_string(), "line3".to_string(), "line4".to_string()];
+
+    assert_eq!(infer_scrolled_line_count(&previous, &current), 1);
+}
+
+#[test]
+fn collect_host_scrollback_insertions_returns_scrolled_primary_rows() {
+    let mut engine = TerminalEngine::new(3, 20, 16);
+    let mut highlight_overlay = HighlightOverlayEngine::new();
+    let mut host_scrollback = HostScrollbackMirror::new(16);
+
+    engine.process_output(b"line1\r\nline2\r\nline3");
+    let initial_insertions = collect_host_scrollback_insertions(&mut engine, &mut highlight_overlay, 1, &mut host_scrollback, 0);
+    assert!(initial_insertions.is_empty());
+
+    engine.process_output(b"\r\nline4");
+    let insertions = collect_host_scrollback_insertions(&mut engine, &mut highlight_overlay, 2, &mut host_scrollback, 0);
+
+    assert_eq!(insertions.len(), 1);
+    assert_eq!(insertions[0].viewport.size().0, 1);
+    assert_eq!(trim_line(&insertions[0].viewport.rows()[0].display_text()), "line1");
 }

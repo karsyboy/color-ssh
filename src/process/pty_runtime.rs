@@ -56,6 +56,29 @@ struct InteractivePtyRuntime {
     session: TerminalSession,
     event_rx: Receiver<PtyRuntimeEvent>,
     highlight_overlay: HighlightOverlayEngine,
+    host_scrollback: HostScrollbackMirror,
+}
+
+#[derive(Debug)]
+struct HostScrollbackMirror {
+    history_capacity: usize,
+    last_history_size: usize,
+    last_live_rows: Vec<String>,
+}
+
+impl HostScrollbackMirror {
+    fn new(history_capacity: usize) -> Self {
+        Self {
+            history_capacity,
+            last_history_size: 0,
+            last_live_rows: Vec::new(),
+        }
+    }
+}
+
+struct ScrollbackInsertion {
+    viewport: TerminalViewport,
+    overlay: HighlightOverlay,
 }
 
 #[derive(Debug, Default)]
@@ -202,6 +225,7 @@ fn spawn_interactive_pty_runtime(command_spec: PreparedCommand, history_buffer: 
         session,
         event_rx,
         highlight_overlay: HighlightOverlayEngine::new(),
+        host_scrollback: HostScrollbackMirror::new(history_buffer),
     })
 }
 
@@ -297,6 +321,24 @@ fn run_pty_event_loop(runtime: &mut InteractivePtyRuntime) -> Result<std::proces
         let current_epoch = runtime.session.render_epoch();
         let current_config_version = config::current_config_version();
         if force_redraw || current_epoch != last_drawn_epoch || current_config_version != last_config_version || last_draw_at.elapsed() >= RENDER_HEARTBEAT {
+            let scrollback_insertions = {
+                let mut engine = runtime.session.engine().lock().map_err(|err| io::Error::other(err.to_string()))?;
+                collect_host_scrollback_insertions(
+                    &mut engine,
+                    &mut runtime.highlight_overlay,
+                    current_epoch,
+                    &mut runtime.host_scrollback,
+                    scroll_offset,
+                )
+            };
+
+            for insertion in scrollback_insertions {
+                let insertion_height = insertion.viewport.size().0;
+                terminal.insert_before(insertion_height, |buffer| {
+                    let _ = paint_terminal_view(buffer, buffer.area, &insertion.viewport, &insertion.overlay, false);
+                })?;
+            }
+
             let mut render_error = None;
             let mut drawn_area = viewport_area;
             terminal.draw(|frame| {
@@ -446,6 +488,81 @@ fn process_pty_output(session: &TerminalSession, bytes: &[u8]) -> io::Result<()>
     drop(engine);
     session.bump_render_epoch();
     Ok(())
+}
+
+fn collect_host_scrollback_insertions(
+    engine: &mut TerminalEngine,
+    highlight_overlay: &mut HighlightOverlayEngine,
+    render_epoch: u64,
+    host_scrollback: &mut HostScrollbackMirror,
+    restore_scrollback: usize,
+) -> Vec<ScrollbackInsertion> {
+    engine.set_display_scrollback(0);
+    let (viewport_rows, viewport_cols, current_history_size, alternate_screen, current_live_rows) = {
+        let view = engine.view_model();
+        let (rows, cols) = view.size();
+        let current_live_rows = view.visible_row_texts().into_iter().map(|(_, text)| text).collect::<Vec<_>>();
+        (rows, cols, view.scrollback(), view.is_alternate_screen(), current_live_rows)
+    };
+
+    if alternate_screen || viewport_rows == 0 || viewport_cols == 0 {
+        engine.set_display_scrollback(restore_scrollback);
+        host_scrollback.last_history_size = current_history_size;
+        host_scrollback.last_live_rows = current_live_rows;
+        return Vec::new();
+    }
+
+    let mut scrolled_line_count = current_history_size.saturating_sub(host_scrollback.last_history_size);
+    if scrolled_line_count == 0
+        && current_history_size == host_scrollback.history_capacity
+        && host_scrollback.last_history_size == host_scrollback.history_capacity
+    {
+        scrolled_line_count = infer_scrolled_line_count(&host_scrollback.last_live_rows, &current_live_rows);
+    }
+
+    let mut insertions = Vec::new();
+    if scrolled_line_count > 0 {
+        let mut remaining = scrolled_line_count;
+        while remaining > 0 {
+            let chunk_rows = remaining.min(viewport_rows as usize) as u16;
+            engine.set_display_scrollback(remaining);
+            let (viewport, overlay) = {
+                let view = engine.view_model();
+                let viewport = view.viewport_snapshot(chunk_rows, viewport_cols);
+                let overlay_view = HighlightOverlayViewport::new(&viewport, view.is_alternate_screen(), view.mouse_protocol().0, view.cursor_hidden());
+                let overlay = highlight_overlay.build_visible_overlay(
+                    &overlay_view,
+                    HighlightOverlayContext {
+                        render_epoch,
+                        display_scrollback: remaining,
+                    },
+                );
+                (viewport, overlay)
+            };
+            insertions.push(ScrollbackInsertion { viewport, overlay });
+            remaining = remaining.saturating_sub(chunk_rows as usize);
+        }
+    }
+
+    engine.set_display_scrollback(restore_scrollback);
+    host_scrollback.last_history_size = current_history_size;
+    host_scrollback.last_live_rows = current_live_rows;
+    insertions
+}
+
+fn infer_scrolled_line_count(previous_rows: &[String], current_rows: &[String]) -> usize {
+    if previous_rows.is_empty() || current_rows.is_empty() || previous_rows.len() != current_rows.len() {
+        return 0;
+    }
+
+    let max_overlap = previous_rows.len().min(current_rows.len());
+    for overlap in (1..=max_overlap).rev() {
+        if previous_rows[previous_rows.len() - overlap..] == current_rows[..overlap] {
+            return previous_rows.len().saturating_sub(overlap);
+        }
+    }
+
+    0
 }
 
 fn max_scrollback(session: &TerminalSession) -> usize {
