@@ -74,7 +74,7 @@ impl ConfigLoader {
         })?;
 
         let (rule_count, secret_count, config_version) = super::with_current_config_mut("reloading configuration", |current_config| {
-            // Preserve session naming used by active logging/session state.
+            // Preserve the active global SSH log filename stem across config reloads.
             new_config.metadata.session_name = current_config.metadata.session_name.clone();
             // Bump config version so active workers can detect reload.
             new_config.metadata.version = current_config.metadata.version.wrapping_add(1);

@@ -12,7 +12,7 @@ pub fn run() -> crate::Result<ExitCode> {
 }
 
 #[cfg(test)]
-pub(crate) use logging::{DebugModeSource, debug_mode_source, resolve_logging_settings};
+pub(crate) use logging::{DebugModeSource, debug_mode_source, resolve_logging_settings, resolve_session_name_for_logging};
 
 #[cfg(test)]
 #[path = "../test/runtime.rs"]

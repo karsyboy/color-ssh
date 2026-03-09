@@ -92,15 +92,19 @@ pub(crate) fn apply_ssh_logging(logger: &log::Logger, args: &args::MainArgs, ssh
     }
 }
 
-/// Update per-session log filename stem from command target or env override.
-pub(crate) fn update_session_name_for_logging(explicit_target: Option<&str>, ssh_args: &[String]) {
-    let session_hostname = explicit_target
+/// Resolve the global SSH log filename stem from the current protocol target.
+pub(crate) fn resolve_session_name_for_logging(explicit_target: Option<&str>, ssh_args: &[String]) -> String {
+    let session_name = explicit_target
         .map(str::to_string)
         .or_else(|| ssh_args::extract_destination_host(ssh_args))
         .unwrap_or_else(|| "unknown".to_string());
 
-    let session_name = std::env::var("COSSH_SESSION_NAME").unwrap_or(session_hostname);
-    let session_name = log::sanitize_session_name(&session_name);
+    log::sanitize_session_name(&session_name)
+}
+
+/// Update the global SSH log filename stem from the current protocol target.
+pub(crate) fn update_session_name_for_logging(explicit_target: Option<&str>, ssh_args: &[String]) {
+    let session_name = resolve_session_name_for_logging(explicit_target, ssh_args);
 
     config::with_current_config_mut("setting session name", |cfg| {
         cfg.metadata.session_name = session_name.clone();

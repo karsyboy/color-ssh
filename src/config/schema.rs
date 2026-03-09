@@ -247,7 +247,7 @@ pub struct Metadata {
     /// Path to the loaded configuration file
     #[serde(default)]
     pub config_path: PathBuf,
-    /// Name of the current SSH session (for log file naming)
+    /// Name of the current globally logged protocol session (for log file naming)
     pub session_name: String,
     /// Compiled regex rules shared by renderer overlays (regex + ANSI style descriptor)
     #[serde(skip)]
