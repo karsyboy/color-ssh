@@ -11,10 +11,16 @@ use crate::terminal_core::highlight_overlay::HighlightOverlayStyle;
 use crate::terminal_core::{AnsiColor, TerminalCellSnapshot, TerminalViewport};
 use alacritty_terminal::vte::ansi::NamedColor;
 use ratatui::{
+    Frame,
     buffer::Buffer,
     layout::{Position, Rect},
     style::{Color, Modifier, Style},
+    widgets::{Block, Borders, Clear, Paragraph, Wrap},
 };
+use unicode_width::UnicodeWidthStr;
+
+const RELOAD_NOTICE_TOAST_MAX_WIDTH: u16 = 60;
+const RELOAD_NOTICE_TOAST_MARGIN: u16 = 1;
 
 pub(crate) fn paint_terminal_viewport<F>(
     buffer: &mut Buffer,
@@ -58,6 +64,49 @@ where
     }
 
     cursor_position
+}
+
+pub(crate) fn render_reload_notice_toast(frame: &mut Frame, area: Rect, message: &str) {
+    let toast_area = reload_notice_toast_area(area, message);
+    if toast_area.width == 0 || toast_area.height == 0 {
+        return;
+    }
+
+    let block_style = Style::default().fg(Color::Indexed(6)).bg(Color::Indexed(8));
+    let text_style = Style::default().fg(Color::Indexed(15)).bg(Color::Indexed(8));
+    let block = Block::default().borders(Borders::ALL).border_style(block_style).style(block_style);
+    let inner = block.inner(toast_area);
+
+    frame.render_widget(Clear, toast_area);
+    frame.render_widget(block, toast_area);
+    frame.render_widget(Paragraph::new(message.to_string()).style(text_style).wrap(Wrap { trim: false }), inner);
+}
+
+fn reload_notice_toast_area(area: Rect, message: &str) -> Rect {
+    if area.width < 3 || area.height < 3 || message.is_empty() {
+        return Rect::default();
+    }
+
+    let available_width = area.width.saturating_sub(RELOAD_NOTICE_TOAST_MARGIN.saturating_mul(2));
+    let available_height = area.height.saturating_sub(RELOAD_NOTICE_TOAST_MARGIN.saturating_mul(2));
+    if available_width < 3 || available_height < 3 {
+        return Rect::default();
+    }
+
+    let max_outer_width = available_width.clamp(3, RELOAD_NOTICE_TOAST_MAX_WIDTH);
+    let desired_outer_width = message.lines().map(UnicodeWidthStr::width).max().unwrap_or(1).saturating_add(2) as u16;
+    let toast_width = desired_outer_width.clamp(3, max_outer_width);
+    let inner_width = toast_width.saturating_sub(2).max(1) as usize;
+    let wrapped_line_count = message
+        .lines()
+        .map(|line| UnicodeWidthStr::width(line).max(1).div_ceil(inner_width).max(1))
+        .sum::<usize>()
+        .max(1) as u16;
+    let toast_height = wrapped_line_count.saturating_add(2).min(available_height).max(3);
+    let x = area.x + area.width.saturating_sub(toast_width + RELOAD_NOTICE_TOAST_MARGIN);
+    let y = area.y + area.height.saturating_sub(toast_height + RELOAD_NOTICE_TOAST_MARGIN);
+
+    Rect::new(x, y, toast_width, toast_height)
 }
 
 fn clear_area(buffer: &mut Buffer, area: Rect) {
@@ -168,3 +217,7 @@ fn named_color_to_ansi_index(named: NamedColor) -> Option<u8> {
         NamedColor::Foreground | NamedColor::Background | NamedColor::Cursor => None,
     }
 }
+
+#[cfg(test)]
+#[path = "test/terminal_ratatui.rs"]
+mod tests;

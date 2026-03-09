@@ -11,6 +11,7 @@ mod highlight_rules;
 pub mod inventory;
 pub mod log;
 mod process;
+mod reload_notice;
 pub mod runtime;
 pub mod ssh_args;
 pub mod ssh_config;

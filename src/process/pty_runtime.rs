@@ -7,9 +7,10 @@
 use super::command_spec::PreparedCommand;
 use super::exit::map_exit_code;
 use crate::auth::secret::ExposeSecret;
+use crate::reload_notice::{ReloadNoticeToast, format_reload_notice};
 use crate::terminal_core::highlight_overlay::{HighlightOverlay, HighlightOverlayContext, HighlightOverlayEngine, HighlightOverlayViewport};
 use crate::terminal_core::{MouseProtocolEncoding, MouseProtocolMode, TerminalChild, TerminalEngine, TerminalInputWriter, TerminalSession, TerminalViewport};
-use crate::terminal_ratatui::{apply_overlay_style, paint_terminal_viewport};
+use crate::terminal_ratatui::{apply_overlay_style, paint_terminal_viewport, render_reload_notice_toast};
 use crate::{Result, command_path, config, log, log_debug, log_error};
 use crossterm::{
     cursor::MoveTo,
@@ -57,6 +58,7 @@ struct InteractivePtyRuntime {
     event_rx: Receiver<PtyRuntimeEvent>,
     highlight_overlay: HighlightOverlayEngine,
     host_scrollback: HostScrollbackMirror,
+    reload_notice_toast: Option<ReloadNoticeToast>,
 }
 
 #[derive(Debug)]
@@ -226,6 +228,7 @@ fn spawn_interactive_pty_runtime(command_spec: PreparedCommand, history_buffer: 
         event_rx,
         highlight_overlay: HighlightOverlayEngine::new(),
         host_scrollback: HostScrollbackMirror::new(history_buffer),
+        reload_notice_toast: None,
     })
 }
 
@@ -313,7 +316,16 @@ fn run_pty_event_loop(runtime: &mut InteractivePtyRuntime) -> Result<std::proces
     let mut viewport_area = Rect::new(0, 0, width.max(1), height.max(1));
 
     loop {
+        if expire_reload_notice_toast(&mut runtime.reload_notice_toast) {
+            force_redraw = true;
+        }
+
         drain_pty_runtime_events(runtime, &mut exit_status, &mut reader_closed)?;
+
+        if let Some(reload_notice_toast) = take_latest_reload_notice_toast() {
+            runtime.reload_notice_toast = Some(reload_notice_toast);
+            force_redraw = true;
+        }
 
         let (mouse_mode, _) = current_mouse_protocol(&runtime.session)?;
         mode_guard.sync_mouse_capture(mouse_mode != MouseProtocolMode::None)?;
@@ -343,7 +355,13 @@ fn run_pty_event_loop(runtime: &mut InteractivePtyRuntime) -> Result<std::proces
             let mut drawn_area = viewport_area;
             terminal.draw(|frame| {
                 drawn_area = frame.area();
-                if let Err(err) = render_terminal_frame(frame, &runtime.session, &mut runtime.highlight_overlay, scroll_offset) {
+                if let Err(err) = render_terminal_frame(
+                    frame,
+                    &runtime.session,
+                    &mut runtime.highlight_overlay,
+                    scroll_offset,
+                    runtime.reload_notice_toast.as_ref().map(ReloadNoticeToast::message),
+                ) {
                     render_error = Some(err);
                 }
             })?;
@@ -490,6 +508,21 @@ fn process_pty_output(session: &TerminalSession, bytes: &[u8]) -> io::Result<()>
     Ok(())
 }
 
+fn take_latest_reload_notice_toast() -> Option<ReloadNoticeToast> {
+    config::take_reload_notices()
+        .into_iter()
+        .last()
+        .map(|notice| ReloadNoticeToast::new(format_reload_notice(&notice)))
+}
+
+fn expire_reload_notice_toast(reload_notice_toast: &mut Option<ReloadNoticeToast>) -> bool {
+    let should_clear = reload_notice_toast.as_ref().is_some_and(ReloadNoticeToast::expired);
+    if should_clear {
+        *reload_notice_toast = None;
+    }
+    should_clear
+}
+
 fn collect_host_scrollback_insertions(
     engine: &mut TerminalEngine,
     highlight_overlay: &mut HighlightOverlayEngine,
@@ -593,7 +626,13 @@ fn restore_host_terminal_prompt_line(viewport_area: Rect) -> io::Result<()> {
     Ok(())
 }
 
-fn render_terminal_frame(frame: &mut Frame, session: &TerminalSession, highlight_overlay: &mut HighlightOverlayEngine, scroll_offset: usize) -> io::Result<()> {
+fn render_terminal_frame(
+    frame: &mut Frame,
+    session: &TerminalSession,
+    highlight_overlay: &mut HighlightOverlayEngine,
+    scroll_offset: usize,
+    reload_notice_toast: Option<&str>,
+) -> io::Result<()> {
     let area = frame.area();
     let (viewport, alternate_screen, mouse_mode, cursor_hidden) = {
         let mut engine = session.engine().lock().map_err(|err| io::Error::other(err.to_string()))?;
@@ -615,6 +654,9 @@ fn render_terminal_frame(frame: &mut Frame, session: &TerminalSession, highlight
     );
 
     let cursor = paint_terminal_view(frame.buffer_mut(), area, &viewport, &overlay, scroll_offset == 0);
+    if let Some(reload_notice_toast) = reload_notice_toast {
+        render_reload_notice_toast(frame, area, reload_notice_toast);
+    }
     if let Some(cursor) = cursor {
         frame.set_cursor_position(cursor);
     }

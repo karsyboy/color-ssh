@@ -168,6 +168,13 @@ fn update_protocol_session_name_if_needed(logger: &log::Logger, command: Option<
     }
 }
 
+pub(crate) fn protocol_reload_notice_target(command: &args::ProtocolCommand, prefer_pty_centered_runtime: bool) -> config::ReloadNoticeTarget {
+    match command {
+        args::ProtocolCommand::Ssh(ssh_command) if !ssh_command.is_non_interactive && prefer_pty_centered_runtime => config::ReloadNoticeTarget::Queue,
+        args::ProtocolCommand::Ssh(_) | args::ProtocolCommand::Rdp(_) => config::ReloadNoticeTarget::Stderr,
+    }
+}
+
 fn run_protocol_command(command: args::ProtocolCommand, pass_entry: Option<String>) -> Result<ExitCode> {
     match command {
         args::ProtocolCommand::Rdp(rdp_command) => {
@@ -221,12 +228,13 @@ pub(crate) fn run() -> Result<ExitCode> {
     print_title_banner(runtime_settings.show_title);
     update_protocol_session_name_if_needed(&logger, args.command.as_ref());
 
-    log_debug!("Starting configuration file watcher");
-    let _watcher = config::config_watcher(runtime_profile, config::ReloadNoticeTarget::Stderr);
-
     let Some(args::MainCommand::Protocol(protocol_command)) = args.command.clone() else {
         unreachable!("non-interactive dispatch requires a protocol command");
     };
+
+    log_debug!("Starting configuration file watcher");
+    let watcher_target = protocol_reload_notice_target(&protocol_command, process::prefer_pty_centered_interactive_ssh_runtime());
+    let _watcher = config::config_watcher(runtime_profile, watcher_target);
 
     let exit_code = run_protocol_command(protocol_command, args.pass_entry.clone()).map_err(|err| {
         log_error!("Process handler failed: {}", err);

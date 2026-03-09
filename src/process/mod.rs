@@ -18,6 +18,10 @@ use std::process::ExitCode;
 pub(crate) use launch::{build_rdp_command_for_host_with_auth_settings, build_ssh_command_for_host, resolve_host_by_destination, spawn_command};
 pub(crate) const DISABLE_VAULT_AUTOLOGIN_ENV: &str = "COSSH_DISABLE_VAULT_AUTOLOGIN";
 
+pub(crate) fn prefer_pty_centered_interactive_ssh_runtime() -> bool {
+    pty_runtime::prefer_pty_centered_ssh_runtime()
+}
+
 pub(crate) fn run_ssh_process(process_args: Vec<String>, is_non_interactive: bool, explicit_pass_entry: Option<String>) -> Result<ExitCode> {
     log_info!(
         "Starting SSH process: interactive={} ssh_arg_count={} explicit_pass_entry={} destination_resolved={}",

@@ -10,6 +10,7 @@ use crate::auth::ipc::{self, VaultStatus, VaultStatusEvent, VaultStatusEventKind
 use crate::config;
 use crate::inventory::{ConnectionProtocol, FolderId, InventoryHost, TreeFolder};
 use crate::log_debug;
+use crate::reload_notice::{ReloadNoticeToast, format_reload_notice};
 use ratatui::layout::Rect;
 use std::collections::{HashMap, HashSet};
 use std::io;
@@ -77,7 +78,7 @@ pub(crate) struct AppState {
     pub(crate) vault_status: VaultStatus,
     pub(crate) quick_connect_default_ssh_logging: bool,
     pub(crate) last_terminal_size: (u16, u16),
-    pending_config_reload_notices: Vec<String>,
+    pub(crate) reload_notice_toast: Option<ReloadNoticeToast>,
     pub(crate) ui_dirty: bool,
     pub(crate) last_draw_at: Instant,
     pub(crate) last_seen_render_epoch: u64,
@@ -227,39 +228,16 @@ impl AppState {
     }
 
     pub(crate) fn apply_config_reload_notifications(&mut self) {
-        let notices = config::take_reload_notices();
-        if !notices.is_empty() {
-            self.pending_config_reload_notices.extend(notices);
+        if let Some(notice) = config::take_reload_notices().into_iter().last() {
+            self.reload_notice_toast = Some(ReloadNoticeToast::new(format_reload_notice(&notice)));
+            self.mark_ui_dirty();
         }
-        if self.pending_config_reload_notices.is_empty() {
-            return;
-        }
+    }
 
-        let pending_notices = std::mem::take(&mut self.pending_config_reload_notices);
-        let injected = {
-            let Some(session) = self.tabs.get(self.selected_tab).and_then(|tab| tab.session.as_ref()) else {
-                self.pending_config_reload_notices = pending_notices;
-                return;
-            };
-
-            match session.engine().lock() {
-                Ok(mut engine) => {
-                    for notice in &pending_notices {
-                        let message = format!("\r\n[color-ssh] {}\r\n", notice);
-                        engine.process_output(message.as_bytes());
-                    }
-                    drop(engine);
-                    session.bump_render_epoch();
-                    true
-                }
-                Err(_) => {
-                    self.pending_config_reload_notices = pending_notices;
-                    return;
-                }
-            }
-        };
-
-        if injected {
+    pub(crate) fn expire_reload_notice_toast(&mut self) {
+        let should_clear = self.reload_notice_toast.as_ref().is_some_and(ReloadNoticeToast::expired);
+        if should_clear {
+            self.reload_notice_toast = None;
             self.mark_ui_dirty();
         }
     }
@@ -315,7 +293,7 @@ impl AppState {
             vault_status: init.vault_status,
             quick_connect_default_ssh_logging: init.quick_connect_default_ssh_logging,
             last_terminal_size: init.last_terminal_size,
-            pending_config_reload_notices: Vec::new(),
+            reload_notice_toast: None,
             ui_dirty: true,
             last_draw_at: now,
             last_seen_render_epoch: 0,

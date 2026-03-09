@@ -1,7 +1,7 @@
 //! Terminal-tabs and root layout rendering.
 
 use crate::terminal_core::highlight_overlay::{HighlightOverlayContext, HighlightOverlayViewport};
-use crate::terminal_ratatui::{apply_overlay_style, paint_terminal_viewport};
+use crate::terminal_ratatui::{apply_overlay_style, paint_terminal_viewport, render_reload_notice_toast};
 use crate::tui::AppState;
 use crate::tui::features::selection::extract::is_cell_in_selection;
 use crate::tui::ui::theme::{self, display_width, truncate_to_display_width};
@@ -229,6 +229,9 @@ impl AppState {
         self.render_quick_connect_modal(frame, size);
         self.render_vault_unlock_modal(frame, size);
         self.render_vault_status_modal(frame, size);
+        if let Some(reload_notice_toast) = self.reload_notice_toast.as_ref() {
+            render_reload_notice_toast(frame, size, reload_notice_toast.message());
+        }
     }
 
     // Terminal-pane composition.

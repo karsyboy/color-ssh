@@ -1,5 +1,6 @@
 use super::{DebugModeSource, debug_mode_source, resolve_logging_settings, resolve_session_name_for_logging};
 use crate::args::{MainArgs, MainCommand, ProtocolCommand, SshCommandArgs};
+use crate::config::ReloadNoticeTarget;
 use crate::inventory::{ConnectionProtocol, InventoryHost};
 use crate::log::DebugVerbosity;
 
@@ -97,4 +98,43 @@ fn resolve_runtime_profile_for_command_ignores_inventory_hosts_with_wrong_protoc
     let profile = super::dispatch::resolve_runtime_profile_for_command(None, Some(&command), &[host]);
 
     assert_eq!(profile, None);
+}
+
+#[test]
+fn protocol_reload_notice_target_queues_direct_pty_ssh_notices() {
+    let command = ProtocolCommand::Ssh(SshCommandArgs {
+        ssh_args: vec!["router01".to_string()],
+        is_non_interactive: false,
+    });
+
+    assert_eq!(super::dispatch::protocol_reload_notice_target(&command, true), ReloadNoticeTarget::Queue);
+}
+
+#[test]
+fn protocol_reload_notice_target_keeps_passthrough_paths_on_stderr() {
+    let interactive_ssh = ProtocolCommand::Ssh(SshCommandArgs {
+        ssh_args: vec!["router01".to_string()],
+        is_non_interactive: false,
+    });
+    let non_interactive_ssh = ProtocolCommand::Ssh(SshCommandArgs {
+        ssh_args: vec!["router01".to_string()],
+        is_non_interactive: true,
+    });
+    let rdp = ProtocolCommand::Rdp(crate::args::RdpCommandArgs {
+        target: "desktop01".to_string(),
+        user: None,
+        domain: None,
+        port: None,
+        extra_args: Vec::new(),
+    });
+
+    assert_eq!(
+        super::dispatch::protocol_reload_notice_target(&interactive_ssh, false),
+        ReloadNoticeTarget::Stderr
+    );
+    assert_eq!(
+        super::dispatch::protocol_reload_notice_target(&non_interactive_ssh, true),
+        ReloadNoticeTarget::Stderr
+    );
+    assert_eq!(super::dispatch::protocol_reload_notice_target(&rdp, true), ReloadNoticeTarget::Stderr);
 }

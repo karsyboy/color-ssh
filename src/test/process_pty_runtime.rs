@@ -1,7 +1,9 @@
 use super::{
     HostScrollbackMirror, InteractiveSshRuntime, collect_host_scrollback_insertions, encode_mouse_event, infer_scrolled_line_count, paint_terminal_view,
-    select_interactive_ssh_runtime,
+    select_interactive_ssh_runtime, take_latest_reload_notice_toast,
 };
+use crate::config;
+use crate::reload_notice::format_reload_notice;
 use crate::terminal_core::highlight_overlay::{HighlightOverlay, HighlightOverlayEngine};
 use crate::terminal_core::{MouseProtocolEncoding, MouseProtocolMode, TerminalEngine};
 use crossterm::event::{KeyModifiers, MouseButton, MouseEvent, MouseEventKind};
@@ -155,4 +157,21 @@ fn collect_host_scrollback_insertions_returns_scrolled_primary_rows() {
     assert_eq!(insertions.len(), 1);
     assert_eq!(insertions[0].viewport.size().0, 1);
     assert_eq!(trim_line(&insertions[0].viewport.rows()[0].display_text()), "line1");
+}
+
+#[test]
+fn format_reload_notice_prefixes_message() {
+    assert_eq!(format_reload_notice("Config reloaded successfully"), "[color-ssh] Config reloaded successfully");
+}
+
+#[test]
+fn take_latest_reload_notice_toast_uses_latest_notice() {
+    let _ = config::take_reload_notices();
+    config::queue_reload_notice("Config reloaded successfully".to_string());
+    config::queue_reload_notice("Config reload failed: parse error at line 77".to_string());
+
+    let toast = take_latest_reload_notice_toast().expect("reload notice toast");
+
+    assert_eq!(toast.message(), "[color-ssh] Config reload failed: parse error at line 77");
+    let _ = config::take_reload_notices();
 }
