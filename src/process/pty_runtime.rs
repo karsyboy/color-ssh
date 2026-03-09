@@ -653,12 +653,9 @@ fn render_terminal_frame(
         },
     );
 
-    let cursor = paint_terminal_view(frame.buffer_mut(), area, &viewport, &overlay, scroll_offset == 0);
+    let _cursor = paint_terminal_view(frame.buffer_mut(), area, &viewport, &overlay, scroll_offset == 0);
     if let Some(reload_notice_toast) = reload_notice_toast {
         render_reload_notice_toast(frame, area, reload_notice_toast);
-    }
-    if let Some(cursor) = cursor {
-        frame.set_cursor_position(cursor);
     }
     Ok(())
 }
