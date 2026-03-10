@@ -3,9 +3,8 @@ use super::{
     select_interactive_ssh_runtime, take_latest_reload_notice_toast,
 };
 use crate::config;
-use crate::config::{AuthSettings, HighlightOverlayAutoPolicy, HighlightOverlayMode, InteractiveProfileSnapshot};
-use crate::terminal::CompiledHighlightRule;
-use crate::terminal::format_reload_notice;
+use crate::config::{AuthSettings, CompiledHighlightRule, HighlightOverlayAutoPolicy, HighlightOverlayMode, InteractiveProfileSnapshot};
+use crate::runtime::format_reload_notice;
 use crate::terminal::highlight_overlay::{HighlightOverlay, HighlightOverlayEngine};
 use crate::terminal::{MouseProtocolEncoding, MouseProtocolMode, TerminalEngine};
 use crossterm::event::{KeyModifiers, MouseButton, MouseEvent, MouseEventKind};

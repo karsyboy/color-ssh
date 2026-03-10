@@ -4,12 +4,14 @@
 //! process-wide lock.
 
 mod errors;
+mod highlight;
 mod loader;
 mod paths;
 mod schema;
 mod watcher;
 
 pub use errors::ConfigError;
+pub(crate) use highlight::CompiledHighlightRule;
 pub use schema::{AuthSettings, Config, HighlightOverlayAutoPolicy, HighlightOverlayMode, HighlightRule, InteractiveSettings, Metadata, Settings};
 #[cfg(test)]
 pub(crate) use watcher::ProfileReloadEvent;
@@ -19,7 +21,6 @@ pub use watcher::{ConfigWatchScope, ReloadNoticeTarget, config_watcher, config_w
 #[cfg(test)]
 pub(crate) use watcher::{queue_profile_reload_event, queue_reload_notice};
 
-use crate::terminal::CompiledHighlightRule;
 use once_cell::sync::OnceCell;
 use regex::Regex;
 use regex::RegexSet;

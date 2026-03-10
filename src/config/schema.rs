@@ -3,7 +3,7 @@
 //! This module defines stable user-facing config fields and runtime metadata
 //! attached after parsing.
 
-use crate::terminal::CompiledHighlightRule;
+use super::CompiledHighlightRule;
 use regex::{Regex, RegexSet};
 use serde::{Deserialize, Deserializer};
 use std::{collections::HashMap, path::PathBuf};

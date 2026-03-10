@@ -173,5 +173,5 @@ impl EventListener for TerminalEventListener {
 }
 
 #[cfg(test)]
-#[path = "../test/terminal_core_event_listener.rs"]
+#[path = "../test/terminal_event_listener.rs"]
 mod tests;

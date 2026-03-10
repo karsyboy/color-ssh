@@ -6,8 +6,7 @@
 //! them additively during rendering.
 
 use super::{AnsiColor, MouseProtocolMode, TerminalViewport};
-use crate::config::{self, HighlightOverlayAutoPolicy, HighlightOverlayMode};
-use crate::terminal::CompiledHighlightRule;
+use crate::config::{self, CompiledHighlightRule, HighlightOverlayAutoPolicy, HighlightOverlayMode};
 use crate::{debug_enabled, log_debug};
 use alacritty_terminal::vte::ansi::Rgb;
 use regex::RegexSet;
@@ -1065,5 +1064,5 @@ fn byte_range_to_cell_columns(text: &str, start: usize, end: usize) -> (u16, u16
 }
 
 #[cfg(test)]
-#[path = "../test/terminal_core_highlight_overlay.rs"]
+#[path = "../test/terminal_highlight_overlay.rs"]
 mod tests;

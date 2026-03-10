@@ -1,7 +1,7 @@
 use super::*;
+use crate::config::CompiledHighlightRule;
 use crate::config::{self, AuthSettings};
 use crate::inventory::{ConnectionProtocol, InventoryHost};
-use crate::terminal::CompiledHighlightRule;
 use crate::terminal::{TerminalEngine, highlight_overlay::HighlightOverlayContext, highlight_overlay::HighlightOverlayViewport};
 use crate::test::support::{config::base_config, fs::TestWorkspace};
 use crate::tui::VaultUnlockAction;

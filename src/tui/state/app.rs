@@ -10,7 +10,7 @@ use crate::auth::ipc::{self, VaultStatus, VaultStatusEvent, VaultStatusEventKind
 use crate::config;
 use crate::inventory::{ConnectionProtocol, FolderId, InventoryHost, TreeFolder};
 use crate::log_debug;
-use crate::terminal::{ReloadNoticeToast, format_reload_notice};
+use crate::runtime::{ReloadNoticeToast, format_reload_notice};
 use crate::terminal::{TerminalGridPoint, TerminalSelection};
 use ratatui::layout::Rect;
 use std::collections::{HashMap, HashSet};
