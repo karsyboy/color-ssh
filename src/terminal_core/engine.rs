@@ -8,12 +8,12 @@
 use super::event_listener::TerminalEventListener;
 use super::host::TerminalHostCallbacks;
 use super::types::{TerminalInputWriter, TerminalSearchMatch};
-use super::view::TerminalViewModel;
+use super::view::{TerminalTextSpan, TerminalViewModel};
 use alacritty_terminal::grid::{Dimensions, Scroll};
 use alacritty_terminal::index::{Boundary, Column, Line, Point};
-use alacritty_terminal::term::search::RegexSearch;
 use alacritty_terminal::term::{Config as TermConfig, Term};
 use alacritty_terminal::vte::ansi::Processor;
+use regex::Regex;
 
 #[derive(Clone, Copy)]
 struct TermDimensions {
@@ -237,42 +237,37 @@ impl TerminalEngine {
         }
 
         let pattern = format!("(?i:{})", regex::escape(query));
-        let mut regex = match RegexSearch::new(&pattern) {
+        let regex = match Regex::new(&pattern) {
             Ok(regex) => regex,
             Err(_) => return Vec::new(),
         };
 
-        let top = self.term.topmost_line();
-        let bottom = self.term.bottommost_line();
-        let last_col = self.term.last_column();
-        let search_end = Point::new(bottom, last_col);
-        let mut search_start = Point::new(top, Column(0));
-        let query_char_count = query.chars().count();
         let mut matches = Vec::new();
+        let view = self.view_model();
 
-        while search_start <= search_end {
-            let Some(range) = self.term.regex_search_right(&mut regex, search_start, search_end) else {
-                break;
+        for absolute_row in self.term.topmost_line().0..=self.term.bottommost_line().0 {
+            let Some((row_text, spans)) = view.search_text_for_absolute_row(absolute_row as i64) else {
+                continue;
             };
 
-            let start_point = *range.start();
-            let end_point = *range.end();
+            for row_match in regex.find_iter(&row_text) {
+                let Some(start_span) = text_span_for_byte(&spans, row_match.start()) else {
+                    continue;
+                };
+                let Some(end_span) = text_span_for_byte(&spans, row_match.end().saturating_sub(1)) else {
+                    continue;
+                };
 
-            if start_point.line == end_point.line {
-                matches.push((start_point.line.0 as i64, start_point.column.0 as u16, query_char_count));
+                matches.push((absolute_row as i64, start_span.start_col(), end_span.end_col()));
             }
-
-            if end_point >= search_end {
-                break;
-            }
-
-            search_start = if end_point.column < last_col {
-                Point::new(end_point.line, end_point.column + 1)
-            } else {
-                Point::new(end_point.line + 1, Column(0))
-            };
         }
 
         matches
     }
+}
+
+fn text_span_for_byte(spans: &[TerminalTextSpan], byte_offset: usize) -> Option<TerminalTextSpan> {
+    let span_idx = spans.partition_point(|span| span.end_byte() <= byte_offset);
+    let span = spans.get(span_idx).copied()?;
+    (byte_offset >= span.start_byte() && byte_offset < span.end_byte()).then_some(span)
 }

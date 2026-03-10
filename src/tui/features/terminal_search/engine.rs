@@ -15,10 +15,7 @@ impl AppState {
 
     pub(crate) fn refresh_current_terminal_search_range(&mut self) {
         if let Some(search) = self.current_tab_search_mut() {
-            search.current_highlight_range = search.matches.get(search.current).map(|(row, col, len)| {
-                let end_col = col.saturating_add(*len as u16);
-                (*row, *col, end_col)
-            });
+            search.current_highlight_range = search.matches.get(search.current).copied();
         }
     }
 

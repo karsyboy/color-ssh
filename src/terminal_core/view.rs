@@ -11,7 +11,7 @@ use alacritty_terminal::index::{Column, Line};
 use alacritty_terminal::term::TermMode;
 use alacritty_terminal::term::cell::{Cell as TermCell, Flags};
 use alacritty_terminal::vte::ansi::NamedColor;
-use unicode_width::UnicodeWidthChar;
+use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum MouseProtocolEncoding {
@@ -212,6 +212,32 @@ impl TerminalCellSnapshot {
             glyph: TerminalGlyph::Blank,
             style: TerminalCellStyle::default(),
         }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct TerminalTextSpan {
+    start_byte: usize,
+    end_byte: usize,
+    start_col: u16,
+    end_col: u16,
+}
+
+impl TerminalTextSpan {
+    pub(crate) fn start_byte(self) -> usize {
+        self.start_byte
+    }
+
+    pub(crate) fn end_byte(self) -> usize {
+        self.end_byte
+    }
+
+    pub(crate) fn start_col(self) -> u16 {
+        self.start_col
+    }
+
+    pub(crate) fn end_col(self) -> u16 {
+        self.end_col
     }
 }
 
@@ -418,6 +444,43 @@ impl<'a> TerminalViewModel<'a> {
     /// Extract text for an arbitrary terminal-coordinate selection.
     pub(crate) fn selection_text(&self, start: (i64, u16), end: (i64, u16)) -> String {
         self.engine.selection_text(start, end)
+    }
+
+    /// Extract searchable row text with terminal-column spans for one absolute row.
+    pub(crate) fn search_text_for_absolute_row(&self, absolute_row: i64) -> Option<(String, Vec<TerminalTextSpan>)> {
+        let grid = self.engine.term.grid();
+        let line = Line(absolute_row as i32);
+        if line < grid.topmost_line() || line > grid.bottommost_line() {
+            return None;
+        }
+
+        let mut text = String::new();
+        let mut spans = Vec::with_capacity(grid.columns());
+        let mut scratch = String::new();
+
+        for col_idx in 0..grid.columns() {
+            let col = col_idx as u16;
+            let cell = &grid[line][Column(col_idx)];
+            if cell.flags.intersects(Flags::WIDE_CHAR_SPACER | Flags::LEADING_WIDE_CHAR_SPACER) {
+                continue;
+            }
+
+            let cell_view = TerminalCellView { cell };
+            let symbol = cell_view.symbol(&mut scratch);
+            let start_byte = text.len();
+            text.push_str(symbol);
+            let end_byte = text.len();
+            let cell_width = UnicodeWidthStr::width(symbol).max(1) as u16;
+
+            spans.push(TerminalTextSpan {
+                start_byte,
+                end_byte,
+                start_col: col,
+                end_col: col.saturating_add(cell_width),
+            });
+        }
+
+        Some((text, spans))
     }
 }
 

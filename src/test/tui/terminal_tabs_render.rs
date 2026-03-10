@@ -1,4 +1,4 @@
-use super::{split_terminal_content_and_scrollbar, terminal_scrollbar_geometry};
+use super::{search_row_ranges_contain, split_terminal_content_and_scrollbar, terminal_scrollbar_geometry};
 use ratatui::layout::Rect;
 
 #[test]
@@ -34,4 +34,16 @@ fn terminal_scrollbar_geometry_expands_thumb_when_no_scrollback_exists() {
 
     assert_eq!(geometry.thumb_height, 6);
     assert_eq!(geometry.thumb_top, 0);
+}
+
+#[test]
+fn search_row_ranges_contain_treats_end_column_as_exclusive() {
+    let ranges = [(2, 5), (8, 10)];
+
+    assert!(search_row_ranges_contain(Some(&ranges), 2));
+    assert!(search_row_ranges_contain(Some(&ranges), 4));
+    assert!(!search_row_ranges_contain(Some(&ranges), 5));
+    assert!(!search_row_ranges_contain(Some(&ranges), 7));
+    assert!(search_row_ranges_contain(Some(&ranges), 8));
+    assert!(!search_row_ranges_contain(Some(&ranges), 10));
 }

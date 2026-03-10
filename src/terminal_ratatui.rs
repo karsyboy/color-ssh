@@ -7,7 +7,7 @@
 //! for presentation: it combines canonical cell styles with additive overlay
 //! styles and never writes back into the PTY or terminal engine.
 
-use crate::terminal_core::highlight_overlay::HighlightOverlayStyle;
+use crate::terminal_core::highlight_overlay::{HighlightCellRange, HighlightOverlayStyle};
 use crate::terminal_core::{AnsiColor, TerminalCellSnapshot, TerminalViewport};
 use alacritty_terminal::vte::ansi::NamedColor;
 use ratatui::{
@@ -178,6 +178,26 @@ pub(crate) fn apply_overlay_style(mut base_style: Style, overlay_style: &Highlig
     }
 
     base_style
+}
+
+pub(crate) fn apply_overlay_ranges(base_style: Style, row_ranges: Option<&[HighlightCellRange]>, styles: &[HighlightOverlayStyle], col: u16) -> Style {
+    let Some(row_ranges) = row_ranges else {
+        return base_style;
+    };
+
+    let range_idx = row_ranges.partition_point(|range| range.end_col <= col);
+    let Some(range) = row_ranges.get(range_idx) else {
+        return base_style;
+    };
+    if col < range.start_col || col >= range.end_col {
+        return base_style;
+    }
+
+    let Some(overlay_style) = styles.get(range.style_index()) else {
+        return base_style;
+    };
+
+    apply_overlay_style(base_style, overlay_style)
 }
 
 fn to_ratatui_color(color: AnsiColor) -> Color {

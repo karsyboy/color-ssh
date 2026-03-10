@@ -10,8 +10,10 @@ use std::sync::{Arc, Mutex};
 /// future backend.
 pub(crate) type TerminalInputWriter = Arc<Mutex<Box<dyn Write + Send>>>;
 
-/// Search match coordinates expressed as `(absolute_line, column, cell_len)`.
+/// Search match coordinates expressed as `(absolute_line, start_col, end_col)`.
 ///
 /// Keeping this in terminal space instead of renderer space allows both the
 /// current TUI and a future GUI to project search results onto their own view.
-pub(crate) type TerminalSearchMatch = (i64, u16, usize);
+/// `end_col` is exclusive so the tuple maps directly onto row-local highlight
+/// ranges without re-deriving terminal cell widths from grapheme counts.
+pub(crate) type TerminalSearchMatch = (i64, u16, u16);

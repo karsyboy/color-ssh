@@ -12,7 +12,7 @@ pub(crate) struct TerminalSearchState {
     pub(crate) query: String,
     pub(crate) query_cursor: usize,
     pub(crate) query_selection: Option<(usize, usize)>,
-    pub(crate) matches: Vec<(i64, u16, usize)>,
+    pub(crate) matches: Vec<(i64, u16, u16)>,
     pub(crate) current: usize,
     pub(crate) highlight_row_ranges: HashMap<i64, Vec<(u16, u16)>>,
     pub(crate) current_highlight_range: Option<(i64, u16, u16)>,

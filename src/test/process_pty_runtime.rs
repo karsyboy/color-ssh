@@ -3,6 +3,8 @@ use super::{
     select_interactive_ssh_runtime, take_latest_reload_notice_toast,
 };
 use crate::config;
+use crate::config::{AuthSettings, HighlightOverlayAutoPolicy, HighlightOverlayMode, InteractiveProfileSnapshot};
+use crate::highlight_rules::CompiledHighlightRule;
 use crate::reload_notice::format_reload_notice;
 use crate::terminal_core::highlight_overlay::{HighlightOverlay, HighlightOverlayEngine};
 use crate::terminal_core::{MouseProtocolEncoding, MouseProtocolMode, TerminalEngine};
@@ -12,6 +14,7 @@ use ratatui::{
     layout::Rect,
     style::{Color, Modifier},
 };
+use regex::{Regex, RegexSet};
 
 fn buffer_lines(buffer: &Buffer) -> Vec<String> {
     let mut lines = Vec::with_capacity(buffer.area.height as usize);
@@ -105,6 +108,38 @@ fn terminal_view_preserves_background_and_underline_styles() {
     let cell = &buffer[(0, 0)];
     assert_eq!(cell.bg, Color::Indexed(1));
     assert!(cell.modifier.contains(Modifier::UNDERLINED));
+}
+
+#[test]
+fn terminal_view_applies_overlay_row_ranges_from_renderer_contract() {
+    let mut engine = TerminalEngine::new(1, 20, 32);
+    engine.process_output(b"status: error");
+
+    let snapshot = InteractiveProfileSnapshot {
+        auth_settings: AuthSettings::default(),
+        history_buffer: 32,
+        remote_clipboard_write: false,
+        remote_clipboard_max_bytes: 4096,
+        ssh_logging_enabled: false,
+        secret_patterns: Vec::new(),
+        overlay_rules: vec![CompiledHighlightRule::new(
+            Regex::new("error").expect("overlay regex"),
+            "\x1b[38;2;255;0;0m".to_string(),
+        )],
+        overlay_rule_set: Some(RegexSet::new(["error"]).expect("overlay rule set")),
+        overlay_mode: HighlightOverlayMode::Always,
+        overlay_auto_policy: HighlightOverlayAutoPolicy::Safe,
+        config_version: 0,
+    };
+    let mut overlay_engine = HighlightOverlayEngine::from_snapshot(&snapshot);
+
+    let render_snapshot = engine.view_model().frontend_snapshot(1, 20);
+    let overlay = render_snapshot.build_highlight_overlay(&mut overlay_engine, 1);
+    let mut buffer = Buffer::empty(Rect::new(0, 0, 20, 1));
+
+    paint_terminal_view(&mut buffer, Rect::new(0, 0, 20, 1), render_snapshot.viewport(), &overlay, true);
+
+    assert_eq!(buffer[(8, 0)].fg, Color::Rgb(255, 0, 0));
 }
 
 #[test]

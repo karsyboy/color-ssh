@@ -15,7 +15,7 @@ use crate::terminal_core::{
     encode_key_event_bytes, encode_mouse_event_bytes, encode_paste_bytes,
 };
 use crate::terminal_host::terminal_host_callbacks;
-use crate::terminal_ratatui::{apply_overlay_style, paint_terminal_viewport, render_reload_notice_toast};
+use crate::terminal_ratatui::{apply_overlay_ranges, paint_terminal_viewport, render_reload_notice_toast};
 use crate::{Result, command_path, config, log, log_debug, log_error};
 use crossterm::{
     cursor::MoveTo,
@@ -690,10 +690,17 @@ fn paint_terminal_view(
     highlight_overlay: &HighlightOverlay,
     show_cursor: bool,
 ) -> Option<Position> {
+    let overlay_styles = highlight_overlay.styles();
+    let mut active_row = None;
+    let mut active_row_ranges = None;
+
     paint_terminal_viewport(buffer, area, viewport, show_cursor, |absolute_row, col, _cell, is_cursor, base_style| {
-        let syntax_style = highlight_overlay
-            .style_for_cell(absolute_row, col)
-            .map_or(base_style, |overlay_style| apply_overlay_style(base_style, overlay_style));
+        if active_row != Some(absolute_row) {
+            active_row = Some(absolute_row);
+            active_row_ranges = highlight_overlay.ranges_for_row(absolute_row);
+        }
+
+        let syntax_style = apply_overlay_ranges(base_style, active_row_ranges, overlay_styles, col);
 
         if is_cursor {
             syntax_style.bg(ratatui::style::Color::White).fg(ratatui::style::Color::Black)

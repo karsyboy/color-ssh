@@ -1,6 +1,6 @@
 //! Terminal-tabs and root layout rendering.
 
-use crate::terminal_ratatui::{apply_overlay_style, paint_terminal_viewport, render_reload_notice_toast};
+use crate::terminal_ratatui::{apply_overlay_ranges, paint_terminal_viewport, render_reload_notice_toast};
 use crate::tui::AppState;
 use crate::tui::features::selection::extract::{current_selection, is_cell_in_selection};
 use crate::tui::ui::theme::{self, display_width, truncate_to_display_width};
@@ -102,6 +102,19 @@ fn draw_horizontal_rule(frame: &mut Frame, y: u16, x: u16, width: u16, style: St
         cell.set_symbol("─");
         cell.set_style(style);
     }
+}
+
+fn search_row_ranges_contain(row_ranges: Option<&[(u16, u16)]>, col: u16) -> bool {
+    let Some(row_ranges) = row_ranges else {
+        return false;
+    };
+
+    let range_idx = row_ranges.partition_point(|(_, end_col)| *end_col <= col);
+    let Some((start_col, end_col)) = row_ranges.get(range_idx) else {
+        return false;
+    };
+
+    col >= *start_col && col < *end_col
 }
 
 impl AppState {
@@ -358,22 +371,33 @@ impl AppState {
                 let max_scrollback = render_state.scrollback().max_offset();
                 self.tabs[tab_idx].scroll_offset = effective_scroll_offset;
                 let highlight_overlay = render_state.build_highlight_overlay(&mut highlight_overlay_engine);
+                let overlay_styles = highlight_overlay.styles();
                 self.tabs[tab_idx].highlight_overlay = highlight_overlay_engine;
+                let mut active_overlay_row = None;
+                let mut active_overlay_row_ranges = None;
+                let mut active_search_row = None;
+                let mut active_search_row_ranges: Option<&[(u16, u16)]> = None;
                 let _ = paint_terminal_viewport(
                     frame.buffer_mut(),
                     content_area,
                     render_state.viewport(),
                     effective_scroll_offset == 0,
                     |absolute_row, col, _cell, is_cursor, base_style| {
-                        let row_ranges = search_row_ranges.as_ref().and_then(|ranges| ranges.get(&absolute_row));
+                        if active_overlay_row != Some(absolute_row) {
+                            active_overlay_row = Some(absolute_row);
+                            active_overlay_row_ranges = highlight_overlay.ranges_for_row(absolute_row);
+                        }
+                        if active_search_row != Some(absolute_row) {
+                            active_search_row = Some(absolute_row);
+                            active_search_row_ranges = search_row_ranges.as_ref().and_then(|ranges| ranges.get(&absolute_row).map(Vec::as_slice));
+                        }
+
                         let current_row_range =
                             current_search_range.and_then(|(match_row, start_col, end_col)| (absolute_row == match_row).then_some((start_col, end_col)));
                         let is_selected = is_cell_in_selection(absolute_row, col, selection);
-                        let is_search_match = row_ranges.is_some_and(|ranges| ranges.iter().any(|(start_col, end_col)| col >= *start_col && col < *end_col));
+                        let is_search_match = search_row_ranges_contain(active_search_row_ranges, col);
                         let is_current_search_match = current_row_range.is_some_and(|(start_col, end_col)| col >= start_col && col < end_col);
-                        let syntax_style = highlight_overlay
-                            .style_for_cell(absolute_row, col)
-                            .map_or(base_style, |overlay_style| apply_overlay_style(base_style, overlay_style));
+                        let syntax_style = apply_overlay_ranges(base_style, active_overlay_row_ranges, overlay_styles, col);
 
                         if is_current_search_match {
                             syntax_style.bg(theme::ansi_yellow()).fg(theme::ansi_black())

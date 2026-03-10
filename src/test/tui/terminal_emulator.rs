@@ -98,6 +98,26 @@ fn terminal_frontend_snapshot_projects_scrollback_without_mutating_live_view() {
 }
 
 #[test]
+fn terminal_search_matches_use_terminal_cell_ranges_for_wide_glyphs() {
+    let mut engine = TerminalEngine::new(1, 8, 8);
+    engine.process_output("A字B".as_bytes());
+
+    let matches = engine.search_literal_matches("字");
+
+    assert_eq!(matches, vec![(0, 1, 3)]);
+}
+
+#[test]
+fn terminal_search_matches_keep_combining_clusters_to_single_cell_ranges() {
+    let mut engine = TerminalEngine::new(1, 8, 8);
+    engine.process_output("e\u{0301}x".as_bytes());
+
+    let matches = engine.search_literal_matches("e\u{0301}");
+
+    assert_eq!(matches, vec![(0, 0, 1)]);
+}
+
+#[test]
 fn terminal_selection_tracks_terminal_coordinate_ranges() {
     let selection = TerminalSelection::new((2, 5), (1, 3)).ordered();
 
