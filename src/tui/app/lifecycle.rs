@@ -51,7 +51,7 @@ pub fn run_session_manager(runtime_profile: Option<String>) -> io::Result<()> {
     let stdout = io::stdout();
     let backend = CrosstermBackend::new(stdout);
     let mut terminal = Terminal::new(backend)?;
-    let _watcher = config::config_watcher(runtime_profile, config::ReloadNoticeTarget::Queue);
+    let _watcher = config::config_watcher_with_scope(runtime_profile, config::ReloadNoticeTarget::Queue, config::ConfigWatchScope::AllProfiles);
 
     let mut app = AppState::new()?;
     let result = run_app(&mut terminal, &mut app);

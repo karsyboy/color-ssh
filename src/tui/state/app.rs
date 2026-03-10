@@ -228,10 +228,45 @@ impl AppState {
     }
 
     pub(crate) fn apply_config_reload_notifications(&mut self) {
-        if let Some(notice) = config::take_reload_notices().into_iter().last() {
+        let mut latest_notice = config::take_reload_notices().into_iter().last();
+
+        for event in config::take_profile_reload_events() {
+            if event.success
+                && let Err(err) = self.refresh_tabs_for_profile(&event.profile)
+            {
+                let message = format!("Config profile '{}' reloaded, but existing tabs could not be refreshed: {}", event.profile, err);
+                crate::log_error!("{}", message);
+                latest_notice = Some(message);
+                continue;
+            }
+            latest_notice = Some(event.message);
+        }
+
+        if let Some(notice) = latest_notice {
             self.reload_notice_toast = Some(ReloadNoticeToast::new(format_reload_notice(&notice)));
             self.mark_ui_dirty();
         }
+    }
+
+    fn refresh_tabs_for_profile(&mut self, profile: &str) -> io::Result<usize> {
+        let matching_tabs = self
+            .tabs
+            .iter()
+            .enumerate()
+            .filter_map(|(tab_idx, tab)| (tab.host.profile.as_deref() == Some(profile)).then_some(tab_idx))
+            .collect::<Vec<_>>();
+
+        if matching_tabs.is_empty() {
+            return Ok(0);
+        }
+
+        let session_profile = config::interactive_profile_snapshot(Some(profile))?;
+        for tab_idx in &matching_tabs {
+            self.tabs[*tab_idx].highlight_overlay = crate::terminal_core::highlight_overlay::HighlightOverlayEngine::from_snapshot(&session_profile);
+        }
+
+        self.mark_ui_dirty();
+        Ok(matching_tabs.len())
     }
 
     pub(crate) fn expire_reload_notice_toast(&mut self) {
