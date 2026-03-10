@@ -59,6 +59,10 @@ pub(crate) struct TerminalCursorSnapshot {
 }
 
 impl TerminalCursorSnapshot {
+    pub(crate) fn new(row: u16, col: u16) -> Self {
+        Self { row, col }
+    }
+
     pub(crate) fn row(&self) -> u16 {
         self.row
     }
@@ -256,10 +260,7 @@ impl<'a> TerminalViewModel<'a> {
         let render_cols = max_cols.min(vt_cols);
         let display_offset = self.engine.term.grid().display_offset() as i64;
         let cursor = (!self.cursor_hidden())
-            .then(|| TerminalCursorSnapshot {
-                row: self.cursor_position().0,
-                col: self.cursor_position().1,
-            })
+            .then(|| TerminalCursorSnapshot::new(self.cursor_position().0, self.cursor_position().1))
             .filter(|cursor| cursor.row < render_rows && cursor.col < render_cols);
 
         let mut rows = Vec::with_capacity(render_rows as usize);

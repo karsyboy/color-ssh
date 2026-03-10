@@ -18,10 +18,14 @@ Color-SSH's interactive architecture is now PTY-centered. Interactive SSH displa
 
 ## Renderer Responsibilities
 
+- `TerminalSession::snapshot_for_frontend(...)` is the renderer adapter boundary for both the current TUI and a future GUI.
+- `TerminalSessionSnapshot` and `TerminalFrontendSnapshot` are the frontend-neutral payloads a renderer consumes each frame.
 - `src/terminal_ratatui.rs` converts `TerminalViewport` snapshots into ratatui buffer cells.
 - The renderer combines base terminal cell styling with optional overlay styling at paint time.
 - Cursor presentation, scrollback presentation, and viewport painting are renderer concerns.
 - Renderers never inject ANSI sequences back into a PTY or child stdout stream.
+
+See `docs/terminal-frontend-contract.md` for the full frontend contract, TUI-specific boundaries, and GPUI integration notes.
 
 ## Highlight Overlay Responsibilities
 

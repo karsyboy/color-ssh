@@ -13,6 +13,7 @@
 mod color;
 mod engine;
 mod event_listener;
+mod frontend;
 pub(crate) mod highlight_overlay;
 mod session;
 mod types;
@@ -20,6 +21,12 @@ mod view;
 
 pub(crate) use color::{AnsiColor, ansi_index_to_rgb};
 pub(crate) use engine::TerminalEngine;
+#[allow(unused_imports)]
+pub(crate) use frontend::{
+    TerminalCursorState, TerminalFrontendSnapshot, TerminalGridPoint, TerminalMouseProtocolState, TerminalScrollbackState, TerminalSelection,
+    TerminalSessionSnapshot,
+};
 pub(crate) use session::{TerminalChild, TerminalSession};
 pub(crate) use types::TerminalInputWriter;
-pub(crate) use view::{MouseProtocolEncoding, MouseProtocolMode, TerminalCellSnapshot, TerminalViewport};
+#[allow(unused_imports)]
+pub(crate) use view::{MouseProtocolEncoding, MouseProtocolMode, TerminalCellSnapshot, TerminalCursorSnapshot, TerminalViewport};

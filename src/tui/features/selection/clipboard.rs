@@ -3,7 +3,7 @@
 //! Uses OSC 52 escape sequences via crossterm for clipboard operations.
 //! This works in most modern terminals: Konsole, Kitty, Alacritty, Wezterm, foot, etc.
 
-use super::extract::extract_selection_text;
+use super::extract::current_selection;
 use crate::tui::AppState;
 use crossterm::clipboard::CopyToClipboard;
 use crossterm::execute;
@@ -19,16 +19,8 @@ impl AppState {
     // Selection export.
     /// Copy the current text selection to clipboard
     pub(crate) fn copy_selection_to_clipboard(&self) {
-        let (start, end) = match (self.selection_start, self.selection_end) {
-            (Some(selection_start), Some(selection_end)) => {
-                // Normalize so start <= end in reading order
-                if selection_start.0 < selection_end.0 || (selection_start.0 == selection_end.0 && selection_start.1 <= selection_end.1) {
-                    (selection_start, selection_end)
-                } else {
-                    (selection_end, selection_start)
-                }
-            }
-            _ => return,
+        let Some(selection) = current_selection(self.selection_start, self.selection_end) else {
+            return;
         };
 
         if self.tabs.is_empty() || self.selected_tab >= self.tabs.len() {
@@ -41,10 +33,9 @@ impl AppState {
             None => return,
         };
 
-        let text = if let Ok(engine) = session.engine().lock() {
-            extract_selection_text(&engine, start, end)
-        } else {
-            return;
+        let text = match session.selection_text_for(selection) {
+            Ok(text) => text,
+            Err(_) => return,
         };
 
         if text.is_empty() {

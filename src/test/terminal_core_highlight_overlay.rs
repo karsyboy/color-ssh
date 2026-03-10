@@ -1,7 +1,4 @@
-use super::{
-    HighlightCompatibilityAction, HighlightOverlayBuildKind, HighlightOverlayContext, HighlightOverlayEngine, HighlightOverlayViewport,
-    HighlightSuppressionReason, viewport_changed_aggressively,
-};
+use super::{HighlightCompatibilityAction, HighlightOverlayBuildKind, HighlightOverlayEngine, HighlightSuppressionReason, viewport_changed_aggressively};
 use crate::config::{HighlightOverlayAutoPolicy, HighlightOverlayMode, InteractiveProfileSnapshot};
 use crate::highlight_rules::CompiledHighlightRule;
 use crate::terminal_core::{AnsiColor, TerminalEngine};
@@ -13,22 +10,15 @@ fn compiled_rule(pattern: &str, style: &str) -> CompiledHighlightRule {
 }
 
 fn build_overlay_for_engine(
-    terminal_engine: &TerminalEngine,
+    terminal_engine: &mut TerminalEngine,
     overlay_engine: &mut HighlightOverlayEngine,
     render_epoch: u64,
     display_scrollback: usize,
 ) -> super::HighlightOverlay {
+    terminal_engine.set_display_scrollback(display_scrollback);
     let view = terminal_engine.view_model();
     let (rows, cols) = view.size();
-    let viewport = view.viewport_snapshot(rows, cols);
-    let overlay_view = HighlightOverlayViewport::new(&viewport, view.is_alternate_screen(), view.mouse_protocol().0, view.cursor_hidden());
-    overlay_engine.build_visible_overlay(
-        &overlay_view,
-        HighlightOverlayContext {
-            render_epoch,
-            display_scrollback,
-        },
-    )
+    view.frontend_snapshot(rows, cols).build_highlight_overlay(overlay_engine, render_epoch)
 }
 
 fn render_dense_lines(terminal_engine: &mut TerminalEngine, line_count: usize, prefix: &str) {
@@ -49,7 +39,7 @@ fn overlay_highlights_visible_rows_with_renderer_side_styles() {
 
     let mut overlay_engine = HighlightOverlayEngine::with_rules(vec![compiled_rule("error", "\x1b[38;2;255;0;0;48;2;12;12;12m")], HighlightOverlayMode::Always);
 
-    let overlay = build_overlay_for_engine(&terminal_engine, &mut overlay_engine, 1, 0);
+    let overlay = build_overlay_for_engine(&mut terminal_engine, &mut overlay_engine, 1, 0);
 
     assert_eq!(overlay.suppression_reason, None);
     let view = terminal_engine.view_model();
@@ -67,6 +57,30 @@ fn overlay_highlights_visible_rows_with_renderer_side_styles() {
     assert!(matches!(style.bg_color(), Some(AnsiColor::Spec(Rgb { r: 12, g: 12, b: 12 }))));
 
     assert!(visible_text.starts_with("user@host:~$ error"));
+}
+
+#[test]
+fn overlay_exposes_row_ranges_and_style_table_for_gui_renderers() {
+    let mut terminal_engine = TerminalEngine::new(3, 32, 128);
+    terminal_engine.process_output(b"status: error\r\n");
+
+    let mut overlay_engine = HighlightOverlayEngine::with_rules(vec![compiled_rule("error", "\x1b[38;2;255;0;0m")], HighlightOverlayMode::Always);
+    let overlay = build_overlay_for_engine(&mut terminal_engine, &mut overlay_engine, 1, 0);
+
+    let view = terminal_engine.view_model();
+    let (highlight_row, visible_text) = view
+        .visible_row_texts()
+        .into_iter()
+        .find(|(_, text)| text.contains("error"))
+        .expect("visible row with highlight target");
+    let highlight_col = visible_text.find("error").expect("highlight column") as u16;
+    let ranges = overlay.ranges_for_row(highlight_row).expect("row highlight ranges");
+
+    assert_eq!(overlay.suppression_reason(), None);
+    assert!(!overlay.styles().is_empty());
+    assert!(ranges.iter().any(|range| highlight_col >= range.start_col() && highlight_col < range.end_col()));
+    let style = &overlay.styles()[ranges[0].style_index()];
+    assert!(matches!(style.fg_color(), Some(AnsiColor::Spec(Rgb { r: 255, g: 0, b: 0 }))));
 }
 
 #[test]
@@ -89,7 +103,7 @@ fn overlay_from_profile_snapshot_uses_snapshot_rules() {
     };
     let mut overlay_engine = HighlightOverlayEngine::from_snapshot(&snapshot);
 
-    let overlay = build_overlay_for_engine(&terminal_engine, &mut overlay_engine, 1, 0);
+    let overlay = build_overlay_for_engine(&mut terminal_engine, &mut overlay_engine, 1, 0);
 
     assert_eq!(overlay.suppression_reason, None);
     let view = terminal_engine.view_model();
@@ -109,7 +123,7 @@ fn overlay_auto_mode_preserves_log_stream_highlighting() {
 
     let mut overlay_engine = HighlightOverlayEngine::with_rules(vec![compiled_rule("error", "\x1b[38;2;255;0;0m")], HighlightOverlayMode::Auto);
 
-    let overlay = build_overlay_for_engine(&terminal_engine, &mut overlay_engine, 2, 0);
+    let overlay = build_overlay_for_engine(&mut terminal_engine, &mut overlay_engine, 2, 0);
 
     assert_eq!(overlay.suppression_reason, None);
     let view = terminal_engine.view_model();
@@ -130,7 +144,7 @@ fn overlay_suppresses_less_like_alternate_screen_sessions_in_auto_mode() {
 
     let mut overlay_engine = HighlightOverlayEngine::with_rules(vec![compiled_rule("error", "\x1b[38;2;255;0;0m")], HighlightOverlayMode::Auto);
 
-    let overlay = build_overlay_for_engine(&terminal_engine, &mut overlay_engine, 2, 0);
+    let overlay = build_overlay_for_engine(&mut terminal_engine, &mut overlay_engine, 2, 0);
 
     assert_eq!(overlay.suppression_reason, Some(HighlightSuppressionReason::AlternateScreen));
     assert!(overlay.style_for_cell(0, 0).is_none());
@@ -143,7 +157,7 @@ fn overlay_suppresses_vim_like_alternate_screen_sessions_in_auto_mode() {
 
     let mut overlay_engine = HighlightOverlayEngine::with_rules(vec![compiled_rule("error", "\x1b[38;2;255;0;0m")], HighlightOverlayMode::Auto);
 
-    let overlay = build_overlay_for_engine(&terminal_engine, &mut overlay_engine, 3, 0);
+    let overlay = build_overlay_for_engine(&mut terminal_engine, &mut overlay_engine, 3, 0);
 
     assert_eq!(overlay.suppression_reason, Some(HighlightSuppressionReason::AlternateScreen));
 }
@@ -155,7 +169,7 @@ fn overlay_suppresses_htop_like_mouse_reporting_sessions_in_auto_mode() {
 
     let mut overlay_engine = HighlightOverlayEngine::with_rules(vec![compiled_rule("error", "\x1b[38;2;255;0;0m")], HighlightOverlayMode::Auto);
 
-    let overlay = build_overlay_for_engine(&terminal_engine, &mut overlay_engine, 4, 0);
+    let overlay = build_overlay_for_engine(&mut terminal_engine, &mut overlay_engine, 4, 0);
 
     assert_eq!(overlay.suppression_reason, Some(HighlightSuppressionReason::MouseReporting));
 }
@@ -167,11 +181,11 @@ fn overlay_reuses_cached_overlay_when_render_epoch_changes_but_viewport_text_is_
 
     let mut overlay_engine = HighlightOverlayEngine::with_rules(vec![compiled_rule("error", "\x1b[38;2;255;0;0m")], HighlightOverlayMode::Always);
 
-    let _first_overlay = build_overlay_for_engine(&terminal_engine, &mut overlay_engine, 1, 0);
+    let _first_overlay = build_overlay_for_engine(&mut terminal_engine, &mut overlay_engine, 1, 0);
     assert_eq!(overlay_engine.profiler.last_build.kind, HighlightOverlayBuildKind::IncrementalAnalysis);
     assert_eq!(overlay_engine.profiler.last_build.analyzed_rows, 1);
 
-    let second_overlay = build_overlay_for_engine(&terminal_engine, &mut overlay_engine, 2, 0);
+    let second_overlay = build_overlay_for_engine(&mut terminal_engine, &mut overlay_engine, 2, 0);
 
     assert_eq!(overlay_engine.profiler.last_build.kind, HighlightOverlayBuildKind::SnapshotReuse);
     assert_eq!(overlay_engine.profiler.last_build.compatibility_action, HighlightCompatibilityAction::Full);
@@ -191,11 +205,11 @@ fn overlay_only_reanalyzes_newly_visible_rows_after_scroll() {
         HighlightOverlayMode::Always,
     );
 
-    let _first_overlay = build_overlay_for_engine(&terminal_engine, &mut overlay_engine, 1, 0);
+    let _first_overlay = build_overlay_for_engine(&mut terminal_engine, &mut overlay_engine, 1, 0);
     assert_eq!(overlay_engine.profiler.last_build.analyzed_rows, 3);
 
     terminal_engine.process_output(b"\r\ndelta");
-    let _second_overlay = build_overlay_for_engine(&terminal_engine, &mut overlay_engine, 2, 0);
+    let _second_overlay = build_overlay_for_engine(&mut terminal_engine, &mut overlay_engine, 2, 0);
 
     assert_eq!(overlay_engine.profiler.last_build.kind, HighlightOverlayBuildKind::IncrementalAnalysis);
     assert_eq!(overlay_engine.profiler.last_build.analyzed_rows, 1);
@@ -210,11 +224,11 @@ fn overlay_reanalyzes_mutated_prompt_line_without_reprocessing_unchanged_rows() 
 
     let mut overlay_engine = HighlightOverlayEngine::with_rules(vec![compiled_rule("error|warn", "\x1b[38;2;255;0;0m")], HighlightOverlayMode::Always);
 
-    let first_overlay = build_overlay_for_engine(&terminal_engine, &mut overlay_engine, 1, 0);
+    let first_overlay = build_overlay_for_engine(&mut terminal_engine, &mut overlay_engine, 1, 0);
     assert!(first_overlay.style_for_cell(0, 8).is_some());
 
     terminal_engine.process_output(b"\rstatus: warn \x1b[K");
-    let second_overlay = build_overlay_for_engine(&terminal_engine, &mut overlay_engine, 2, 0);
+    let second_overlay = build_overlay_for_engine(&mut terminal_engine, &mut overlay_engine, 2, 0);
 
     assert_eq!(overlay_engine.profiler.last_build.kind, HighlightOverlayBuildKind::IncrementalAnalysis);
     assert_eq!(overlay_engine.profiler.last_build.analyzed_rows, 1);
@@ -234,7 +248,7 @@ fn overlay_safe_policy_suppresses_primary_screen_fullscreen_viewports() {
         HighlightOverlayAutoPolicy::Safe,
     );
 
-    let overlay = build_overlay_for_engine(&terminal_engine, &mut overlay_engine, 5, 0);
+    let overlay = build_overlay_for_engine(&mut terminal_engine, &mut overlay_engine, 5, 0);
 
     assert_eq!(overlay.suppression_reason, Some(HighlightSuppressionReason::PrimaryScreenFullscreen));
     assert_eq!(
@@ -255,7 +269,7 @@ fn overlay_reduced_policy_limits_primary_screen_fullscreen_viewports_to_trailing
         HighlightOverlayAutoPolicy::Reduced,
     );
 
-    let overlay = build_overlay_for_engine(&terminal_engine, &mut overlay_engine, 6, 0);
+    let overlay = build_overlay_for_engine(&mut terminal_engine, &mut overlay_engine, 6, 0);
     let view = terminal_engine.view_model();
     let visible_rows = view.visible_row_texts();
     let first_highlight_col = visible_rows[0].1.find("error").expect("first highlight") as u16;

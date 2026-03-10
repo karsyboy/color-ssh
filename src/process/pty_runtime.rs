@@ -9,8 +9,10 @@ use super::exit::map_exit_code;
 use super::{PtyLogTarget, spawn_pty_output_reader};
 use crate::auth::secret::ExposeSecret;
 use crate::reload_notice::{ReloadNoticeToast, format_reload_notice};
-use crate::terminal_core::highlight_overlay::{HighlightOverlay, HighlightOverlayContext, HighlightOverlayEngine, HighlightOverlayViewport};
-use crate::terminal_core::{MouseProtocolEncoding, MouseProtocolMode, TerminalChild, TerminalEngine, TerminalInputWriter, TerminalSession, TerminalViewport};
+use crate::terminal_core::highlight_overlay::{HighlightOverlay, HighlightOverlayEngine};
+use crate::terminal_core::{
+    MouseProtocolEncoding, MouseProtocolMode, TerminalChild, TerminalEngine, TerminalFrontendSnapshot, TerminalInputWriter, TerminalSession, TerminalViewport,
+};
 use crate::terminal_ratatui::{apply_overlay_style, paint_terminal_viewport, render_reload_notice_toast};
 use crate::{Result, command_path, config, log, log_debug, log_error};
 use crossterm::{
@@ -103,25 +105,16 @@ impl HostScrollbackMirror {
 }
 
 struct PendingScrollbackInsertion {
-    viewport: TerminalViewport,
-    display_scrollback: usize,
+    snapshot: TerminalFrontendSnapshot,
 }
 
 struct CapturedScrollbackInsertions {
-    alternate_screen: bool,
-    mouse_mode: MouseProtocolMode,
-    cursor_hidden: bool,
     pending: Vec<PendingScrollbackInsertion>,
 }
 
 impl CapturedScrollbackInsertions {
-    fn empty(alternate_screen: bool, mouse_mode: MouseProtocolMode, cursor_hidden: bool) -> Self {
-        Self {
-            alternate_screen,
-            mouse_mode,
-            cursor_hidden,
-            pending: Vec::new(),
-        }
+    fn empty() -> Self {
+        Self { pending: Vec::new() }
     }
 }
 
@@ -565,31 +558,25 @@ fn capture_host_scrollback_insertions(
     restore_scrollback: usize,
 ) -> CapturedScrollbackInsertions {
     engine.set_display_scrollback(0);
-    let (viewport_rows, viewport_cols, current_history_size, alternate_screen, mouse_mode, cursor_hidden, buffer_row_ids) = {
+    let (snapshot, buffer_row_ids) = {
         let view = engine.view_model();
         let (rows, cols) = view.size();
-        (
-            rows,
-            cols,
-            view.scrollback(),
-            view.is_alternate_screen(),
-            view.mouse_protocol().0,
-            view.cursor_hidden(),
-            view.buffer_row_storage_ids(),
-        )
+        (view.frontend_snapshot(rows, cols), view.buffer_row_storage_ids())
     };
+    let (viewport_rows, viewport_cols) = snapshot.viewport().size();
+    let current_history_size = snapshot.scrollback().max_offset();
 
-    if alternate_screen || viewport_rows == 0 || viewport_cols == 0 {
+    if snapshot.is_alternate_screen() || viewport_rows == 0 || viewport_cols == 0 {
         engine.set_display_scrollback(restore_scrollback);
         host_scrollback.sync_history(current_history_size);
         host_scrollback.invalidate();
-        return CapturedScrollbackInsertions::empty(alternate_screen, mouse_mode, cursor_hidden);
+        return CapturedScrollbackInsertions::empty();
     }
 
     if !host_scrollback.valid || host_scrollback.last_viewport_rows != viewport_rows || host_scrollback.last_viewport_cols != viewport_cols {
         engine.set_display_scrollback(restore_scrollback);
         host_scrollback.sync(current_history_size, viewport_rows, viewport_cols, buffer_row_ids);
-        return CapturedScrollbackInsertions::empty(alternate_screen, mouse_mode, cursor_hidden);
+        return CapturedScrollbackInsertions::empty();
     }
 
     let mut scrolled_line_count = current_history_size.saturating_sub(host_scrollback.last_history_size);
@@ -606,23 +593,15 @@ fn capture_host_scrollback_insertions(
         while remaining > 0 {
             let chunk_rows = remaining.min(viewport_rows as usize) as u16;
             engine.set_display_scrollback(remaining);
-            let viewport = engine.view_model().viewport_snapshot(chunk_rows, viewport_cols);
-            pending.push(PendingScrollbackInsertion {
-                viewport,
-                display_scrollback: remaining,
-            });
+            let snapshot = engine.view_model().frontend_snapshot(chunk_rows, viewport_cols);
+            pending.push(PendingScrollbackInsertion { snapshot });
             remaining = remaining.saturating_sub(chunk_rows as usize);
         }
     }
 
     engine.set_display_scrollback(restore_scrollback);
     host_scrollback.sync(current_history_size, viewport_rows, viewport_cols, buffer_row_ids);
-    CapturedScrollbackInsertions {
-        alternate_screen,
-        mouse_mode,
-        cursor_hidden,
-        pending,
-    }
+    CapturedScrollbackInsertions { pending }
 }
 
 fn build_host_scrollback_insertions(
@@ -634,16 +613,9 @@ fn build_host_scrollback_insertions(
         .pending
         .into_iter()
         .map(|pending| {
-            let overlay_view = HighlightOverlayViewport::new(&pending.viewport, captured.alternate_screen, captured.mouse_mode, captured.cursor_hidden);
-            let overlay = highlight_overlay.build_visible_overlay(
-                &overlay_view,
-                HighlightOverlayContext {
-                    render_epoch,
-                    display_scrollback: pending.display_scrollback,
-                },
-            );
+            let overlay = pending.snapshot.build_highlight_overlay(highlight_overlay, render_epoch);
             ScrollbackInsertion {
-                viewport: pending.viewport,
+                viewport: pending.snapshot.into_viewport(),
                 overlay,
             }
         })
@@ -701,26 +673,11 @@ fn render_terminal_frame(
     reload_notice_toast: Option<&str>,
 ) -> io::Result<()> {
     let area = frame.area();
-    let (viewport, alternate_screen, mouse_mode, cursor_hidden) = {
-        let mut engine = session.engine().lock().map_err(|err| io::Error::other(err.to_string()))?;
-        engine.set_display_scrollback(scroll_offset);
-        let view = engine.view_model();
-        let alternate_screen = view.is_alternate_screen();
-        let mouse_mode = view.mouse_protocol().0;
-        let cursor_hidden = view.cursor_hidden();
-        let viewport = view.viewport_snapshot(area.height, area.width);
-        (viewport, alternate_screen, mouse_mode, cursor_hidden)
-    };
-    let overlay_view = HighlightOverlayViewport::new(&viewport, alternate_screen, mouse_mode, cursor_hidden);
-    let overlay = highlight_overlay.build_visible_overlay(
-        &overlay_view,
-        HighlightOverlayContext {
-            render_epoch: session.render_epoch(),
-            display_scrollback: scroll_offset,
-        },
-    );
+    let render_snapshot = session.snapshot_for_frontend(area.height, area.width, scroll_offset)?;
+    let effective_scroll_offset = render_snapshot.scrollback().display_offset();
+    let overlay = render_snapshot.build_highlight_overlay(highlight_overlay);
 
-    let _cursor = paint_terminal_view(frame.buffer_mut(), area, &viewport, &overlay, scroll_offset == 0);
+    let _cursor = paint_terminal_view(frame.buffer_mut(), area, render_snapshot.viewport(), &overlay, effective_scroll_offset == 0);
     if let Some(reload_notice_toast) = reload_notice_toast {
         render_reload_notice_toast(frame, area, reload_notice_toast);
     }

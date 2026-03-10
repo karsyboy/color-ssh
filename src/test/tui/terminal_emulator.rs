@@ -1,4 +1,5 @@
 use super::TerminalEngine;
+use crate::terminal_core::TerminalSelection;
 
 #[test]
 fn terminal_cell_tab_character_renders_as_space_without_contents() {
@@ -58,4 +59,28 @@ fn terminal_viewport_snapshot_preserves_rows_glyphs_and_cursor_state() {
 
     let cursor = viewport.cursor().expect("cursor");
     assert_eq!((cursor.row(), cursor.col()), (1, 2));
+}
+
+#[test]
+fn terminal_frontend_snapshot_distinguishes_hidden_cursor_from_viewport_cursor() {
+    let mut engine = TerminalEngine::new(1, 4, 8);
+    engine.process_output(b"\x1b[?25l");
+
+    let snapshot = engine.view_model().frontend_snapshot(1, 4);
+
+    assert!(snapshot.cursor().hidden());
+    assert_eq!((snapshot.cursor().position().row(), snapshot.cursor().position().col()), (0, 0));
+    assert!(snapshot.visible_cursor().is_none());
+}
+
+#[test]
+fn terminal_selection_tracks_terminal_coordinate_ranges() {
+    let selection = TerminalSelection::new((2, 5), (1, 3)).ordered();
+
+    assert_eq!((selection.start().absolute_row(), selection.start().column()), (1, 3));
+    assert_eq!((selection.end().absolute_row(), selection.end().column()), (2, 5));
+    assert!(selection.contains_cell(1, 3));
+    assert!(selection.contains_cell(2, 4));
+    assert!(!selection.contains_cell(0, 0));
+    assert!(!selection.contains_cell(2, 6));
 }

@@ -1,9 +1,8 @@
 //! Terminal-tabs and root layout rendering.
 
-use crate::terminal_core::highlight_overlay::{HighlightOverlayContext, HighlightOverlayViewport};
 use crate::terminal_ratatui::{apply_overlay_style, paint_terminal_viewport, render_reload_notice_toast};
 use crate::tui::AppState;
-use crate::tui::features::selection::extract::is_cell_in_selection;
+use crate::tui::features::selection::extract::{current_selection, is_cell_in_selection};
 use crate::tui::ui::theme::{self, display_width, truncate_to_display_width};
 use ratatui::{
     Frame,
@@ -344,8 +343,7 @@ impl AppState {
         self.tab_scrollbar_area = scrollbar_area;
 
         let scroll_offset = self.tabs[tab_idx].scroll_offset;
-        let sel_start = self.selection_start;
-        let sel_end = self.selection_end;
+        let selection = current_selection(self.selection_start, self.selection_end);
         let (search_row_ranges, current_search_range) = self.current_tab_search().map_or((None, None), |search| {
             (Some(search.highlight_row_ranges.clone()), search.current_highlight_range)
         });
@@ -353,40 +351,24 @@ impl AppState {
         let mut highlight_overlay_engine = std::mem::take(&mut self.tabs[tab_idx].highlight_overlay);
 
         if let Some(session) = self.tabs[tab_idx].session.as_ref() {
-            let render_epoch = session.render_epoch();
-            let render_state = if let Ok(mut engine) = session.engine().lock() {
-                engine.set_display_scrollback(scroll_offset);
-                let view = engine.view_model();
-                let alternate_screen = view.is_alternate_screen();
-                let mouse_mode = view.mouse_protocol().0;
-                let cursor_hidden = view.cursor_hidden();
-                let viewport = view.viewport_snapshot(content_area.height, content_area.width);
-                let max_scrollback = engine.max_scrollback();
-                Some((viewport, alternate_screen, mouse_mode, cursor_hidden, max_scrollback))
-            } else {
-                None
-            };
+            let render_state = session.snapshot_for_frontend(content_area.height, content_area.width, scroll_offset).ok();
 
-            if let Some((viewport, alternate_screen, mouse_mode, cursor_hidden, max_scrollback)) = render_state {
-                let overlay_view = HighlightOverlayViewport::new(&viewport, alternate_screen, mouse_mode, cursor_hidden);
-                let highlight_overlay = highlight_overlay_engine.build_visible_overlay(
-                    &overlay_view,
-                    HighlightOverlayContext {
-                        render_epoch,
-                        display_scrollback: scroll_offset,
-                    },
-                );
+            if let Some(render_state) = render_state {
+                let effective_scroll_offset = render_state.scrollback().display_offset();
+                let max_scrollback = render_state.scrollback().max_offset();
+                self.tabs[tab_idx].scroll_offset = effective_scroll_offset;
+                let highlight_overlay = render_state.build_highlight_overlay(&mut highlight_overlay_engine);
                 self.tabs[tab_idx].highlight_overlay = highlight_overlay_engine;
                 let _ = paint_terminal_viewport(
                     frame.buffer_mut(),
                     content_area,
-                    &viewport,
-                    scroll_offset == 0,
+                    render_state.viewport(),
+                    effective_scroll_offset == 0,
                     |absolute_row, col, _cell, is_cursor, base_style| {
                         let row_ranges = search_row_ranges.as_ref().and_then(|ranges| ranges.get(&absolute_row));
                         let current_row_range =
                             current_search_range.and_then(|(match_row, start_col, end_col)| (absolute_row == match_row).then_some((start_col, end_col)));
-                        let is_selected = is_cell_in_selection(absolute_row, col, sel_start, sel_end);
+                        let is_selected = is_cell_in_selection(absolute_row, col, selection);
                         let is_search_match = row_ranges.is_some_and(|ranges| ranges.iter().any(|(start_col, end_col)| col >= *start_col && col < *end_col));
                         let is_current_search_match = current_row_range.is_some_and(|(start_col, end_col)| col >= start_col && col < end_col);
                         let syntax_style = highlight_overlay
@@ -407,7 +389,7 @@ impl AppState {
                     },
                 );
 
-                if let Some(scrollbar) = terminal_scrollbar_geometry(scrollbar_area, content_area.height, max_scrollback, scroll_offset) {
+                if let Some(scrollbar) = terminal_scrollbar_geometry(scrollbar_area, content_area.height, max_scrollback, effective_scroll_offset) {
                     draw_terminal_scrollbar(frame, scrollbar);
                 }
             } else {

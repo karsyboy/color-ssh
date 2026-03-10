@@ -4,7 +4,7 @@
 //! terminal surface. It deliberately does not own rendering concerns; callers
 //! consume terminal state through the contained `TerminalEngine`.
 
-use super::{TerminalEngine, TerminalInputWriter};
+use super::{TerminalEngine, TerminalInputWriter, TerminalSelection, TerminalSessionSnapshot};
 use crate::log_error;
 use portable_pty::{Child as PtyChild, MasterPty, PtySize};
 use std::io::{self, Write};
@@ -63,6 +63,16 @@ impl TerminalSession {
         self.render_epoch.load(Ordering::Relaxed)
     }
 
+    /// Snapshot the frontend-facing terminal state for a renderer frame.
+    pub(crate) fn snapshot_for_frontend(&self, max_rows: u16, max_cols: u16, display_scrollback: usize) -> io::Result<TerminalSessionSnapshot> {
+        let mut engine = self.engine.lock().map_err(|err| io::Error::other(err.to_string()))?;
+        engine.set_display_scrollback(display_scrollback);
+        Ok(TerminalSessionSnapshot::new(
+            self.render_epoch(),
+            engine.view_model().frontend_snapshot(max_rows, max_cols),
+        ))
+    }
+
     /// Bump the render epoch after any state mutation visible to renderers.
     pub(crate) fn bump_render_epoch(&self) {
         self.render_epoch.fetch_add(1, Ordering::Relaxed);
@@ -88,6 +98,12 @@ impl TerminalSession {
 
         let mut input_writer = input_writer.lock().map_err(|err| io::Error::other(err.to_string()))?;
         input_writer.write_all(bytes)
+    }
+
+    /// Extract text for a typed terminal-coordinate selection.
+    pub(crate) fn selection_text_for(&self, selection: TerminalSelection) -> io::Result<String> {
+        let engine = self.engine.lock().map_err(|err| io::Error::other(err.to_string()))?;
+        Ok(engine.view_model().selection_text_for(selection))
     }
 
     /// Resize both the PTY surface and the canonical terminal engine.

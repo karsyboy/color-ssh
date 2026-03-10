@@ -137,6 +137,21 @@ pub(crate) struct HighlightCellRange {
     pub(crate) style_index: usize,
 }
 
+#[allow(dead_code)]
+impl HighlightCellRange {
+    pub(crate) fn start_col(&self) -> u16 {
+        self.start_col
+    }
+
+    pub(crate) fn end_col(&self) -> u16 {
+        self.end_col
+    }
+
+    pub(crate) fn style_index(&self) -> usize {
+        self.style_index
+    }
+}
+
 #[derive(Debug, Default, Clone)]
 pub(crate) struct HighlightOverlay {
     row_ranges: HashMap<i64, Arc<[HighlightCellRange]>>,
@@ -145,11 +160,28 @@ pub(crate) struct HighlightOverlay {
     pub(crate) config_version: u64,
 }
 
+#[allow(dead_code)]
 impl HighlightOverlay {
     pub(crate) fn style_for_cell(&self, absolute_row: i64, col: u16) -> Option<&HighlightOverlayStyle> {
         let row_ranges = self.row_ranges.get(&absolute_row)?;
         let range = row_ranges.iter().find(|range| col >= range.start_col && col < range.end_col)?;
         self.styles.get(range.style_index)
+    }
+
+    pub(crate) fn ranges_for_row(&self, absolute_row: i64) -> Option<&[HighlightCellRange]> {
+        self.row_ranges.get(&absolute_row).map(|ranges| ranges.as_ref())
+    }
+
+    pub(crate) fn styles(&self) -> &[HighlightOverlayStyle] {
+        &self.styles
+    }
+
+    pub(crate) fn suppression_reason(&self) -> Option<HighlightSuppressionReason> {
+        self.suppression_reason
+    }
+
+    pub(crate) fn config_version(&self) -> u64 {
+        self.config_version
     }
 }
 
