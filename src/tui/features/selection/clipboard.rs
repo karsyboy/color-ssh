@@ -4,16 +4,9 @@
 //! This works in most modern terminals: Konsole, Kitty, Alacritty, Wezterm, foot, etc.
 
 use super::extract::current_selection;
+use crate::terminal_core::TerminalClipboardTarget;
+use crate::terminal_host::copy_to_clipboard;
 use crate::tui::AppState;
-use crossterm::clipboard::CopyToClipboard;
-use crossterm::execute;
-use std::io::{Write, stdout};
-
-/// Copy text to system clipboard using OSC 52 escape sequence
-fn copy_to_clipboard(text: &str) {
-    let _ = execute!(stdout(), CopyToClipboard::to_clipboard_from(text));
-    let _ = stdout().flush();
-}
 
 impl AppState {
     // Selection export.
@@ -42,6 +35,6 @@ impl AppState {
             return;
         }
 
-        copy_to_clipboard(&text);
+        copy_to_clipboard(TerminalClipboardTarget::Clipboard, &text);
     }
 }

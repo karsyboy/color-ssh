@@ -65,11 +65,10 @@ impl TerminalSession {
 
     /// Snapshot the frontend-facing terminal state for a renderer frame.
     pub(crate) fn snapshot_for_frontend(&self, max_rows: u16, max_cols: u16, display_scrollback: usize) -> io::Result<TerminalSessionSnapshot> {
-        let mut engine = self.engine.lock().map_err(|err| io::Error::other(err.to_string()))?;
-        engine.set_display_scrollback(display_scrollback);
+        let engine = self.engine.lock().map_err(|err| io::Error::other(err.to_string()))?;
         Ok(TerminalSessionSnapshot::new(
             self.render_epoch(),
-            engine.view_model().frontend_snapshot(max_rows, max_cols),
+            engine.view_model().frontend_snapshot_at_scrollback(max_rows, max_cols, display_scrollback),
         ))
     }
 

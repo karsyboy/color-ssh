@@ -1,6 +1,10 @@
 use super::TerminalEngine;
 use crate::terminal_core::TerminalSelection;
 
+fn trim_row(text: &str) -> &str {
+    text.trim_end_matches(' ')
+}
+
 #[test]
 fn terminal_cell_tab_character_renders_as_space_without_contents() {
     let mut engine = TerminalEngine::new(2, 16, 100);
@@ -71,6 +75,26 @@ fn terminal_frontend_snapshot_distinguishes_hidden_cursor_from_viewport_cursor()
     assert!(snapshot.cursor().hidden());
     assert_eq!((snapshot.cursor().position().row(), snapshot.cursor().position().col()), (0, 0));
     assert!(snapshot.visible_cursor().is_none());
+}
+
+#[test]
+fn terminal_frontend_snapshot_projects_scrollback_without_mutating_live_view() {
+    let mut engine = TerminalEngine::new(2, 8, 8);
+    engine.process_output(b"line1\r\nline2\r\nline3");
+
+    let scrolled = engine.view_model().frontend_snapshot_at_scrollback(2, 8, 1);
+    let scrolled_rows: Vec<String> = scrolled.viewport().rows().iter().map(|row| row.display_text()).collect();
+
+    assert_eq!(scrolled.scrollback().display_offset(), 1);
+    assert_eq!(trim_row(&scrolled_rows[0]), "line1");
+    assert_eq!(trim_row(&scrolled_rows[1]), "line2");
+
+    let live = engine.view_model().frontend_snapshot(2, 8);
+    let live_rows: Vec<String> = live.viewport().rows().iter().map(|row| row.display_text()).collect();
+
+    assert_eq!(live.scrollback().display_offset(), 0);
+    assert_eq!(trim_row(&live_rows[0]), "line2");
+    assert_eq!(trim_row(&live_rows[1]), "line3");
 }
 
 #[test]

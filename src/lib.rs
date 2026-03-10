@@ -16,6 +16,7 @@ pub mod runtime;
 pub mod ssh_args;
 pub mod ssh_config;
 pub(crate) mod terminal_core;
+mod terminal_host;
 mod terminal_ratatui;
 pub mod tui;
 mod validation;

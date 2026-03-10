@@ -239,8 +239,16 @@ impl TerminalSessionSnapshot {
 
 impl<'a> TerminalViewModel<'a> {
     /// Snapshot the renderer-facing terminal state a frontend needs to paint a frame.
+    #[cfg_attr(not(test), allow(dead_code))]
     pub(crate) fn frontend_snapshot(&self, max_rows: u16, max_cols: u16) -> TerminalFrontendSnapshot {
-        let viewport = self.viewport_snapshot(max_rows, max_cols);
+        self.frontend_snapshot_at_scrollback(max_rows, max_cols, self.engine.term.grid().display_offset())
+    }
+
+    /// Snapshot the renderer-facing terminal state for an explicit scrollback
+    /// offset without mutating the live engine state.
+    pub(crate) fn frontend_snapshot_at_scrollback(&self, max_rows: u16, max_cols: u16, display_scrollback: usize) -> TerminalFrontendSnapshot {
+        let display_scrollback = display_scrollback.min(self.scrollback());
+        let viewport = self.viewport_snapshot_at_scrollback(max_rows, max_cols, display_scrollback);
         let cursor_position = self.cursor_position();
         let cursor = TerminalCursorState {
             position: TerminalCursorSnapshot::new(cursor_position.0, cursor_position.1),
@@ -252,7 +260,7 @@ impl<'a> TerminalViewModel<'a> {
             viewport,
             cursor,
             scrollback: TerminalScrollbackState {
-                display_offset: self.engine.term.grid().display_offset(),
+                display_offset: display_scrollback,
                 max_offset: self.scrollback(),
             },
             alternate_screen: self.is_alternate_screen(),

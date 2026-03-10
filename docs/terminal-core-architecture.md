@@ -23,6 +23,7 @@ Color-SSH's interactive architecture is now PTY-centered. Interactive SSH displa
 - `src/terminal_ratatui.rs` converts `TerminalViewport` snapshots into ratatui buffer cells.
 - The renderer combines base terminal cell styling with optional overlay styling at paint time.
 - Cursor presentation, scrollback presentation, and viewport painting are renderer concerns.
+- Snapshot generation projects explicit scrollback offsets into read-only view models instead of mutating `TerminalEngine` display state.
 - Renderers never inject ANSI sequences back into a PTY or child stdout stream.
 
 See `docs/terminal-frontend-contract.md` for the full frontend contract, TUI-specific boundaries, and GPUI integration notes.

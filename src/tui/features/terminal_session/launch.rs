@@ -6,6 +6,7 @@ use crate::process;
 use crate::process::{PtyLogTarget, spawn_pty_output_reader};
 use crate::terminal_core::highlight_overlay::HighlightOverlayEngine;
 use crate::terminal_core::{TerminalChild, TerminalEngine, TerminalSession};
+use crate::terminal_host::terminal_host_callbacks;
 use crate::tui::{AppState, HostTab, TerminalSearchState, VaultUnlockAction};
 use crate::{command_path, debug_enabled, log_debug, log_error};
 use portable_pty::{CommandBuilder, PtySize, native_pty_system};
@@ -93,11 +94,12 @@ fn spawn_pty_terminal_session(
     let writer = pty_pair.master.take_writer().map_err(|err| io::Error::other(err.to_string()))?;
     let writer = Arc::new(Mutex::new(writer));
 
-    let engine = Arc::new(Mutex::new(TerminalEngine::new_with_input_writer_and_remote_clipboard_policy(
+    let engine = Arc::new(Mutex::new(TerminalEngine::new_with_input_writer_and_host_and_remote_clipboard_policy(
         rows,
         cols,
         session_profile.history_buffer,
         writer.clone(),
+        terminal_host_callbacks(),
         session_profile.remote_clipboard_write,
         session_profile.remote_clipboard_max_bytes,
     )));
@@ -569,10 +571,11 @@ impl AppState {
 
         let rows = initial_rows.max(1);
         let cols = initial_cols.max(1);
-        let engine = Arc::new(Mutex::new(TerminalEngine::new_with_remote_clipboard_policy(
+        let engine = Arc::new(Mutex::new(TerminalEngine::new_with_host_and_remote_clipboard_policy(
             rows,
             cols,
             session_profile.history_buffer,
+            terminal_host_callbacks(),
             session_profile.remote_clipboard_write,
             session_profile.remote_clipboard_max_bytes,
         )));

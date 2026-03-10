@@ -9,7 +9,7 @@ The goal is to let the current ratatui frontend and a future GUI frontend consum
 The explicit frontend boundary now lives in `src/terminal_core`:
 
 - `TerminalSession::snapshot_for_frontend(max_rows, max_cols, display_scrollback)`
-  - Locks the session engine, applies the requested scrollback offset, and returns a `TerminalSessionSnapshot`.
+  - Locks the session engine, projects the requested scrollback offset into a read-only `TerminalSessionSnapshot`, and returns it without mutating canonical terminal state.
 - `TerminalSessionSnapshot`
   - Carries the `render_epoch` used by overlay caching.
   - Exposes `frontend()` and `viewport()` for renderer consumption.

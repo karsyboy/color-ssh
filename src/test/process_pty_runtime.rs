@@ -148,11 +148,11 @@ fn collect_host_scrollback_insertions_returns_scrolled_primary_rows() {
     let mut host_scrollback = HostScrollbackMirror::new(16);
 
     engine.process_output(b"line1\r\nline2\r\nline3");
-    let initial_insertions = collect_host_scrollback_insertions(&mut engine, &mut highlight_overlay, 1, &mut host_scrollback, 0);
+    let initial_insertions = collect_host_scrollback_insertions(&engine, &mut highlight_overlay, 1, &mut host_scrollback);
     assert!(initial_insertions.is_empty());
 
     engine.process_output(b"\r\nline4");
-    let insertions = collect_host_scrollback_insertions(&mut engine, &mut highlight_overlay, 2, &mut host_scrollback, 0);
+    let insertions = collect_host_scrollback_insertions(&engine, &mut highlight_overlay, 2, &mut host_scrollback);
 
     assert_eq!(insertions.len(), 1);
     assert_eq!(insertions[0].viewport.size().0, 1);
@@ -166,15 +166,33 @@ fn collect_host_scrollback_insertions_handles_saturated_history_with_repeated_ro
     let mut host_scrollback = HostScrollbackMirror::new(2);
 
     engine.process_output(b"same\r\nsame\r\nsame\r\nsame");
-    let initial_insertions = collect_host_scrollback_insertions(&mut engine, &mut highlight_overlay, 1, &mut host_scrollback, 0);
+    let initial_insertions = collect_host_scrollback_insertions(&engine, &mut highlight_overlay, 1, &mut host_scrollback);
     assert!(initial_insertions.is_empty());
 
     engine.process_output(b"\r\nsame");
-    let insertions = collect_host_scrollback_insertions(&mut engine, &mut highlight_overlay, 2, &mut host_scrollback, 0);
+    let insertions = collect_host_scrollback_insertions(&engine, &mut highlight_overlay, 2, &mut host_scrollback);
 
     assert_eq!(insertions.len(), 1);
     assert_eq!(insertions[0].viewport.size().0, 1);
     assert_eq!(trim_line(&insertions[0].viewport.rows()[0].display_text()), "same");
+}
+
+#[test]
+fn collect_host_scrollback_insertions_preserves_existing_display_scrollback() {
+    let mut engine = TerminalEngine::new(2, 20, 8);
+    let mut highlight_overlay = HighlightOverlayEngine::new();
+    let mut host_scrollback = HostScrollbackMirror::new(8);
+
+    engine.process_output(b"line1\r\nline2\r\nline3");
+    let initial_insertions = collect_host_scrollback_insertions(&engine, &mut highlight_overlay, 1, &mut host_scrollback);
+    assert!(initial_insertions.is_empty());
+
+    engine.process_output(b"\r\nline4");
+    engine.set_display_scrollback(1);
+
+    let _ = collect_host_scrollback_insertions(&engine, &mut highlight_overlay, 2, &mut host_scrollback);
+
+    assert_eq!(engine.view_model().frontend_snapshot(2, 20).scrollback().display_offset(), 1);
 }
 
 #[test]

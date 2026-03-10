@@ -5,14 +5,13 @@
 //! events, such as PTY writes and clipboard requests, back to the embedding
 //! session/frontend.
 
-use super::ansi_index_to_rgb;
 use super::types::TerminalInputWriter;
+use super::{TerminalClipboardTarget, TerminalHostCallbacks, ansi_index_to_rgb};
 use crate::config;
 use alacritty_terminal::event::{Event, EventListener, WindowSize};
+use alacritty_terminal::term::ClipboardType;
 use alacritty_terminal::vte::ansi::Rgb;
-use crossterm::clipboard::CopyToClipboard;
-use crossterm::execute;
-use std::io::{Write, stdout};
+use std::io::Write;
 use std::sync::{Arc, Mutex};
 
 #[derive(Default)]
@@ -25,6 +24,7 @@ struct TerminalEventState {
 #[derive(Clone)]
 pub(super) struct TerminalEventListener {
     state: Arc<Mutex<TerminalEventState>>,
+    host_callbacks: TerminalHostCallbacks,
     allow_remote_clipboard_write: bool,
     remote_clipboard_max_bytes: usize,
 }
@@ -35,10 +35,40 @@ impl TerminalEventListener {
         Self::new_with_remote_clipboard_policy(rows, cols, input_writer, allow_remote_clipboard_write, remote_clipboard_max_bytes)
     }
 
+    pub(super) fn new_with_host(rows: u16, cols: u16, input_writer: Option<TerminalInputWriter>, host_callbacks: TerminalHostCallbacks) -> Self {
+        let (allow_remote_clipboard_write, remote_clipboard_max_bytes) = Self::current_remote_clipboard_policy();
+        Self::new_with_host_and_remote_clipboard_policy(
+            rows,
+            cols,
+            input_writer,
+            host_callbacks,
+            allow_remote_clipboard_write,
+            remote_clipboard_max_bytes,
+        )
+    }
+
     pub(super) fn new_with_remote_clipboard_policy(
         rows: u16,
         cols: u16,
         input_writer: Option<TerminalInputWriter>,
+        allow_remote_clipboard_write: bool,
+        remote_clipboard_max_bytes: usize,
+    ) -> Self {
+        Self::new_with_host_and_remote_clipboard_policy(
+            rows,
+            cols,
+            input_writer,
+            TerminalHostCallbacks::default(),
+            allow_remote_clipboard_write,
+            remote_clipboard_max_bytes,
+        )
+    }
+
+    pub(super) fn new_with_host_and_remote_clipboard_policy(
+        rows: u16,
+        cols: u16,
+        input_writer: Option<TerminalInputWriter>,
+        host_callbacks: TerminalHostCallbacks,
         allow_remote_clipboard_write: bool,
         remote_clipboard_max_bytes: usize,
     ) -> Self {
@@ -49,6 +79,7 @@ impl TerminalEventListener {
         };
         Self {
             state: Arc::new(Mutex::new(state)),
+            host_callbacks,
             allow_remote_clipboard_write,
             remote_clipboard_max_bytes,
         }
@@ -79,12 +110,6 @@ impl TerminalEventListener {
         }
     }
 
-    fn copy_to_clipboard(text: &str) {
-        let mut out = stdout();
-        let _ = execute!(out, CopyToClipboard::to_clipboard_from(text));
-        let _ = out.flush();
-    }
-
     fn current_remote_clipboard_policy() -> (bool, usize) {
         config::with_current_config("reading remote clipboard policy", |cfg| {
             cfg.interactive_settings
@@ -105,19 +130,27 @@ impl TerminalEventListener {
     fn color_index_rgb(index: usize) -> Rgb {
         if index <= 15 { ansi_index_to_rgb(index as u8) } else { ansi_index_to_rgb(7) }
     }
+
+    fn clipboard_target(target: ClipboardType) -> TerminalClipboardTarget {
+        match target {
+            ClipboardType::Clipboard => TerminalClipboardTarget::Clipboard,
+            ClipboardType::Selection => TerminalClipboardTarget::Selection,
+        }
+    }
 }
 
 impl EventListener for TerminalEventListener {
     fn send_event(&self, event: Event) {
         match event {
             Event::PtyWrite(text) => self.write_input(text.as_bytes()),
-            Event::ClipboardStore(_, text) => {
+            Event::ClipboardStore(target, text) => {
                 if self.allow_remote_clipboard_write && Self::allow_remote_clipboard_write(&text, self.remote_clipboard_max_bytes) {
-                    Self::copy_to_clipboard(&text);
+                    self.host_callbacks.store_clipboard(Self::clipboard_target(target), &text);
                 }
             }
-            Event::ClipboardLoad(_, formatter) => {
-                let response = formatter("");
+            Event::ClipboardLoad(target, formatter) => {
+                let clipboard = self.host_callbacks.load_clipboard(Self::clipboard_target(target)).unwrap_or_default();
+                let response = formatter(&clipboard);
                 self.write_input(response.as_bytes());
             }
             Event::TextAreaSizeRequest(formatter) => {
@@ -138,3 +171,7 @@ impl EventListener for TerminalEventListener {
         }
     }
 }
+
+#[cfg(test)]
+#[path = "../test/terminal_core_event_listener.rs"]
+mod tests;

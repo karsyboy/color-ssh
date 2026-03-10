@@ -220,6 +220,14 @@ pub(crate) struct TerminalViewModel<'a> {
 }
 
 impl<'a> TerminalViewModel<'a> {
+    fn current_display_scrollback(&self) -> usize {
+        self.engine.term.grid().display_offset()
+    }
+
+    fn resolved_display_scrollback(&self, display_scrollback: usize) -> usize {
+        display_scrollback.min(self.scrollback())
+    }
+
     /// Return the visible terminal size in rows and columns.
     pub(crate) fn size(&self) -> (u16, u16) {
         let grid = self.engine.term.grid();
@@ -254,11 +262,18 @@ impl<'a> TerminalViewModel<'a> {
 
     /// Snapshot the visible viewport into backend-neutral rows, cells, and
     /// cursor metadata for renderers.
+    #[cfg_attr(not(test), allow(dead_code))]
     pub(crate) fn viewport_snapshot(&self, max_rows: u16, max_cols: u16) -> TerminalViewport {
+        self.viewport_snapshot_at_scrollback(max_rows, max_cols, self.current_display_scrollback())
+    }
+
+    /// Snapshot the visible viewport for an explicit scrollback offset without
+    /// mutating the live terminal engine state.
+    pub(crate) fn viewport_snapshot_at_scrollback(&self, max_rows: u16, max_cols: u16, display_scrollback: usize) -> TerminalViewport {
         let (vt_rows, vt_cols) = self.size();
         let render_rows = max_rows.min(vt_rows);
         let render_cols = max_cols.min(vt_cols);
-        let display_offset = self.engine.term.grid().display_offset() as i64;
+        let display_offset = self.resolved_display_scrollback(display_scrollback).min(i32::MAX as usize) as i32;
         let cursor = (!self.cursor_hidden())
             .then(|| TerminalCursorSnapshot::new(self.cursor_position().0, self.cursor_position().1))
             .filter(|cursor| cursor.row < render_rows && cursor.col < render_cols);
@@ -267,12 +282,15 @@ impl<'a> TerminalViewModel<'a> {
         for row in 0..render_rows {
             let mut cells = Vec::with_capacity(render_cols as usize);
             for col in 0..render_cols {
-                let snapshot = self.cell(row, col).map(|cell| cell.snapshot()).unwrap_or_else(TerminalCellSnapshot::blank);
+                let snapshot = self
+                    .cell_at_scrollback(row, col, display_offset as usize)
+                    .map(|cell| cell.snapshot())
+                    .unwrap_or_else(TerminalCellSnapshot::blank);
                 cells.push(snapshot);
             }
 
             rows.push(TerminalViewportRow {
-                absolute_row: row as i64 - display_offset,
+                absolute_row: row as i64 - i64::from(display_offset),
                 cells,
             });
         }
@@ -287,23 +305,36 @@ impl<'a> TerminalViewModel<'a> {
     /// Convert a visible row index into an absolute terminal line index.
     #[allow(dead_code)]
     pub(crate) fn absolute_row(&self, row: u16) -> Option<i64> {
+        self.absolute_row_at_scrollback(row, self.current_display_scrollback())
+    }
+
+    /// Convert a visible row index into an absolute terminal line index for an
+    /// explicit scrollback offset.
+    pub(crate) fn absolute_row_at_scrollback(&self, row: u16, display_scrollback: usize) -> Option<i64> {
         let grid = self.engine.term.grid();
         if row as usize >= grid.screen_lines() {
             return None;
         }
 
-        let line = Line(row as i32 - grid.display_offset() as i32);
+        let display_offset = self.resolved_display_scrollback(display_scrollback).min(i32::MAX as usize) as i32;
+        let line = Line(row as i32 - display_offset);
         (line >= grid.topmost_line() && line <= grid.bottommost_line()).then_some(line.0 as i64)
     }
 
     /// Return renderer-facing cells for the visible grid.
     pub(crate) fn cell(&self, row: u16, col: u16) -> Option<TerminalCellView<'_>> {
+        self.cell_at_scrollback(row, col, self.current_display_scrollback())
+    }
+
+    /// Return renderer-facing cells for an explicit scrollback offset.
+    pub(crate) fn cell_at_scrollback(&self, row: u16, col: u16, display_scrollback: usize) -> Option<TerminalCellView<'_>> {
         let grid = self.engine.term.grid();
         if row as usize >= grid.screen_lines() || col as usize >= grid.columns() {
             return None;
         }
 
-        let line = Line(row as i32 - grid.display_offset() as i32);
+        let display_offset = self.resolved_display_scrollback(display_scrollback).min(i32::MAX as usize) as i32;
+        let line = Line(row as i32 - display_offset);
         if line < grid.topmost_line() || line > grid.bottommost_line() {
             return None;
         }
