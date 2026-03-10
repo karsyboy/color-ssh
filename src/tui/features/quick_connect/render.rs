@@ -1,5 +1,6 @@
 //! Quick-connect modal rendering.
 
+use crate::tui::text_edit::build_edit_value_spans;
 use crate::tui::ui::theme;
 use crate::tui::{AppState, QuickConnectField};
 use ratatui::{
@@ -9,73 +10,6 @@ use ratatui::{
     text::{Line, Span},
     widgets::{Block, Borders, Clear, Paragraph},
 };
-
-fn char_to_byte_index(text: &str, char_index: usize) -> usize {
-    if char_index == 0 {
-        return 0;
-    }
-    let len = text.chars().count();
-    let clamped = char_index.min(len);
-    if clamped == len {
-        text.len()
-    } else {
-        text.char_indices().nth(clamped).map_or(text.len(), |(byte_index, _)| byte_index)
-    }
-}
-
-fn push_if_non_empty(spans: &mut Vec<Span<'static>>, text: &str, style: Style) {
-    if !text.is_empty() {
-        spans.push(Span::styled(text.to_string(), style));
-    }
-}
-
-fn build_edit_value_spans(
-    text: &str,
-    cursor: usize,
-    selection: Option<(usize, usize)>,
-    value_style: Style,
-    cursor_style: Style,
-    selection_style: Style,
-) -> Vec<Span<'static>> {
-    let mut spans = Vec::new();
-    let len = text.chars().count();
-    let cursor = cursor.min(len);
-
-    if let Some((start_raw, end_raw)) = selection {
-        let start = start_raw.min(len);
-        let end = end_raw.min(len);
-        let (start, end) = if start <= end { (start, end) } else { (end, start) };
-
-        if start < end {
-            let start_byte = char_to_byte_index(text, start);
-            let end_byte = char_to_byte_index(text, end);
-
-            push_if_non_empty(&mut spans, &text[..start_byte], value_style);
-            push_if_non_empty(&mut spans, &text[start_byte..end_byte], selection_style);
-            push_if_non_empty(&mut spans, &text[end_byte..], value_style);
-            return spans;
-        }
-    }
-
-    if len == 0 {
-        spans.push(Span::styled(" ".to_string(), cursor_style));
-        return spans;
-    }
-
-    if cursor < len {
-        let cursor_start = char_to_byte_index(text, cursor);
-        let cursor_end = char_to_byte_index(text, cursor + 1);
-
-        push_if_non_empty(&mut spans, &text[..cursor_start], value_style);
-        push_if_non_empty(&mut spans, &text[cursor_start..cursor_end], cursor_style);
-        push_if_non_empty(&mut spans, &text[cursor_end..], value_style);
-    } else {
-        spans.push(Span::styled(text.to_string(), value_style));
-        spans.push(Span::styled(" ".to_string(), cursor_style));
-    }
-
-    spans
-}
 
 impl AppState {
     // Modal rendering.
@@ -131,7 +65,7 @@ impl AppState {
 
         let host_cursor_style = if host_error_active { host_error_cursor } else { cursor_value };
 
-        let user_value_spans: Vec<Span<'static>> = if form.selected == QuickConnectField::User {
+        let user_value_spans: Vec<Span<'_>> = if form.selected == QuickConnectField::User {
             build_edit_value_spans(
                 &form.user,
                 form.cursor_for_field(QuickConnectField::User).unwrap_or(0),
@@ -141,11 +75,11 @@ impl AppState {
                 selected_region,
             )
         } else if form.user.is_empty() {
-            vec![Span::styled("(optional)".to_string(), normal_value)]
+            vec![Span::styled("(optional)", normal_value)]
         } else {
-            vec![Span::styled(form.user.clone(), normal_value)]
+            vec![Span::styled(form.user.as_str(), normal_value)]
         };
-        let host_value_spans: Vec<Span<'static>> = if form.selected == QuickConnectField::Host {
+        let host_value_spans: Vec<Span<'_>> = if form.selected == QuickConnectField::Host {
             build_edit_value_spans(
                 &form.host,
                 form.cursor_for_field(QuickConnectField::Host).unwrap_or(0),
@@ -155,11 +89,11 @@ impl AppState {
                 selected_region,
             )
         } else if form.host.is_empty() {
-            vec![Span::styled(String::new(), host_base_value)]
+            vec![Span::styled("", host_base_value)]
         } else {
-            vec![Span::styled(form.host.clone(), host_base_value)]
+            vec![Span::styled(form.host.as_str(), host_base_value)]
         };
-        let profile_text = form.selected_profile_label().to_string();
+        let profile_text = form.selected_profile_label();
         let mut profile_list_spans = vec![Span::styled("Profiles: ", Style::default().fg(theme::ansi_bright_black()))];
         for (idx, profile_name) in form.profile_options.iter().enumerate() {
             if idx > 0 {
@@ -170,7 +104,7 @@ impl AppState {
             } else {
                 Style::default().fg(theme::ansi_white())
             };
-            profile_list_spans.push(Span::styled(profile_name.clone(), style));
+            profile_list_spans.push(Span::styled(profile_name.as_str(), style));
         }
 
         let logging_mark = if form.ssh_logging { "[x]" } else { "[ ]" };

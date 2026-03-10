@@ -1,6 +1,7 @@
 //! Global status bar rendering.
 
 use crate::tui::AppState;
+use crate::tui::text_edit::build_edit_value_spans;
 use crate::tui::ui::theme::{self, display_width};
 use ratatui::{
     Frame,
@@ -17,71 +18,6 @@ enum StatusContext {
     TerminalSearch,
     Host,
     Terminal,
-}
-
-fn char_to_byte_index(text: &str, char_index: usize) -> usize {
-    if char_index == 0 {
-        return 0;
-    }
-    let len = text.chars().count();
-    let clamped = char_index.min(len);
-    if clamped == len {
-        text.len()
-    } else {
-        text.char_indices().nth(clamped).map_or(text.len(), |(byte_index, _)| byte_index)
-    }
-}
-
-fn push_if_non_empty<'a>(spans: &mut Vec<Span<'a>>, text: &'a str, style: Style) {
-    if !text.is_empty() {
-        spans.push(Span::styled(text, style));
-    }
-}
-
-fn build_edit_value_spans<'a>(
-    text: &'a str,
-    cursor: usize,
-    selection: Option<(usize, usize)>,
-    value_style: Style,
-    cursor_style: Style,
-    selection_style: Style,
-) -> Vec<Span<'a>> {
-    let mut spans = Vec::new();
-    let len = text.chars().count();
-    let cursor = cursor.min(len);
-
-    if let Some((start_raw, end_raw)) = selection {
-        let start = start_raw.min(len);
-        let end = end_raw.min(len);
-        let (start, end) = if start <= end { (start, end) } else { (end, start) };
-
-        if start < end {
-            let start_byte = char_to_byte_index(text, start);
-            let end_byte = char_to_byte_index(text, end);
-            push_if_non_empty(&mut spans, &text[..start_byte], value_style);
-            push_if_non_empty(&mut spans, &text[start_byte..end_byte], selection_style);
-            push_if_non_empty(&mut spans, &text[end_byte..], value_style);
-            return spans;
-        }
-    }
-
-    if len == 0 {
-        spans.push(Span::styled(" ", cursor_style));
-        return spans;
-    }
-
-    if cursor < len {
-        let cursor_start = char_to_byte_index(text, cursor);
-        let cursor_end = char_to_byte_index(text, cursor + 1);
-        push_if_non_empty(&mut spans, &text[..cursor_start], value_style);
-        push_if_non_empty(&mut spans, &text[cursor_start..cursor_end], cursor_style);
-        push_if_non_empty(&mut spans, &text[cursor_end..], value_style);
-    } else {
-        spans.push(Span::styled(text, value_style));
-        spans.push(Span::styled(" ", cursor_style));
-    }
-
-    spans
 }
 
 impl AppState {

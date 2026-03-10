@@ -4,11 +4,10 @@
 //! Logs are written to `~/.color-ssh/logs/cossh.log` with timestamps and log levels.
 
 use super::{LogError, LogLevel, formatter::LogFormatter};
-use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
 use std::{
-    fs::{self, File, OpenOptions},
+    fs::File,
     io::{BufWriter, Write},
-    path::{Path, PathBuf},
+    path::PathBuf,
     sync::{
         Arc, Mutex,
         mpsc::{self, Receiver, RecvTimeoutError, SyncSender},
@@ -135,7 +134,7 @@ impl DebugLogger {
     // File path and file creation helpers.
     fn create_log_file() -> Result<File, LogError> {
         let log_path = Self::get_debug_log_path()?;
-        open_private_append_file(&log_path)
+        Ok(crate::fs_private::open_private_append_file(&log_path, PRIVATE_LOG_FILE_MODE)?)
     }
 
     fn get_debug_log_path() -> Result<PathBuf, LogError> {
@@ -144,26 +143,10 @@ impl DebugLogger {
         let log_dir = home_dir.join(".color-ssh").join("logs");
 
         // Create directory structure if it doesn't exist
-        create_private_directory(&log_dir)?;
+        crate::fs_private::create_private_directory(&log_dir, PRIVATE_LOG_DIR_MODE)?;
 
         Ok(log_dir.join("cossh.log"))
     }
-}
-
-fn create_private_directory(path: &Path) -> Result<(), LogError> {
-    fs::create_dir_all(path)?;
-    set_private_directory_permissions(path)
-}
-
-fn open_private_append_file(path: &Path) -> Result<File, LogError> {
-    let mut options = OpenOptions::new();
-    options
-        .create(true) // Create if missing.
-        .append(true) // Preserve existing logs.
-        .mode(PRIVATE_LOG_FILE_MODE);
-    let file = options.open(path)?;
-    set_private_file_permissions(path)?;
-    Ok(file)
 }
 
 fn run_worker(receiver: Receiver<DebugLogCommand>, formatter: LogFormatter) {
@@ -234,14 +217,4 @@ fn flush_worker(state: &mut DebugLogWorkerState) -> Result<(), LogError> {
 
 fn should_flush(pending_bytes: usize, elapsed_since_flush: Duration) -> bool {
     pending_bytes >= DEBUG_LOG_FLUSH_BYTES || elapsed_since_flush >= DEBUG_LOG_FLUSH_INTERVAL
-}
-
-fn set_private_directory_permissions(path: &Path) -> Result<(), LogError> {
-    fs::set_permissions(path, fs::Permissions::from_mode(PRIVATE_LOG_DIR_MODE))?;
-    Ok(())
-}
-
-fn set_private_file_permissions(path: &Path) -> Result<(), LogError> {
-    fs::set_permissions(path, fs::Permissions::from_mode(PRIVATE_LOG_FILE_MODE))?;
-    Ok(())
 }

@@ -1,61 +1,12 @@
 //! Terminal-search keyboard handling.
 
 use crate::tui::AppState;
+use crate::tui::text_edit::{byte_index_for_char, char_len, clamp_cursor, delete_selection, normalized_selection};
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use std::io;
 
 type SearchSelection = Option<(usize, usize)>;
 type TerminalSearchQueryMut<'a> = (&'a mut String, &'a mut usize, &'a mut SearchSelection);
-
-fn char_len(text: &str) -> usize {
-    text.chars().count()
-}
-
-fn clamp_cursor(text: &str, cursor: &mut usize) {
-    *cursor = (*cursor).min(char_len(text));
-}
-
-fn normalized_selection(text: &str, selection: Option<(usize, usize)>) -> Option<(usize, usize)> {
-    let (start, end) = selection?;
-    let len = char_len(text);
-    let start = start.min(len);
-    let end = end.min(len);
-    if start == end {
-        None
-    } else if start < end {
-        Some((start, end))
-    } else {
-        Some((end, start))
-    }
-}
-
-fn byte_index_for_char(text: &str, char_index: usize) -> usize {
-    if char_index == 0 {
-        return 0;
-    }
-
-    let max = char_len(text);
-    let clamped = char_index.min(max);
-    if clamped == max {
-        return text.len();
-    }
-
-    text.char_indices().nth(clamped).map_or(text.len(), |(byte_index, _)| byte_index)
-}
-
-fn delete_selection(text: &mut String, cursor: &mut usize, selection: &mut Option<(usize, usize)>) -> bool {
-    let Some((start, end)) = normalized_selection(text, *selection) else {
-        *selection = None;
-        return false;
-    };
-
-    let start_byte = byte_index_for_char(text, start);
-    let end_byte = byte_index_for_char(text, end);
-    text.replace_range(start_byte..end_byte, "");
-    *cursor = start;
-    *selection = None;
-    true
-}
 
 impl AppState {
     fn terminal_search_query_mut(&mut self) -> Option<TerminalSearchQueryMut<'_>> {

@@ -7,6 +7,7 @@ mod app;
 mod features;
 mod state;
 mod terminal;
+mod text_edit;
 mod ui;
 
 pub(crate) use state::{

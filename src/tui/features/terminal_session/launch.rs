@@ -3,15 +3,15 @@ use crate::auth::secret::{ExposeSecret, SensitiveString};
 use crate::inventory::{ConnectionProtocol, InventoryHost};
 use crate::log::SessionSshLogger;
 use crate::process;
-use crate::process::{PtyLogTarget, spawn_pty_output_reader};
+use crate::process::{PtyLogTarget, spawn_captured_command, spawn_pty_command, spawn_pty_output_reader};
 use crate::terminal_core::highlight_overlay::HighlightOverlayEngine;
 use crate::terminal_core::{TerminalChild, TerminalEngine, TerminalSession};
 use crate::terminal_host::terminal_host_callbacks;
 use crate::tui::{AppState, HostTab, TerminalSearchState, VaultUnlockAction};
-use crate::{command_path, debug_enabled, log_debug, log_error};
-use portable_pty::{CommandBuilder, PtySize, native_pty_system};
-use std::io::{self, Write};
-use std::process::Stdio;
+use crate::{debug_enabled, log_debug, log_error};
+use std::io;
+#[cfg(test)]
+use std::io::Write;
 use std::sync::{
     Arc, Mutex,
     atomic::{AtomicU64, AtomicUsize, Ordering},
@@ -78,6 +78,7 @@ fn inject_launch_notice(engine: &Arc<Mutex<TerminalEngine>>, render_epoch: &Arc<
     }
 }
 
+#[cfg(test)]
 fn write_startup_payload_and_close_stdin(mut writer: Box<dyn Write + Send>, stdin_payload: Option<&SensitiveString>) -> io::Result<()> {
     if let Some(stdin_payload) = stdin_payload {
         writer.write_all(stdin_payload.expose_secret().as_bytes())?;
@@ -141,33 +142,12 @@ fn spawn_pty_terminal_session(
         launch_notice,
         session_logger,
     } = command;
-    let pty_system = native_pty_system();
     let rows = initial_rows.max(1);
     let cols = initial_cols.max(1);
-
-    let pty_pair = pty_system
-        .openpty(PtySize {
-            rows,
-            cols,
-            pixel_width: 0,
-            pixel_height: 0,
-        })
-        .map_err(|err| io::Error::other(err.to_string()))?;
-
-    let program_path = command_path::resolve_known_command_path(program)?;
-    let mut cmd = CommandBuilder::new(&program_path);
-    for arg in args {
-        cmd.arg(arg);
-    }
-    for (key, value) in env {
-        cmd.env(key, value);
-    }
-
-    let child = Arc::new(Mutex::new(pty_pair.slave.spawn_command(cmd).map_err(|err| io::Error::other(err.to_string()))?));
-    drop(pty_pair.slave);
-
-    let reader = pty_pair.master.try_clone_reader().map_err(|err| io::Error::other(err.to_string()))?;
-    let writer = Arc::new(Mutex::new(pty_pair.master.take_writer().map_err(|err| io::Error::other(err.to_string()))?));
+    let spawned = spawn_pty_command(program, args, env, rows, cols)?;
+    let child = spawned.child;
+    let reader = spawned.reader;
+    let writer = Arc::new(Mutex::new(spawned.writer));
 
     let engine = Arc::new(Mutex::new(TerminalEngine::new_with_input_writer_and_host_and_remote_clipboard_policy(
         rows,
@@ -179,7 +159,7 @@ fn spawn_pty_terminal_session(
         session_profile.remote_clipboard_max_bytes,
     )));
     let exited = Arc::new(Mutex::new(false));
-    let pty_master = Arc::new(Mutex::new(pty_pair.master));
+    let pty_master = Arc::new(Mutex::new(spawned.master));
     let render_epoch = Arc::new(AtomicU64::new(0));
 
     if let Some(notice) = launch_notice {
@@ -238,47 +218,11 @@ fn spawn_captured_terminal_session(
     } = command;
     let rows = initial_rows.max(1);
     let cols = initial_cols.max(1);
-
-    let program_path = command_path::resolve_known_command_path(program)?;
-    let mut cmd = std::process::Command::new(&program_path);
-    cmd.stdout(Stdio::piped()).stderr(Stdio::piped());
-    if stdin_payload.is_some() {
-        cmd.stdin(Stdio::piped());
-    } else {
-        cmd.stdin(Stdio::null());
-    }
-    for arg in args {
-        cmd.arg(arg);
-    }
-    for (key, value) in env {
-        cmd.env(key, value);
-    }
-
-    let mut child_process = cmd.spawn().map_err(|err| io::Error::other(err.to_string()))?;
-    let stdout = child_process
-        .stdout
-        .take()
-        .ok_or_else(|| io::Error::other("captured session stdout pipe missing"))?;
-    let stderr = child_process
-        .stderr
-        .take()
-        .ok_or_else(|| io::Error::other("captured session stderr pipe missing"))?;
-
-    if let Some(stdin_payload) = stdin_payload.as_ref() {
-        let Some(stdin) = child_process.stdin.take() else {
-            let _ = child_process.kill();
-            let _ = child_process.wait();
-            return Err(io::Error::other("captured session stdin pipe missing"));
-        };
-
-        if let Err(err) = write_startup_payload_and_close_stdin(Box::new(stdin), Some(stdin_payload)) {
-            let _ = child_process.kill();
-            let _ = child_process.wait();
-            return Err(err);
-        }
-    }
-
-    let child: Arc<Mutex<Box<dyn portable_pty::Child + Send + Sync>>> = Arc::new(Mutex::new(Box::new(child_process)));
+    let stdin_payload = stdin_payload.as_ref().map(|payload| payload.expose_secret().as_bytes());
+    let spawned = spawn_captured_command(program, args, env, stdin_payload)?;
+    let child = spawned.child;
+    let stdout = spawned.stdout;
+    let stderr = spawned.stderr;
     let engine = Arc::new(Mutex::new(TerminalEngine::new_with_host_and_remote_clipboard_policy(
         rows,
         cols,
@@ -295,7 +239,7 @@ fn spawn_captured_terminal_session(
         inject_launch_notice(&engine, &render_epoch, notice);
     }
 
-    for (stream_name, reader) in [("stdout", Box::new(stdout) as Box<dyn std::io::Read + Send>), ("stderr", Box::new(stderr))] {
+    for (stream_name, reader) in [("stdout", stdout), ("stderr", stderr)] {
         if let Err(err) = spawn_pty_output_reader(
             format!("captured-reader-{}-{}", program, stream_name),
             reader,

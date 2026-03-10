@@ -8,7 +8,7 @@ use interprocess::local_socket::{Listener as LocalSocketListener, ListenerNonblo
 use serde::{Deserialize, Serialize};
 use std::fs;
 use std::io::{self, BufRead, BufReader, Read, Write};
-use std::os::unix::fs::{FileTypeExt, PermissionsExt};
+use std::os::unix::fs::FileTypeExt;
 use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 use zeroize::Zeroizing;
@@ -422,13 +422,11 @@ fn cleanup_local_endpoint(paths: &VaultPaths) -> io::Result<()> {
 }
 
 fn set_restrictive_directory_permissions(path: &Path) -> io::Result<()> {
-    fs::set_permissions(path, fs::Permissions::from_mode(0o700))?;
-    Ok(())
+    crate::fs_private::set_private_directory_permissions(path, 0o700)
 }
 
 fn set_restrictive_file_permissions(path: &Path) -> io::Result<()> {
-    fs::set_permissions(path, fs::Permissions::from_mode(UNIX_SOCKET_MODE))?;
-    Ok(())
+    crate::fs_private::set_private_file_permissions(path, UNIX_SOCKET_MODE)
 }
 
 #[cfg(test)]

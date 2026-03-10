@@ -8,6 +8,7 @@ mod pty_output;
 mod pty_runtime;
 mod rdp_builder;
 mod spawn;
+mod spawn_common;
 mod ssh_builder;
 mod vault;
 
@@ -17,6 +18,7 @@ use std::process::ExitCode;
 
 pub(crate) use launch::{build_rdp_command_for_host_with_auth_settings, build_ssh_command_for_host, resolve_host_by_destination};
 pub(crate) use pty_output::{PtyLogTarget, spawn_pty_output_reader};
+pub(crate) use spawn_common::{io_other_error, spawn_captured_command, spawn_pty_command};
 pub(crate) const DISABLE_VAULT_AUTOLOGIN_ENV: &str = "COSSH_DISABLE_VAULT_AUTOLOGIN";
 
 pub(crate) fn prefer_pty_centered_interactive_ssh_runtime() -> bool {

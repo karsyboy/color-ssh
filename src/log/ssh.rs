@@ -10,12 +10,13 @@ use super::{LogError, formatter::LogFormatter, sanitize_session_name};
 use chrono::Local;
 use once_cell::sync::Lazy;
 use regex::Regex;
-use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
+#[cfg(test)]
+use std::path::Path;
 use std::{
     borrow::Cow,
-    fs::{self, File, OpenOptions},
+    fs::File,
     io::{BufWriter, Write},
-    path::{Path, PathBuf},
+    path::PathBuf,
     sync::{
         Arc, Mutex,
         mpsc::{self, Receiver, RecvTimeoutError, SyncSender},
@@ -191,12 +192,12 @@ impl SshLogger {
     // File creation helper.
     fn create_log_file() -> Result<File, LogError> {
         let log_path = get_ssh_log_path()?;
-        open_private_append_file(&log_path)
+        Ok(crate::fs_private::open_private_append_file(&log_path, PRIVATE_LOG_FILE_MODE)?)
     }
 
     fn create_log_file_for_session_name(session_name: &str) -> Result<File, LogError> {
         let log_path = get_ssh_log_path_for_session_name(session_name)?;
-        open_private_append_file(&log_path)
+        Ok(crate::fs_private::open_private_append_file(&log_path, PRIVATE_LOG_FILE_MODE)?)
     }
 }
 
@@ -391,24 +392,18 @@ fn ssh_log_directory() -> Result<PathBuf, LogError> {
     let date = Local::now().format("%Y-%m-%d");
     let log_dir = home_dir.join(".color-ssh").join("logs").join("ssh_sessions").join(date.to_string());
 
-    create_private_directory(&log_dir)?;
+    crate::fs_private::create_private_directory(&log_dir, PRIVATE_LOG_DIR_MODE)?;
     Ok(log_dir)
 }
 
+#[cfg(test)]
 fn create_private_directory(path: &Path) -> Result<(), LogError> {
-    fs::create_dir_all(path)?;
-    set_private_directory_permissions(path)
+    Ok(crate::fs_private::create_private_directory(path, PRIVATE_LOG_DIR_MODE)?)
 }
 
+#[cfg(test)]
 fn open_private_append_file(path: &Path) -> Result<File, LogError> {
-    let mut options = OpenOptions::new();
-    options
-        .create(true) // Create if missing.
-        .append(true) // Preserve existing logs.
-        .mode(PRIVATE_LOG_FILE_MODE);
-    let file = options.open(path)?;
-    set_private_file_permissions(path)?;
-    Ok(file)
+    Ok(crate::fs_private::open_private_append_file(path, PRIVATE_LOG_FILE_MODE)?)
 }
 
 fn current_secret_patterns() -> Vec<Regex> {
@@ -471,16 +466,6 @@ fn extract_complete_lines(buffer: &mut String) -> Vec<String> {
 
 fn should_flush(pending_bytes: usize, elapsed_since_flush: Duration) -> bool {
     pending_bytes >= SSH_LOG_FLUSH_BYTES || elapsed_since_flush >= SSH_LOG_FLUSH_INTERVAL
-}
-
-fn set_private_directory_permissions(path: &Path) -> Result<(), LogError> {
-    fs::set_permissions(path, fs::Permissions::from_mode(PRIVATE_LOG_DIR_MODE))?;
-    Ok(())
-}
-
-fn set_private_file_permissions(path: &Path) -> Result<(), LogError> {
-    fs::set_permissions(path, fs::Permissions::from_mode(PRIVATE_LOG_FILE_MODE))?;
-    Ok(())
 }
 
 #[cfg(test)]

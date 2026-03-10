@@ -1,5 +1,7 @@
 //! Quick-connect form state.
 
+use crate::tui::text_edit;
+
 type TextSelection = Option<(usize, usize)>;
 type TextCursorSelectionMut<'a> = (&'a mut String, &'a mut usize, &'a mut TextSelection);
 type TextCursorSelection<'a> = (&'a str, usize, TextSelection);
@@ -96,47 +98,11 @@ impl QuickConnectState {
         }
     }
 
-    fn char_len(text: &str) -> usize {
-        text.chars().count()
-    }
-
-    fn clamp_cursor(text: &str, cursor: &mut usize) {
-        *cursor = (*cursor).min(Self::char_len(text));
-    }
-
-    fn normalized_selection(text: &str, selection: Option<(usize, usize)>) -> Option<(usize, usize)> {
-        let (start, end) = selection?;
-        let len = Self::char_len(text);
-        let start = start.min(len);
-        let end = end.min(len);
-        if start == end {
-            None
-        } else if start < end {
-            Some((start, end))
-        } else {
-            Some((end, start))
-        }
-    }
-
-    fn byte_index_for_char(text: &str, char_index: usize) -> usize {
-        if char_index == 0 {
-            return 0;
-        }
-
-        let max = Self::char_len(text);
-        let clamped = char_index.min(max);
-        if clamped == max {
-            return text.len();
-        }
-
-        text.char_indices().nth(clamped).map_or(text.len(), |(byte_index, _)| byte_index)
-    }
-
     pub(crate) fn begin_mouse_selection(&mut self, field: QuickConnectField, column: usize) {
         self.drag_anchor = None;
         let mut anchor = None;
         if let Some((text, cursor, selection)) = self.text_cursor_selection_mut(field) {
-            let next_cursor = column.min(Self::char_len(text));
+            let next_cursor = column.min(text_edit::char_len(text));
             *cursor = next_cursor;
             *selection = None;
             anchor = Some(next_cursor);
@@ -152,7 +118,7 @@ impl QuickConnectState {
         };
 
         if let Some((text, cursor, selection)) = self.text_cursor_selection_mut(field) {
-            let next_cursor = column.min(Self::char_len(text));
+            let next_cursor = column.min(text_edit::char_len(text));
             *cursor = next_cursor;
             *selection = if next_cursor == anchor { None } else { Some((anchor, next_cursor)) };
         }
@@ -169,8 +135,8 @@ impl QuickConnectState {
     pub(crate) fn move_cursor_left(&mut self, field: QuickConnectField) {
         self.finish_mouse_selection();
         if let Some((text, cursor, selection)) = self.text_cursor_selection_mut(field) {
-            Self::clamp_cursor(text, cursor);
-            let active_selection = Self::normalized_selection(text, *selection);
+            text_edit::clamp_cursor(text, cursor);
+            let active_selection = text_edit::normalized_selection(text, *selection);
             *selection = None;
             if let Some((start, _)) = active_selection {
                 *cursor = start;
@@ -183,9 +149,9 @@ impl QuickConnectState {
     pub(crate) fn move_cursor_right(&mut self, field: QuickConnectField) {
         self.finish_mouse_selection();
         if let Some((text, cursor, selection)) = self.text_cursor_selection_mut(field) {
-            Self::clamp_cursor(text, cursor);
-            let len = Self::char_len(text);
-            let active_selection = Self::normalized_selection(text, *selection);
+            text_edit::clamp_cursor(text, cursor);
+            let len = text_edit::char_len(text);
+            let active_selection = text_edit::normalized_selection(text, *selection);
             *selection = None;
             if let Some((_, end)) = active_selection {
                 *cursor = end;
@@ -206,7 +172,7 @@ impl QuickConnectState {
     pub(crate) fn move_cursor_end(&mut self, field: QuickConnectField) {
         self.finish_mouse_selection();
         if let Some((text, cursor, selection)) = self.text_cursor_selection_mut(field) {
-            *cursor = Self::char_len(text);
+            *cursor = text_edit::char_len(text);
             *selection = None;
         }
     }
@@ -214,7 +180,7 @@ impl QuickConnectState {
     pub(crate) fn select_all(&mut self, field: QuickConnectField) {
         self.finish_mouse_selection();
         if let Some((text, cursor, selection)) = self.text_cursor_selection_mut(field) {
-            let len = Self::char_len(text);
+            let len = text_edit::char_len(text);
             if len == 0 {
                 *selection = None;
                 *cursor = 0;
@@ -230,25 +196,15 @@ impl QuickConnectState {
             return false;
         };
 
-        let Some((start, end)) = Self::normalized_selection(text, *selection) else {
-            *selection = None;
-            return false;
-        };
-
-        let start_byte = Self::byte_index_for_char(text, start);
-        let end_byte = Self::byte_index_for_char(text, end);
-        text.replace_range(start_byte..end_byte, "");
-        *cursor = start;
-        *selection = None;
-        true
+        text_edit::delete_selection(text, cursor, selection)
     }
 
     pub(crate) fn insert_char(&mut self, field: QuickConnectField, ch: char) {
         self.finish_mouse_selection();
         let _ = self.delete_selection(field);
         if let Some((text, cursor, selection)) = self.text_cursor_selection_mut(field) {
-            Self::clamp_cursor(text, cursor);
-            let insert_at = Self::byte_index_for_char(text, *cursor);
+            text_edit::clamp_cursor(text, cursor);
+            let insert_at = text_edit::byte_index_for_char(text, *cursor);
             text.insert(insert_at, ch);
             *cursor += 1;
             *selection = None;
@@ -262,14 +218,14 @@ impl QuickConnectState {
         }
 
         if let Some((text, cursor, selection)) = self.text_cursor_selection_mut(field) {
-            Self::clamp_cursor(text, cursor);
+            text_edit::clamp_cursor(text, cursor);
             if *cursor == 0 {
                 *selection = None;
                 return;
             }
 
-            let end = Self::byte_index_for_char(text, *cursor);
-            let start = Self::byte_index_for_char(text, *cursor - 1);
+            let end = text_edit::byte_index_for_char(text, *cursor);
+            let start = text_edit::byte_index_for_char(text, *cursor - 1);
             text.replace_range(start..end, "");
             *cursor -= 1;
             *selection = None;
@@ -283,15 +239,15 @@ impl QuickConnectState {
         }
 
         if let Some((text, cursor, selection)) = self.text_cursor_selection_mut(field) {
-            Self::clamp_cursor(text, cursor);
-            let len = Self::char_len(text);
+            text_edit::clamp_cursor(text, cursor);
+            let len = text_edit::char_len(text);
             if *cursor >= len {
                 *selection = None;
                 return;
             }
 
-            let start = Self::byte_index_for_char(text, *cursor);
-            let end = Self::byte_index_for_char(text, *cursor + 1);
+            let start = text_edit::byte_index_for_char(text, *cursor);
+            let end = text_edit::byte_index_for_char(text, *cursor + 1);
             text.replace_range(start..end, "");
             *selection = None;
         }
@@ -303,7 +259,7 @@ impl QuickConnectState {
 
     pub(crate) fn selection_for_field(&self, field: QuickConnectField) -> Option<(usize, usize)> {
         self.text_cursor_selection(field)
-            .and_then(|(text, _, selection)| Self::normalized_selection(text, selection))
+            .and_then(|(text, _, selection)| text_edit::normalized_selection(text, selection))
     }
 
     // Profile accessors.

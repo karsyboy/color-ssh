@@ -7,7 +7,7 @@
 
 use super::command_spec::PreparedCommand;
 use super::exit::map_exit_code;
-use super::{PtyLogTarget, spawn_pty_output_reader};
+use super::{PtyLogTarget, io_other_error, spawn_pty_command, spawn_pty_output_reader};
 use crate::auth::secret::ExposeSecret;
 use crate::reload_notice::{ReloadNoticeToast, format_reload_notice};
 use crate::terminal_core::highlight_overlay::{HighlightOverlay, HighlightOverlayEngine};
@@ -17,7 +17,7 @@ use crate::terminal_core::{
 };
 use crate::terminal_host::terminal_host_callbacks;
 use crate::terminal_ratatui::{apply_overlay_ranges, paint_terminal_viewport, render_reload_notice_toast};
-use crate::{Result, command_path, config, log, log_debug, log_error};
+use crate::{Result, config, log, log_debug, log_error};
 use crossterm::{
     cursor::MoveTo,
     event::{
@@ -28,7 +28,6 @@ use crossterm::{
     style::Print,
     terminal::{disable_raw_mode, enable_raw_mode},
 };
-use portable_pty::{CommandBuilder, PtySize, native_pty_system};
 use ratatui::{
     Frame, Terminal, TerminalOptions, Viewport,
     layout::{Position, Rect},
@@ -241,24 +240,11 @@ fn spawn_interactive_pty_runtime(command_spec: PreparedCommand, history_buffer: 
     let rows = rows.max(1);
     let cols = cols.max(1);
 
-    let pty_system = native_pty_system();
-    let pty_pair = pty_system
-        .openpty(PtySize {
-            rows,
-            cols,
-            pixel_width: 0,
-            pixel_height: 0,
-        })
-        .map_err(|err| io::Error::other(err.to_string()))?;
-
-    let cmd = command_builder_from_spec(&command_spec)?;
-    let child = Arc::new(Mutex::new(pty_pair.slave.spawn_command(cmd).map_err(|err| io::Error::other(err.to_string()))?));
-    drop(pty_pair.slave);
-
-    let reader = pty_pair.master.try_clone_reader().map_err(|err| io::Error::other(err.to_string()))?;
-    let writer = pty_pair.master.take_writer().map_err(|err| io::Error::other(err.to_string()))?;
-    let writer: TerminalInputWriter = Arc::new(Mutex::new(writer));
-    let pty_master = Arc::new(Mutex::new(pty_pair.master));
+    let spawned = spawn_pty_command(&command_spec.program, &command_spec.args, &command_spec.env, rows, cols)?;
+    let child = spawned.child;
+    let reader = spawned.reader;
+    let writer: TerminalInputWriter = Arc::new(Mutex::new(spawned.writer));
+    let pty_master = Arc::new(Mutex::new(spawned.master));
     let engine = Arc::new(Mutex::new(TerminalEngine::new_with_input_writer_and_host(
         rows,
         cols,
@@ -308,18 +294,6 @@ fn reader_thread_name(program: &str) -> String {
     format!("pty-reader-{}", program)
 }
 
-fn command_builder_from_spec(command_spec: &PreparedCommand) -> io::Result<CommandBuilder> {
-    let program_path = command_path::resolve_known_command_path(&command_spec.program)?;
-    let mut builder = CommandBuilder::new(program_path.as_os_str());
-    for arg in &command_spec.args {
-        builder.arg(arg);
-    }
-    for (key, value) in &command_spec.env {
-        builder.env(key, value);
-    }
-    Ok(builder)
-}
-
 fn spawn_exit_watcher(
     child: Arc<Mutex<Box<dyn portable_pty::Child + Send + Sync>>>,
     exited: Arc<Mutex<bool>>,
@@ -327,8 +301,8 @@ fn spawn_exit_watcher(
 ) -> io::Result<()> {
     thread::Builder::new().name("pty-exit-watcher".to_string()).spawn(move || {
         let exit_result = match child.lock() {
-            Ok(mut child) => child.wait().map_err(|err| io::Error::other(err.to_string())),
-            Err(err) => Err(io::Error::other(err.to_string())),
+            Ok(mut child) => child.wait().map_err(io_other_error),
+            Err(err) => Err(io_other_error(err)),
         };
 
         if let Ok(mut exited) = exited.lock() {
@@ -380,7 +354,7 @@ fn run_pty_event_loop(runtime: &mut InteractivePtyRuntime) -> Result<std::proces
         let current_config_version = config::current_config_version();
         if force_redraw || current_epoch != last_drawn_epoch || current_config_version != last_config_version || last_draw_at.elapsed() >= RENDER_HEARTBEAT {
             let captured_scrollback = {
-                let engine = runtime.session.engine().lock().map_err(|err| io::Error::other(err.to_string()))?;
+                let engine = runtime.session.engine().lock().map_err(io_other_error)?;
                 capture_host_scrollback_insertions(&engine, &mut runtime.host_scrollback)
             };
             let scrollback_insertions = build_host_scrollback_insertions(captured_scrollback, &mut runtime.highlight_overlay, current_epoch);
@@ -424,69 +398,7 @@ fn run_pty_event_loop(runtime: &mut InteractivePtyRuntime) -> Result<std::proces
             continue;
         }
 
-        match event::read()? {
-            Event::Key(key) => {
-                if key.kind != KeyEventKind::Press {
-                    continue;
-                }
-
-                if key.code == KeyCode::PageUp && key.modifiers.contains(KeyModifiers::SHIFT) {
-                    scroll_offset = scroll_offset.saturating_add(10).min(max_scrollback(&runtime.session));
-                    force_redraw = true;
-                    continue;
-                }
-
-                if key.code == KeyCode::PageDown && key.modifiers.contains(KeyModifiers::SHIFT) {
-                    scroll_offset = scroll_offset.saturating_sub(10);
-                    force_redraw = true;
-                    continue;
-                }
-
-                if scroll_offset > 0 {
-                    scroll_offset = 0;
-                    force_redraw = true;
-                }
-
-                if let Some(bytes) = encode_key_event_bytes(key) {
-                    runtime.session.write_input(&bytes)?;
-                }
-            }
-            Event::Paste(text) => {
-                if text.is_empty() {
-                    continue;
-                }
-
-                if scroll_offset > 0 {
-                    scroll_offset = 0;
-                    force_redraw = true;
-                }
-
-                let bracketed = bracketed_paste_enabled(&runtime.session)?;
-                let bytes = encode_paste_bytes(&text, bracketed);
-                runtime.session.write_input(&bytes)?;
-            }
-            Event::Resize(width, height) => {
-                runtime.session.resize(height.max(1), width.max(1));
-                runtime.host_scrollback.invalidate();
-                force_redraw = true;
-            }
-            Event::Mouse(mouse) => {
-                let (mouse_mode, mouse_encoding) = current_mouse_protocol(&runtime.session)?;
-                if mouse_mode == MouseProtocolMode::None {
-                    continue;
-                }
-
-                if scroll_offset > 0 {
-                    scroll_offset = 0;
-                    force_redraw = true;
-                }
-
-                if let Some(bytes) = encode_mouse_event(mouse, viewport_area, mouse_mode, mouse_encoding) {
-                    runtime.session.write_input(&bytes)?;
-                }
-            }
-            _ => {}
-        }
+        process_runtime_input_event(runtime, event::read()?, viewport_area, &mut scroll_offset, &mut force_redraw)?;
     }
 
     let show_cursor_result = terminal.show_cursor();
@@ -510,6 +422,80 @@ fn run_pty_event_loop(runtime: &mut InteractivePtyRuntime) -> Result<std::proces
         Some(Err(err)) => Err(err.into()),
         None => Ok(std::process::ExitCode::from(1)),
     }
+}
+
+fn process_runtime_input_event(
+    runtime: &mut InteractivePtyRuntime,
+    event: Event,
+    viewport_area: Rect,
+    scroll_offset: &mut usize,
+    force_redraw: &mut bool,
+) -> io::Result<()> {
+    match event {
+        Event::Key(key) => {
+            if key.kind != KeyEventKind::Press {
+                return Ok(());
+            }
+
+            if key.code == KeyCode::PageUp && key.modifiers.contains(KeyModifiers::SHIFT) {
+                *scroll_offset = (*scroll_offset).saturating_add(10).min(max_scrollback(&runtime.session));
+                *force_redraw = true;
+                return Ok(());
+            }
+
+            if key.code == KeyCode::PageDown && key.modifiers.contains(KeyModifiers::SHIFT) {
+                *scroll_offset = (*scroll_offset).saturating_sub(10);
+                *force_redraw = true;
+                return Ok(());
+            }
+
+            if *scroll_offset > 0 {
+                *scroll_offset = 0;
+                *force_redraw = true;
+            }
+
+            if let Some(bytes) = encode_key_event_bytes(key) {
+                runtime.session.write_input(&bytes)?;
+            }
+        }
+        Event::Paste(text) => {
+            if text.is_empty() {
+                return Ok(());
+            }
+
+            if *scroll_offset > 0 {
+                *scroll_offset = 0;
+                *force_redraw = true;
+            }
+
+            let bracketed = bracketed_paste_enabled(&runtime.session)?;
+            let bytes = encode_paste_bytes(&text, bracketed);
+            runtime.session.write_input(&bytes)?;
+        }
+        Event::Resize(width, height) => {
+            runtime.session.resize(height.max(1), width.max(1));
+            runtime.host_scrollback.invalidate();
+            *force_redraw = true;
+        }
+        Event::Mouse(mouse) => {
+            let (mouse_mode, mouse_encoding) = current_mouse_protocol(&runtime.session)?;
+            if mouse_mode == MouseProtocolMode::None {
+                return Ok(());
+            }
+
+            if *scroll_offset > 0 {
+                *scroll_offset = 0;
+                *force_redraw = true;
+            }
+
+            if let Some(bytes) = encode_mouse_event(mouse, viewport_area, mouse_mode, mouse_encoding) {
+                runtime.session.write_input(&bytes)?;
+            }
+        }
+        _ => {}
+    }
+
+    Ok(())
 }
 
 fn drain_pty_runtime_events(
@@ -536,7 +522,7 @@ fn process_pty_output(session: &TerminalSession, bytes: &[u8]) -> io::Result<()>
         return Ok(());
     }
 
-    let mut engine = session.engine().lock().map_err(|err| io::Error::other(err.to_string()))?;
+    let mut engine = session.engine().lock().map_err(io_other_error)?;
     engine.process_output(bytes);
     drop(engine);
     session.bump_render_epoch();
@@ -654,12 +640,12 @@ fn max_scrollback(session: &TerminalSession) -> usize {
 }
 
 fn bracketed_paste_enabled(session: &TerminalSession) -> io::Result<bool> {
-    let engine = session.engine().lock().map_err(|err| io::Error::other(err.to_string()))?;
+    let engine = session.engine().lock().map_err(io_other_error)?;
     Ok(engine.view_model().bracketed_paste_enabled())
 }
 
 fn current_mouse_protocol(session: &TerminalSession) -> io::Result<(MouseProtocolMode, MouseProtocolEncoding)> {
-    let engine = session.engine().lock().map_err(|err| io::Error::other(err.to_string()))?;
+    let engine = session.engine().lock().map_err(io_other_error)?;
     Ok(engine.view_model().mouse_protocol())
 }
 

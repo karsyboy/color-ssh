@@ -138,3 +138,14 @@ fn protocol_reload_notice_target_keeps_passthrough_paths_on_stderr() {
     );
     assert_eq!(super::dispatch::protocol_reload_notice_target(&rdp, true), ReloadNoticeTarget::Stderr);
 }
+
+#[test]
+fn protocol_command_for_non_interactive_requires_protocol_command() {
+    let mut no_command = base_args(0, false, false);
+    no_command.command = None;
+    assert!(super::dispatch::protocol_command_for_non_interactive(&no_command).is_err());
+
+    let mut vault_command = base_args(0, false, false);
+    vault_command.command = Some(MainCommand::Vault(crate::args::VaultCommand::Status));
+    assert!(super::dispatch::protocol_command_for_non_interactive(&vault_command).is_err());
+}

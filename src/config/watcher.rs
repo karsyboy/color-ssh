@@ -75,8 +75,12 @@ fn event_targets_config_file(event: &Event, config_path: &Path) -> bool {
     })
 }
 
+fn is_reloadable_event_kind(event: &Event) -> bool {
+    event.kind.is_modify() || event.kind.is_create() || event.kind.is_remove()
+}
+
 fn should_reload_for_event(event: &Event, config_path: &Path) -> bool {
-    (event.kind.is_modify() || event.kind.is_create() || event.kind.is_remove()) && event_targets_config_file(event, config_path)
+    is_reloadable_event_kind(event) && event_targets_config_file(event, config_path)
 }
 
 pub(crate) fn queue_reload_notice(message: impl Into<String>) {
@@ -89,7 +93,6 @@ pub(crate) fn queue_reload_notice(message: impl Into<String>) {
     });
 }
 
-#[cfg(test)]
 pub(crate) fn queue_profile_reload_event(event: ProfileReloadEvent) {
     with_profile_reload_queue(|queue| {
         if queue.len() >= MAX_PENDING_RELOAD_NOTICES {
@@ -119,12 +122,7 @@ fn emit_reload_notice(message: &str, target: ReloadNoticeTarget) {
 }
 
 fn queue_profile_reload_result(profile: String, success: bool, message: String) {
-    with_profile_reload_queue(|queue| {
-        if queue.len() >= MAX_PENDING_RELOAD_NOTICES {
-            queue.pop_front();
-        }
-        queue.push_back(ProfileReloadEvent { profile, message, success });
-    });
+    queue_profile_reload_event(ProfileReloadEvent { profile, message, success });
 }
 
 fn profile_name_from_config_path(path: &Path) -> Option<String> {
@@ -155,10 +153,10 @@ fn config_watch_paths(config_path: &Path, scope: ConfigWatchScope) -> io::Result
 }
 
 fn classify_reload_events(event: &Event, config_path: &Path, active_profile: Option<&str>, scope: ConfigWatchScope) -> Vec<PendingReloadEvent> {
-    let active_config_changed = should_reload_for_event(event, config_path);
-    if !(event.kind.is_modify() || event.kind.is_create() || event.kind.is_remove()) {
+    if !is_reloadable_event_kind(event) {
         return Vec::new();
     }
+    let active_config_changed = should_reload_for_event(event, config_path);
 
     let mut pending = Vec::new();
     if active_config_changed {

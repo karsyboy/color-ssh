@@ -3,6 +3,7 @@
 use super::logging::{APP_VERSION, apply_debug_logging, apply_ssh_logging, flush_debug_logs, resolve_logging_settings, update_session_name_for_logging};
 use super::startup::{exit_with_logged_error, initialize_config_or_exit, load_runtime_config_settings, print_title_banner, try_load_interactive_debug_mode};
 use crate::{Result, args, auth, config, inventory, log, log_debug, log_debug_raw, log_error, log_info, process, tui};
+use std::io;
 use std::process::ExitCode;
 
 fn run_interactive_session(logger: &log::Logger, args: &args::MainArgs) -> Result<ExitCode> {
@@ -188,6 +189,20 @@ fn run_protocol_command(command: args::ProtocolCommand, pass_entry: Option<Strin
     }
 }
 
+pub(crate) fn protocol_command_for_non_interactive(args: &args::MainArgs) -> io::Result<args::ProtocolCommand> {
+    match args.command.clone() {
+        Some(args::MainCommand::Protocol(protocol_command)) => Ok(protocol_command),
+        Some(other_command) => Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            format!("non-interactive dispatch requires a protocol command, found '{other_command:?}'"),
+        )),
+        None => Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "non-interactive dispatch requires a protocol command, found none",
+        )),
+    }
+}
+
 pub(crate) fn run() -> Result<ExitCode> {
     if auth::transport::is_internal_askpass_invocation() {
         return Ok(auth::run_internal_askpass());
@@ -228,9 +243,7 @@ pub(crate) fn run() -> Result<ExitCode> {
     print_title_banner(runtime_settings.show_title);
     update_protocol_session_name_if_needed(&logger, args.command.as_ref());
 
-    let Some(args::MainCommand::Protocol(protocol_command)) = args.command.clone() else {
-        unreachable!("non-interactive dispatch requires a protocol command");
-    };
+    let protocol_command = protocol_command_for_non_interactive(&args)?;
 
     log_debug!("Starting configuration file watcher");
     let watcher_target = protocol_reload_notice_target(&protocol_command, process::prefer_pty_centered_interactive_ssh_runtime());

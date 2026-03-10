@@ -533,17 +533,11 @@ fn entry_aad(name: &str) -> String {
 }
 
 fn set_restrictive_directory_permissions(path: &Path) -> Result<(), VaultError> {
-    use std::os::unix::fs::PermissionsExt;
-
-    fs::set_permissions(path, fs::Permissions::from_mode(0o700))?;
-    Ok(())
+    Ok(crate::fs_private::set_private_directory_permissions(path, 0o700)?)
 }
 
 fn set_restrictive_file_permissions(path: &Path) -> Result<(), VaultError> {
-    use std::os::unix::fs::PermissionsExt;
-
-    fs::set_permissions(path, fs::Permissions::from_mode(0o600))?;
-    Ok(())
+    Ok(crate::fs_private::set_private_file_permissions(path, 0o600)?)
 }
 
 #[cfg(test)]

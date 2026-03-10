@@ -1,6 +1,7 @@
 //! Password vault unlock modal rendering.
 
 use crate::tui::AppState;
+use crate::tui::text_edit::byte_index_for_char;
 use crate::tui::ui::theme;
 use chrono::{Local, TimeZone};
 use ratatui::{
@@ -10,19 +11,6 @@ use ratatui::{
     text::{Line, Span},
     widgets::{Block, Borders, Clear, Paragraph},
 };
-
-fn char_to_byte_index(text: &str, char_index: usize) -> usize {
-    if char_index == 0 {
-        return 0;
-    }
-    let len = text.chars().count();
-    let clamped = char_index.min(len);
-    if clamped == len {
-        text.len()
-    } else {
-        text.char_indices().nth(clamped).map_or(text.len(), |(byte_index, _)| byte_index)
-    }
-}
 
 fn format_vault_time_left(seconds: Option<u64>) -> String {
     let Some(total_seconds) = seconds else {
@@ -93,8 +81,8 @@ impl AppState {
         if masked.is_empty() {
             pass_spans.push(Span::styled(" ".to_string(), cursor_style));
         } else if cursor < masked.chars().count() {
-            let start = char_to_byte_index(&masked, cursor);
-            let end = char_to_byte_index(&masked, cursor + 1);
+            let start = byte_index_for_char(&masked, cursor);
+            let end = byte_index_for_char(&masked, cursor + 1);
             pass_spans.push(Span::styled(masked[..start].to_string(), value_style));
             pass_spans.push(Span::styled(masked[start..end].to_string(), cursor_style));
             pass_spans.push(Span::styled(masked[end..].to_string(), value_style));
