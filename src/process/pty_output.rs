@@ -159,7 +159,7 @@ where
                     }
                 }
                 Err(err) => {
-                    log_error!("Error reading from PTY: {}", err);
+                    log_error!("Error reading from session output: {}", err);
                     handle_closed();
                     break;
                 }
@@ -167,7 +167,7 @@ where
         }
 
         log_target.finish(&mut decoder);
-        log_debug!("PTY reader thread exiting");
+        log_debug!("Session output reader thread exiting");
     })?;
 
     Ok(())

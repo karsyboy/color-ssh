@@ -194,10 +194,6 @@ pub(super) fn run_interactive_ssh(command_spec: PreparedCommand) -> Result<std::
     run_interactive_command(command_spec, PtyLogTarget::global_ssh())
 }
 
-pub(super) fn run_interactive_rdp(command_spec: PreparedCommand) -> Result<std::process::ExitCode> {
-    run_interactive_command(command_spec, PtyLogTarget::Disabled)
-}
-
 fn run_interactive_command(mut command_spec: PreparedCommand, log_target: PtyLogTarget) -> Result<std::process::ExitCode> {
     let fallback_notice = command_spec.fallback_notice.take();
     let stdin_payload = command_spec.stdin_payload.take();

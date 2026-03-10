@@ -68,7 +68,7 @@ fn build_rdp_args(host: &InventoryHost, password: Option<&SensitiveString>) -> i
 }
 
 fn build_rdp_stdin_payload(args: &[String]) -> SensitiveString {
-    SensitiveString::from(args.join("\n") + "\n")
+    SensitiveString::from(args.join("\n"))
 }
 
 fn resolve_rdp_auth_mode_with<F>(host: &InventoryHost, explicit_pass_entry: Option<&str>, resolve_password: F) -> (RdpAuthMode, Option<String>)

@@ -10,10 +10,11 @@ use crate::terminal_host::terminal_host_callbacks;
 use crate::tui::{AppState, HostTab, TerminalSearchState, VaultUnlockAction};
 use crate::{command_path, debug_enabled, log_debug, log_error};
 use portable_pty::{CommandBuilder, PtySize, native_pty_system};
-use std::io;
+use std::io::{self, Write};
+use std::process::Stdio;
 use std::sync::{
     Arc, Mutex,
-    atomic::{AtomicU64, Ordering},
+    atomic::{AtomicU64, AtomicUsize, Ordering},
 };
 use std::time::Instant;
 
@@ -37,9 +38,27 @@ struct PtySessionLaunch<'a> {
     program: &'a str,
     args: &'a [String],
     env: &'a [(String, String)],
-    stdin_payload: Option<SensitiveString>,
     launch_notice: Option<String>,
     session_logger: Option<SessionSshLogger>,
+}
+
+struct CapturedSessionLaunch<'a> {
+    program: &'a str,
+    args: &'a [String],
+    env: &'a [(String, String)],
+    stdin_payload: Option<SensitiveString>,
+    launch_notice: Option<String>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum RdpSessionLaunchMode {
+    Pty,
+    CapturedOutput,
+}
+
+#[derive(Debug, Default)]
+struct CapturedOutputNewlineNormalizer {
+    previous_byte_was_carriage_return: bool,
 }
 
 fn auto_login_notice(host: &InventoryHost, detail: impl Into<String>) -> String {
@@ -59,12 +78,69 @@ fn inject_launch_notice(engine: &Arc<Mutex<TerminalEngine>>, render_epoch: &Arc<
     }
 }
 
+fn write_startup_payload_and_close_stdin(mut writer: Box<dyn Write + Send>, stdin_payload: Option<&SensitiveString>) -> io::Result<()> {
+    if let Some(stdin_payload) = stdin_payload {
+        writer.write_all(stdin_payload.expose_secret().as_bytes())?;
+        writer.flush()?;
+    }
+
+    Ok(())
+}
+
+fn rdp_session_launch_mode(stdin_payload: Option<&SensitiveString>) -> RdpSessionLaunchMode {
+    if stdin_payload.is_some() {
+        RdpSessionLaunchMode::CapturedOutput
+    } else {
+        RdpSessionLaunchMode::Pty
+    }
+}
+
+fn terminate_spawned_child(child: &Arc<Mutex<Box<dyn portable_pty::Child + Send + Sync>>>) {
+    if let Ok(mut child) = child.lock() {
+        let _ = child.kill();
+        let _ = child.try_wait();
+    }
+}
+
+fn normalize_captured_output_chunk(normalizer: &mut CapturedOutputNewlineNormalizer, bytes: &[u8]) -> Vec<u8> {
+    let mut normalized = Vec::with_capacity(bytes.len().saturating_mul(2));
+
+    for &byte in bytes {
+        match byte {
+            b'\n' => {
+                if !normalizer.previous_byte_was_carriage_return {
+                    normalized.push(b'\r');
+                }
+                normalized.push(b'\n');
+                normalizer.previous_byte_was_carriage_return = false;
+            }
+            b'\r' => {
+                normalized.push(b'\r');
+                normalizer.previous_byte_was_carriage_return = true;
+            }
+            _ => {
+                normalized.push(byte);
+                normalizer.previous_byte_was_carriage_return = false;
+            }
+        }
+    }
+
+    normalized
+}
+
 fn spawn_pty_terminal_session(
     command: PtySessionLaunch<'_>,
     session_profile: &crate::config::InteractiveProfileSnapshot,
     initial_rows: u16,
     initial_cols: u16,
 ) -> io::Result<TerminalSession> {
+    let PtySessionLaunch {
+        program,
+        args,
+        env,
+        launch_notice,
+        session_logger,
+    } = command;
     let pty_system = native_pty_system();
     let rows = initial_rows.max(1);
     let cols = initial_cols.max(1);
@@ -78,12 +154,12 @@ fn spawn_pty_terminal_session(
         })
         .map_err(|err| io::Error::other(err.to_string()))?;
 
-    let program_path = command_path::resolve_known_command_path(command.program)?;
+    let program_path = command_path::resolve_known_command_path(program)?;
     let mut cmd = CommandBuilder::new(&program_path);
-    for arg in command.args {
+    for arg in args {
         cmd.arg(arg);
     }
-    for (key, value) in command.env {
+    for (key, value) in env {
         cmd.env(key, value);
     }
 
@@ -91,8 +167,7 @@ fn spawn_pty_terminal_session(
     drop(pty_pair.slave);
 
     let reader = pty_pair.master.try_clone_reader().map_err(|err| io::Error::other(err.to_string()))?;
-    let writer = pty_pair.master.take_writer().map_err(|err| io::Error::other(err.to_string()))?;
-    let writer = Arc::new(Mutex::new(writer));
+    let writer = Arc::new(Mutex::new(pty_pair.master.take_writer().map_err(|err| io::Error::other(err.to_string()))?));
 
     let engine = Arc::new(Mutex::new(TerminalEngine::new_with_input_writer_and_host_and_remote_clipboard_policy(
         rows,
@@ -107,12 +182,12 @@ fn spawn_pty_terminal_session(
     let pty_master = Arc::new(Mutex::new(pty_pair.master));
     let render_epoch = Arc::new(AtomicU64::new(0));
 
-    if let Some(notice) = command.launch_notice {
+    if let Some(notice) = launch_notice {
         inject_launch_notice(&engine, &render_epoch, notice);
     }
 
     spawn_pty_output_reader(
-        format!("pty-reader-{}", command.program),
+        format!("pty-reader-{}", program),
         reader,
         {
             let engine = engine.clone();
@@ -135,19 +210,129 @@ fn spawn_pty_terminal_session(
                 }
             }
         },
-        PtyLogTarget::session(command.session_logger),
+        PtyLogTarget::session(session_logger),
     )?;
 
-    let mut session = TerminalSession::new(Some(pty_master), Some(writer), TerminalChild::Pty(child), engine, exited, render_epoch);
+    Ok(TerminalSession::new(
+        Some(pty_master),
+        Some(writer),
+        TerminalChild::Pty(child),
+        engine,
+        exited,
+        render_epoch,
+    ))
+}
 
-    if let Some(stdin_payload) = command.stdin_payload
-        && let Err(err) = session.write_input(stdin_payload.expose_secret().as_bytes())
-    {
-        session.terminate();
-        return Err(err);
+fn spawn_captured_terminal_session(
+    command: CapturedSessionLaunch<'_>,
+    session_profile: &crate::config::InteractiveProfileSnapshot,
+    initial_rows: u16,
+    initial_cols: u16,
+) -> io::Result<TerminalSession> {
+    let CapturedSessionLaunch {
+        program,
+        args,
+        env,
+        stdin_payload,
+        launch_notice,
+    } = command;
+    let rows = initial_rows.max(1);
+    let cols = initial_cols.max(1);
+
+    let program_path = command_path::resolve_known_command_path(program)?;
+    let mut cmd = std::process::Command::new(&program_path);
+    cmd.stdout(Stdio::piped()).stderr(Stdio::piped());
+    if stdin_payload.is_some() {
+        cmd.stdin(Stdio::piped());
+    } else {
+        cmd.stdin(Stdio::null());
+    }
+    for arg in args {
+        cmd.arg(arg);
+    }
+    for (key, value) in env {
+        cmd.env(key, value);
     }
 
-    Ok(session)
+    let mut child_process = cmd.spawn().map_err(|err| io::Error::other(err.to_string()))?;
+    let stdout = child_process
+        .stdout
+        .take()
+        .ok_or_else(|| io::Error::other("captured session stdout pipe missing"))?;
+    let stderr = child_process
+        .stderr
+        .take()
+        .ok_or_else(|| io::Error::other("captured session stderr pipe missing"))?;
+
+    if let Some(stdin_payload) = stdin_payload.as_ref() {
+        let Some(stdin) = child_process.stdin.take() else {
+            let _ = child_process.kill();
+            let _ = child_process.wait();
+            return Err(io::Error::other("captured session stdin pipe missing"));
+        };
+
+        if let Err(err) = write_startup_payload_and_close_stdin(Box::new(stdin), Some(stdin_payload)) {
+            let _ = child_process.kill();
+            let _ = child_process.wait();
+            return Err(err);
+        }
+    }
+
+    let child: Arc<Mutex<Box<dyn portable_pty::Child + Send + Sync>>> = Arc::new(Mutex::new(Box::new(child_process)));
+    let engine = Arc::new(Mutex::new(TerminalEngine::new_with_host_and_remote_clipboard_policy(
+        rows,
+        cols,
+        session_profile.history_buffer,
+        terminal_host_callbacks(),
+        session_profile.remote_clipboard_write,
+        session_profile.remote_clipboard_max_bytes,
+    )));
+    let exited = Arc::new(Mutex::new(false));
+    let render_epoch = Arc::new(AtomicU64::new(0));
+    let closed_streams = Arc::new(AtomicUsize::new(0));
+
+    if let Some(notice) = launch_notice {
+        inject_launch_notice(&engine, &render_epoch, notice);
+    }
+
+    for (stream_name, reader) in [("stdout", Box::new(stdout) as Box<dyn std::io::Read + Send>), ("stderr", Box::new(stderr))] {
+        if let Err(err) = spawn_pty_output_reader(
+            format!("captured-reader-{}-{}", program, stream_name),
+            reader,
+            {
+                let engine = engine.clone();
+                let render_epoch = render_epoch.clone();
+                let mut newline_normalizer = CapturedOutputNewlineNormalizer::default();
+                move |bytes| {
+                    let normalized = normalize_captured_output_chunk(&mut newline_normalizer, bytes);
+                    if let Ok(mut engine) = engine.lock() {
+                        engine.process_output(&normalized);
+                        render_epoch.fetch_add(1, Ordering::Relaxed);
+                        true
+                    } else {
+                        false
+                    }
+                }
+            },
+            {
+                let exited = exited.clone();
+                let closed_streams = closed_streams.clone();
+                move || {
+                    if closed_streams.fetch_add(1, Ordering::Relaxed) + 1 >= 2
+                        && let Ok(mut exited) = exited.lock()
+                    {
+                        *exited = true;
+                    }
+                }
+            },
+            PtyLogTarget::Disabled,
+        ) {
+            terminate_spawned_child(&child);
+            return Err(err);
+        }
+    }
+
+    Ok(TerminalSession::new(None, None, TerminalChild::Pty(child), engine, exited, render_epoch))
 }
 
 fn highlight_overlay_for_host(host: &InventoryHost, session_profile: &crate::config::InteractiveProfileSnapshot) -> HighlightOverlayEngine {
@@ -517,7 +702,6 @@ impl AppState {
                 program: &command_spec.program,
                 args: &command_spec.args,
                 env: &command_spec.env,
-                stdin_payload: None,
                 launch_notice,
                 session_logger,
             },
@@ -549,20 +733,32 @@ impl AppState {
         let mut command_spec =
             process::build_rdp_command_for_host_with_auth_settings(&launch_host, pass_entry_override.as_deref(), &session_profile.auth_settings)?;
         let launch_notice = pass_fallback_notice.or(command_spec.fallback_notice.take());
-
-        spawn_pty_terminal_session(
-            PtySessionLaunch {
-                program: &command_spec.program,
-                args: &command_spec.args,
-                env: &command_spec.env,
-                stdin_payload: command_spec.stdin_payload.take(),
-                launch_notice,
-                session_logger: None,
-            },
-            session_profile,
-            initial_rows,
-            initial_cols,
-        )
+        match rdp_session_launch_mode(command_spec.stdin_payload.as_ref()) {
+            RdpSessionLaunchMode::Pty => spawn_pty_terminal_session(
+                PtySessionLaunch {
+                    program: &command_spec.program,
+                    args: &command_spec.args,
+                    env: &command_spec.env,
+                    launch_notice,
+                    session_logger: None,
+                },
+                session_profile,
+                initial_rows,
+                initial_cols,
+            ),
+            RdpSessionLaunchMode::CapturedOutput => spawn_captured_terminal_session(
+                CapturedSessionLaunch {
+                    program: &command_spec.program,
+                    args: &command_spec.args,
+                    env: &command_spec.env,
+                    stdin_payload: command_spec.stdin_payload.take(),
+                    launch_notice,
+                },
+                session_profile,
+                initial_rows,
+                initial_cols,
+            ),
+        }
     }
 
     pub(crate) fn reconnect_session(&mut self) {

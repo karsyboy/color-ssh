@@ -39,7 +39,7 @@ See `docs/terminal-frontend-contract.md` for the full frontend contract, TUI-spe
 
 - Direct interactive SSH uses the PTY-centered runtime whenever stdin and stdout are attached to an interactive TTY.
 - Direct SSH without a controlling TTY uses `src/process/interactive_passthrough.rs`.
-- Direct RDP still uses a captured-output fallback when Color-SSH must inject auth data and forward FreeRDP stdout/stderr instead of handing the session to a PTY-owned renderer.
+- Vault-backed RDP launches use a captured-output fallback whenever Color-SSH must inject auth data via `/args-from:stdin`, both for direct mode and TUI-owned sessions, instead of handing the session to a PTY-owned renderer.
 
 ## Overlay Behavior
 
@@ -62,7 +62,7 @@ See `docs/terminal-frontend-contract.md` for the full frontend contract, TUI-spe
 
 - `src/process/interactive_passthrough.rs`
   - Required for direct SSH when there is no interactive controlling TTY and the PTY renderer cannot own the local terminal surface.
-  - Required for the explicit RDP compatibility exception where FreeRDP still needs captured stdout/stderr forwarding.
+  - Required for the explicit RDP compatibility exception where FreeRDP still needs captured stdout/stderr forwarding for vault-backed launches.
 
 ## Long-Term Design
 

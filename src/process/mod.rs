@@ -79,17 +79,13 @@ pub(crate) fn run_rdp_process(rdp_args: RdpCommandArgs, explicit_pass_entry: Opt
         eprintln!("[color-ssh] {}", notice);
     }
 
-    if command_spec.stdin_payload.is_none() {
+    if command_spec.stdin_payload.is_some() {
+        log_info!("Using passthrough mode for vault-backed RDP command so FreeRDP receives startup arguments over a closed pipe");
+    } else {
         log_info!("Using passthrough mode for RDP command so FreeRDP can prompt on the controlling terminal");
-        return launch::spawn_passthrough(command_spec);
     }
 
-    if !pty_runtime::prefer_direct_pty_runtime() {
-        log_info!("Using passthrough compatibility mode for vault-backed RDP command without an interactive controlling terminal");
-        return launch::spawn_passthrough(command_spec);
-    }
-
-    interactive::run_interactive_rdp_session(command_spec)
+    launch::spawn_passthrough(command_spec)
 }
 
 #[cfg(test)]

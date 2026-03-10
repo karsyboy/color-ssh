@@ -7,8 +7,12 @@ use crate::test::support::{config::base_config, fs::TestWorkspace};
 use crate::tui::VaultUnlockAction;
 use regex::Regex;
 use std::ffi::OsString;
+use std::io::{self, Write};
 use std::path::PathBuf;
-use std::sync::{Mutex, MutexGuard, OnceLock};
+use std::sync::{
+    Arc, Mutex, MutexGuard, OnceLock,
+    atomic::{AtomicBool, Ordering},
+};
 
 static PROFILE_TEST_LOCK: OnceLock<Mutex<()>> = OnceLock::new();
 
@@ -95,6 +99,28 @@ fn build_overlay_for_text(
     )
 }
 
+struct TrackingWriter {
+    bytes: Arc<Mutex<Vec<u8>>>,
+    dropped: Arc<AtomicBool>,
+}
+
+impl Write for TrackingWriter {
+    fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
+        self.bytes.lock().expect("writer bytes").extend_from_slice(buf);
+        Ok(buf.len())
+    }
+
+    fn flush(&mut self) -> io::Result<()> {
+        Ok(())
+    }
+}
+
+impl Drop for TrackingWriter {
+    fn drop(&mut self) {
+        self.dropped.store(true, Ordering::Relaxed);
+    }
+}
+
 #[test]
 fn auto_login_notice_for_rdp_mentions_freerdp_prompt() {
     let host = sample_rdp_host();
@@ -148,6 +174,57 @@ fn resolve_host_pass_password_for_rdp_with_tui_autologin_disabled_is_launchable(
             disable_vault_autologin: true,
         })
     );
+}
+
+#[test]
+fn startup_only_rdp_launch_payload_closes_writer_after_write() {
+    let bytes = Arc::new(Mutex::new(Vec::new()));
+    let dropped = Arc::new(AtomicBool::new(false));
+    let writer = TrackingWriter {
+        bytes: bytes.clone(),
+        dropped: dropped.clone(),
+    };
+    let payload = crate::auth::secret::sensitive_string("/u:alice\n/p:super-secret");
+
+    write_startup_payload_and_close_stdin(Box::new(writer), Some(&payload)).expect("write startup payload");
+
+    assert_eq!(
+        String::from_utf8(bytes.lock().expect("payload bytes").clone()).expect("payload should be utf-8"),
+        "/u:alice\n/p:super-secret"
+    );
+    assert!(dropped.load(Ordering::Relaxed));
+}
+
+#[test]
+fn vault_backed_rdp_launch_uses_captured_output_mode() {
+    let payload = crate::auth::secret::sensitive_string("/u:alice\n/p:super-secret");
+
+    assert_eq!(rdp_session_launch_mode(Some(&payload)), RdpSessionLaunchMode::CapturedOutput);
+}
+
+#[test]
+fn prompt_backed_rdp_launch_uses_pty_mode() {
+    assert_eq!(rdp_session_launch_mode(None), RdpSessionLaunchMode::Pty);
+}
+
+#[test]
+fn captured_output_newlines_expand_to_crlf() {
+    let mut normalizer = CapturedOutputNewlineNormalizer::default();
+
+    let normalized = normalize_captured_output_chunk(&mut normalizer, b"first line\nsecond line\n");
+
+    assert_eq!(normalized, b"first line\r\nsecond line\r\n");
+}
+
+#[test]
+fn captured_output_newlines_preserve_chunked_crlf_sequences() {
+    let mut normalizer = CapturedOutputNewlineNormalizer::default();
+
+    let first_chunk = normalize_captured_output_chunk(&mut normalizer, b"first line\r");
+    let second_chunk = normalize_captured_output_chunk(&mut normalizer, b"\nsecond line\n");
+
+    assert_eq!(first_chunk, b"first line\r");
+    assert_eq!(second_chunk, b"\nsecond line\r\n");
 }
 
 #[test]
