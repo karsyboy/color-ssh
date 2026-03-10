@@ -16,7 +16,11 @@ mod event_listener;
 mod frontend;
 pub(crate) mod highlight_overlay;
 mod host;
+mod host_integration;
 mod protocol;
+mod ratatui;
+mod reload_notice;
+mod rules;
 mod session;
 mod types;
 mod view;
@@ -29,7 +33,11 @@ pub(crate) use frontend::{
     TerminalSessionSnapshot,
 };
 pub(crate) use host::{TerminalClipboardTarget, TerminalHostCallbacks};
+pub(crate) use host_integration::{copy_to_clipboard, terminal_host_callbacks};
 pub(crate) use protocol::{encode_key_event_bytes, encode_mouse_event_bytes, encode_paste_bytes};
+pub(crate) use ratatui::{apply_overlay_ranges, paint_terminal_viewport, render_reload_notice_toast};
+pub(crate) use reload_notice::{ReloadNoticeToast, format_reload_notice};
+pub(crate) use rules::CompiledHighlightRule;
 pub(crate) use session::{TerminalChild, TerminalSession};
 pub(crate) use types::TerminalInputWriter;
 #[allow(unused_imports)]

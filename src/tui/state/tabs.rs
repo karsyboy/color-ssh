@@ -1,10 +1,10 @@
 //! Per-tab session state.
 
 use crate::inventory::InventoryHost;
-use crate::terminal_core::highlight_overlay::HighlightOverlayEngine;
+use crate::terminal::highlight_overlay::HighlightOverlayEngine;
 use std::collections::HashMap;
 
-pub(crate) use crate::terminal_core::TerminalSession as ManagedSession;
+pub(crate) use crate::terminal::TerminalSession as ManagedSession;
 
 #[derive(Debug, Clone, Default)]
 pub(crate) struct TerminalSearchState {

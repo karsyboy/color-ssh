@@ -1,5 +1,6 @@
-use super::exit::map_exit_code;
-use super::launch::{build_plain_ssh_command, build_ssh_command_for_host, resolve_host_by_destination, resolve_pass_entry_from_hosts, synthesize_ssh_args};
+use super::{
+    build_plain_ssh_command, build_ssh_command_for_host, map_exit_code, resolve_host_by_destination, resolve_pass_entry_from_hosts, synthesize_ssh_args,
+};
 use crate::inventory::InventoryHost;
 use std::process::ExitCode;
 

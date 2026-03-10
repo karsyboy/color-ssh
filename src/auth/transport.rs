@@ -1,6 +1,6 @@
 //! Internal askpass environment and prompt-classification helpers.
 
-use crate::{command_path, log_debug};
+use crate::{log_debug, platform};
 use std::io;
 
 pub const INTERNAL_ASKPASS_MODE_ENV: &str = "COSSH_INTERNAL_ASKPASS";
@@ -22,7 +22,7 @@ pub enum AskpassPromptDecision {
 
 /// Configure environment so OpenSSH invokes `cossh` as askpass helper.
 pub fn configure_internal_askpass_env(command_env: &mut Vec<(String, String)>, token: &str) -> io::Result<()> {
-    let cossh_path = command_path::cossh_path()?;
+    let cossh_path = platform::cossh_path()?;
     log_debug!("Configuring internal askpass helper");
     command_env.push((SSH_ASKPASS_ENV.to_string(), cossh_path.to_string_lossy().into_owned()));
     command_env.push((SSH_ASKPASS_REQUIRE_ENV.to_string(), SSH_ASKPASS_FORCE.to_string()));

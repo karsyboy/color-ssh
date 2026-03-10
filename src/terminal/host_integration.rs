@@ -1,4 +1,4 @@
-use crate::terminal_core::{TerminalClipboardTarget, TerminalHostCallbacks};
+use super::{TerminalClipboardTarget, TerminalHostCallbacks};
 use crossterm::clipboard::CopyToClipboard;
 use crossterm::execute;
 use std::io::{Write, stdout};

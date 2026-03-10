@@ -87,7 +87,7 @@ fn run_vault_mode(logger: &log::Logger, args: &args::MainArgs, vault_command: &a
 
 pub(crate) fn resolve_inventory_profile_for_protocol_command(command: &args::ProtocolCommand, inventory_hosts: &[inventory::InventoryHost]) -> Option<String> {
     match command {
-        args::ProtocolCommand::Ssh(ssh_command) => crate::ssh_args::extract_destination_host(&ssh_command.ssh_args)
+        args::ProtocolCommand::Ssh(ssh_command) => crate::args::extract_destination_host(&ssh_command.ssh_args)
             .and_then(|destination| process::resolve_host_by_destination(&destination, inventory_hosts))
             .filter(|host| matches!(&host.protocol, inventory::ConnectionProtocol::Ssh))
             .and_then(|host| host.profile.clone()),

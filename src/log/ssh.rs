@@ -192,12 +192,12 @@ impl SshLogger {
     // File creation helper.
     fn create_log_file() -> Result<File, LogError> {
         let log_path = get_ssh_log_path()?;
-        Ok(crate::fs_private::open_private_append_file(&log_path, PRIVATE_LOG_FILE_MODE)?)
+        Ok(crate::platform::open_private_append_file(&log_path, PRIVATE_LOG_FILE_MODE)?)
     }
 
     fn create_log_file_for_session_name(session_name: &str) -> Result<File, LogError> {
         let log_path = get_ssh_log_path_for_session_name(session_name)?;
-        Ok(crate::fs_private::open_private_append_file(&log_path, PRIVATE_LOG_FILE_MODE)?)
+        Ok(crate::platform::open_private_append_file(&log_path, PRIVATE_LOG_FILE_MODE)?)
     }
 }
 
@@ -392,18 +392,18 @@ fn ssh_log_directory() -> Result<PathBuf, LogError> {
     let date = Local::now().format("%Y-%m-%d");
     let log_dir = home_dir.join(".color-ssh").join("logs").join("ssh_sessions").join(date.to_string());
 
-    crate::fs_private::create_private_directory(&log_dir, PRIVATE_LOG_DIR_MODE)?;
+    crate::platform::create_private_directory(&log_dir, PRIVATE_LOG_DIR_MODE)?;
     Ok(log_dir)
 }
 
 #[cfg(test)]
 fn create_private_directory(path: &Path) -> Result<(), LogError> {
-    Ok(crate::fs_private::create_private_directory(path, PRIVATE_LOG_DIR_MODE)?)
+    Ok(crate::platform::create_private_directory(path, PRIVATE_LOG_DIR_MODE)?)
 }
 
 #[cfg(test)]
 fn open_private_append_file(path: &Path) -> Result<File, LogError> {
-    Ok(crate::fs_private::open_private_append_file(path, PRIVATE_LOG_FILE_MODE)?)
+    Ok(crate::platform::open_private_append_file(path, PRIVATE_LOG_FILE_MODE)?)
 }
 
 fn current_secret_patterns() -> Vec<Regex> {

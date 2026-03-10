@@ -1,7 +1,7 @@
 use super::{HighlightCompatibilityAction, HighlightOverlayBuildKind, HighlightOverlayEngine, HighlightSuppressionReason, viewport_changed_aggressively};
 use crate::config::{HighlightOverlayAutoPolicy, HighlightOverlayMode, InteractiveProfileSnapshot};
-use crate::highlight_rules::CompiledHighlightRule;
-use crate::terminal_core::{AnsiColor, TerminalEngine};
+use crate::terminal::CompiledHighlightRule;
+use crate::terminal::{AnsiColor, TerminalEngine};
 use alacritty_terminal::vte::ansi::Rgb;
 use regex::Regex;
 

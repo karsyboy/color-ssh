@@ -1,5 +1,6 @@
 //! Shared vault-access helpers for protocol launch paths.
 
+use crate::args::validate_vault_entry_name;
 use crate::auth::{
     self, agent,
     ipc::UnlockPolicy,
@@ -7,7 +8,6 @@ use crate::auth::{
 };
 use crate::config;
 use crate::log_debug;
-use crate::validation::validate_vault_entry_name;
 use std::fmt;
 use std::io::{self, IsTerminal};
 

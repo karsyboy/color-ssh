@@ -3,8 +3,8 @@
 //! Vault data is stored under `~/.color-ssh/vault` with restrictive
 //! permissions and authenticated encryption at rest.
 
+use crate::args::validate_vault_entry_name;
 use crate::auth::secret::{SensitiveString, sensitive_string};
-use crate::validation::validate_vault_entry_name;
 use argon2::{Algorithm, Argon2, Params, Version};
 use base64::{Engine as _, engine::general_purpose::STANDARD as BASE64};
 use chacha20poly1305::aead::{Aead, Payload};
@@ -533,11 +533,11 @@ fn entry_aad(name: &str) -> String {
 }
 
 fn set_restrictive_directory_permissions(path: &Path) -> Result<(), VaultError> {
-    Ok(crate::fs_private::set_private_directory_permissions(path, 0o700)?)
+    Ok(crate::platform::set_private_directory_permissions(path, 0o700)?)
 }
 
 fn set_restrictive_file_permissions(path: &Path) -> Result<(), VaultError> {
-    Ok(crate::fs_private::set_private_file_permissions(path, 0o600)?)
+    Ok(crate::platform::set_private_file_permissions(path, 0o600)?)
 }
 
 #[cfg(test)]

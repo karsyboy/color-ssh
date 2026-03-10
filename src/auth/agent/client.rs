@@ -2,8 +2,8 @@ use super::error::{AgentError, map_remote_error};
 use crate::auth::ipc::{self, AgentRequestPayload, AgentResponse, UnlockPolicy, VaultStatus};
 use crate::auth::secret::{SensitiveString, sensitive_string};
 use crate::auth::vault::VaultPaths;
-use crate::command_path;
 use crate::log_debug;
+use crate::platform;
 use std::process::{Command, Stdio};
 use std::thread;
 use std::time::{Duration, Instant};
@@ -131,7 +131,7 @@ impl AgentClient {
 
     fn spawn_server(&self) -> Result<(), AgentError> {
         log_debug!("Starting password vault agent process");
-        let cossh_path = command_path::cossh_path()?;
+        let cossh_path = platform::cossh_path()?;
         let mut command = Command::new(cossh_path);
         command
             .arg("agent")

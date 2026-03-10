@@ -134,7 +134,7 @@ impl DebugLogger {
     // File path and file creation helpers.
     fn create_log_file() -> Result<File, LogError> {
         let log_path = Self::get_debug_log_path()?;
-        Ok(crate::fs_private::open_private_append_file(&log_path, PRIVATE_LOG_FILE_MODE)?)
+        Ok(crate::platform::open_private_append_file(&log_path, PRIVATE_LOG_FILE_MODE)?)
     }
 
     fn get_debug_log_path() -> Result<PathBuf, LogError> {
@@ -143,7 +143,7 @@ impl DebugLogger {
         let log_dir = home_dir.join(".color-ssh").join("logs");
 
         // Create directory structure if it doesn't exist
-        crate::fs_private::create_private_directory(&log_dir, PRIVATE_LOG_DIR_MODE)?;
+        crate::platform::create_private_directory(&log_dir, PRIVATE_LOG_DIR_MODE)?;
 
         Ok(log_dir.join("cossh.log"))
     }

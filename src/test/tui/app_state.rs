@@ -1,7 +1,7 @@
 use super::AppState;
 use crate::config;
 use crate::inventory::build_inventory_tree;
-use crate::terminal_core::TerminalGridPoint;
+use crate::terminal::TerminalGridPoint;
 use crate::test::support::fs::TestWorkspace;
 use crate::tui::HostTreeRowKind;
 use std::sync::{Mutex, OnceLock};

@@ -19,7 +19,7 @@ pub use watcher::{ConfigWatchScope, ReloadNoticeTarget, config_watcher, config_w
 #[cfg(test)]
 pub(crate) use watcher::{queue_profile_reload_event, queue_reload_notice};
 
-use crate::highlight_rules::CompiledHighlightRule;
+use crate::terminal::CompiledHighlightRule;
 use once_cell::sync::OnceCell;
 use regex::Regex;
 use regex::RegexSet;

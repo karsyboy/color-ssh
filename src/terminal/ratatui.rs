@@ -1,14 +1,14 @@
 //! Ratatui adapter for terminal viewport snapshots.
 //!
-//! `terminal_core` remains renderer-neutral. This module is the current
+//! `terminal` remains renderer-neutral. This module is the current
 //! ratatui-specific bridge that paints backend-neutral viewport data into a
 //! ratatui buffer. A future GUI renderer should consume the same viewport model
 //! directly instead of re-reading terminal internals. It is responsible only
 //! for presentation: it combines canonical cell styles with additive overlay
 //! styles and never writes back into the PTY or terminal engine.
 
-use crate::terminal_core::highlight_overlay::{HighlightCellRange, HighlightOverlayStyle};
-use crate::terminal_core::{AnsiColor, TerminalCellSnapshot, TerminalViewport};
+use super::highlight_overlay::{HighlightCellRange, HighlightOverlayStyle};
+use super::{AnsiColor, TerminalCellSnapshot, TerminalViewport};
 use alacritty_terminal::vte::ansi::NamedColor;
 use ratatui::{
     Frame,
@@ -239,5 +239,5 @@ fn named_color_to_ansi_index(named: NamedColor) -> Option<u8> {
 }
 
 #[cfg(test)]
-#[path = "test/terminal_ratatui.rs"]
+#[path = "../test/terminal_ratatui.rs"]
 mod tests;

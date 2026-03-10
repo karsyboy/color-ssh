@@ -1,7 +1,7 @@
 //! Config file loading and compile pipeline.
 
 use super::{Config, paths};
-use crate::highlight_rules::CompiledHighlightRule;
+use crate::terminal::CompiledHighlightRule;
 use crate::{debug_enabled, log_debug, log_info, log_warn};
 use regex::{Regex, RegexSet};
 use std::{fs, io, path::PathBuf};

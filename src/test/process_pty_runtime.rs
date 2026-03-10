@@ -4,10 +4,10 @@ use super::{
 };
 use crate::config;
 use crate::config::{AuthSettings, HighlightOverlayAutoPolicy, HighlightOverlayMode, InteractiveProfileSnapshot};
-use crate::highlight_rules::CompiledHighlightRule;
-use crate::reload_notice::format_reload_notice;
-use crate::terminal_core::highlight_overlay::{HighlightOverlay, HighlightOverlayEngine};
-use crate::terminal_core::{MouseProtocolEncoding, MouseProtocolMode, TerminalEngine};
+use crate::terminal::CompiledHighlightRule;
+use crate::terminal::format_reload_notice;
+use crate::terminal::highlight_overlay::{HighlightOverlay, HighlightOverlayEngine};
+use crate::terminal::{MouseProtocolEncoding, MouseProtocolMode, TerminalEngine};
 use crossterm::event::{KeyModifiers, MouseButton, MouseEvent, MouseEventKind};
 use ratatui::{
     buffer::Buffer,

@@ -422,11 +422,11 @@ fn cleanup_local_endpoint(paths: &VaultPaths) -> io::Result<()> {
 }
 
 fn set_restrictive_directory_permissions(path: &Path) -> io::Result<()> {
-    crate::fs_private::set_private_directory_permissions(path, 0o700)
+    crate::platform::set_private_directory_permissions(path, 0o700)
 }
 
 fn set_restrictive_file_permissions(path: &Path) -> io::Result<()> {
-    crate::fs_private::set_private_file_permissions(path, UNIX_SOCKET_MODE)
+    crate::platform::set_private_file_permissions(path, UNIX_SOCKET_MODE)
 }
 
 #[cfg(test)]

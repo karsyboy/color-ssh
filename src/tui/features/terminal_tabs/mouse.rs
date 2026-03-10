@@ -1,6 +1,6 @@
 //! Mouse input handling and PTY mouse forwarding.
 
-use crate::terminal_core::{MouseProtocolEncoding, MouseProtocolMode, TerminalGridPoint, encode_mouse_event_bytes};
+use crate::terminal::{MouseProtocolEncoding, MouseProtocolMode, TerminalGridPoint, encode_mouse_event_bytes};
 use crate::tui::state::{HOST_PANEL_MAX_WIDTH, HOST_PANEL_MIN_WIDTH};
 use crate::tui::{AppState, HostTreeRowKind};
 use crossterm::event::{self, KeyModifiers, MouseButton, MouseEventKind};

@@ -1,7 +1,7 @@
 //! Prepared command model shared by SSH/RDP builders.
 
 use crate::auth::secret::SensitiveString;
-use crate::command_path;
+use crate::platform;
 use std::io;
 use std::process::Command;
 
@@ -36,7 +36,7 @@ pub(crate) fn build_plain_ssh_command(args: &[String]) -> PreparedCommand {
 }
 
 pub(crate) fn command_from_spec(spec: &PreparedCommand) -> io::Result<Command> {
-    let program_path = command_path::resolve_known_command_path(&spec.program)?;
+    let program_path = platform::resolve_known_command_path(&spec.program)?;
     let mut command = Command::new(&program_path);
     command.args(&spec.args);
     for (key, value) in &spec.env {

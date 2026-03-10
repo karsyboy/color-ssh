@@ -40,5 +40,5 @@ pub fn is_non_interactive_ssh_invocation(ssh_args: &[String]) -> bool {
 }
 
 #[cfg(test)]
-#[path = "test/ssh_args.rs"]
+#[path = "../test/ssh_args.rs"]
 mod tests;

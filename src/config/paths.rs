@@ -1,6 +1,6 @@
 //! Configuration file path discovery and default-file bootstrap.
 
-use crate::{log_debug, log_info, log_warn, validation};
+use crate::{args, log_debug, log_info, log_warn};
 use std::{env, fs, io, path::PathBuf};
 
 pub(crate) const DEFAULT_CONFIG_FILENAME: &str = "cossh-config.yaml";
@@ -33,7 +33,7 @@ pub(crate) fn resolve_config_path(profile: Option<&str>) -> io::Result<PathBuf> 
 fn normalize_profile_name(profile: Option<&str>) -> io::Result<Option<String>> {
     match profile.map(str::trim) {
         Some("") | None => Ok(None),
-        Some(profile_name) if validation::validate_profile_name(profile_name) => Ok(Some(profile_name.to_string())),
+        Some(profile_name) if args::validate_profile_name(profile_name) => Ok(Some(profile_name.to_string())),
         Some(profile_name) => Err(io::Error::new(
             io::ErrorKind::InvalidInput,
             format!("Invalid profile name '{}': use only letters, numbers, '_' or '-'", profile_name),

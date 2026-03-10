@@ -3,7 +3,12 @@
 //! Parses CLI arguments using the clap library and provides structured access
 //! to user-provided options.
 
-use crate::{ssh_args, validation};
+mod ssh;
+mod validation;
+
+pub use ssh::{extract_destination_host, is_non_interactive_ssh_invocation};
+pub(crate) use validation::{parse_profile_name, parse_vault_entry_name, validate_profile_name, validate_vault_entry_name};
+
 use clap::{Arg, Command, error::ErrorKind};
 use std::ffi::OsString;
 
@@ -113,7 +118,7 @@ fn build_cli_command() -> Command {
                 .short('P')
                 .long("profile")
                 .help("Specify a configuration profile to use")
-                .value_parser(clap::builder::ValueParser::new(validation::parse_profile_name))
+                .value_parser(clap::builder::ValueParser::new(parse_profile_name))
                 .num_args(1)
                 .required(false),
         )
@@ -130,7 +135,7 @@ fn build_cli_command() -> Command {
                 .help("Override the optional password vault entry used for a direct protocol launch")
                 .num_args(1)
                 .value_name("name")
-                .value_parser(clap::builder::ValueParser::new(validation::parse_vault_entry_name)),
+                .value_parser(clap::builder::ValueParser::new(parse_vault_entry_name)),
         )
         .arg(
             Arg::new("migrate")
@@ -184,7 +189,7 @@ fn build_cli_command() -> Command {
                         Arg::new("name")
                             .help("Password entry name")
                             .required(true)
-                            .value_parser(clap::builder::ValueParser::new(validation::parse_vault_entry_name)),
+                            .value_parser(clap::builder::ValueParser::new(parse_vault_entry_name)),
                     ),
                 )
                 .subcommand(
@@ -192,7 +197,7 @@ fn build_cli_command() -> Command {
                         Arg::new("name")
                             .help("Password entry name")
                             .required(true)
-                            .value_parser(clap::builder::ValueParser::new(validation::parse_vault_entry_name)),
+                            .value_parser(clap::builder::ValueParser::new(parse_vault_entry_name)),
                     ),
                 )
                 .subcommand(Command::new("list").about("List password vault entries"))
@@ -266,7 +271,7 @@ fn parse_ssh_command(ssh_matches: &clap::ArgMatches) -> Option<SshCommandArgs> {
     }
 
     Some(SshCommandArgs {
-        is_non_interactive: ssh_args::is_non_interactive_ssh_invocation(&ssh_args),
+        is_non_interactive: is_non_interactive_ssh_invocation(&ssh_args),
         ssh_args,
     })
 }
@@ -394,5 +399,5 @@ pub fn main_args() -> MainArgs {
 }
 
 #[cfg(test)]
-#[path = "test/args.rs"]
+#[path = "../test/args.rs"]
 mod tests;

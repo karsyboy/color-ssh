@@ -1,5 +1,5 @@
 use super::{TerminalEventListener, TerminalHostCallbacks};
-use crate::terminal_core::{TerminalClipboardTarget, TerminalInputWriter};
+use crate::terminal::{TerminalClipboardTarget, TerminalInputWriter};
 use alacritty_terminal::event::{Event, EventListener};
 use alacritty_terminal::term::ClipboardType;
 use std::io::{self, Write};

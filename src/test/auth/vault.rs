@@ -1,7 +1,7 @@
 use super::*;
+use crate::args::validate_vault_entry_name;
 use crate::auth::secret::ExposeSecret;
 use crate::test::support::auth::TestVaultEnv;
-use crate::validation::validate_vault_entry_name;
 
 #[test]
 fn validate_vault_entry_name_core_rules() {

@@ -4,8 +4,8 @@
 //! This works in most modern terminals: Konsole, Kitty, Alacritty, Wezterm, foot, etc.
 
 use super::extract::current_selection;
-use crate::terminal_core::TerminalClipboardTarget;
-use crate::terminal_host::copy_to_clipboard;
+use crate::terminal::TerminalClipboardTarget;
+use crate::terminal::copy_to_clipboard;
 use crate::tui::AppState;
 
 impl AppState {

@@ -3,12 +3,12 @@
 use super::DISABLE_VAULT_AUTOLOGIN_ENV;
 use super::command_spec::{PreparedCommand, build_plain_ssh_command};
 use super::vault::{VaultAccessError, query_vault_entry_status};
+use crate::args;
+use crate::args::validate_vault_entry_name;
 use crate::auth::{agent, secret::ExposeSecret, transport};
 use crate::config;
 use crate::inventory::{ConnectionProtocol, InventoryHost};
 use crate::log_debug;
-use crate::ssh_args;
-use crate::validation::validate_vault_entry_name;
 use std::collections::HashSet;
 use std::io;
 
@@ -502,7 +502,7 @@ pub(crate) fn synthesize_ssh_args(args: &[String], host: &InventoryHost) -> Vec<
 }
 
 pub(crate) fn build_ssh_command(args: &[String], explicit_pass_entry: Option<&str>) -> io::Result<PreparedCommand> {
-    let destination = ssh_args::extract_destination_host(args);
+    let destination = args::extract_destination_host(args);
     let inventory_hosts = crate::inventory::load_inventory_tree().ok().map(|tree| tree.hosts).unwrap_or_default();
     let resolved_host = destination
         .as_deref()

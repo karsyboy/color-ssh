@@ -1,6 +1,6 @@
 //! Selection extraction helpers.
 
-use crate::terminal_core::{TerminalGridPoint, TerminalSelection};
+use crate::terminal::{TerminalGridPoint, TerminalSelection};
 
 pub(crate) fn current_selection(start: Option<TerminalGridPoint>, end: Option<TerminalGridPoint>) -> Option<TerminalSelection> {
     Some(TerminalSelection::new(start?, end?).ordered())

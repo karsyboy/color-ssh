@@ -1,6 +1,6 @@
 //! Shared PTY/captured process spawn helpers.
 
-use crate::command_path;
+use crate::platform;
 use std::io::{self, Read, Write};
 use std::process::Stdio;
 use std::sync::{Arc, Mutex};
@@ -59,7 +59,7 @@ pub(crate) fn spawn_captured_command(
     env: &[(String, String)],
     stdin_payload: Option<&[u8]>,
 ) -> io::Result<SpawnedCapturedCommand> {
-    let program_path = command_path::resolve_known_command_path(program)?;
+    let program_path = platform::resolve_known_command_path(program)?;
     let mut cmd = std::process::Command::new(program_path);
     cmd.stdout(Stdio::piped()).stderr(Stdio::piped());
     if stdin_payload.is_some() {
@@ -107,7 +107,7 @@ pub(crate) fn spawn_captured_command(
 }
 
 fn pty_command_builder(program: &str, args: &[String], env: &[(String, String)]) -> io::Result<CommandBuilder> {
-    let program_path = command_path::resolve_known_command_path(program)?;
+    let program_path = platform::resolve_known_command_path(program)?;
     let mut builder = CommandBuilder::new(program_path.as_os_str());
     for arg in args {
         builder.arg(arg);

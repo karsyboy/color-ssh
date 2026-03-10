@@ -1,6 +1,6 @@
 //! Logging policy helpers used by runtime dispatch.
 
-use crate::{args, config, log, log_debug, log_info, log_warn, ssh_args};
+use crate::{args, config, log, log_debug, log_info, log_warn};
 use std::sync::Once;
 
 pub(crate) const APP_VERSION: &str = concat!("v", env!("CARGO_PKG_VERSION"));
@@ -96,7 +96,7 @@ pub(crate) fn apply_ssh_logging(logger: &log::Logger, args: &args::MainArgs, ssh
 pub(crate) fn resolve_session_name_for_logging(explicit_target: Option<&str>, ssh_args: &[String]) -> String {
     let session_name = explicit_target
         .map(str::to_string)
-        .or_else(|| ssh_args::extract_destination_host(ssh_args))
+        .or_else(|| args::extract_destination_host(ssh_args))
         .unwrap_or_else(|| "unknown".to_string());
 
     log::sanitize_session_name(&session_name)

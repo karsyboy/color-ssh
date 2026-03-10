@@ -1,8 +1,8 @@
 use super::*;
 use crate::config::{self, AuthSettings};
-use crate::highlight_rules::CompiledHighlightRule;
 use crate::inventory::{ConnectionProtocol, InventoryHost};
-use crate::terminal_core::{TerminalEngine, highlight_overlay::HighlightOverlayContext, highlight_overlay::HighlightOverlayViewport};
+use crate::terminal::CompiledHighlightRule;
+use crate::terminal::{TerminalEngine, highlight_overlay::HighlightOverlayContext, highlight_overlay::HighlightOverlayViewport};
 use crate::test::support::{config::base_config, fs::TestWorkspace};
 use crate::tui::VaultUnlockAction;
 use regex::Regex;
@@ -80,11 +80,7 @@ fn compiled_rule(pattern: &str, style: &str) -> CompiledHighlightRule {
     CompiledHighlightRule::new(Regex::new(pattern).expect("regex"), style.to_string())
 }
 
-fn build_overlay_for_text(
-    overlay_engine: &mut HighlightOverlayEngine,
-    text: &str,
-    render_epoch: u64,
-) -> crate::terminal_core::highlight_overlay::HighlightOverlay {
+fn build_overlay_for_text(overlay_engine: &mut HighlightOverlayEngine, text: &str, render_epoch: u64) -> crate::terminal::highlight_overlay::HighlightOverlay {
     let mut terminal_engine = TerminalEngine::new(2, 32, 128);
     terminal_engine.process_output(text.as_bytes());
     let view = terminal_engine.view_model();

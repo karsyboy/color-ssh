@@ -2,7 +2,7 @@
 
 use super::event_loop::run_app;
 use crate::tui::AppState;
-use crate::{command_path, config, inventory::ConnectionProtocol, log_debug, log_error};
+use crate::{config, inventory::ConnectionProtocol, log_debug, log_error, platform};
 use crossterm::{
     event::{DisableBracketedPaste, DisableMouseCapture, EnableBracketedPaste, EnableMouseCapture},
     execute,
@@ -74,7 +74,7 @@ pub fn run_session_manager(runtime_profile: Option<String>) -> io::Result<()> {
     if let Some(request) = selected_request {
         log_debug!("Connecting to {} host: {}", request.protocol.display_name(), request.target);
 
-        let cossh_path = command_path::cossh_path()?;
+        let cossh_path = platform::cossh_path()?;
         let mut cmd = Command::new(cossh_path);
 
         if request.force_ssh_logging {

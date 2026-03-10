@@ -6,17 +6,17 @@
 //! canonical engine instead of rewriting stdout chunks.
 
 use super::command_spec::PreparedCommand;
-use super::exit::map_exit_code;
+use super::map_exit_code;
 use super::{PtyLogTarget, io_other_error, spawn_pty_command, spawn_pty_output_reader};
 use crate::auth::secret::ExposeSecret;
-use crate::reload_notice::{ReloadNoticeToast, format_reload_notice};
-use crate::terminal_core::highlight_overlay::{HighlightOverlay, HighlightOverlayEngine};
-use crate::terminal_core::{
+use crate::terminal::highlight_overlay::{HighlightOverlay, HighlightOverlayEngine};
+use crate::terminal::terminal_host_callbacks;
+use crate::terminal::{
     MouseProtocolEncoding, MouseProtocolMode, TerminalChild, TerminalEngine, TerminalFrontendSnapshot, TerminalInputWriter, TerminalSession, TerminalViewport,
     encode_key_event_bytes, encode_mouse_event_bytes, encode_paste_bytes,
 };
-use crate::terminal_host::terminal_host_callbacks;
-use crate::terminal_ratatui::{apply_overlay_ranges, paint_terminal_viewport, render_reload_notice_toast};
+use crate::terminal::{ReloadNoticeToast, format_reload_notice};
+use crate::terminal::{apply_overlay_ranges, paint_terminal_viewport, render_reload_notice_toast};
 use crate::{Result, config, log, log_debug, log_error};
 use crossterm::{
     cursor::MoveTo,

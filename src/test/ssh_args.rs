@@ -1,4 +1,4 @@
-use crate::ssh_args::{extract_destination_host, is_non_interactive_ssh_invocation};
+use crate::args::{extract_destination_host, is_non_interactive_ssh_invocation};
 
 #[test]
 fn extract_destination_host_core_forms() {

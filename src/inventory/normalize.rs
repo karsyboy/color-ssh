@@ -1,7 +1,7 @@
 use super::error::{InventoryResult, invalid_inventory};
 use super::model::{InventoryHost, InventoryHostRaw, RdpHostOptions, SshHostOptions};
 use super::path::expand_tilde;
-use crate::validation::validate_vault_entry_name;
+use crate::args::validate_vault_entry_name;
 use std::path::Path;
 
 pub(super) fn normalize_inventory_host(raw: InventoryHostRaw, source_file: &Path, folder_path: &[String]) -> InventoryResult<InventoryHost> {

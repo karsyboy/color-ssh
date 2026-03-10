@@ -7,7 +7,7 @@
 
 use super::{AnsiColor, MouseProtocolMode, TerminalViewport};
 use crate::config::{self, HighlightOverlayAutoPolicy, HighlightOverlayMode};
-use crate::highlight_rules::CompiledHighlightRule;
+use crate::terminal::CompiledHighlightRule;
 use crate::{debug_enabled, log_debug};
 use alacritty_terminal::vte::ansi::Rgb;
 use regex::RegexSet;

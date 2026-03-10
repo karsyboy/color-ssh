@@ -10,8 +10,8 @@ use crate::auth::ipc::{self, VaultStatus, VaultStatusEvent, VaultStatusEventKind
 use crate::config;
 use crate::inventory::{ConnectionProtocol, FolderId, InventoryHost, TreeFolder};
 use crate::log_debug;
-use crate::reload_notice::{ReloadNoticeToast, format_reload_notice};
-use crate::terminal_core::{TerminalGridPoint, TerminalSelection};
+use crate::terminal::{ReloadNoticeToast, format_reload_notice};
+use crate::terminal::{TerminalGridPoint, TerminalSelection};
 use ratatui::layout::Rect;
 use std::collections::{HashMap, HashSet};
 use std::io;
@@ -291,7 +291,7 @@ impl AppState {
 
         let session_profile = config::interactive_profile_snapshot(Some(profile))?;
         for tab_idx in &matching_tabs {
-            self.tabs[*tab_idx].highlight_overlay = crate::terminal_core::highlight_overlay::HighlightOverlayEngine::from_snapshot(&session_profile);
+            self.tabs[*tab_idx].highlight_overlay = crate::terminal::highlight_overlay::HighlightOverlayEngine::from_snapshot(&session_profile);
         }
 
         self.mark_ui_dirty();
