@@ -3,7 +3,6 @@
 mod command_spec;
 mod exit;
 mod interactive;
-mod interactive_passthrough;
 mod launch;
 mod pty_output;
 mod pty_runtime;
@@ -13,11 +12,11 @@ mod ssh_builder;
 mod vault;
 
 use crate::args::RdpCommandArgs;
-use crate::{Result, log_debug, log_debug_raw, log_error, log_info, log_warn, ssh_args};
+use crate::{Result, log_debug, log_debug_raw, log_info, log_warn, ssh_args};
 use std::process::ExitCode;
 
-pub(crate) use launch::{build_rdp_command_for_host_with_auth_settings, build_ssh_command_for_host, resolve_host_by_destination, spawn_command};
-pub(crate) use pty_output::{PtyLogTarget, Utf8ChunkDecoder, spawn_pty_output_reader};
+pub(crate) use launch::{build_rdp_command_for_host_with_auth_settings, build_ssh_command_for_host, resolve_host_by_destination};
+pub(crate) use pty_output::{PtyLogTarget, spawn_pty_output_reader};
 pub(crate) const DISABLE_VAULT_AUTOLOGIN_ENV: &str = "COSSH_DISABLE_VAULT_AUTOLOGIN";
 
 pub(crate) fn prefer_pty_centered_interactive_ssh_runtime() -> bool {
@@ -54,6 +53,14 @@ pub(crate) fn run_ssh_process(process_args: Vec<String>, is_non_interactive: boo
         log_warn!("{}", notice);
     }
 
+    if !pty_runtime::prefer_direct_pty_runtime() {
+        if let Some(notice) = &command_spec.fallback_notice {
+            eprintln!("[color-ssh] {}", notice);
+        }
+        log_info!("Using passthrough compatibility mode for SSH command without an interactive controlling terminal");
+        return launch::spawn_passthrough(command_spec);
+    }
+
     interactive::run_interactive_ssh_session(command_spec)
 }
 
@@ -77,13 +84,12 @@ pub(crate) fn run_rdp_process(rdp_args: RdpCommandArgs, explicit_pass_entry: Opt
         return launch::spawn_passthrough(command_spec);
     }
 
-    let child = launch::spawn_command(command_spec, std::process::Stdio::piped(), std::process::Stdio::piped()).map_err(|err| {
-        log_error!("Failed to spawn RDP process: {}", err);
-        err
-    })?;
-    log_debug!("RDP process spawned successfully (PID: {:?})", child.id());
+    if !pty_runtime::prefer_direct_pty_runtime() {
+        log_info!("Using passthrough compatibility mode for vault-backed RDP command without an interactive controlling terminal");
+        return launch::spawn_passthrough(command_spec);
+    }
 
-    interactive::run_interactive_rdp_session(child)
+    interactive::run_interactive_rdp_session(command_spec)
 }
 
 #[cfg(test)]

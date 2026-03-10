@@ -99,30 +99,6 @@ impl TerminalEngine {
         )
     }
 
-    /// Create a terminal engine with host-owned callbacks and an explicit remote clipboard policy.
-    pub(crate) fn new_with_host_and_remote_clipboard_policy(
-        rows: u16,
-        cols: u16,
-        history: usize,
-        host_callbacks: TerminalHostCallbacks,
-        allow_remote_clipboard_write: bool,
-        remote_clipboard_max_bytes: usize,
-    ) -> Self {
-        Self::new_with_listener(
-            rows,
-            cols,
-            history,
-            TerminalEventListener::new_with_host_and_remote_clipboard_policy(
-                rows,
-                cols,
-                None,
-                host_callbacks,
-                allow_remote_clipboard_write,
-                remote_clipboard_max_bytes,
-            ),
-        )
-    }
-
     /// Create a terminal engine that can answer PTY-originated writes with an explicit remote clipboard policy.
     #[allow(dead_code)]
     pub(crate) fn new_with_input_writer_and_remote_clipboard_policy(

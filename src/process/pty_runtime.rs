@@ -1,8 +1,9 @@
-//! PTY-centered interactive SSH runtime.
+//! PTY-centered interactive direct-session runtime.
 //!
-//! This is the preferred direct `cossh ssh` architecture. It launches SSH in a
-//! PTY, feeds raw PTY bytes into `alacritty_terminal`, and renders terminal
-//! state from the canonical engine instead of rewriting stdout chunks.
+//! This is the preferred direct-session architecture for commands that still
+//! need terminal ownership. It launches the child in a PTY, feeds raw PTY
+//! bytes into `alacritty_terminal`, and renders terminal state from the
+//! canonical engine instead of rewriting stdout chunks.
 
 use super::command_spec::PreparedCommand;
 use super::exit::map_exit_code;
@@ -181,25 +182,38 @@ impl Drop for TerminalModeGuard {
     }
 }
 
-pub(super) fn prefer_pty_centered_ssh_runtime() -> bool {
-    let has_interactive_tty = io::stdin().is_terminal() && io::stdout().is_terminal();
-
-    matches!(select_interactive_ssh_runtime(has_interactive_tty), InteractiveSshRuntime::PtyCentered)
+pub(super) fn prefer_direct_pty_runtime() -> bool {
+    io::stdin().is_terminal() && io::stdout().is_terminal()
 }
 
-pub(super) fn run_interactive_ssh(mut command_spec: PreparedCommand) -> Result<std::process::ExitCode> {
+pub(super) fn prefer_pty_centered_ssh_runtime() -> bool {
+    matches!(select_interactive_ssh_runtime(prefer_direct_pty_runtime()), InteractiveSshRuntime::PtyCentered)
+}
+
+pub(super) fn run_interactive_ssh(command_spec: PreparedCommand) -> Result<std::process::ExitCode> {
+    run_interactive_command(command_spec, PtyLogTarget::global_ssh())
+}
+
+pub(super) fn run_interactive_rdp(command_spec: PreparedCommand) -> Result<std::process::ExitCode> {
+    run_interactive_command(command_spec, PtyLogTarget::Disabled)
+}
+
+fn run_interactive_command(mut command_spec: PreparedCommand, log_target: PtyLogTarget) -> Result<std::process::ExitCode> {
     let fallback_notice = command_spec.fallback_notice.take();
     let stdin_payload = command_spec.stdin_payload.take();
     let history_buffer = direct_history_buffer();
-    let mut runtime = spawn_interactive_pty_runtime(command_spec, history_buffer)?;
+    let mut runtime = spawn_interactive_pty_runtime(command_spec, history_buffer, log_target)?;
 
     if let Some(notice) = fallback_notice {
         let message = format!("\r\n[color-ssh] {}\r\n", notice);
         process_pty_output(&runtime.session, message.as_bytes())?;
     }
 
-    if let Some(stdin_payload) = stdin_payload {
-        runtime.session.write_input(stdin_payload.expose_secret().as_bytes())?;
+    if let Some(stdin_payload) = stdin_payload
+        && let Err(err) = runtime.session.write_input(stdin_payload.expose_secret().as_bytes())
+    {
+        runtime.session.terminate();
+        return Err(err.into());
     }
 
     let result = run_pty_event_loop(&mut runtime);
@@ -226,7 +240,7 @@ fn direct_history_buffer() -> usize {
     })
 }
 
-fn spawn_interactive_pty_runtime(command_spec: PreparedCommand, history_buffer: usize) -> io::Result<InteractivePtyRuntime> {
+fn spawn_interactive_pty_runtime(command_spec: PreparedCommand, history_buffer: usize, log_target: PtyLogTarget) -> io::Result<InteractivePtyRuntime> {
     let (cols, rows) = crossterm::terminal::size().unwrap_or((80, 24));
     let rows = rows.max(1);
     let cols = cols.max(1);
@@ -281,7 +295,7 @@ fn spawn_interactive_pty_runtime(command_spec: PreparedCommand, history_buffer: 
                 let _ = closed_tx.send(PtyRuntimeEvent::ReaderClosed);
             }
         },
-        PtyLogTarget::global_ssh(),
+        log_target,
     )?;
     spawn_exit_watcher(child, exited, event_tx)?;
 

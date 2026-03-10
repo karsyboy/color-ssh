@@ -1,5 +1,6 @@
 use super::AppState;
 use crate::config;
+use crate::terminal_core::TerminalGridPoint;
 use std::sync::{Mutex, OnceLock};
 
 static APP_STATE_CONFIG_TEST_LOCK: OnceLock<Mutex<()>> = OnceLock::new();
@@ -77,4 +78,16 @@ fn apply_config_reload_notifications_sets_reload_notice_toast() {
     );
 
     let _ = config::take_reload_notices();
+}
+
+#[test]
+fn current_selection_orders_typed_terminal_points() {
+    let mut app = AppState::new_for_tests();
+    app.selection_start = Some(TerminalGridPoint::new(4, 10));
+    app.selection_end = Some(TerminalGridPoint::new(2, 3));
+
+    let selection = app.current_selection().expect("current selection");
+
+    assert_eq!(selection.start(), TerminalGridPoint::new(2, 3));
+    assert_eq!(selection.end(), TerminalGridPoint::new(4, 10));
 }

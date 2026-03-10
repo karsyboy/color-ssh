@@ -1,5 +1,4 @@
 use super::exit::map_exit_code;
-use super::interactive_passthrough::{requires_immediate_terminal_flush, should_flush_immediately};
 use super::launch::{build_plain_ssh_command, build_ssh_command_for_host, resolve_host_by_destination, resolve_pass_entry_from_hosts, synthesize_ssh_args};
 use crate::inventory::InventoryHost;
 use std::process::ExitCode;
@@ -32,15 +31,6 @@ fn map_exit_code_success_failure_and_missing_status_maps_to_expected_code() {
 
     for ((is_success, status), expected) in cases {
         assert_eq!(map_exit_code(is_success, status), expected);
-    }
-}
-
-#[test]
-fn flush_decisions_prompt_signals_return_expected_booleans() {
-    let immediate_flush_cases = [("\rprompt", true), ("plain text", false)];
-    for (line, expected) in immediate_flush_cases {
-        assert_eq!(requires_immediate_terminal_flush(line), expected);
-        assert_eq!(should_flush_immediately(line), expected);
     }
 }
 

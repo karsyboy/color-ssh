@@ -1,5 +1,5 @@
-use super::io::{spawn_output_reader, spawn_process_exit_watcher};
 use crate::auth::agent;
+use crate::auth::secret::{ExposeSecret, SensitiveString};
 use crate::inventory::{ConnectionProtocol, InventoryHost};
 use crate::log::SessionSshLogger;
 use crate::process;
@@ -11,7 +11,6 @@ use crate::tui::{AppState, HostTab, TerminalSearchState, VaultUnlockAction};
 use crate::{command_path, debug_enabled, log_debug, log_error};
 use portable_pty::{CommandBuilder, PtySize, native_pty_system};
 use std::io;
-use std::process::Stdio;
 use std::sync::{
     Arc, Mutex,
     atomic::{AtomicU64, Ordering},
@@ -38,6 +37,7 @@ struct PtySessionLaunch<'a> {
     program: &'a str,
     args: &'a [String],
     env: &'a [(String, String)],
+    stdin_payload: Option<SensitiveString>,
     launch_notice: Option<String>,
     session_logger: Option<SessionSshLogger>,
 }
@@ -138,14 +138,16 @@ fn spawn_pty_terminal_session(
         PtyLogTarget::session(command.session_logger),
     )?;
 
-    Ok(TerminalSession::new(
-        Some(pty_master),
-        Some(writer),
-        TerminalChild::Pty(child),
-        engine,
-        exited,
-        render_epoch,
-    ))
+    let mut session = TerminalSession::new(Some(pty_master), Some(writer), TerminalChild::Pty(child), engine, exited, render_epoch);
+
+    if let Some(stdin_payload) = command.stdin_payload
+        && let Err(err) = session.write_input(stdin_payload.expose_secret().as_bytes())
+    {
+        session.terminate();
+        return Err(err);
+    }
+
+    Ok(session)
 }
 
 fn highlight_overlay_for_host(host: &InventoryHost, session_profile: &crate::config::InteractiveProfileSnapshot) -> HighlightOverlayEngine {
@@ -515,6 +517,7 @@ impl AppState {
                 program: &command_spec.program,
                 args: &command_spec.args,
                 env: &command_spec.env,
+                stdin_payload: None,
                 launch_notice,
                 session_logger,
             },
@@ -547,55 +550,19 @@ impl AppState {
             process::build_rdp_command_for_host_with_auth_settings(&launch_host, pass_entry_override.as_deref(), &session_profile.auth_settings)?;
         let launch_notice = pass_fallback_notice.or(command_spec.fallback_notice.take());
 
-        if command_spec.stdin_payload.is_none() {
-            return spawn_pty_terminal_session(
-                PtySessionLaunch {
-                    program: &command_spec.program,
-                    args: &command_spec.args,
-                    env: &command_spec.env,
-                    launch_notice,
-                    session_logger: None,
-                },
-                session_profile,
-                initial_rows,
-                initial_cols,
-            );
-        }
-
-        // Explicit compatibility exception: when FreeRDP launch still depends on
-        // injected stdin payload, Color-SSH cannot hand ownership to a PTY-backed
-        // terminal session and must temporarily capture stdout/stderr instead.
-        let mut child = process::spawn_command(command_spec, Stdio::piped(), Stdio::piped())?;
-        let stdout = child.stdout.take().ok_or_else(|| io::Error::other("failed to capture FreeRDP stdout"))?;
-        let stderr = child.stderr.take().ok_or_else(|| io::Error::other("failed to capture FreeRDP stderr"))?;
-
-        let rows = initial_rows.max(1);
-        let cols = initial_cols.max(1);
-        let engine = Arc::new(Mutex::new(TerminalEngine::new_with_host_and_remote_clipboard_policy(
-            rows,
-            cols,
-            session_profile.history_buffer,
-            terminal_host_callbacks(),
-            session_profile.remote_clipboard_write,
-            session_profile.remote_clipboard_max_bytes,
-        )));
-        let exited = Arc::new(Mutex::new(false));
-        let render_epoch = Arc::new(AtomicU64::new(0));
-        let child = Arc::new(Mutex::new(child));
-
-        spawn_output_reader("freerdp stdout", stdout, engine.clone(), render_epoch.clone());
-        spawn_output_reader("freerdp stderr", stderr, engine.clone(), render_epoch.clone());
-        spawn_process_exit_watcher(child.clone(), exited.clone());
-
-        if let Some(notice) = launch_notice
-            && let Ok(mut engine) = engine.lock()
-        {
-            let message = format!("\r\n[color-ssh] {}\r\n", notice);
-            engine.process_output(message.as_bytes());
-            render_epoch.fetch_add(1, Ordering::Relaxed);
-        }
-
-        Ok(TerminalSession::new(None, None, TerminalChild::Process(child), engine, exited, render_epoch))
+        spawn_pty_terminal_session(
+            PtySessionLaunch {
+                program: &command_spec.program,
+                args: &command_spec.args,
+                env: &command_spec.env,
+                stdin_payload: command_spec.stdin_payload.take(),
+                launch_notice,
+                session_logger: None,
+            },
+            session_profile,
+            initial_rows,
+            initial_cols,
+        )
     }
 
     pub(crate) fn reconnect_session(&mut self) {

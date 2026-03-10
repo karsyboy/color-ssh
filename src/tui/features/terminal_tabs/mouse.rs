@@ -1,6 +1,6 @@
 //! Mouse input handling and PTY mouse forwarding.
 
-use crate::terminal_core::{MouseProtocolEncoding, MouseProtocolMode, encode_mouse_event_bytes};
+use crate::terminal_core::{MouseProtocolEncoding, MouseProtocolMode, TerminalGridPoint, encode_mouse_event_bytes};
 use crate::tui::state::{HOST_PANEL_MAX_WIDTH, HOST_PANEL_MIN_WIDTH};
 use crate::tui::{AppState, HostTreeRowKind};
 use crossterm::event::{self, KeyModifiers, MouseButton, MouseEventKind};
@@ -228,8 +228,9 @@ impl AppState {
                         let vt_col = mouse.column.saturating_sub(area.x);
                         let scroll_offset = self.tabs[self.selected_tab].scroll_offset;
                         let abs_row = vt_row as i64 - scroll_offset as i64;
-                        self.selection_start = Some((abs_row, vt_col));
-                        self.selection_end = Some((abs_row, vt_col));
+                        let point = TerminalGridPoint::new(abs_row, vt_col);
+                        self.selection_start = Some(point);
+                        self.selection_end = Some(point);
                         self.is_selecting = true;
                         self.selection_dragged = false;
                     }
@@ -318,7 +319,7 @@ impl AppState {
                     let vt_col = clamped_col.saturating_sub(area.x);
                     let scroll_offset = self.tabs[self.selected_tab].scroll_offset;
                     let abs_row = vt_row as i64 - scroll_offset as i64;
-                    self.selection_end = Some((abs_row, vt_col));
+                    self.selection_end = Some(TerminalGridPoint::new(abs_row, vt_col));
                 } else if self.is_pty_mouse_mode_active() && !force_local_selection(mouse.modifiers) {
                     let mode = self.pty_mouse_mode();
                     if (mode == MouseProtocolMode::AnyMotion || mode == MouseProtocolMode::ButtonMotion)
@@ -329,7 +330,7 @@ impl AppState {
                 }
             }
             MouseEventKind::Down(MouseButton::Right) => {
-                if self.mouse_to_vt_coords(mouse.column, mouse.row).is_some() && self.selection_start.is_some() && self.selection_end.is_some() {
+                if self.mouse_to_vt_coords(mouse.column, mouse.row).is_some() && self.current_selection().is_some() {
                     return Ok(());
                 }
 
@@ -456,7 +457,7 @@ impl AppState {
                 }
             }
             MouseEventKind::Up(MouseButton::Right) => {
-                if self.mouse_to_vt_coords(mouse.column, mouse.row).is_some() && self.selection_start.is_some() && self.selection_end.is_some() {
+                if self.mouse_to_vt_coords(mouse.column, mouse.row).is_some() && self.current_selection().is_some() {
                     self.copy_selection_to_clipboard();
                     self.clear_selection_state();
                     return Ok(());

@@ -11,6 +11,7 @@ use crate::config;
 use crate::inventory::{ConnectionProtocol, FolderId, InventoryHost, TreeFolder};
 use crate::log_debug;
 use crate::reload_notice::{ReloadNoticeToast, format_reload_notice};
+use crate::terminal_core::{TerminalGridPoint, TerminalSelection};
 use ratatui::layout::Rect;
 use std::collections::{HashMap, HashSet};
 use std::io;
@@ -55,8 +56,8 @@ pub(crate) struct AppState {
     pub(crate) tabs: Vec<HostTab>,
     pub(crate) selected_tab: usize,
     pub(crate) focus_on_manager: bool,
-    pub(crate) selection_start: Option<(i64, u16)>,
-    pub(crate) selection_end: Option<(i64, u16)>,
+    pub(crate) selection_start: Option<TerminalGridPoint>,
+    pub(crate) selection_end: Option<TerminalGridPoint>,
     pub(crate) is_selecting: bool,
     pub(crate) selection_dragged: bool,
     pub(crate) tab_content_area: Rect,
@@ -176,6 +177,10 @@ impl AppState {
 
     pub(crate) fn current_tab_search_mut(&mut self) -> Option<&mut TerminalSearchState> {
         self.tabs.get_mut(self.selected_tab).map(|tab| &mut tab.terminal_search)
+    }
+
+    pub(crate) fn current_selection(&self) -> Option<TerminalSelection> {
+        Some(TerminalSelection::new(self.selection_start?, self.selection_end?).ordered())
     }
 
     pub(crate) fn set_vault_status(&mut self, status: VaultStatus) {

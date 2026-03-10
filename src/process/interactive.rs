@@ -1,30 +1,15 @@
-//! Interactive SSH/RDP runtime selection.
-//!
-//! Direct `cossh ssh` prefers the PTY-centered runtime. The compatibility
-//! passthrough runtime remains only for environments without an interactive
-//! controlling TTY.
+//! Interactive direct-session runtime entry points.
 
 use super::command_spec::PreparedCommand;
-use super::spawn::spawn_command;
-use crate::{Result, log_error, log_info};
-use std::process::{Child, ExitCode, Stdio};
+use crate::{Result, log_info};
+use std::process::ExitCode;
 
 pub(super) fn run_interactive_ssh_session(command_spec: PreparedCommand) -> Result<ExitCode> {
-    if super::pty_runtime::prefer_pty_centered_ssh_runtime() {
-        log_info!("Using PTY-centered interactive SSH runtime");
-        return super::pty_runtime::run_interactive_ssh(command_spec);
-    }
-
-    log_info!("Using compatibility interactive SSH passthrough runtime");
-
-    let child = spawn_command(command_spec, Stdio::piped(), Stdio::inherit()).map_err(|err| {
-        log_error!("Failed to spawn SSH process: {}", err);
-        err
-    })?;
-
-    super::interactive_passthrough::run_interactive_ssh(child)
+    log_info!("Using PTY-centered interactive SSH runtime");
+    super::pty_runtime::run_interactive_ssh(command_spec)
 }
 
-pub(super) fn run_interactive_rdp_session(child: Child) -> Result<ExitCode> {
-    super::interactive_passthrough::run_interactive_rdp(child)
+pub(super) fn run_interactive_rdp_session(command_spec: PreparedCommand) -> Result<ExitCode> {
+    log_info!("Using PTY-centered interactive RDP runtime");
+    super::pty_runtime::run_interactive_rdp(command_spec)
 }

@@ -8,7 +8,6 @@ use super::{TerminalEngine, TerminalInputWriter, TerminalSelection, TerminalSess
 use crate::log_error;
 use portable_pty::{Child as PtyChild, MasterPty, PtySize};
 use std::io::{self, Write};
-use std::process::Child as ProcessChild;
 use std::sync::{
     Arc, Mutex,
     atomic::{AtomicU64, Ordering},
@@ -16,7 +15,6 @@ use std::sync::{
 
 pub(crate) enum TerminalChild {
     Pty(Arc<Mutex<Box<dyn PtyChild + Send + Sync>>>),
-    Process(Arc<Mutex<ProcessChild>>),
 }
 
 pub(crate) struct TerminalSession {
@@ -139,14 +137,6 @@ impl TerminalSession {
     pub(crate) fn terminate(&mut self) {
         let terminate_result = match &self.child {
             TerminalChild::Pty(child) => match child.lock() {
-                Ok(mut child) => {
-                    let result = child.kill();
-                    let _ = child.try_wait();
-                    result
-                }
-                Err(err) => Err(io::Error::other(err.to_string())),
-            },
-            TerminalChild::Process(child) => match child.lock() {
                 Ok(mut child) => {
                     let result = child.kill();
                     let _ = child.try_wait();
