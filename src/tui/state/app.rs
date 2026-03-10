@@ -17,7 +17,7 @@ use std::collections::{HashMap, HashSet};
 use std::io;
 use std::time::{Duration, Instant};
 
-use self::init::{AppStateInit, VaultStatusEventWatcher, load_app_state_init, load_vault_status};
+use self::init::{AppStateInit, InventoryEventWatcher, VaultStatusEventWatcher, load_app_state_init, load_vault_status};
 
 pub(crate) const HOST_PANEL_MIN_WIDTH: u16 = 15;
 pub(crate) const HOST_PANEL_MAX_WIDTH: u16 = 80;
@@ -86,6 +86,7 @@ pub(crate) struct AppState {
     pub(crate) last_seen_config_version: u64,
     pub(crate) last_vault_status_refresh_at: Instant,
     vault_status_events: Option<VaultStatusEventWatcher>,
+    inventory_events: Option<InventoryEventWatcher>,
 }
 
 impl AppState {
@@ -98,7 +99,7 @@ impl AppState {
     }
 
     // Search indexing helpers.
-    fn build_host_search_index(hosts: &[InventoryHost]) -> Vec<HostSearchEntry> {
+    pub(crate) fn build_host_search_index(hosts: &[InventoryHost]) -> Vec<HostSearchEntry> {
         hosts
             .iter()
             .map(|host| HostSearchEntry {
@@ -232,6 +233,29 @@ impl AppState {
         }
     }
 
+    pub(crate) fn apply_inventory_reload_notifications(&mut self) {
+        if !self.inventory_events.as_ref().is_some_and(InventoryEventWatcher::take_pending_reload) {
+            return;
+        }
+
+        let inventory_path = self.host_tree_root.path.clone();
+        let notice = match self.reload_inventory_tree_from_path(&inventory_path) {
+            Ok(()) => {
+                if let Some(watcher) = InventoryEventWatcher::new(&inventory_path) {
+                    self.inventory_events = Some(watcher);
+                }
+                "Inventory reloaded successfully".to_string()
+            }
+            Err(err) => {
+                crate::log_error!("Inventory reload failed: {}", err);
+                format!("Inventory reload failed: {}", err)
+            }
+        };
+
+        self.reload_notice_toast = Some(ReloadNoticeToast::new(format_reload_notice(&notice)));
+        self.mark_ui_dirty();
+    }
+
     pub(crate) fn apply_config_reload_notifications(&mut self) {
         let mut latest_notice = config::take_reload_notices().into_iter().last();
 
@@ -340,6 +364,7 @@ impl AppState {
             last_seen_config_version: config::current_config_version(),
             last_vault_status_refresh_at: now,
             vault_status_events: init.vault_status_events,
+            inventory_events: init.inventory_events,
         };
 
         app.update_filtered_hosts();
