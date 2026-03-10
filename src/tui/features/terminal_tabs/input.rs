@@ -2,25 +2,13 @@
 
 use crate::log_error;
 use crate::tui::AppState;
-use crate::tui::features::terminal_session::pty::encode_key_event_bytes;
+use crate::tui::features::terminal_session::pty::{encode_key_event_bytes, encode_paste_bytes};
 use crate::tui::ui::theme::display_width;
 use crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
 use std::io;
 
 fn tab_title_display_width(title: &str) -> usize {
     display_width(title)
-}
-
-fn encode_paste_bytes(pasted: &str, bracketed: bool) -> Vec<u8> {
-    if !bracketed {
-        return pasted.as_bytes().to_vec();
-    }
-
-    let mut out = Vec::with_capacity(pasted.len() + 12);
-    out.extend_from_slice(b"\x1b[200~");
-    out.extend_from_slice(pasted.as_bytes());
-    out.extend_from_slice(b"\x1b[201~");
-    out
 }
 
 impl AppState {

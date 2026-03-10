@@ -1,4 +1,41 @@
+//! Shared terminal protocol byte encoders.
+//!
+//! These helpers are transport-agnostic and are reused by both the direct PTY
+//! runtime and embedded TUI tabs so key, paste, and mouse protocol behavior do
+//! not drift between frontends.
+
+use super::MouseProtocolEncoding;
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+
+pub(crate) fn encode_paste_bytes(pasted: &str, bracketed: bool) -> Vec<u8> {
+    if !bracketed {
+        return pasted.as_bytes().to_vec();
+    }
+
+    let mut out = Vec::with_capacity(pasted.len() + 12);
+    out.extend_from_slice(b"\x1b[200~");
+    out.extend_from_slice(pasted.as_bytes());
+    out.extend_from_slice(b"\x1b[201~");
+    out
+}
+
+pub(crate) fn encode_mouse_event_bytes(encoding: MouseProtocolEncoding, button: u8, col: u16, row: u16, is_release: bool) -> Vec<u8> {
+    match encoding {
+        MouseProtocolEncoding::Sgr => {
+            let suffix = if is_release { 'm' } else { 'M' };
+            format!("\x1b[<{};{};{}{}", button, col, row, suffix).into_bytes()
+        }
+        MouseProtocolEncoding::Default => {
+            // Legacy X10 encoding only supports 8-bit coordinates. Clamp to avoid wraparound.
+            let clamped_col = col.clamp(1, 223) as u8;
+            let clamped_row = row.clamp(1, 223) as u8;
+            let cb = if is_release { 3u8 + 32 } else { button.saturating_add(32) };
+            let cx = clamped_col.saturating_add(32);
+            let cy = clamped_row.saturating_add(32);
+            vec![0x1b, b'[', b'M', cb, cx, cy]
+        }
+    }
+}
 
 fn modifier_parameter(modifiers: KeyModifiers) -> u8 {
     let mut param = 1u8;

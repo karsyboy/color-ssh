@@ -83,6 +83,8 @@ Those layers consume the shared snapshots, but they remain presentation and plat
 
 This gives GUI frontends enough information to drive their own scrollbars without re-reading engine internals.
 
+Cursor rendering is positional and style-driven only. Frontends should not replace blank cursor cells with placeholder glyphs; if the cursor lands on a blank cell, the underlying cell content remains blank and the frontend is responsible only for cursor visibility/styling.
+
 ## Overlay Contract
 
 Highlight overlays stay renderer-side and additive.

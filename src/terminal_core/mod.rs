@@ -15,6 +15,7 @@ mod engine;
 mod event_listener;
 mod frontend;
 pub(crate) mod highlight_overlay;
+mod protocol;
 mod session;
 mod types;
 mod view;
@@ -26,6 +27,7 @@ pub(crate) use frontend::{
     TerminalCursorState, TerminalFrontendSnapshot, TerminalGridPoint, TerminalMouseProtocolState, TerminalScrollbackState, TerminalSelection,
     TerminalSessionSnapshot,
 };
+pub(crate) use protocol::{encode_key_event_bytes, encode_mouse_event_bytes, encode_paste_bytes};
 pub(crate) use session::{TerminalChild, TerminalSession};
 pub(crate) use types::TerminalInputWriter;
 #[allow(unused_imports)]

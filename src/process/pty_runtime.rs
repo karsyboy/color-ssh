@@ -12,14 +12,15 @@ use crate::reload_notice::{ReloadNoticeToast, format_reload_notice};
 use crate::terminal_core::highlight_overlay::{HighlightOverlay, HighlightOverlayEngine};
 use crate::terminal_core::{
     MouseProtocolEncoding, MouseProtocolMode, TerminalChild, TerminalEngine, TerminalFrontendSnapshot, TerminalInputWriter, TerminalSession, TerminalViewport,
+    encode_key_event_bytes, encode_mouse_event_bytes, encode_paste_bytes,
 };
 use crate::terminal_ratatui::{apply_overlay_style, paint_terminal_viewport, render_reload_notice_toast};
 use crate::{Result, command_path, config, log, log_debug, log_error};
 use crossterm::{
     cursor::MoveTo,
     event::{
-        self, DisableBracketedPaste, DisableMouseCapture, EnableBracketedPaste, EnableMouseCapture, Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers,
-        MouseButton, MouseEvent, MouseEventKind,
+        self, DisableBracketedPaste, DisableMouseCapture, EnableBracketedPaste, EnableMouseCapture, Event, KeyCode, KeyEventKind, KeyModifiers, MouseButton,
+        MouseEvent, MouseEventKind,
     },
     execute,
     style::Print,
@@ -715,23 +716,6 @@ fn mouse_to_vt_coords(area: Rect, mouse: MouseEvent) -> Option<(u16, u16)> {
     Some(((mouse.column - area.x) + 1, (mouse.row - area.y) + 1))
 }
 
-fn encode_mouse_event_bytes(encoding: MouseProtocolEncoding, button: u8, col: u16, row: u16, is_release: bool) -> Vec<u8> {
-    match encoding {
-        MouseProtocolEncoding::Sgr => {
-            let suffix = if is_release { 'm' } else { 'M' };
-            format!("\x1b[<{};{};{}{}", button, col, row, suffix).into_bytes()
-        }
-        MouseProtocolEncoding::Default => {
-            let clamped_col = col.clamp(1, 223) as u8;
-            let clamped_row = row.clamp(1, 223) as u8;
-            let cb = if is_release { 3u8 + 32 } else { button.saturating_add(32) };
-            let cx = clamped_col.saturating_add(32);
-            let cy = clamped_row.saturating_add(32);
-            vec![0x1b, b'[', b'M', cb, cx, cy]
-        }
-    }
-}
-
 fn encode_mouse_event(mouse: MouseEvent, area: Rect, mode: MouseProtocolMode, encoding: MouseProtocolEncoding) -> Option<Vec<u8>> {
     let (col, row) = mouse_to_vt_coords(area, mouse)?;
 
@@ -750,139 +734,6 @@ fn encode_mouse_event(mouse: MouseEvent, area: Rect, mode: MouseProtocolMode, en
         MouseEventKind::Moved if mode == MouseProtocolMode::AnyMotion => Some(encode_mouse_event_bytes(encoding, 35, col, row, false)),
         _ => None,
     }
-}
-
-fn encode_paste_bytes(pasted: &str, bracketed: bool) -> Vec<u8> {
-    if !bracketed {
-        return pasted.as_bytes().to_vec();
-    }
-
-    let mut out = Vec::with_capacity(pasted.len() + 12);
-    out.extend_from_slice(b"\x1b[200~");
-    out.extend_from_slice(pasted.as_bytes());
-    out.extend_from_slice(b"\x1b[201~");
-    out
-}
-
-fn modifier_parameter(modifiers: KeyModifiers) -> u8 {
-    let mut param = 1u8;
-    if modifiers.contains(KeyModifiers::SHIFT) {
-        param = param.saturating_add(1);
-    }
-    if modifiers.contains(KeyModifiers::ALT) {
-        param = param.saturating_add(2);
-    }
-    if modifiers.contains(KeyModifiers::CONTROL) {
-        param = param.saturating_add(4);
-    }
-    param
-}
-
-fn prefix_with_escape(mut bytes: Vec<u8>) -> Vec<u8> {
-    let mut prefixed = Vec::with_capacity(bytes.len() + 1);
-    prefixed.push(0x1b);
-    prefixed.append(&mut bytes);
-    prefixed
-}
-
-fn encode_csi_cursor_key(final_byte: u8, modifiers: KeyModifiers) -> Vec<u8> {
-    let base = vec![0x1b, b'[', final_byte];
-    if modifiers.is_empty() {
-        return base;
-    }
-    if modifiers == KeyModifiers::ALT {
-        return prefix_with_escape(base);
-    }
-
-    let final_char = final_byte as char;
-    format!("\x1b[1;{}{}", modifier_parameter(modifiers), final_char).into_bytes()
-}
-
-fn encode_csi_tilde_key(code: u8, modifiers: KeyModifiers) -> Vec<u8> {
-    if modifiers.is_empty() {
-        return format!("\x1b[{}~", code).into_bytes();
-    }
-    if modifiers == KeyModifiers::ALT {
-        return prefix_with_escape(format!("\x1b[{}~", code).into_bytes());
-    }
-
-    format!("\x1b[{};{}~", code, modifier_parameter(modifiers)).into_bytes()
-}
-
-fn encode_key_event_bytes(key: KeyEvent) -> Option<Vec<u8>> {
-    let modifiers = key.modifiers & (KeyModifiers::SHIFT | KeyModifiers::ALT | KeyModifiers::CONTROL);
-
-    let bytes = match key.code {
-        KeyCode::Char(ch) => {
-            let mut out = if modifiers.contains(KeyModifiers::CONTROL) {
-                let control_byte = match ch {
-                    '@' | ' ' => 0,
-                    'a'..='z' => (ch as u8) - b'a' + 1,
-                    'A'..='Z' => (ch as u8) - b'A' + 1,
-                    '[' => 27,
-                    '\\' => 28,
-                    ']' => 29,
-                    '^' => 30,
-                    '_' => 31,
-                    '?' => 127,
-                    _ => ch as u8,
-                };
-                vec![control_byte]
-            } else {
-                ch.to_string().into_bytes()
-            };
-
-            if modifiers.contains(KeyModifiers::ALT) {
-                out = prefix_with_escape(out);
-            }
-            out
-        }
-        KeyCode::Enter => {
-            let out = vec![b'\r'];
-            if modifiers.contains(KeyModifiers::ALT) {
-                prefix_with_escape(out)
-            } else {
-                out
-            }
-        }
-        KeyCode::Backspace => {
-            let out = vec![127];
-            if modifiers.contains(KeyModifiers::ALT) {
-                prefix_with_escape(out)
-            } else {
-                out
-            }
-        }
-        KeyCode::Tab => {
-            let out = vec![b'\t'];
-            if modifiers.contains(KeyModifiers::ALT) {
-                prefix_with_escape(out)
-            } else {
-                out
-            }
-        }
-        KeyCode::Esc => {
-            let out = vec![27];
-            if modifiers.contains(KeyModifiers::ALT) {
-                prefix_with_escape(out)
-            } else {
-                out
-            }
-        }
-        KeyCode::Up => encode_csi_cursor_key(b'A', modifiers),
-        KeyCode::Down => encode_csi_cursor_key(b'B', modifiers),
-        KeyCode::Right => encode_csi_cursor_key(b'C', modifiers),
-        KeyCode::Left => encode_csi_cursor_key(b'D', modifiers),
-        KeyCode::Home => encode_csi_cursor_key(b'H', modifiers),
-        KeyCode::End => encode_csi_cursor_key(b'F', modifiers),
-        KeyCode::PageUp => encode_csi_tilde_key(5, modifiers),
-        KeyCode::PageDown => encode_csi_tilde_key(6, modifiers),
-        KeyCode::Delete => encode_csi_tilde_key(3, modifiers),
-        KeyCode::Insert => encode_csi_tilde_key(2, modifiers),
-        _ => return None,
-    };
-
-    Some(bytes)
 }
 
 #[cfg(test)]

@@ -1,6 +1,6 @@
 //! Mouse input handling and PTY mouse forwarding.
 
-use crate::terminal_core::{MouseProtocolEncoding, MouseProtocolMode};
+use crate::terminal_core::{MouseProtocolEncoding, MouseProtocolMode, encode_mouse_event_bytes};
 use crate::tui::state::{HOST_PANEL_MAX_WIDTH, HOST_PANEL_MIN_WIDTH};
 use crate::tui::{AppState, HostTreeRowKind};
 use crossterm::event::{self, KeyModifiers, MouseButton, MouseEventKind};
@@ -627,32 +627,13 @@ impl AppState {
         }
     }
 
-    // Encode mouse reporting bytes for default and SGR modes.
-    fn encode_mouse_event_bytes(encoding: MouseProtocolEncoding, button: u8, col: u16, row: u16, is_release: bool) -> Vec<u8> {
-        match encoding {
-            MouseProtocolEncoding::Sgr => {
-                let suffix = if is_release { 'm' } else { 'M' };
-                format!("\x1b[<{};{};{}{}", button, col, row, suffix).into_bytes()
-            }
-            _ => {
-                // Legacy X10 encoding only supports 8-bit coordinates. Clamp to avoid wraparound.
-                let clamped_col = col.clamp(1, 223) as u8;
-                let clamped_row = row.clamp(1, 223) as u8;
-                let cb = if is_release { 3u8 + 32 } else { button.saturating_add(32) };
-                let cx = clamped_col.saturating_add(32);
-                let cy = clamped_row.saturating_add(32);
-                vec![0x1b, b'[', b'M', cb, cx, cy]
-            }
-        }
-    }
-
     // Send encoded mouse bytes to active PTY.
     fn send_mouse_to_pty(&mut self, button: u8, col: u16, row: u16, is_release: bool) -> io::Result<()> {
         if self.selected_tab >= self.tabs.len() {
             return Ok(());
         }
         let encoding = self.pty_mouse_protocol().1;
-        let bytes = Self::encode_mouse_event_bytes(encoding, button, col, row, is_release);
+        let bytes = encode_mouse_event_bytes(encoding, button, col, row, is_release);
         self.write_bytes_to_active_pty(&bytes)
     }
 }
