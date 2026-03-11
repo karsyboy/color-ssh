@@ -112,3 +112,7 @@ pub(crate) fn update_session_name_for_logging(explicit_target: Option<&str>, ssh
 
     log_debug!("Session name set to: {session_name}");
 }
+
+#[cfg(test)]
+#[path = "../test/runtime/logging.rs"]
+mod tests;

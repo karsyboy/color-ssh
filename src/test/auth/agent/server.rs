@@ -1,22 +1,8 @@
-use super::*;
-use crate::auth::ipc::{AgentRequest, AgentRequestPayload, UnlockPolicy, VaultStatusEventKind};
+use super::handle_request;
+use crate::auth::agent::runtime::AgentRuntime;
+use crate::auth::ipc::{self, AgentRequest, AgentRequestPayload, AgentResponse, UnlockPolicy, VaultStatusEventKind};
 use crate::auth::secret::{ExposeSecret, sensitive_string};
 use crate::test::support::auth::TestVaultEnv;
-use std::time::{Duration, Instant};
-
-#[test]
-fn runtime_expiry_and_poll_backoff_follow_timeout_rules() {
-    let mut runtime = AgentRuntime::new();
-    runtime.unlock([7u8; 32], UnlockPolicy::new(1, 10));
-    runtime.last_activity_at = Some(Instant::now() - Duration::from_secs(2));
-    assert!(runtime.expire_if_needed());
-    assert!(runtime.data_key.is_none());
-
-    let first = next_idle_shutdown_poll_interval(AGENT_IDLE_SHUTDOWN_POLL_INTERVAL_MIN);
-    let second = next_idle_shutdown_poll_interval(first);
-    assert_eq!(first, Duration::from_millis(10));
-    assert_eq!(second, Duration::from_millis(20));
-}
 
 #[test]
 fn handle_request_unlock_authorize_and_get_secret_happy_path() {
@@ -143,14 +129,4 @@ fn askpass_token_single_use_and_locked_runtime_errors() {
         },
     );
     assert!(matches!(locked_authorize, AgentResponse::Error { code, .. } if code == "locked"));
-}
-
-#[test]
-fn map_remote_error_maps_known_codes() {
-    assert!(matches!(map_remote_error("locked", "locked".to_string()), AgentError::Locked));
-    assert!(matches!(
-        map_remote_error("invalid_master_password", "bad".to_string()),
-        AgentError::InvalidMasterPassword
-    ));
-    assert!(matches!(map_remote_error("vault_error", "oops".to_string()), AgentError::Protocol(_)));
 }

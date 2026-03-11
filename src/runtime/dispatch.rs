@@ -260,3 +260,7 @@ pub(crate) fn run() -> Result<ExitCode> {
     flush_debug_logs(&logger);
     Ok(exit_code)
 }
+
+#[cfg(test)]
+#[path = "../test/runtime/dispatch.rs"]
+mod tests;

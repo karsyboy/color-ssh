@@ -57,3 +57,7 @@ pub(crate) fn map_remote_error(code: &str, message: String) -> AgentError {
         _ => AgentError::Protocol(message),
     }
 }
+
+#[cfg(test)]
+#[path = "../../test/auth/agent/error.rs"]
+mod tests;

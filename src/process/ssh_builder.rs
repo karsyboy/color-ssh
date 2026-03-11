@@ -602,3 +602,7 @@ pub(crate) fn build_ssh_command_for_host(host: &InventoryHost, explicit_pass_ent
     log_debug!("Configured internal askpass helper for TUI SSH host launch");
     Ok(command)
 }
+
+#[cfg(test)]
+#[path = "../test/process/ssh_builder.rs"]
+mod tests;

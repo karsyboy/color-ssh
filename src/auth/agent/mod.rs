@@ -16,18 +16,3 @@ pub use client::{AgentClient, AgentEntryStatus};
 pub use error::AgentError;
 /// Starts the unlock-agent server process loop.
 pub use server::run_server;
-
-#[cfg(test)]
-pub(super) use crate::auth::ipc;
-#[cfg(test)]
-pub(super) use crate::auth::ipc::AgentResponse;
-#[cfg(test)]
-pub(super) use error::map_remote_error;
-#[cfg(test)]
-pub(super) use runtime::{AGENT_IDLE_SHUTDOWN_POLL_INTERVAL_MIN, AgentRuntime, next_idle_shutdown_poll_interval};
-#[cfg(test)]
-pub(super) use server::handle_request;
-
-#[cfg(test)]
-#[path = "../../test/auth/agent/mod.rs"]
-mod tests;

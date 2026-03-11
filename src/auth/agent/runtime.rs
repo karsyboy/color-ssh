@@ -191,3 +191,7 @@ impl AgentRuntime {
 pub(crate) fn next_idle_shutdown_poll_interval(current: Duration) -> Duration {
     current.saturating_mul(2).min(AGENT_IDLE_SHUTDOWN_POLL_INTERVAL_MAX)
 }
+
+#[cfg(test)]
+#[path = "../../test/auth/agent/runtime.rs"]
+mod tests;

@@ -44,3 +44,7 @@ pub(crate) fn command_from_spec(spec: &PreparedCommand) -> io::Result<Command> {
     }
     Ok(command)
 }
+
+#[cfg(test)]
+#[path = "../test/process/command_spec.rs"]
+mod tests;

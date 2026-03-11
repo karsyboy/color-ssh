@@ -13,14 +13,10 @@ use crate::args::RdpCommandArgs;
 use crate::{Result, args, log_debug, log_debug_raw, log_info, log_warn};
 use std::process::ExitCode;
 
-#[cfg(test)]
-pub(crate) use command_spec::build_plain_ssh_command;
 pub(crate) use pty_output::{PtyLogTarget, spawn_pty_output_reader};
 pub(crate) use rdp_builder::build_rdp_command_for_host_with_auth_settings;
 pub(crate) use spawn_common::{io_other_error, spawn_captured_command, spawn_pty_command};
 pub(crate) use ssh_builder::{build_ssh_command_for_host, resolve_host_by_destination};
-#[cfg(test)]
-pub(crate) use ssh_builder::{resolve_pass_entry_from_hosts, synthesize_ssh_args};
 pub(crate) const DISABLE_VAULT_AUTOLOGIN_ENV: &str = "COSSH_DISABLE_VAULT_AUTOLOGIN";
 
 pub(crate) fn prefer_pty_centered_interactive_ssh_runtime() -> bool {

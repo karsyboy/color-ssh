@@ -209,3 +209,7 @@ fn agent_error_response(runtime: &mut AgentRuntime, paths: &VaultPaths, err: Vau
         message,
     }
 }
+
+#[cfg(test)]
+#[path = "../../test/auth/agent/server.rs"]
+mod tests;
