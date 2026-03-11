@@ -38,3 +38,7 @@ pub(crate) use session::{TerminalChild, TerminalSession};
 pub(crate) use types::TerminalInputWriter;
 #[allow(unused_imports)]
 pub(crate) use view::{MouseProtocolEncoding, MouseProtocolMode, TerminalCellSnapshot, TerminalCursorSnapshot, TerminalViewport};
+
+#[cfg(test)]
+#[path = "../test/terminal/mod.rs"]
+mod tests;

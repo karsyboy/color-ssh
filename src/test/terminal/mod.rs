@@ -1,5 +1,4 @@
-use super::TerminalEngine;
-use crate::terminal::TerminalSelection;
+use super::{TerminalEngine, TerminalSelection};
 
 fn trim_row(text: &str) -> &str {
     text.trim_end_matches(' ')
