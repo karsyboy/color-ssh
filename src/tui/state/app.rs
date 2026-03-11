@@ -377,7 +377,6 @@ impl AppState {
         Ok(Self::build_from_init(load_app_state_init()))
     }
 
-    // Test scaffolding.
     #[cfg(test)]
     pub(crate) fn new_for_tests() -> Self {
         Self::build_from_init(init::test_app_state_init())

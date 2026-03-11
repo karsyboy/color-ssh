@@ -1,4 +1,5 @@
 use super::*;
+use crate::auth::secret::{ExposeSecret, SensitiveString};
 use crate::config::{self, AuthSettings};
 use crate::inventory::{ConnectionProtocol, InventoryHost};
 use crate::test::support::{fs::TestWorkspace, state::TestStateGuard};
@@ -8,6 +9,15 @@ use std::sync::{
     Arc, Mutex,
     atomic::{AtomicBool, Ordering},
 };
+
+fn write_startup_payload_and_close_stdin(mut writer: Box<dyn Write + Send>, stdin_payload: Option<&SensitiveString>) -> io::Result<()> {
+    if let Some(stdin_payload) = stdin_payload {
+        writer.write_all(stdin_payload.expose_secret().as_bytes())?;
+        writer.flush()?;
+    }
+
+    Ok(())
+}
 
 #[path = "launch/auth_resolution.rs"]
 mod auth_resolution;

@@ -10,8 +10,6 @@ use super::{LogError, formatter::LogFormatter, sanitize_session_name};
 use chrono::Local;
 use once_cell::sync::Lazy;
 use regex::Regex;
-#[cfg(test)]
-use std::path::Path;
 use std::{
     borrow::Cow,
     fs::File,
@@ -394,16 +392,6 @@ fn ssh_log_directory() -> Result<PathBuf, LogError> {
 
     crate::platform::create_private_directory(&log_dir, PRIVATE_LOG_DIR_MODE)?;
     Ok(log_dir)
-}
-
-#[cfg(test)]
-fn create_private_directory(path: &Path) -> Result<(), LogError> {
-    Ok(crate::platform::create_private_directory(path, PRIVATE_LOG_DIR_MODE)?)
-}
-
-#[cfg(test)]
-fn open_private_append_file(path: &Path) -> Result<File, LogError> {
-    Ok(crate::platform::open_private_append_file(path, PRIVATE_LOG_FILE_MODE)?)
 }
 
 fn current_secret_patterns() -> Vec<Regex> {

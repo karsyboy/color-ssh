@@ -1,8 +1,16 @@
-use super::{
-    LogFileFactory, SecretPatternSource, SshLogCommand, create_private_directory, extract_complete_lines, open_private_append_file, run_worker, sanitize_line,
-};
+use super::{LogFileFactory, SecretPatternSource, SshLogCommand, extract_complete_lines, run_worker, sanitize_line};
+use crate::log::LogError;
 use crate::test::support::fs::TestWorkspace;
 use regex::Regex;
+use std::path::Path;
+
+fn create_private_directory(path: &Path) -> Result<(), LogError> {
+    Ok(crate::platform::create_private_directory(path, 0o700)?)
+}
+
+fn open_private_append_file(path: &Path) -> Result<std::fs::File, LogError> {
+    Ok(crate::platform::open_private_append_file(path, 0o600)?)
+}
 use std::fs;
 use std::os::unix::fs::PermissionsExt;
 use std::sync::{Arc, mpsc};

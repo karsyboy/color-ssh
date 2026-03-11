@@ -10,8 +10,6 @@ use crate::terminal::{TerminalChild, TerminalEngine, TerminalSession};
 use crate::tui::{AppState, HostTab, TerminalSearchState, VaultUnlockAction};
 use crate::{debug_enabled, log_debug, log_error};
 use std::io;
-#[cfg(test)]
-use std::io::Write;
 use std::sync::{
     Arc, Mutex,
     atomic::{AtomicU64, AtomicUsize, Ordering},
@@ -76,16 +74,6 @@ fn inject_launch_notice(engine: &Arc<Mutex<TerminalEngine>>, render_epoch: &Arc<
         engine.process_output(message.as_bytes());
         render_epoch.fetch_add(1, Ordering::Relaxed);
     }
-}
-
-#[cfg(test)]
-fn write_startup_payload_and_close_stdin(mut writer: Box<dyn Write + Send>, stdin_payload: Option<&SensitiveString>) -> io::Result<()> {
-    if let Some(stdin_payload) = stdin_payload {
-        writer.write_all(stdin_payload.expose_secret().as_bytes())?;
-        writer.flush()?;
-    }
-
-    Ok(())
 }
 
 fn rdp_session_launch_mode(stdin_payload: Option<&SensitiveString>) -> RdpSessionLaunchMode {
