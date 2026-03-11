@@ -69,48 +69,40 @@ fn explicit_pass_entry_overrides_inventory_pass_for_resolution() {
 }
 
 #[test]
-fn missing_vault_entry_falls_back_to_prompt_with_notice() {
+fn vault_resolution_failures_fall_back_to_prompt_with_notice() {
     let mut host = sample_rdp_host();
     host.vault_pass = Some("shared".to_string());
 
-    let (auth_mode, fallback_notice) = resolve_rdp_auth_mode_with(&host, None, |_| Err("password vault entry 'shared' was not found".to_string()));
-    let command = build_prepared_rdp_command(&host, auth_mode, fallback_notice.clone()).expect("build fallback RDP command");
+    let cases = [
+        ("missing_entry", "password vault entry 'shared' was not found", "shared"),
+        (
+            "vault_uninitialized",
+            "password vault is not initialized; run `cossh vault init` or `cossh vault add <name>`",
+            "password vault is not initialized",
+        ),
+        (
+            "unlock_failure",
+            "failed to unlock password vault after 3 attempts",
+            "failed to unlock password vault after 3 attempts",
+        ),
+    ];
 
-    assert!(command.stdin_payload.is_none());
-    assert!(matches!(command.fallback_notice.as_deref(), Some(notice) if notice.contains("FreeRDP password prompt")));
-    assert!(matches!(fallback_notice.as_deref(), Some(notice) if notice.contains("shared")));
-}
+    for (case_name, resolver_error, expected_fragment) in cases {
+        let (auth_mode, fallback_notice) = resolve_rdp_auth_mode_with(&host, None, |_| Err(resolver_error.to_string()));
+        let command = build_prepared_rdp_command(&host, auth_mode, fallback_notice).expect("build fallback RDP command");
 
-#[test]
-fn vault_uninitialized_falls_back_to_prompt_with_notice() {
-    let mut host = sample_rdp_host();
-    host.vault_pass = Some("shared".to_string());
+        assert!(command.stdin_payload.is_none(), "stdin payload should be absent for case: {case_name}");
 
-    let (auth_mode, fallback_notice) = resolve_rdp_auth_mode_with(&host, None, |_| {
-        Err("password vault is not initialized; run `cossh vault init` or `cossh vault add <name>`".to_string())
-    });
-    let command = build_prepared_rdp_command(&host, auth_mode, fallback_notice.clone()).expect("build uninitialized-vault fallback RDP command");
-
-    assert!(command.stdin_payload.is_none());
-    assert!(matches!(
-        fallback_notice.as_deref(),
-        Some(notice) if notice.contains("password vault is not initialized") && notice.contains("FreeRDP password prompt")
-    ));
-}
-
-#[test]
-fn vault_unlock_failure_falls_back_to_prompt_with_notice() {
-    let mut host = sample_rdp_host();
-    host.vault_pass = Some("shared".to_string());
-
-    let (auth_mode, fallback_notice) = resolve_rdp_auth_mode_with(&host, None, |_| Err("failed to unlock password vault after 3 attempts".to_string()));
-    let command = build_prepared_rdp_command(&host, auth_mode, fallback_notice.clone()).expect("build unlock-failure fallback RDP command");
-
-    assert!(command.stdin_payload.is_none());
-    assert!(matches!(
-        command.fallback_notice.as_deref(),
-        Some(notice) if notice.contains("failed to unlock password vault after 3 attempts") && notice.contains("FreeRDP password prompt")
-    ));
+        let fallback_notice = command.fallback_notice.expect("fallback notice should be present");
+        assert!(
+            fallback_notice.contains("FreeRDP password prompt"),
+            "fallback notice should mention FreeRDP prompt for case: {case_name}"
+        );
+        assert!(
+            fallback_notice.contains(expected_fragment),
+            "fallback notice should include '{expected_fragment}' for case: {case_name}"
+        );
+    }
 }
 
 #[test]

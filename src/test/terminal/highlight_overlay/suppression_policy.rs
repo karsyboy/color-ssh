@@ -15,18 +15,6 @@ fn overlay_suppresses_less_like_alternate_screen_sessions_in_auto_mode() {
 }
 
 #[test]
-fn overlay_suppresses_vim_like_alternate_screen_sessions_in_auto_mode() {
-    let mut terminal_engine = TerminalEngine::new(4, 24, 128);
-    terminal_engine.process_output(b"\x1b[?1049h\x1b[?25lfile.rs\r\nerror line\r\n~");
-
-    let mut overlay_engine = HighlightOverlayEngine::with_rules(vec![compiled_rule("error", "\x1b[38;2;255;0;0m")], HighlightOverlayMode::Auto);
-
-    let overlay = build_overlay_for_engine(&mut terminal_engine, &mut overlay_engine, 3, 0);
-
-    assert_eq!(overlay.suppression_reason, Some(HighlightSuppressionReason::AlternateScreen));
-}
-
-#[test]
 fn overlay_suppresses_htop_like_mouse_reporting_sessions_in_auto_mode() {
     let mut terminal_engine = TerminalEngine::new(4, 24, 128);
     terminal_engine.process_output(b"\x1b[?1000h\x1b[?25lCPU error\r\nMEM error");

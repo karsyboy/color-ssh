@@ -12,35 +12,26 @@ fn sample_host(protocol: ConnectionProtocol) -> InventoryHost {
 }
 
 #[test]
-fn vault_unlock_fallback_notice_for_rdp_mentions_freerdp_prompt() {
+fn vault_unlock_fallback_notice_matches_protocol_prompt_text() {
     let app = AppState::new_for_tests();
-    let host = sample_host(ConnectionProtocol::Rdp);
-    let action = VaultUnlockAction::OpenHostTab {
-        host: Box::new(host),
-        force_ssh_logging: false,
-        auth_settings: AuthSettings::default(),
-    };
+    let cases = [
+        (ConnectionProtocol::Rdp, "FreeRDP password prompt", "standard SSH password prompt"),
+        (ConnectionProtocol::Ssh, "standard SSH password prompt", "FreeRDP password prompt"),
+    ];
 
-    let notice = app.vault_unlock_fallback_notice(&action, "Password vault unlock canceled");
+    for (protocol, expected_fragment, unexpected_fragment) in cases {
+        let host = sample_host(protocol);
+        let action = VaultUnlockAction::OpenHostTab {
+            host: Box::new(host),
+            force_ssh_logging: false,
+            auth_settings: AuthSettings::default(),
+        };
 
-    assert!(notice.contains("FreeRDP password prompt"));
-    assert!(!notice.contains("standard SSH password prompt"));
-}
+        let notice = app.vault_unlock_fallback_notice(&action, "Password vault unlock canceled");
 
-#[test]
-fn vault_unlock_fallback_notice_for_ssh_keeps_standard_prompt_text() {
-    let app = AppState::new_for_tests();
-    let host = sample_host(ConnectionProtocol::Ssh);
-    let action = VaultUnlockAction::OpenHostTab {
-        host: Box::new(host),
-        force_ssh_logging: false,
-        auth_settings: AuthSettings::default(),
-    };
-
-    let notice = app.vault_unlock_fallback_notice(&action, "Password vault unlock canceled");
-
-    assert!(notice.contains("standard SSH password prompt"));
-    assert!(!notice.contains("FreeRDP password prompt"));
+        assert!(notice.contains(expected_fragment));
+        assert!(!notice.contains(unexpected_fragment));
+    }
 }
 
 #[test]

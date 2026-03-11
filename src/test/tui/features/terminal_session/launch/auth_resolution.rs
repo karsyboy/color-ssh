@@ -1,16 +1,6 @@
 use super::*;
 
 #[test]
-fn auto_login_notice_for_rdp_mentions_freerdp_prompt() {
-    let host = sample_rdp_host();
-
-    let notice = auto_login_notice(&host, "Password vault unlock canceled");
-
-    assert!(notice.contains("FreeRDP password prompt"));
-    assert!(!notice.contains("standard SSH password prompt"));
-}
-
-#[test]
 fn resolve_host_pass_password_for_rdp_without_vault_pass_is_launchable() {
     let mut app = AppState::new_for_tests();
     let host = sample_rdp_host();

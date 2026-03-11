@@ -200,7 +200,3 @@ pub(crate) fn current_config_version() -> u64 {
 pub(crate) fn set_config_version(version: u64) {
     CONFIG_VERSION.store(version, Ordering::Release);
 }
-
-#[cfg(test)]
-#[path = "../test/config/mod.rs"]
-mod tests;

@@ -7,6 +7,7 @@
 //! - Mirror production modules under `src/test/**` whenever possible.
 //! - Keep scenario-heavy tests grouped by behavior in submodules.
 //! - Use `src/test/support/**` for reusable fixtures and global-state guards.
+//! - See `src/test/README.md` for contributor guidance and placement rules.
 //!
 //! Example mappings:
 //! - `src/process/rdp_builder.rs` -> `src/test/process/rdp_builder.rs`
