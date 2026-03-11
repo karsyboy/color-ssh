@@ -108,6 +108,11 @@ impl AppState {
             return Ok(());
         }
 
+        if self.rdp_credentials.is_some() {
+            self.handle_rdp_credentials_key(key);
+            return Ok(());
+        }
+
         if self.vault_status_modal.is_some() {
             self.handle_vault_status_modal_key(key);
             return Ok(());
@@ -136,6 +141,11 @@ impl AppState {
 
         if self.vault_unlock.is_some() {
             self.handle_vault_unlock_paste(&pasted);
+            return Ok(());
+        }
+
+        if self.rdp_credentials.is_some() {
+            self.handle_rdp_credentials_paste(&pasted);
             return Ok(());
         }
 

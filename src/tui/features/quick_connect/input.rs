@@ -1,16 +1,15 @@
 //! Quick-connect keyboard handling.
 
-use crate::tui::{AppState, QuickConnectField, QuickConnectState};
+use crate::tui::{AppState, QuickConnectField, QuickConnectState, QuickConnectValidationError};
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
 impl AppState {
-    // Modal lifecycle.
     pub(crate) fn open_quick_connect_modal(&mut self) {
         let profiles = self.discover_quick_connect_profiles();
         self.quick_connect = Some(QuickConnectState::new(self.quick_connect_default_ssh_logging, profiles));
+        self.mark_ui_dirty();
     }
 
-    // Keyboard handling inside quick-connect modal.
     pub(crate) fn handle_quick_connect_key(&mut self, key: KeyEvent) {
         let mut should_submit = false;
         let mut should_close = false;
@@ -22,12 +21,15 @@ impl AppState {
                     should_close = true;
                 }
                 KeyCode::Tab | KeyCode::Down => {
-                    form.selected = form.selected.next();
+                    form.select_next_field();
                 }
                 KeyCode::BackTab | KeyCode::Up => {
-                    form.selected = form.selected.prev();
+                    form.select_prev_field();
                 }
                 KeyCode::Enter => match form.selected {
+                    QuickConnectField::Protocol => {
+                        form.toggle_protocol_forward();
+                    }
                     QuickConnectField::Profile => {
                         form.select_next_profile();
                     }
@@ -41,22 +43,28 @@ impl AppState {
                         should_close = true;
                     }
                     _ => {
-                        form.selected = form.selected.next();
+                        form.select_next_field();
                     }
                 },
-                KeyCode::Char(' ') => {
-                    if form.selected == QuickConnectField::Logging {
-                        form.ssh_logging = !form.ssh_logging;
-                    }
-                }
+                KeyCode::Char(' ') => match form.selected {
+                    QuickConnectField::Protocol => form.toggle_protocol_forward(),
+                    QuickConnectField::Logging => form.ssh_logging = !form.ssh_logging,
+                    _ => {}
+                },
                 KeyCode::Left => match form.selected {
+                    QuickConnectField::Protocol => form.toggle_protocol_backward(),
                     QuickConnectField::Profile => form.select_prev_profile(),
-                    QuickConnectField::User | QuickConnectField::Host => form.move_cursor_left(form.selected),
+                    QuickConnectField::User | QuickConnectField::Host | QuickConnectField::Port | QuickConnectField::Domain | QuickConnectField::Password => {
+                        form.move_cursor_left(form.selected)
+                    }
                     _ => {}
                 },
                 KeyCode::Right => match form.selected {
+                    QuickConnectField::Protocol => form.toggle_protocol_forward(),
                     QuickConnectField::Profile => form.select_next_profile(),
-                    QuickConnectField::User | QuickConnectField::Host => form.move_cursor_right(form.selected),
+                    QuickConnectField::User | QuickConnectField::Host | QuickConnectField::Port | QuickConnectField::Domain | QuickConnectField::Password => {
+                        form.move_cursor_right(form.selected)
+                    }
                     _ => {}
                 },
                 KeyCode::Home => {
@@ -70,18 +78,21 @@ impl AppState {
                     if form.selected == QuickConnectField::Host {
                         form.host_required = false;
                     }
+                    form.error = None;
                 }
                 KeyCode::Delete => {
                     form.delete(form.selected);
                     if form.selected == QuickConnectField::Host {
                         form.host_required = false;
                     }
+                    form.error = None;
                 }
                 KeyCode::Char(ch) if !key.modifiers.contains(KeyModifiers::CONTROL) && !key.modifiers.contains(KeyModifiers::ALT) => {
                     form.insert_char(form.selected, ch);
                     if form.selected == QuickConnectField::Host {
                         form.host_required = false;
                     }
+                    form.error = None;
                 }
                 KeyCode::Char('a') if key.modifiers.contains(KeyModifiers::CONTROL) => {
                     form.select_all(form.selected);
@@ -97,6 +108,7 @@ impl AppState {
             self.submit_quick_connect_modal();
         } else if should_close {
             self.quick_connect = None;
+            self.mark_ui_dirty();
         }
     }
 
@@ -112,7 +124,7 @@ impl AppState {
         }
 
         match form.selected {
-            QuickConnectField::User | QuickConnectField::Host => {
+            QuickConnectField::User | QuickConnectField::Host | QuickConnectField::Port | QuickConnectField::Domain | QuickConnectField::Password => {
                 let field = form.selected;
                 for ch in filtered.chars() {
                     form.insert_char(field, ch);
@@ -120,29 +132,35 @@ impl AppState {
                 if field == QuickConnectField::Host {
                     form.host_required = false;
                 }
+                form.error = None;
             }
             _ => {}
         }
     }
 
-    // Form submit validation + action.
     pub(crate) fn submit_quick_connect_modal(&mut self) {
         let Some(form) = self.quick_connect.as_mut() else {
             return;
         };
 
-        let user = form.user.trim().to_string();
-        let host = form.host.trim().to_string();
-        let profile = form.selected_profile_for_cli();
-        let force_ssh_logging = form.ssh_logging;
-
-        if host.is_empty() {
-            form.host_required = true;
-            form.selected = QuickConnectField::Host;
-            return;
-        }
+        let submission = match form.build_submission() {
+            Ok(submission) => submission,
+            Err(err) => {
+                form.host_required = matches!(err, QuickConnectValidationError::HostRequired);
+                form.selected = match err {
+                    QuickConnectValidationError::HostRequired => QuickConnectField::Host,
+                    QuickConnectValidationError::RdpUserRequired => QuickConnectField::User,
+                    QuickConnectValidationError::InvalidPort => QuickConnectField::Port,
+                    QuickConnectValidationError::PasswordEncoding(_) => QuickConnectField::Password,
+                };
+                form.error = Some(err.message());
+                self.mark_ui_dirty();
+                return;
+            }
+        };
 
         form.host_required = false;
-        self.open_quick_connect_host(user, host, profile, force_ssh_logging);
+        form.error = None;
+        self.open_quick_connect_host(submission);
     }
 }

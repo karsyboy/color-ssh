@@ -18,6 +18,7 @@ fn resolve_host_pass_password_for_rdp_without_vault_pass_is_launchable() {
             pass_entry_override: None,
             pass_fallback_notice: None,
             disable_vault_autologin: false,
+            manual_rdp_password: None,
         })
     );
 }
@@ -41,6 +42,7 @@ fn resolve_host_pass_password_for_rdp_with_tui_autologin_disabled_is_launchable(
             pass_entry_override: None,
             pass_fallback_notice: None,
             disable_vault_autologin: true,
+            manual_rdp_password: None,
         })
     );
 }
@@ -80,6 +82,7 @@ fn resolve_host_pass_password_uses_inventory_profile_auth_settings() {
                 pass_entry_override: None,
                 pass_fallback_notice: None,
                 disable_vault_autologin: true,
+                manual_rdp_password: None,
             })
         );
     });

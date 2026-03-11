@@ -25,6 +25,8 @@ mod auth_resolution;
 mod captured_output;
 #[path = "launch/profile_reload.rs"]
 mod profile_reload;
+#[path = "launch/rdp_prompt.rs"]
+mod rdp_prompt;
 
 fn launch_config_yaml(tui_password_autologin: bool, history_buffer: usize) -> String {
     format!(

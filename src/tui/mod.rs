@@ -10,8 +10,9 @@ mod text_edit;
 mod ui;
 
 pub(crate) use state::{
-    AppState, ConnectRequest, HostTab, HostTreeRow, HostTreeRowKind, QuickConnectField, QuickConnectState, TerminalSearchState, VaultStatusModalState,
-    VaultUnlockAction, VaultUnlockState,
+    AppState, ConnectRequest, HostTab, HostTreeRow, HostTreeRowKind, QuickConnectField, QuickConnectRow, QuickConnectState, QuickConnectSubmission,
+    QuickConnectValidationError, RdpCredentialLaunchContext, RdpCredentialSubmission, RdpCredentialValidationError, RdpCredentialsAction, RdpCredentialsField,
+    RdpCredentialsState, TerminalSearchState, VaultStatusModalState, VaultUnlockAction, VaultUnlockState,
 };
 
 /// Run the interactive session manager.

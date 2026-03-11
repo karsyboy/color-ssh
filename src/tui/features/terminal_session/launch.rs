@@ -7,7 +7,7 @@ use crate::process::{PtyLogTarget, spawn_captured_command, spawn_pty_command, sp
 use crate::terminal::highlight_overlay::HighlightOverlayEngine;
 use crate::terminal::terminal_host_callbacks;
 use crate::terminal::{TerminalChild, TerminalEngine, TerminalSession};
-use crate::tui::{AppState, HostTab, TerminalSearchState, VaultUnlockAction};
+use crate::tui::{AppState, HostTab, QuickConnectSubmission, RdpCredentialLaunchContext, RdpCredentialsAction, TerminalSearchState, VaultUnlockAction};
 use crate::{debug_enabled, log_debug, log_error};
 use std::io;
 use std::sync::{
@@ -23,13 +23,15 @@ struct SessionLaunchOptions {
     pass_entry_override: Option<String>,
     pass_fallback_notice: Option<String>,
     disable_vault_autologin: bool,
+    rdp_manual_password: Option<SensitiveString>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-struct HostPassResolution {
-    pass_entry_override: Option<String>,
-    pass_fallback_notice: Option<String>,
-    disable_vault_autologin: bool,
+pub(crate) struct HostPassResolution {
+    pub(crate) pass_entry_override: Option<String>,
+    pub(crate) pass_fallback_notice: Option<String>,
+    pub(crate) disable_vault_autologin: bool,
+    pub(crate) manual_rdp_password: Option<SensitiveString>,
 }
 
 struct PtySessionLaunch<'a> {
@@ -76,11 +78,10 @@ fn inject_launch_notice(engine: &Arc<Mutex<TerminalEngine>>, render_epoch: &Arc<
     }
 }
 
-fn rdp_session_launch_mode(stdin_payload: Option<&SensitiveString>) -> RdpSessionLaunchMode {
-    if stdin_payload.is_some() {
-        RdpSessionLaunchMode::CapturedOutput
-    } else {
-        RdpSessionLaunchMode::Pty
+fn rdp_session_launch_mode(launch_mode: process::RdpLaunchMode) -> RdpSessionLaunchMode {
+    match launch_mode {
+        process::RdpLaunchMode::Pty => RdpSessionLaunchMode::Pty,
+        process::RdpLaunchMode::CapturedOutput => RdpSessionLaunchMode::CapturedOutput,
     }
 }
 
@@ -275,6 +276,14 @@ fn highlight_overlay_for_host(host: &InventoryHost, session_profile: &crate::con
     }
 }
 
+fn rdp_launch_context(auth_resolution: &HostPassResolution) -> RdpCredentialLaunchContext {
+    RdpCredentialLaunchContext {
+        pass_entry_override: auth_resolution.pass_entry_override.clone(),
+        pass_fallback_notice: auth_resolution.pass_fallback_notice.clone(),
+        disable_vault_autologin: auth_resolution.disable_vault_autologin,
+    }
+}
+
 impl AppState {
     fn initial_pty_size(&self) -> (u16, u16) {
         let rows = self.tab_content_area.height.max(1);
@@ -282,7 +291,7 @@ impl AppState {
         (rows, cols)
     }
 
-    fn resolve_session_profile(host: &InventoryHost) -> io::Result<crate::config::InteractiveProfileSnapshot> {
+    pub(crate) fn resolve_session_profile(host: &InventoryHost) -> io::Result<crate::config::InteractiveProfileSnapshot> {
         crate::config::interactive_profile_snapshot(host.profile.as_deref())
     }
 
@@ -325,7 +334,7 @@ impl AppState {
         log_debug!("Created new tab at index {}", self.selected_tab);
     }
 
-    fn open_host_tab_error(&mut self, host: InventoryHost, force_ssh_logging: bool, err_message: String) {
+    pub(crate) fn open_host_tab_error(&mut self, host: InventoryHost, force_ssh_logging: bool, err_message: String) {
         log_error!("Failed to prepare {} session: {}", host.protocol.display_name(), err_message);
         let title = self.next_tab_title(&host);
         self.push_host_tab(host, title, None, Some(err_message), HighlightOverlayEngine::new(), force_ssh_logging);
@@ -343,11 +352,13 @@ impl AppState {
                     pass_entry_override: None,
                     pass_fallback_notice: None,
                     disable_vault_autologin: true,
+                    manual_rdp_password: None,
                 },
                 ConnectionProtocol::Other(protocol) => HostPassResolution {
                     pass_entry_override: None,
                     pass_fallback_notice: Some(format!("Protocol '{}' is not supported for launch.", protocol)),
                     disable_vault_autologin: true,
+                    manual_rdp_password: None,
                 },
             });
         }
@@ -358,11 +369,13 @@ impl AppState {
                     pass_entry_override: None,
                     pass_fallback_notice: None,
                     disable_vault_autologin: false,
+                    manual_rdp_password: None,
                 },
                 ConnectionProtocol::Other(protocol) => HostPassResolution {
                     pass_entry_override: None,
                     pass_fallback_notice: Some(format!("Protocol '{}' is not supported for launch.", protocol)),
                     disable_vault_autologin: false,
+                    manual_rdp_password: None,
                 },
             });
         };
@@ -377,6 +390,7 @@ impl AppState {
                         format!("Password auto-login is unavailable because the password vault agent could not be started ({err})"),
                     )),
                     disable_vault_autologin: true,
+                    manual_rdp_password: None,
                 });
             }
         };
@@ -391,6 +405,7 @@ impl AppState {
                         pass_entry_override: Some(pass_key.to_string()),
                         pass_fallback_notice: None,
                         disable_vault_autologin: false,
+                        manual_rdp_password: None,
                     });
                 }
                 if !exists {
@@ -401,6 +416,7 @@ impl AppState {
                             format!("Password auto-login is unavailable because vault entry '{}' was not found", pass_key),
                         )),
                         disable_vault_autologin: true,
+                        manual_rdp_password: None,
                     });
                 }
                 self.open_vault_unlock(pass_key.to_string(), action);
@@ -417,6 +433,7 @@ impl AppState {
                     ConnectionProtocol::Other(protocol) => format!("Protocol '{}' is not supported for launch.", protocol),
                 }),
                 disable_vault_autologin: true,
+                manual_rdp_password: None,
             }),
             Err(err) => {
                 log_debug!("Password auto-login unavailable for host {}: {}", host.name, err);
@@ -427,6 +444,7 @@ impl AppState {
                         format!("Password auto-login is unavailable because the password vault could not be queried ({err})"),
                     )),
                     disable_vault_autologin: true,
+                    manual_rdp_password: None,
                 })
             }
         }
@@ -449,17 +467,69 @@ impl AppState {
         self.open_host_tab(host, false);
     }
 
-    pub(crate) fn open_quick_connect_host(&mut self, user: String, hostname: String, profile: Option<String>, force_ssh_logging: bool) {
-        let user = user.trim().to_string();
-        let target = if user.is_empty() {
-            hostname.clone()
-        } else {
-            format!("{}@{}", user, hostname)
-        };
-        let mut host = InventoryHost::new(target);
-        host.user = if user.is_empty() { None } else { Some(user) };
-        host.host = hostname;
-        host.profile = profile;
+    fn should_open_rdp_credentials_modal(host: &InventoryHost, auth_resolution: &HostPassResolution) -> bool {
+        matches!(host.protocol, ConnectionProtocol::Rdp)
+            && (host.user.as_deref().filter(|value| !value.trim().is_empty()).is_none() || auth_resolution.pass_entry_override.is_none())
+    }
+
+    fn maybe_open_rdp_credentials_modal_for_open_host(&mut self, host: &InventoryHost, force_ssh_logging: bool, auth_resolution: &HostPassResolution) -> bool {
+        if !Self::should_open_rdp_credentials_modal(host, auth_resolution) {
+            return false;
+        }
+
+        self.open_rdp_credentials_modal(
+            host,
+            RdpCredentialsAction::OpenHostTab {
+                host: Box::new(host.clone()),
+                force_ssh_logging,
+                launch_context: rdp_launch_context(auth_resolution),
+            },
+            auth_resolution.pass_fallback_notice.clone(),
+        );
+        true
+    }
+
+    fn maybe_open_rdp_credentials_modal_for_reconnect(&mut self, tab_index: usize, host: &InventoryHost, auth_resolution: &HostPassResolution) -> bool {
+        if !Self::should_open_rdp_credentials_modal(host, auth_resolution) {
+            return false;
+        }
+
+        self.open_rdp_credentials_modal(
+            host,
+            RdpCredentialsAction::ReconnectTab {
+                tab_index,
+                launch_context: rdp_launch_context(auth_resolution),
+            },
+            auth_resolution.pass_fallback_notice.clone(),
+        );
+        true
+    }
+
+    pub(crate) fn open_quick_connect_host(&mut self, submission: QuickConnectSubmission) {
+        let QuickConnectSubmission {
+            host,
+            force_ssh_logging,
+            manual_rdp_password,
+        } = submission;
+
+        if matches!(host.protocol, ConnectionProtocol::Rdp) {
+            match Self::resolve_session_profile(&host) {
+                Ok(session_profile) => self.open_host_tab_with_auth(
+                    host,
+                    force_ssh_logging,
+                    HostPassResolution {
+                        pass_entry_override: None,
+                        pass_fallback_notice: None,
+                        disable_vault_autologin: true,
+                        manual_rdp_password,
+                    },
+                    session_profile,
+                ),
+                Err(err) => self.open_host_tab_error(host, force_ssh_logging, err.to_string()),
+            }
+            return;
+        }
+
         self.open_host_tab(host, force_ssh_logging);
     }
 
@@ -480,23 +550,17 @@ impl AppState {
         let Some(auth_resolution) = self.resolve_host_pass_password(&host, action, &session_profile.auth_settings) else {
             return;
         };
-        self.open_host_tab_with_auth(
-            host,
-            force_ssh_logging,
-            auth_resolution.pass_entry_override,
-            auth_resolution.pass_fallback_notice,
-            auth_resolution.disable_vault_autologin,
-            session_profile,
-        );
+        if self.maybe_open_rdp_credentials_modal_for_open_host(&host, force_ssh_logging, &auth_resolution) {
+            return;
+        }
+        self.open_host_tab_with_auth(host, force_ssh_logging, auth_resolution, session_profile);
     }
 
-    fn open_host_tab_with_auth(
+    pub(crate) fn open_host_tab_with_auth(
         &mut self,
         host: InventoryHost,
         force_ssh_logging: bool,
-        pass_entry_override: Option<String>,
-        pass_fallback_notice: Option<String>,
-        disable_vault_autologin: bool,
+        auth_resolution: HostPassResolution,
         session_profile: crate::config::InteractiveProfileSnapshot,
     ) {
         let tab_title = self.next_tab_title(&host);
@@ -512,9 +576,10 @@ impl AppState {
             force_ssh_logging,
             initial_rows,
             initial_cols,
-            pass_entry_override,
-            pass_fallback_notice,
-            disable_vault_autologin,
+            pass_entry_override: auth_resolution.pass_entry_override,
+            pass_fallback_notice: auth_resolution.pass_fallback_notice,
+            disable_vault_autologin: auth_resolution.disable_vault_autologin,
+            rdp_manual_password: auth_resolution.manual_rdp_password,
         };
 
         let (session, session_error) = match Self::spawn_session(&host, &tab_title, &session_profile, session_launch_options) {
@@ -541,14 +606,16 @@ impl AppState {
             VaultUnlockAction::UnlockVault => {}
             VaultUnlockAction::OpenHostTab { host, force_ssh_logging, .. } => match Self::resolve_session_profile(&host) {
                 Ok(session_profile) => {
-                    self.open_host_tab_with_auth(
-                        *host,
-                        force_ssh_logging,
-                        pass_entry_override,
-                        pass_fallback_notice,
+                    let auth_resolution = HostPassResolution {
+                        pass_entry_override: pass_entry_override.clone(),
+                        pass_fallback_notice: pass_fallback_notice.clone(),
                         disable_vault_autologin,
-                        session_profile,
-                    );
+                        manual_rdp_password: None,
+                    };
+                    if self.maybe_open_rdp_credentials_modal_for_open_host(&host, force_ssh_logging, &auth_resolution) {
+                        return;
+                    }
+                    self.open_host_tab_with_auth(*host, force_ssh_logging, auth_resolution, session_profile);
                 }
                 Err(err) => self.open_host_tab_error(*host, force_ssh_logging, err.to_string()),
             },
@@ -558,7 +625,16 @@ impl AppState {
                 };
                 match Self::resolve_session_profile(&host) {
                     Ok(session_profile) => {
-                        self.reconnect_session_with_auth(tab_index, pass_entry_override, pass_fallback_notice, disable_vault_autologin, session_profile);
+                        let auth_resolution = HostPassResolution {
+                            pass_entry_override: pass_entry_override.clone(),
+                            pass_fallback_notice: pass_fallback_notice.clone(),
+                            disable_vault_autologin,
+                            manual_rdp_password: None,
+                        };
+                        if self.maybe_open_rdp_credentials_modal_for_reconnect(tab_index, &host, &auth_resolution) {
+                            return;
+                        }
+                        self.reconnect_session_with_auth(tab_index, host, auth_resolution, session_profile);
                     }
                     Err(err) => {
                         let err_message = err.to_string();
@@ -599,6 +675,7 @@ impl AppState {
             pass_entry_override,
             pass_fallback_notice,
             disable_vault_autologin,
+            rdp_manual_password: _,
         } = launch_options;
         let mut launch_host = host.clone();
         if disable_vault_autologin {
@@ -655,6 +732,7 @@ impl AppState {
             pass_entry_override,
             pass_fallback_notice,
             disable_vault_autologin,
+            rdp_manual_password,
             ..
         } = launch_options;
         let mut launch_host = host.clone();
@@ -662,15 +740,18 @@ impl AppState {
         if disable_vault_autologin {
             launch_host.vault_pass = None;
         }
-        let mut command_spec =
-            process::build_rdp_command_for_host_with_auth_settings(&launch_host, pass_entry_override.as_deref(), &session_profile.auth_settings)?;
-        let launch_notice = pass_fallback_notice.or(command_spec.fallback_notice.take());
-        match rdp_session_launch_mode(command_spec.stdin_payload.as_ref()) {
+        let mut command_spec = if let Some(password) = rdp_manual_password {
+            process::build_rdp_command_for_host_with_manual_password(&launch_host, password)?
+        } else {
+            process::build_rdp_command_for_host_with_auth_settings(&launch_host, pass_entry_override.as_deref(), &session_profile.auth_settings)?
+        };
+        let launch_notice = pass_fallback_notice.or(command_spec.command.fallback_notice.take());
+        match rdp_session_launch_mode(command_spec.launch_mode) {
             RdpSessionLaunchMode::Pty => spawn_pty_terminal_session(
                 PtySessionLaunch {
-                    program: &command_spec.program,
-                    args: &command_spec.args,
-                    env: &command_spec.env,
+                    program: &command_spec.command.program,
+                    args: &command_spec.command.args,
+                    env: &command_spec.command.env,
                     launch_notice,
                     session_logger: None,
                 },
@@ -680,10 +761,10 @@ impl AppState {
             ),
             RdpSessionLaunchMode::CapturedOutput => spawn_captured_terminal_session(
                 CapturedSessionLaunch {
-                    program: &command_spec.program,
-                    args: &command_spec.args,
-                    env: &command_spec.env,
-                    stdin_payload: command_spec.stdin_payload.take(),
+                    program: &command_spec.command.program,
+                    args: &command_spec.command.args,
+                    env: &command_spec.command.env,
+                    stdin_payload: command_spec.command.stdin_payload.take(),
                     launch_notice,
                 },
                 session_profile,
@@ -722,21 +803,17 @@ impl AppState {
         let Some(auth_resolution) = self.resolve_host_pass_password(&host, action, &session_profile.auth_settings) else {
             return;
         };
-        self.reconnect_session_with_auth(
-            tab_index,
-            auth_resolution.pass_entry_override,
-            auth_resolution.pass_fallback_notice,
-            auth_resolution.disable_vault_autologin,
-            session_profile,
-        );
+        if self.maybe_open_rdp_credentials_modal_for_reconnect(tab_index, &host, &auth_resolution) {
+            return;
+        }
+        self.reconnect_session_with_auth(tab_index, host, auth_resolution, session_profile);
     }
 
-    fn reconnect_session_with_auth(
+    pub(crate) fn reconnect_session_with_auth(
         &mut self,
         tab_index: usize,
-        pass_entry_override: Option<String>,
-        pass_fallback_notice: Option<String>,
-        disable_vault_autologin: bool,
+        host: InventoryHost,
+        auth_resolution: HostPassResolution,
         session_profile: crate::config::InteractiveProfileSnapshot,
     ) {
         if self.tabs.is_empty() || tab_index >= self.tabs.len() {
@@ -744,7 +821,6 @@ impl AppState {
         }
 
         let tab = &self.tabs[tab_index];
-        let host = tab.host.clone();
         let tab_title = tab.title.clone();
         let force_ssh_logging = tab.force_ssh_logging;
         let (initial_rows, initial_cols) = tab.last_pty_size.unwrap_or_else(|| self.initial_pty_size());
@@ -759,14 +835,16 @@ impl AppState {
             force_ssh_logging,
             initial_rows,
             initial_cols,
-            pass_entry_override,
-            pass_fallback_notice,
-            disable_vault_autologin,
+            pass_entry_override: auth_resolution.pass_entry_override,
+            pass_fallback_notice: auth_resolution.pass_fallback_notice,
+            disable_vault_autologin: auth_resolution.disable_vault_autologin,
+            rdp_manual_password: auth_resolution.manual_rdp_password,
         };
 
         match Self::spawn_session(&host, &tab_title, &session_profile, session_launch_options) {
             Ok(session) => {
                 let tab = &mut self.tabs[tab_index];
+                tab.host = host.clone();
                 tab.session = Some(session);
                 tab.session_error = None;
                 tab.highlight_overlay = highlight_overlay_for_host(&host, &session_profile);

@@ -24,6 +24,11 @@ impl AppState {
     // Top-level mouse routing for host panel, tab bar, and terminal area.
     /// Handle mouse events.
     pub(crate) fn handle_mouse(&mut self, mouse: event::MouseEvent) -> io::Result<()> {
+        if self.rdp_credentials.is_some() {
+            self.handle_rdp_credentials_mouse(mouse);
+            return Ok(());
+        }
+
         if self.vault_unlock.is_some() {
             self.handle_vault_unlock_mouse(mouse);
             return Ok(());

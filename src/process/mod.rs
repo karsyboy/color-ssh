@@ -14,7 +14,7 @@ use crate::{Result, args, log_debug, log_debug_raw, log_info, log_warn};
 use std::process::ExitCode;
 
 pub(crate) use pty_output::{PtyLogTarget, spawn_pty_output_reader};
-pub(crate) use rdp_builder::build_rdp_command_for_host_with_auth_settings;
+pub(crate) use rdp_builder::{RdpLaunchMode, build_rdp_command_for_host_with_auth_settings, build_rdp_command_for_host_with_manual_password};
 pub(crate) use spawn_common::{io_other_error, spawn_captured_command, spawn_pty_command};
 pub(crate) use ssh_builder::{build_ssh_command_for_host, resolve_host_by_destination};
 pub(crate) const DISABLE_VAULT_AUTOLOGIN_ENV: &str = "COSSH_DISABLE_VAULT_AUTOLOGIN";
@@ -74,19 +74,25 @@ pub(crate) fn run_rdp_process(rdp_args: RdpCommandArgs, explicit_pass_entry: Opt
     );
     log_debug_raw!("Starting RDP process with args: {:?}", rdp_args);
 
-    let command_spec = rdp_builder::build_rdp_command(&rdp_args, explicit_pass_entry.as_deref())?;
-    if let Some(notice) = &command_spec.fallback_notice {
+    let rdp_launch = rdp_builder::build_rdp_command(&rdp_args, explicit_pass_entry.as_deref())?;
+    if let Some(notice) = &rdp_launch.command.fallback_notice {
         log_warn!("{}", notice);
         eprintln!("[color-ssh] {}", notice);
     }
 
-    if command_spec.stdin_payload.is_some() {
-        log_info!("Using passthrough mode for vault-backed RDP command so FreeRDP receives startup arguments over a closed pipe");
-    } else {
-        log_info!("Using passthrough mode for RDP command so FreeRDP can prompt on the controlling terminal");
+    match rdp_launch.credential_source {
+        rdp_builder::RdpCredentialSource::VaultEntry => {
+            log_info!("Using passthrough mode for vault-backed RDP command so FreeRDP receives startup arguments over a closed pipe");
+        }
+        rdp_builder::RdpCredentialSource::ManualPrompt => {
+            log_info!("Using passthrough mode for manually authenticated RDP command so FreeRDP receives startup arguments over a closed pipe");
+        }
+        rdp_builder::RdpCredentialSource::NativePrompt => {
+            log_info!("Using passthrough mode for RDP command so FreeRDP can prompt on the controlling terminal");
+        }
     }
 
-    spawn::spawn_passthrough(command_spec)
+    spawn::spawn_passthrough(rdp_launch.into_command())
 }
 
 pub(super) fn map_exit_code(success: bool, code: Option<i32>) -> ExitCode {

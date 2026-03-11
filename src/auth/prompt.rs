@@ -1,7 +1,7 @@
 use crate::auth::secret::{ExposeSecret, SensitiveBuffer, SensitiveString};
 use crossterm::event::{self, Event, KeyCode, KeyEventKind, KeyModifiers};
 use crossterm::terminal::{disable_raw_mode, enable_raw_mode};
-use std::io::{self, Write};
+use std::io::{self, BufRead, Write};
 
 struct RawModeGuard;
 
@@ -59,6 +59,25 @@ pub(crate) fn prompt_hidden_secret(prompt: &str) -> io::Result<SensitiveString> 
             _ => {}
         }
     }
+}
+
+pub(crate) fn prompt_visible_value(prompt: &str) -> io::Result<String> {
+    let mut stderr = io::stderr().lock();
+    stderr.write_all(b"\r")?;
+    stderr.write_all(prompt.as_bytes())?;
+    stderr.flush()?;
+
+    let mut line = String::new();
+    let bytes_read = io::stdin().lock().read_line(&mut line)?;
+    if bytes_read == 0 {
+        return Err(io::Error::new(io::ErrorKind::UnexpectedEof, "input canceled"));
+    }
+
+    while matches!(line.chars().last(), Some('\n' | '\r')) {
+        line.pop();
+    }
+
+    Ok(line)
 }
 
 pub(crate) fn confirm_hidden_value(prompt: &str, confirm_prompt: &str, empty_message: &str, mismatch_message: &str) -> Result<SensitiveString, String> {

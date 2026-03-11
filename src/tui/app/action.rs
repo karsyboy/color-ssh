@@ -14,6 +14,9 @@ pub(crate) fn resolve_action(app: &AppState) -> AppAction {
     if app.should_exit {
         return AppAction::Exit;
     }
+    if app.rdp_credentials.is_some() {
+        return AppAction::Tab;
+    }
     if app.vault_unlock.is_some() || app.vault_status_modal.is_some() {
         return AppAction::Tab;
     }
@@ -38,6 +41,7 @@ pub(crate) fn should_mark_ui_dirty_for_key(app: &AppState, key: &KeyEvent) -> bo
     let direct_terminal_input = terminal_view_active
         && !terminal_search_active
         && app.quick_connect.is_none()
+        && app.rdp_credentials.is_none()
         && app.vault_unlock.is_none()
         && app.vault_status_modal.is_none()
         && !app.search_mode;

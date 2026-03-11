@@ -21,14 +21,15 @@ fn startup_only_rdp_launch_payload_closes_writer_after_write() {
 
 #[test]
 fn vault_backed_rdp_launch_uses_captured_output_mode() {
-    let payload = crate::auth::secret::sensitive_string("/u:alice\n/p:super-secret");
-
-    assert_eq!(rdp_session_launch_mode(Some(&payload)), RdpSessionLaunchMode::CapturedOutput);
+    assert_eq!(
+        rdp_session_launch_mode(crate::process::RdpLaunchMode::CapturedOutput),
+        RdpSessionLaunchMode::CapturedOutput
+    );
 }
 
 #[test]
 fn prompt_backed_rdp_launch_uses_pty_mode() {
-    assert_eq!(rdp_session_launch_mode(None), RdpSessionLaunchMode::Pty);
+    assert_eq!(rdp_session_launch_mode(crate::process::RdpLaunchMode::Pty), RdpSessionLaunchMode::Pty);
 }
 
 #[test]

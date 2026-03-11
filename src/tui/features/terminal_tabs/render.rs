@@ -239,6 +239,7 @@ impl AppState {
 
         self.render_global_status_bar(frame, status_area);
         self.render_quick_connect_modal(frame, size);
+        self.render_rdp_credentials_modal(frame, size);
         self.render_vault_unlock_modal(frame, size);
         self.render_vault_status_modal(frame, size);
         if let Some(reload_notice_toast) = self.reload_notice_toast.as_ref() {

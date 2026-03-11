@@ -4,6 +4,7 @@ mod init;
 
 use super::host_browser::{HostSearchEntry, HostTreeRow};
 use super::quick_connect::QuickConnectState;
+use super::rdp_prompt::RdpCredentialsState;
 use super::tabs::{HostTab, TerminalSearchState};
 use super::vault::{VaultStatusModalState, VaultUnlockState};
 use crate::auth::ipc::{self, VaultStatus, VaultStatusEvent, VaultStatusEventKind};
@@ -74,6 +75,7 @@ pub(crate) struct AppState {
     pub(crate) host_panel_visible: bool,
     pub(crate) host_info_visible: bool,
     pub(crate) quick_connect: Option<QuickConnectState>,
+    pub(crate) rdp_credentials: Option<RdpCredentialsState>,
     pub(crate) vault_unlock: Option<VaultUnlockState>,
     pub(crate) vault_status_modal: Option<VaultStatusModalState>,
     pub(crate) vault_status: VaultStatus,
@@ -352,6 +354,7 @@ impl AppState {
             host_panel_visible: true,
             host_info_visible: init.host_info_visible,
             quick_connect: None,
+            rdp_credentials: None,
             vault_unlock: None,
             vault_status_modal: None,
             vault_status: init.vault_status,
