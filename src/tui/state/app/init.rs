@@ -301,9 +301,11 @@ fn compute_host_info_height(term_height: u16, info_view_size_percent: u16) -> u1
 }
 
 pub(super) fn load_vault_status() -> VaultStatus {
+    let fallback_vault_exists = VaultPaths::resolve_default().map(|paths| paths.metadata_path().is_file()).unwrap_or(false);
+
     agent::AgentClient::new()
         .and_then(|client| client.status())
-        .unwrap_or_else(|_| VaultStatus::locked(false))
+        .unwrap_or_else(|_| VaultStatus::locked(fallback_vault_exists))
 }
 
 pub(super) fn load_app_state_init() -> AppStateInit {

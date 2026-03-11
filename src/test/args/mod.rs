@@ -25,6 +25,10 @@ fn parse_main_args_default_and_debug_flags_set_interactive_and_debug_levels() {
     assert!(debug_only.interactive);
     assert_eq!(debug_only.debug_count, 1);
 
+    let profile_only = parse_ok(&["cossh", "-P", "network"]);
+    assert!(profile_only.interactive);
+    assert_eq!(profile_only.profile.as_deref(), Some("network"));
+
     let debug_with_command = parse_ok(&["cossh", "-ddd", "ssh", "host"]);
     assert_eq!(debug_with_command.debug_count, 3);
 
@@ -113,6 +117,22 @@ fn parse_main_args_invalid_combinations_and_profile_names_return_parse_errors() 
         vec!["cossh", "--profile", "../prod", "ssh", "host"],
         vec!["cossh", "--profile", "prod/main", "ssh", "host"],
         vec!["cossh", "--profile", "prod.config", "ssh", "host"],
+    ];
+
+    for args in invalid_cases {
+        assert_parse_err(&args);
+    }
+}
+
+#[test]
+fn parse_main_args_logging_and_pass_flags_require_protocol_subcommands() {
+    let invalid_cases: Vec<Vec<&str>> = vec![
+        vec!["cossh", "--log"],
+        vec!["cossh", "--test"],
+        vec!["cossh", "--pass-entry", "shared"],
+        vec!["cossh", "--log", "vault", "status"],
+        vec!["cossh", "--test", "vault", "status"],
+        vec!["cossh", "--pass-entry", "shared", "vault", "status"],
     ];
 
     for args in invalid_cases {

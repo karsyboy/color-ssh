@@ -336,6 +336,21 @@ fn validate_main_args(cmd: &Command, matches: &clap::ArgMatches, parsed: &MainAr
             .error(ErrorKind::ArgumentConflict, "`--migrate` cannot be combined with interactive mode"));
     }
 
+    let protocol_command_selected = matches!(parsed.command, Some(MainCommand::Protocol(_)));
+    if !protocol_command_selected {
+        if parsed.ssh_logging {
+            return Err(cmd.clone().error(ErrorKind::ArgumentConflict, "`--log` requires an `ssh` or `rdp` command"));
+        }
+        if parsed.test_mode {
+            return Err(cmd.clone().error(ErrorKind::ArgumentConflict, "`--test` requires an `ssh` or `rdp` command"));
+        }
+        if parsed.pass_entry.is_some() {
+            return Err(cmd
+                .clone()
+                .error(ErrorKind::ArgumentConflict, "`--pass-entry` requires an `ssh` or `rdp` command"));
+        }
+    }
+
     Ok(())
 }
 
@@ -362,9 +377,7 @@ where
     let profile = matches.get_one::<String>("profile").cloned().filter(|profile_name| !profile_name.is_empty());
     let pass_entry = matches.get_one::<String>("pass_entry").cloned().filter(|value| !value.is_empty());
     let command = parse_main_command(&matches);
-    let no_user_args = raw_args.len() <= 1;
-    let debug_only = debug_count > 0 && !ssh_logging && profile.is_none() && pass_entry.is_none() && command.is_none();
-    let interactive = (no_user_args || debug_only) && command.is_none();
+    let interactive = matches.subcommand_name().is_none() && command.is_none();
 
     let parsed = MainArgs {
         debug_count,

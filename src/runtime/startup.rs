@@ -1,4 +1,4 @@
-use crate::{config, log, log_debug, log_error, log_warn};
+use crate::{config, log, log_debug, log_error};
 
 const TITLE_BANNER: &[&str] = &[
     " ",
@@ -36,17 +36,6 @@ pub(crate) fn initialize_config_or_exit(logger: &log::Logger, profile: Option<St
     if let Err(err) = config::init_session_config(profile) {
         log_error!("{context}: {}", err);
         exit_with_logged_error(logger, format!("Failed to initialize config: {err}"));
-    }
-}
-
-/// Best-effort load of debug setting before interactive startup.
-pub(crate) fn try_load_interactive_debug_mode(profile: Option<String>) -> bool {
-    match config::init_session_config(profile) {
-        Ok(()) => config::with_current_config("reading interactive debug setting", |cfg| cfg.settings.debug_mode),
-        Err(err) => {
-            log_warn!("Failed to initialize config for interactive startup: {}", err);
-            false
-        }
     }
 }
 

@@ -34,6 +34,14 @@ fn should_reload_for_event_modify_or_create_target_file_returns_true() {
 }
 
 #[test]
+fn should_reload_for_event_same_filename_in_different_directory_returns_false() {
+    let config_path = Path::new("/tmp/cossh-config.yaml");
+    let other_dir_same_name = event(EventKind::Modify(ModifyKind::Any), &["/var/tmp/cossh-config.yaml"]);
+
+    assert!(!should_reload_for_event(&other_dir_same_name, config_path));
+}
+
+#[test]
 fn classify_reload_events_ignores_profile_files_when_scope_is_active_only() {
     let config_path = Path::new("/tmp/cossh-config.yaml");
     let profile_event = event(EventKind::Modify(ModifyKind::Any), &["/tmp/linux.cossh-config.yaml"]);

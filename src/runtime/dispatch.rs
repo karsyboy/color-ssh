@@ -1,7 +1,7 @@
 //! Runtime dispatch for interactive mode, protocol mode, vault CLI, and agent mode.
 
 use super::logging::{APP_VERSION, apply_debug_logging, apply_ssh_logging, flush_debug_logs, resolve_logging_settings, update_session_name_for_logging};
-use super::startup::{initialize_config_or_exit, load_runtime_config_settings, print_title_banner, try_load_interactive_debug_mode};
+use super::startup::{initialize_config_or_exit, load_runtime_config_settings, print_title_banner};
 use crate::{Result, args, auth, config, inventory, log, log_debug, log_debug_raw, log_error, log_info, process, tui};
 use std::io;
 use std::process::ExitCode;
@@ -9,9 +9,10 @@ use std::process::ExitCode;
 fn run_interactive_session(logger: &log::Logger, args: &args::MainArgs) -> Result<ExitCode> {
     log_info!("Launching interactive session manager");
 
-    let debug_from_config = try_load_interactive_debug_mode(args.profile.clone());
-    let (final_debug, _) = resolve_logging_settings(args, debug_from_config, false);
-    apply_debug_logging(logger, args, final_debug, debug_from_config);
+    initialize_config_or_exit(logger, args.profile.clone(), "Failed to initialize config for interactive session");
+    let runtime_settings = load_runtime_config_settings();
+    let (final_debug, _) = resolve_logging_settings(args, runtime_settings.debug_mode, false);
+    apply_debug_logging(logger, args, final_debug, runtime_settings.debug_mode);
 
     if let Err(err) = tui::run_session_manager(args.profile.clone()) {
         log_error!("Session manager error: {}", err);
@@ -212,7 +213,7 @@ pub(crate) fn run() -> Result<ExitCode> {
     }
 
     let args = args::main_args();
-    let logger = log::Logger::new();
+    let logger = &log::LOGGER;
 
     if args.debug_count > 0 {
         logger.enable_debug_with_verbosity(log::DebugVerbosity::from_count(args.debug_count));
@@ -232,19 +233,19 @@ pub(crate) fn run() -> Result<ExitCode> {
     }
 
     if let Some(args::MainCommand::Vault(vault_command)) = args.command.as_ref() {
-        return Ok(run_vault_mode(&logger, &args, vault_command));
+        return Ok(run_vault_mode(logger, &args, vault_command));
     }
 
     if args.interactive {
-        return run_interactive_session(&logger, &args);
+        return run_interactive_session(logger, &args);
     }
 
     let runtime_profile = effective_runtime_profile(&args);
-    let runtime_settings = configure_non_interactive_runtime(&logger, runtime_profile.clone(), &args);
+    let runtime_settings = configure_non_interactive_runtime(logger, runtime_profile.clone(), &args);
     log_argument_summary(&args);
 
     print_title_banner(runtime_settings.show_title);
-    update_protocol_session_name_if_needed(&logger, args.command.as_ref());
+    update_protocol_session_name_if_needed(logger, args.command.as_ref());
 
     let protocol_command = protocol_command_for_non_interactive(&args)?;
 
@@ -255,12 +256,12 @@ pub(crate) fn run() -> Result<ExitCode> {
     let exit_code = run_protocol_command(protocol_command, args.pass_entry.clone()).map_err(|err| {
         log_error!("Process handler failed: {}", err);
         eprintln!("Process failed: {err}");
-        flush_debug_logs(&logger);
+        flush_debug_logs(logger);
         err
     })?;
 
     log_info!("color-ssh exiting with code: {:?}", exit_code);
-    flush_debug_logs(&logger);
+    flush_debug_logs(logger);
     Ok(exit_code)
 }
 

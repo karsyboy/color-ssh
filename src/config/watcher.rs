@@ -64,15 +64,29 @@ fn with_profile_reload_queue<T>(f: impl FnOnce(&mut VecDeque<ProfileReloadEvent>
     }
 }
 
+fn absolute_path(path: &Path) -> PathBuf {
+    if path.is_absolute() {
+        return path.to_path_buf();
+    }
+
+    env::current_dir()
+        .map(|current_dir| current_dir.join(path))
+        .unwrap_or_else(|_| path.to_path_buf())
+}
+
+fn paths_equivalent(left: &Path, right: &Path) -> bool {
+    if left == right {
+        return true;
+    }
+
+    match (left.canonicalize(), right.canonicalize()) {
+        (Ok(left_canonical), Ok(right_canonical)) => left_canonical == right_canonical,
+        _ => absolute_path(left) == absolute_path(right),
+    }
+}
+
 fn event_targets_config_file(event: &Event, config_path: &Path) -> bool {
-    let config_file_name = config_path.file_name();
-    event.paths.iter().any(|path| {
-        path == config_path
-            || match (path.file_name(), config_file_name) {
-                (Some(event_name), Some(config_name)) => event_name == config_name,
-                _ => false,
-            }
-    })
+    event.paths.iter().any(|path| paths_equivalent(path, config_path))
 }
 
 fn is_reloadable_event_kind(event: &Event) -> bool {
