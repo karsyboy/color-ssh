@@ -28,7 +28,7 @@ This directory contains the crate-attached test suite for `color-ssh`.
 ## Fixtures and Helpers
 
 - Use local helpers first; lift to `src/test/support/*` only when reused across multiple files.
-- Use `src/test/support/state.rs` for global config queue/version resets and scoped `HOME`/cwd environment guards.
+- Use `src/test/support/state.rs` for global config queue/version resets and scoped `HOME`/cwd environment helpers.
 - Keep helper behavior explicit and small; avoid helpers that hide important setup logic.
 
 ## Anti-Patterns to Avoid

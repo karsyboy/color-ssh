@@ -45,6 +45,9 @@ alacritty_terminal = "0.25.1"
 which = "8.0.2"
 zeroize = "1.8.2"
 
+[dev-dependencies]
+temp-env = "0.3.6"
+
 [profile.release]
 lto = "thin"
 codegen-units = 1

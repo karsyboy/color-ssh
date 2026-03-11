@@ -3,11 +3,7 @@ use crate::config::CompiledHighlightRule;
 use crate::config::{self, AuthSettings};
 use crate::inventory::{ConnectionProtocol, InventoryHost};
 use crate::terminal::{TerminalEngine, highlight_overlay::HighlightOverlayContext, highlight_overlay::HighlightOverlayViewport};
-use crate::test::support::{
-    config::base_config,
-    fs::TestWorkspace,
-    state::{HomeAndCwdGuard, TestStateGuard},
-};
+use crate::test::support::{config::base_config, fs::TestWorkspace, state::TestStateGuard};
 use crate::tui::VaultUnlockAction;
 use regex::Regex;
 use std::io::{self, Write};
@@ -58,22 +54,14 @@ fn build_overlay_for_text(overlay_engine: &mut HighlightOverlayEngine, text: &st
     )
 }
 
-struct ProfileTestEnvironment {
-    _state: TestStateGuard,
-    _env: HomeAndCwdGuard,
-}
+fn with_profile_test_environment<T>(workspace: &TestWorkspace, run: impl FnOnce() -> T) -> T {
+    let state = TestStateGuard::lock();
+    let home_dir = workspace.join("home");
+    let current_dir = workspace.join("cwd");
 
-impl ProfileTestEnvironment {
-    fn enter(workspace: &TestWorkspace) -> Self {
-        let state = TestStateGuard::lock();
-        let home_dir = workspace.join("home");
-        let current_dir = workspace.join("cwd");
-        let env = state
-            .enter_home_and_cwd(&home_dir, &current_dir)
-            .expect("configure HOME and cwd for profile tests");
-
-        Self { _state: state, _env: env }
-    }
+    state
+        .with_home_and_cwd(&home_dir, &current_dir, run)
+        .expect("configure HOME and cwd for profile tests")
 }
 
 struct TrackingWriter {
