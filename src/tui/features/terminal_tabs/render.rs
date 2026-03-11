@@ -451,5 +451,5 @@ impl AppState {
 }
 
 #[cfg(test)]
-#[path = "../../../test/tui/terminal_tabs_render.rs"]
+#[path = "../../../test/tui/features/terminal_tabs/render.rs"]
 mod tests;

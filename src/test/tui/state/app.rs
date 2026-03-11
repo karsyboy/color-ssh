@@ -2,11 +2,8 @@ use super::AppState;
 use crate::config;
 use crate::inventory::build_inventory_tree;
 use crate::terminal::TerminalGridPoint;
-use crate::test::support::fs::TestWorkspace;
+use crate::test::support::{fs::TestWorkspace, state::TestStateGuard};
 use crate::tui::HostTreeRowKind;
-use std::sync::{Mutex, OnceLock};
-
-static APP_STATE_CONFIG_TEST_LOCK: OnceLock<Mutex<()>> = OnceLock::new();
 
 #[test]
 fn handle_terminal_resize_growing_and_shrinking_width_scales_host_panel_proportionally() {
@@ -46,10 +43,7 @@ fn handle_terminal_resize_window_growth_caps_width_at_default_percent() {
 
 #[test]
 fn should_draw_when_config_version_changes() {
-    let _lock = APP_STATE_CONFIG_TEST_LOCK
-        .get_or_init(|| Mutex::new(()))
-        .lock()
-        .expect("app state config test lock");
+    let _state = TestStateGuard::lock();
     let mut app = AppState::new_for_tests();
     app.ui_dirty = false;
     app.mark_drawn();
@@ -64,11 +58,7 @@ fn should_draw_when_config_version_changes() {
 
 #[test]
 fn apply_config_reload_notifications_sets_reload_notice_toast() {
-    let _lock = APP_STATE_CONFIG_TEST_LOCK
-        .get_or_init(|| Mutex::new(()))
-        .lock()
-        .expect("app state config test lock");
-    let _ = config::take_reload_notices();
+    let _state = TestStateGuard::lock();
 
     let mut app = AppState::new_for_tests();
 
@@ -79,8 +69,6 @@ fn apply_config_reload_notifications_sets_reload_notice_toast() {
         app.reload_notice_toast.as_ref().map(|toast| toast.message()),
         Some("[color-ssh] Config reloaded successfully")
     );
-
-    let _ = config::take_reload_notices();
 }
 
 #[test]

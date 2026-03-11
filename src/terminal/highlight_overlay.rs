@@ -1064,5 +1064,5 @@ fn byte_range_to_cell_columns(text: &str, start: usize, end: usize) -> (u16, u16
 }
 
 #[cfg(test)]
-#[path = "../test/terminal_highlight_overlay.rs"]
+#[path = "../test/terminal/highlight_overlay.rs"]
 mod tests;

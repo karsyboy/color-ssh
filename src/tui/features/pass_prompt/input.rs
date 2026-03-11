@@ -331,5 +331,5 @@ impl AppState {
 }
 
 #[cfg(test)]
-#[path = "../../../test/tui/pass_prompt.rs"]
+#[path = "../../../test/tui/features/pass_prompt/input.rs"]
 mod tests;

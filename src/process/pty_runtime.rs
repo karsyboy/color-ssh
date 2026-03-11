@@ -738,5 +738,5 @@ fn encode_mouse_event(mouse: MouseEvent, area: Rect, mode: MouseProtocolMode, en
 }
 
 #[cfg(test)]
-#[path = "../test/process_pty_runtime.rs"]
+#[path = "../test/process/pty_runtime.rs"]
 mod tests;

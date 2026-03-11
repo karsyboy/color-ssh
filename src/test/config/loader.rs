@@ -3,7 +3,7 @@ use crate::config::{Config, HighlightOverlayAutoPolicy};
 use crate::test::support::config::base_config;
 
 #[test]
-fn compile_secret_patterns_core_paths() {
+fn compile_secret_patterns_skips_invalid_regex_entries() {
     let mut config = base_config();
 
     config.settings.remove_secrets = Some(vec!["token=\\w+".to_string(), "[".to_string()]);

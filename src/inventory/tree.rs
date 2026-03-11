@@ -250,5 +250,5 @@ fn add_inventory_node(
 }
 
 #[cfg(test)]
-#[path = "../test/inventory/loader.rs"]
+#[path = "../test/inventory/tree.rs"]
 mod tests;

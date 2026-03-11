@@ -28,7 +28,7 @@ fn spawn_worker(log_path: std::path::PathBuf) -> (mpsc::SyncSender<SshLogCommand
 }
 
 #[test]
-fn sanitize_line_and_extract_complete_lines_core_behaviors() {
+fn sanitize_line_and_extract_complete_lines_handle_redaction_and_partial_buffers() {
     let secrets = vec![Regex::new("token=\\w+").expect("regex compiles")];
     let sanitized = sanitize_line("\x1b[31mtoken=abc123\x1b[0m ok", &secrets);
     assert_eq!(sanitized, "[REDACTED] ok");
@@ -41,7 +41,7 @@ fn sanitize_line_and_extract_complete_lines_core_behaviors() {
 
 #[test]
 fn worker_flush_writes_chunks_in_order() {
-    let root = TestWorkspace::new("log", "ssh_worker_core").expect("temp workspace");
+    let root = TestWorkspace::new("log", "ssh_worker").expect("temp workspace");
     let log_path = root.join("session.log");
     let (tx, worker) = spawn_worker(log_path.clone());
 
@@ -61,7 +61,7 @@ fn worker_flush_writes_chunks_in_order() {
 
 #[test]
 fn private_log_file_permissions_are_restrictive() {
-    let root = TestWorkspace::new("log", "ssh_permissions_core").expect("temp workspace");
+    let root = TestWorkspace::new("log", "ssh_permissions").expect("temp workspace");
     let log_dir = root.join("ssh_sessions");
     let log_path = log_dir.join("session.log");
 

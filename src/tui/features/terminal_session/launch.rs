@@ -826,5 +826,5 @@ impl AppState {
 }
 
 #[cfg(test)]
-#[path = "../../../test/tui/terminal_launch.rs"]
+#[path = "../../../test/tui/features/terminal_session/launch.rs"]
 mod tests;

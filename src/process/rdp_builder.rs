@@ -146,5 +146,5 @@ pub(crate) fn build_rdp_command(args: &RdpCommandArgs, explicit_pass_entry: Opti
 }
 
 #[cfg(test)]
-#[path = "../test/process_rdp.rs"]
+#[path = "../test/process/rdp_builder.rs"]
 mod tests;

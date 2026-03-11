@@ -1,7 +1,7 @@
 use super::*;
 
 #[test]
-fn askpass_prompt_classification_core_paths() {
+fn askpass_prompt_classification_distinguishes_allowed_missing_and_unexpected_prompts() {
     assert_eq!(
         classify_internal_askpass_prompt(Some("alice@example.com's password:")),
         AskpassPromptDecision::Allow

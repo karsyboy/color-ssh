@@ -20,7 +20,7 @@ fn base_args(debug_count: u8, ssh_logging: bool, test_mode: bool) -> MainArgs {
 }
 
 #[test]
-fn resolve_logging_settings_core_modes() {
+fn resolve_logging_settings_matches_safe_and_raw_modes() {
     assert_eq!(resolve_logging_settings(&base_args(1, false, true), false, true), (DebugVerbosity::Safe, false));
     assert_eq!(resolve_logging_settings(&base_args(2, true, false), false, false), (DebugVerbosity::Raw, true));
 }

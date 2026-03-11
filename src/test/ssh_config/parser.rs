@@ -3,8 +3,8 @@ use crate::ssh_config::ConnectionProtocol;
 use crate::test::support::fs::TestWorkspace;
 
 #[test]
-fn parser_metadata_hidden_and_wildcard_filtering_core_behavior() {
-    let workspace = TestWorkspace::new("ssh_config", "metadata_core").expect("temp workspace");
+fn parser_filters_hidden_and_wildcard_hosts_from_metadata() {
+    let workspace = TestWorkspace::new("ssh_config", "metadata").expect("temp workspace");
     let config_path = workspace.join("config");
 
     workspace
@@ -22,8 +22,8 @@ fn parser_metadata_hidden_and_wildcard_filtering_core_behavior() {
 }
 
 #[test]
-fn parser_include_glob_order_and_cycle_handling_core_behavior() {
-    let workspace = TestWorkspace::new("ssh_config", "include_cycle_core").expect("temp workspace");
+fn parser_resolves_glob_includes_once_in_stable_order() {
+    let workspace = TestWorkspace::new("ssh_config", "include_cycle").expect("temp workspace");
     let config_path = workspace.join("config");
 
     workspace
@@ -46,7 +46,7 @@ fn parser_include_glob_order_and_cycle_handling_core_behavior() {
 
 #[test]
 fn parser_multi_alias_and_invalid_pass_key_behavior() {
-    let workspace = TestWorkspace::new("ssh_config", "alias_pass_core").expect("temp workspace");
+    let workspace = TestWorkspace::new("ssh_config", "alias_pass").expect("temp workspace");
     let config_path = workspace.join("config");
 
     workspace
@@ -62,8 +62,8 @@ fn parser_multi_alias_and_invalid_pass_key_behavior() {
 }
 
 #[test]
-fn parser_rdp_and_repeated_options_core_behavior() {
-    let workspace = TestWorkspace::new("ssh_config", "rdp_repeated_core").expect("temp workspace");
+fn parser_handles_rdp_hosts_and_repeated_options() {
+    let workspace = TestWorkspace::new("ssh_config", "rdp_repeated").expect("temp workspace");
     let config_path = workspace.join("config");
 
     workspace

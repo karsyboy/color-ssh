@@ -2,5 +2,5 @@
 pub(crate) use crate::terminal::TerminalEngine;
 
 #[cfg(test)]
-#[path = "../../test/tui/terminal_emulator.rs"]
+#[path = "../../test/tui/terminal/mod.rs"]
 mod tests;

@@ -44,7 +44,7 @@ fn host_named<'a>(tree: &'a InventoryTreeModel, name: &str) -> &'a InventoryHost
 #[test]
 fn build_inventory_tree_canonical_aliases_and_protocol_fields_maps_to_host_model() {
     let fixture = InventoryFixture::new(
-        "parse_core",
+        "parse",
         r#"
 inventory:
   - name: switch
@@ -76,7 +76,7 @@ inventory:
 #[test]
 fn build_inventory_tree_includes_and_duplicate_hosts_merges_then_rejects_duplicates() {
     let fixture = InventoryFixture::new(
-        "includes_core",
+        "includes",
         r#"
 include:
   - ./extra.yaml
@@ -119,7 +119,7 @@ inventory:
 #[test]
 fn build_inventory_tree_glob_include_order_and_cycles_loads_each_file_once_in_sorted_order() {
     let fixture = InventoryFixture::new(
-        "glob_cycle_core",
+        "glob_cycle",
         r#"
 include:
   - ./inventory/*.yaml

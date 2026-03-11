@@ -103,5 +103,5 @@ pub(super) fn map_exit_code(success: bool, code: Option<i32>) -> ExitCode {
 }
 
 #[cfg(test)]
-#[path = "../test/process.rs"]
+#[path = "../test/process/mod.rs"]
 mod tests;

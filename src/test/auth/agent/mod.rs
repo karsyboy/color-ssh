@@ -5,7 +5,7 @@ use crate::test::support::auth::TestVaultEnv;
 use std::time::{Duration, Instant};
 
 #[test]
-fn runtime_expiry_and_poll_backoff_core_behaviors() {
+fn runtime_expiry_and_poll_backoff_follow_timeout_rules() {
     let mut runtime = AgentRuntime::new();
     runtime.unlock([7u8; 32], UnlockPolicy::new(1, 10));
     runtime.last_activity_at = Some(Instant::now() - Duration::from_secs(2));
@@ -20,7 +20,7 @@ fn runtime_expiry_and_poll_backoff_core_behaviors() {
 
 #[test]
 fn handle_request_unlock_authorize_and_get_secret_happy_path() {
-    let env = TestVaultEnv::new("unlock_fetch_core");
+    let env = TestVaultEnv::new("unlock_fetch");
     let unlocked = env.init_and_unlock("master-pass");
     unlocked.store_secret("shared", "top-secret").expect("store secret");
 
@@ -62,7 +62,7 @@ fn handle_request_unlock_authorize_and_get_secret_happy_path() {
 
 #[test]
 fn lock_and_unlock_requests_emit_status_events_and_clear_runtime_state() {
-    let env = TestVaultEnv::new("lock_unlock_events_core");
+    let env = TestVaultEnv::new("lock_unlock_events");
     env.init("master-pass");
 
     let mut runtime = AgentRuntime::new();
@@ -99,7 +99,7 @@ fn lock_and_unlock_requests_emit_status_events_and_clear_runtime_state() {
 
 #[test]
 fn askpass_token_single_use_and_locked_runtime_errors() {
-    let env = TestVaultEnv::new("single_use_core");
+    let env = TestVaultEnv::new("single_use");
     let unlocked = env.init_and_unlock("master-pass");
     unlocked.store_secret("shared", "top-secret").expect("store secret");
 

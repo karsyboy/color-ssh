@@ -202,5 +202,5 @@ pub(crate) fn set_config_version(version: u64) {
 }
 
 #[cfg(test)]
-#[path = "../test/config.rs"]
+#[path = "../test/config/mod.rs"]
 mod tests;

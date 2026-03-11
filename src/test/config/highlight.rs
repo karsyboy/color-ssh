@@ -3,7 +3,7 @@ use crate::config::HighlightRule;
 use crate::test::support::config::base_config;
 
 #[test]
-fn color_parsing_and_hex_validation_core_paths() {
+fn color_parsing_and_hex_validation_handle_valid_and_invalid_inputs() {
     assert!(is_valid_hex_color("#00ffAA"));
     assert!(!is_valid_hex_color("#00ffZZ"));
     assert_eq!(hex_to_ansi("#112233", ColorType::Foreground), "\x1b[38;2;17;34;51m");

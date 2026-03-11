@@ -29,5 +29,5 @@ pub(super) use runtime::{AGENT_IDLE_SHUTDOWN_POLL_INTERVAL_MIN, AgentRuntime, ne
 pub(super) use server::handle_request;
 
 #[cfg(test)]
-#[path = "../../test/auth/agent.rs"]
+#[path = "../../test/auth/agent/mod.rs"]
 mod tests;

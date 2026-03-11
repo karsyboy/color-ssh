@@ -239,5 +239,5 @@ fn named_color_to_ansi_index(named: NamedColor) -> Option<u8> {
 }
 
 #[cfg(test)]
-#[path = "../test/terminal_ratatui.rs"]
+#[path = "../test/terminal/ratatui.rs"]
 mod tests;

@@ -7,6 +7,7 @@ use crate::config::{AuthSettings, CompiledHighlightRule, HighlightOverlayAutoPol
 use crate::runtime::format_reload_notice;
 use crate::terminal::highlight_overlay::{HighlightOverlay, HighlightOverlayEngine};
 use crate::terminal::{MouseProtocolEncoding, MouseProtocolMode, TerminalEngine};
+use crate::test::support::state::TestStateGuard;
 use crossterm::event::{KeyModifiers, MouseButton, MouseEvent, MouseEventKind};
 use ratatui::{
     buffer::Buffer,
@@ -236,12 +237,11 @@ fn format_reload_notice_prefixes_message() {
 
 #[test]
 fn take_latest_reload_notice_toast_uses_latest_notice() {
-    let _ = config::take_reload_notices();
+    let _state = TestStateGuard::lock();
     config::queue_reload_notice("Config reloaded successfully".to_string());
     config::queue_reload_notice("Config reload failed: parse error at line 77".to_string());
 
     let toast = take_latest_reload_notice_toast().expect("reload notice toast");
 
     assert_eq!(toast.message(), "[color-ssh] Config reload failed: parse error at line 77");
-    let _ = config::take_reload_notices();
 }

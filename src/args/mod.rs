@@ -399,5 +399,5 @@ pub fn main_args() -> MainArgs {
 }
 
 #[cfg(test)]
-#[path = "../test/args.rs"]
+#[path = "../test/args/mod.rs"]
 mod tests;

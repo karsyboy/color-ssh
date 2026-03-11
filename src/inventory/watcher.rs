@@ -146,5 +146,5 @@ fn sort_and_dedup_paths(paths: &mut Vec<PathBuf>) {
 }
 
 #[cfg(test)]
-#[path = "../test/inventory/watch.rs"]
+#[path = "../test/inventory/watcher.rs"]
 mod tests;

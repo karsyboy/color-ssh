@@ -25,8 +25,8 @@ fn local_socket_bind_allowed() -> bool {
 }
 
 #[test]
-fn endpoint_derivation_and_json_round_trip_core_paths() {
-    let env = TestVaultEnv::new("deterministic_core");
+fn endpoint_derivation_and_json_round_trip_are_stable() {
+    let env = TestVaultEnv::new("deterministic");
     let left = agent_endpoint(env.paths());
     let right = agent_endpoint(env.paths());
     assert_eq!(left.identifier, right.identifier);
@@ -61,7 +61,7 @@ fn listener_stale_socket_reclaim_and_active_listener_detection() {
         return;
     }
 
-    let env = TestVaultEnv::new("stale_and_active_core");
+    let env = TestVaultEnv::new("stale_and_active");
     fs::create_dir_all(env.paths().run_dir()).expect("create run dir");
     set_restrictive_directory_permissions(&env.paths().run_dir()).expect("restrict run dir");
 
@@ -88,7 +88,7 @@ fn local_socket_round_trip_uses_private_socket_permissions() {
         return;
     }
 
-    let env = TestVaultEnv::new("local_socket_round_trip_core");
+    let env = TestVaultEnv::new("local_socket_round_trip");
     let endpoint = agent_endpoint(env.paths());
 
     let listener = match bind_listener(env.paths()).expect("bind listener") {

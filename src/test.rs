@@ -2,15 +2,15 @@
 //!
 //! Tests live under `src/test/` and are attached to production modules via
 //! `#[path = "..."] mod tests;` so they keep access to module-private items.
-//! The suite is intentionally condensed to core behavior coverage only.
 //!
-//! Domain layout:
-//! - `src/test/auth/*`
-//! - `src/test/config/*`
-//! - `src/test/inventory/*`
-//! - `src/test/log/*`
-//! - `src/test/ssh_config/*`
-//! - `src/test/tui/*`
-//! - `src/test/{args,args_ssh,process,runtime}.rs`
+//! Layout convention:
+//! - Mirror production modules under `src/test/**` whenever possible.
+//! - Keep scenario-heavy tests grouped by behavior in submodules.
+//! - Use `src/test/support/**` for reusable fixtures and global-state guards.
+//!
+//! Example mappings:
+//! - `src/process/rdp_builder.rs` -> `src/test/process/rdp_builder.rs`
+//! - `src/tui/state/app.rs` -> `src/test/tui/state/app.rs`
+//! - `src/tui/features/terminal_session/launch.rs` -> `src/test/tui/features/terminal_session/launch.rs`
 
 pub(crate) mod support;
