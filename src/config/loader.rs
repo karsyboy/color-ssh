@@ -29,16 +29,22 @@ impl ConfigLoader {
                 config.metadata.config_path = self.config_path;
                 log_debug!("Parsed configuration successfully");
 
-                let mut invalid_colors = Vec::new();
-                for (color_name, value) in config.palette.iter() {
-                    if !highlight::is_valid_hex_color(value) {
-                        log_warn!("Invalid hex color '{}' for palette entry '{}'", value, color_name);
-                        invalid_colors.push(color_name.clone());
-                    }
+                let invalid_colors: Vec<String> = config
+                    .palette
+                    .iter()
+                    .filter(|(_, value)| !highlight::is_valid_hex_color(value))
+                    .map(|(name, value)| {
+                        log_warn!("Invalid hex color '{}' for palette entry '{}'; removing from palette", value, name);
+                        name.clone()
+                    })
+                    .collect();
+
+                for name in &invalid_colors {
+                    config.palette.remove(name);
                 }
 
                 if !invalid_colors.is_empty() {
-                    log_warn!("Found {} invalid color(s): {:?}", invalid_colors.len(), invalid_colors);
+                    log_warn!("Removed {} invalid palette color(s): {:?}", invalid_colors.len(), invalid_colors);
                 }
 
                 let compiled_rules = highlight::compile_rules(&config);
@@ -108,7 +114,12 @@ fn compile_secret_patterns(config: &Config) -> Vec<Regex> {
             match Regex::new(pattern) {
                 Ok(regex) => patterns.push(regex),
                 Err(err) => {
-                    log_warn!("Failed to compile secret pattern #{}: '{}' - {}", idx + 1, pattern, err);
+                    log_warn!(
+                        "Secret redaction pattern #{} ('{}') is invalid and will be skipped: {}. Secrets matching this pattern will NOT be redacted.",
+                        idx + 1,
+                        pattern,
+                        err
+                    );
                 }
             }
         }

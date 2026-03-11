@@ -1,7 +1,7 @@
 //! Runtime dispatch for interactive mode, protocol mode, vault CLI, and agent mode.
 
 use super::logging::{APP_VERSION, apply_debug_logging, apply_ssh_logging, flush_debug_logs, resolve_logging_settings, update_session_name_for_logging};
-use super::startup::{exit_with_logged_error, initialize_config_or_exit, load_runtime_config_settings, print_title_banner, try_load_interactive_debug_mode};
+use super::startup::{initialize_config_or_exit, load_runtime_config_settings, print_title_banner, try_load_interactive_debug_mode};
 use crate::{Result, args, auth, config, inventory, log, log_debug, log_debug_raw, log_error, log_info, process, tui};
 use std::io;
 use std::process::ExitCode;
@@ -14,7 +14,10 @@ fn run_interactive_session(logger: &log::Logger, args: &args::MainArgs) -> Resul
     apply_debug_logging(logger, args, final_debug, debug_from_config);
 
     if let Err(err) = tui::run_session_manager(args.profile.clone()) {
-        exit_with_logged_error(logger, format!("Session manager error: {err}"));
+        log_error!("Session manager error: {}", err);
+        eprintln!("Session manager error: {err}");
+        flush_debug_logs(logger);
+        return Ok(ExitCode::FAILURE);
     }
 
     flush_debug_logs(logger);

@@ -334,6 +334,7 @@ fn run_pty_event_loop(runtime: &mut InteractivePtyRuntime) -> Result<std::proces
     let mut reader_closed = false;
     let mut force_redraw = true;
     let mut viewport_area = Rect::new(0, 0, width.max(1), height.max(1));
+    let mut exit_received_at: Option<Instant> = None;
 
     loop {
         if expire_reload_notice_toast(&mut runtime.reload_notice_toast) {
@@ -392,6 +393,17 @@ fn run_pty_event_loop(runtime: &mut InteractivePtyRuntime) -> Result<std::proces
 
         if exit_status.is_some() && reader_closed {
             break;
+        }
+
+        // If the child exited but the reader thread has not closed within a
+        // grace period, assume the reader thread is dead (e.g. panicked) and
+        // proceed with cleanup rather than hanging forever.
+        if exit_status.is_some() && !reader_closed {
+            let deadline = exit_received_at.get_or_insert_with(Instant::now);
+            if deadline.elapsed() >= Duration::from_secs(3) {
+                log_debug!("Reader thread did not close within grace period after process exit; proceeding with cleanup");
+                break;
+            }
         }
 
         if !event::poll(EVENT_POLL_INTERVAL)? {
