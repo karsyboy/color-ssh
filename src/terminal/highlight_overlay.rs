@@ -136,16 +136,7 @@ pub(crate) struct HighlightCellRange {
     pub(crate) style_index: usize,
 }
 
-#[allow(dead_code)]
 impl HighlightCellRange {
-    pub(crate) fn start_col(&self) -> u16 {
-        self.start_col
-    }
-
-    pub(crate) fn end_col(&self) -> u16 {
-        self.end_col
-    }
-
     pub(crate) fn style_index(&self) -> usize {
         self.style_index
     }
@@ -159,28 +150,13 @@ pub(crate) struct HighlightOverlay {
     pub(crate) config_version: u64,
 }
 
-#[allow(dead_code)]
 impl HighlightOverlay {
-    pub(crate) fn style_for_cell(&self, absolute_row: i64, col: u16) -> Option<&HighlightOverlayStyle> {
-        let row_ranges = self.row_ranges.get(&absolute_row)?;
-        let range = row_ranges.iter().find(|range| col >= range.start_col && col < range.end_col)?;
-        self.styles.get(range.style_index)
-    }
-
     pub(crate) fn ranges_for_row(&self, absolute_row: i64) -> Option<&[HighlightCellRange]> {
         self.row_ranges.get(&absolute_row).map(|ranges| ranges.as_ref())
     }
 
     pub(crate) fn styles(&self) -> &[HighlightOverlayStyle] {
         &self.styles
-    }
-
-    pub(crate) fn suppression_reason(&self) -> Option<HighlightSuppressionReason> {
-        self.suppression_reason
-    }
-
-    pub(crate) fn config_version(&self) -> u64 {
-        self.config_version
     }
 }
 
@@ -844,43 +820,6 @@ impl HighlightOverlayEngine {
         self.last_analysis_at = None;
         self.profiler = HighlightOverlayProfiler::default();
     }
-
-    #[cfg(test)]
-    fn with_rules(rules: Vec<CompiledHighlightRule>, mode: HighlightOverlayMode) -> Self {
-        Self::with_rules_and_policy(rules, mode, HighlightOverlayAutoPolicy::default())
-    }
-
-    #[cfg(test)]
-    fn with_rules_and_policy(rules: Vec<CompiledHighlightRule>, mode: HighlightOverlayMode, auto_policy: HighlightOverlayAutoPolicy) -> Self {
-        let rule_set = (!rules.is_empty()).then(|| {
-            let patterns: Vec<&str> = rules.iter().map(|rule| rule.regex.as_str()).collect();
-            RegexSet::new(patterns).expect("rule set")
-        });
-        let (styles, rule_style_indexes) = build_overlay_styles(&rules);
-        let config_version = config::current_config_version();
-        Self {
-            rules,
-            rule_set,
-            styles,
-            rule_style_indexes,
-            mode,
-            auto_policy,
-            config_version,
-            refresh_from_current_config: false,
-            cached_overlay: HighlightOverlay::default(),
-            cached_render_epoch: None,
-            cached_display_scrollback: 0,
-            last_compatibility_action: HighlightCompatibilityAction::Full,
-            last_overlay_rows: Vec::new(),
-            row_analysis_cache: HashMap::new(),
-            row_cache_generation: 0,
-            last_visible_rows: Vec::new(),
-            last_analysis_at: None,
-            volatile_repaint_streak: 0,
-            volatile_suppressed_until: None,
-            profiler: HighlightOverlayProfiler::default(),
-        }
-    }
 }
 
 impl HighlightOverlayEngine {
@@ -1062,7 +1001,3 @@ fn byte_range_to_cell_columns(text: &str, start: usize, end: usize) -> (u16, u16
     let end_col = end_col.unwrap_or(current_col);
     (start_col, end_col)
 }
-
-#[cfg(test)]
-#[path = "../test/terminal/highlight_overlay.rs"]
-mod tests;

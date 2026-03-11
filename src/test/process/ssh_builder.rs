@@ -1,11 +1,5 @@
-use super::{build_ssh_command_for_host, resolve_host_by_destination, resolve_pass_entry_from_hosts, synthesize_ssh_args};
+use super::{build_ssh_command_for_host, synthesize_ssh_args};
 use crate::inventory::InventoryHost;
-
-fn host_with_alias_and_hostname(alias: &str, hostname: &str) -> InventoryHost {
-    let mut host = InventoryHost::new(alias.to_string());
-    host.host = hostname.to_string();
-    host
-}
 
 fn assert_pair(args: &[String], flag: &str, value: &str) {
     assert!(
@@ -16,26 +10,6 @@ fn assert_pair(args: &[String], flag: &str, value: &str) {
 
 fn assert_contains(args: &[String], expected: &str) {
     assert!(args.iter().any(|arg| arg == expected), "missing arg '{expected}' in args: {args:?}");
-}
-
-#[test]
-fn host_and_pass_entry_resolution_explicit_then_inventory_lookup_follows_precedence_rules() {
-    let mut prod_host = host_with_alias_and_hostname("prod", "host.example.com");
-    prod_host.vault_pass = Some("shared".to_string());
-
-    let explicit_pass_entry = resolve_pass_entry_from_hosts("prod", Some("override"), &[prod_host.clone()]);
-    assert_eq!(explicit_pass_entry.as_deref(), Some("override"));
-
-    let derived_pass_entry = resolve_pass_entry_from_hosts("prod", None, &[prod_host]);
-    assert_eq!(derived_pass_entry.as_deref(), Some("shared"));
-
-    let hosts = [
-        host_with_alias_and_hostname("prod", "host.example.com"),
-        host_with_alias_and_hostname("host.example.com", "other.example.com"),
-    ];
-
-    let resolved = resolve_host_by_destination("host.example.com", &hosts).expect("resolve by destination");
-    assert_eq!(resolved.name, "host.example.com");
 }
 
 #[test]

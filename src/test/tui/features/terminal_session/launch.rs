@@ -1,11 +1,8 @@
 use super::*;
-use crate::config::CompiledHighlightRule;
 use crate::config::{self, AuthSettings};
 use crate::inventory::{ConnectionProtocol, InventoryHost};
-use crate::terminal::{TerminalEngine, highlight_overlay::HighlightOverlayContext, highlight_overlay::HighlightOverlayViewport};
-use crate::test::support::{config::base_config, fs::TestWorkspace, state::TestStateGuard};
+use crate::test::support::{fs::TestWorkspace, state::TestStateGuard};
 use crate::tui::VaultUnlockAction;
-use regex::Regex;
 use std::io::{self, Write};
 use std::sync::{
     Arc, Mutex,
@@ -33,25 +30,6 @@ fn sample_rdp_host() -> InventoryHost {
     host.host = "rdp.internal".to_string();
     host.user = Some("alice".to_string());
     host
-}
-
-fn compiled_rule(pattern: &str, style: &str) -> CompiledHighlightRule {
-    CompiledHighlightRule::new(Regex::new(pattern).expect("regex"), style.to_string())
-}
-
-fn build_overlay_for_text(overlay_engine: &mut HighlightOverlayEngine, text: &str, render_epoch: u64) -> crate::terminal::highlight_overlay::HighlightOverlay {
-    let mut terminal_engine = TerminalEngine::new(2, 32, 128);
-    terminal_engine.process_output(text.as_bytes());
-    let view = terminal_engine.view_model();
-    let viewport = view.viewport_snapshot(2, 32);
-    let overlay_view = HighlightOverlayViewport::new(&viewport, view.is_alternate_screen(), view.mouse_protocol().0, view.cursor_hidden());
-    overlay_engine.build_visible_overlay(
-        &overlay_view,
-        HighlightOverlayContext {
-            render_epoch,
-            display_scrollback: 0,
-        },
-    )
 }
 
 fn with_profile_test_environment<T>(workspace: &TestWorkspace, run: impl FnOnce() -> T) -> T {

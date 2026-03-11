@@ -9,7 +9,7 @@ use super::event_listener::TerminalEventListener;
 use super::host::TerminalHostCallbacks;
 use super::types::{TerminalInputWriter, TerminalSearchMatch};
 use super::view::{TerminalTextSpan, TerminalViewModel};
-use alacritty_terminal::grid::{Dimensions, Scroll};
+use alacritty_terminal::grid::Dimensions;
 use alacritty_terminal::index::{Boundary, Column, Line, Point};
 use alacritty_terminal::term::{Config as TermConfig, Term};
 use alacritty_terminal::vte::ansi::Processor;
@@ -54,35 +54,6 @@ pub(crate) struct TerminalEngine {
 }
 
 impl TerminalEngine {
-    /// Create a terminal engine without a host input channel.
-    #[cfg_attr(not(test), allow(dead_code))]
-    pub(crate) fn new(rows: u16, cols: u16, history: usize) -> Self {
-        Self::new_with_listener(rows, cols, history, TerminalEventListener::new(rows, cols, None))
-    }
-
-    /// Create a terminal engine with an explicit remote clipboard policy.
-    #[allow(dead_code)]
-    pub(crate) fn new_with_remote_clipboard_policy(
-        rows: u16,
-        cols: u16,
-        history: usize,
-        allow_remote_clipboard_write: bool,
-        remote_clipboard_max_bytes: usize,
-    ) -> Self {
-        Self::new_with_listener(
-            rows,
-            cols,
-            history,
-            TerminalEventListener::new_with_remote_clipboard_policy(rows, cols, None, allow_remote_clipboard_write, remote_clipboard_max_bytes),
-        )
-    }
-
-    /// Create a terminal engine that can answer PTY-originated writes.
-    #[allow(dead_code)]
-    pub(crate) fn new_with_input_writer(rows: u16, cols: u16, history: usize, input_writer: TerminalInputWriter) -> Self {
-        Self::new_with_listener(rows, cols, history, TerminalEventListener::new(rows, cols, Some(input_writer)))
-    }
-
     /// Create a terminal engine that can answer PTY-originated writes and host-owned callbacks.
     pub(crate) fn new_with_input_writer_and_host(
         rows: u16,
@@ -96,27 +67,6 @@ impl TerminalEngine {
             cols,
             history,
             TerminalEventListener::new_with_host(rows, cols, Some(input_writer), host_callbacks),
-        )
-    }
-
-    /// Create a terminal engine that can answer PTY-originated writes with an explicit remote clipboard policy.
-    #[allow(dead_code)]
-    pub(crate) fn new_with_input_writer_and_remote_clipboard_policy(
-        rows: u16,
-        cols: u16,
-        history: usize,
-        input_writer: TerminalInputWriter,
-        allow_remote_clipboard_write: bool,
-        remote_clipboard_max_bytes: usize,
-    ) -> Self {
-        Self::new_with_input_writer_and_host_and_remote_clipboard_policy(
-            rows,
-            cols,
-            history,
-            input_writer,
-            TerminalHostCallbacks::default(),
-            allow_remote_clipboard_write,
-            remote_clipboard_max_bytes,
         )
     }
 
@@ -194,18 +144,6 @@ impl TerminalEngine {
         self.dimensions = TermDimensions::new(rows, cols, self.dimensions.history);
         self.event_listener.resize_surface(rows, cols);
         self.term.resize(self.dimensions);
-    }
-
-    /// Set the display offset within scrollback.
-    #[cfg_attr(not(test), allow(dead_code))]
-    pub(crate) fn set_display_scrollback(&mut self, scrollback: usize) {
-        let max_scrollback = self.max_scrollback();
-        let target = scrollback.min(max_scrollback) as i32;
-        let current = self.term.grid().display_offset() as i32;
-        let delta = target - current;
-        if delta != 0 {
-            self.term.scroll_display(Scroll::Delta(delta));
-        }
     }
 
     /// Build a renderer-facing view model over the current terminal state.

@@ -556,17 +556,6 @@ fn expire_reload_notice_toast(reload_notice_toast: &mut Option<ReloadNoticeToast
     should_clear
 }
 
-#[cfg_attr(not(test), allow(dead_code))]
-fn collect_host_scrollback_insertions(
-    engine: &TerminalEngine,
-    highlight_overlay: &mut HighlightOverlayEngine,
-    render_epoch: u64,
-    host_scrollback: &mut HostScrollbackMirror,
-) -> Vec<ScrollbackInsertion> {
-    let captured = capture_host_scrollback_insertions(engine, host_scrollback);
-    build_host_scrollback_insertions(captured, highlight_overlay, render_epoch)
-}
-
 fn capture_host_scrollback_insertions(engine: &TerminalEngine, host_scrollback: &mut HostScrollbackMirror) -> CapturedScrollbackInsertions {
     let (snapshot, buffer_row_ids) = {
         let view = engine.view_model();

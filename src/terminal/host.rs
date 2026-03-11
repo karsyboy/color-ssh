@@ -24,15 +24,6 @@ impl TerminalHostCallbacks {
         self
     }
 
-    #[cfg_attr(not(test), allow(dead_code))]
-    pub(crate) fn with_clipboard_load<F>(mut self, callback: F) -> Self
-    where
-        F: Fn(TerminalClipboardTarget) -> Option<String> + Send + Sync + 'static,
-    {
-        self.clipboard_load = Some(Arc::new(callback));
-        self
-    }
-
     pub(crate) fn store_clipboard(&self, target: TerminalClipboardTarget, text: &str) {
         if let Some(callback) = self.clipboard_store.as_ref() {
             callback(target, text);

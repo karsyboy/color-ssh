@@ -246,10 +246,6 @@ pub(crate) struct TerminalViewModel<'a> {
 }
 
 impl<'a> TerminalViewModel<'a> {
-    fn current_display_scrollback(&self) -> usize {
-        self.engine.term.grid().display_offset()
-    }
-
     fn resolved_display_scrollback(&self, display_scrollback: usize) -> usize {
         display_scrollback.min(self.scrollback())
     }
@@ -284,13 +280,6 @@ impl<'a> TerminalViewModel<'a> {
     /// Whether the terminal is currently rendering into the alternate screen.
     pub(crate) fn is_alternate_screen(&self) -> bool {
         self.engine.term.mode().contains(TermMode::ALT_SCREEN)
-    }
-
-    /// Snapshot the visible viewport into backend-neutral rows, cells, and
-    /// cursor metadata for renderers.
-    #[cfg_attr(not(test), allow(dead_code))]
-    pub(crate) fn viewport_snapshot(&self, max_rows: u16, max_cols: u16) -> TerminalViewport {
-        self.viewport_snapshot_at_scrollback(max_rows, max_cols, self.current_display_scrollback())
     }
 
     /// Snapshot the visible viewport for an explicit scrollback offset without
@@ -328,30 +317,6 @@ impl<'a> TerminalViewModel<'a> {
         }
     }
 
-    /// Convert a visible row index into an absolute terminal line index.
-    #[allow(dead_code)]
-    pub(crate) fn absolute_row(&self, row: u16) -> Option<i64> {
-        self.absolute_row_at_scrollback(row, self.current_display_scrollback())
-    }
-
-    /// Convert a visible row index into an absolute terminal line index for an
-    /// explicit scrollback offset.
-    pub(crate) fn absolute_row_at_scrollback(&self, row: u16, display_scrollback: usize) -> Option<i64> {
-        let grid = self.engine.term.grid();
-        if row as usize >= grid.screen_lines() {
-            return None;
-        }
-
-        let display_offset = self.resolved_display_scrollback(display_scrollback).min(i32::MAX as usize) as i32;
-        let line = Line(row as i32 - display_offset);
-        (line >= grid.topmost_line() && line <= grid.bottommost_line()).then_some(line.0 as i64)
-    }
-
-    /// Return renderer-facing cells for the visible grid.
-    pub(crate) fn cell(&self, row: u16, col: u16) -> Option<TerminalCellView<'_>> {
-        self.cell_at_scrollback(row, col, self.current_display_scrollback())
-    }
-
     /// Return renderer-facing cells for an explicit scrollback offset.
     pub(crate) fn cell_at_scrollback(&self, row: u16, col: u16, display_scrollback: usize) -> Option<TerminalCellView<'_>> {
         let grid = self.engine.term.grid();
@@ -367,39 +332,6 @@ impl<'a> TerminalViewModel<'a> {
 
         let column = Column(col as usize);
         Some(TerminalCellView { cell: &grid[line][column] })
-    }
-
-    /// Extract a visible row as display text using terminal-cell semantics.
-    #[allow(dead_code)]
-    pub(crate) fn visible_row_text(&self, row: u16) -> Option<String> {
-        let (_, cols) = self.size();
-        let _ = self.absolute_row(row)?;
-
-        let mut line = String::new();
-        let mut scratch = String::new();
-        for col in 0..cols {
-            let Some(cell) = self.cell(row, col) else {
-                continue;
-            };
-            line.push_str(cell.symbol(&mut scratch));
-        }
-        Some(line)
-    }
-
-    /// Return the visible rows as `(absolute_line, text)` tuples.
-    ///
-    /// This is the extraction point future overlay engines and GUI adapters
-    /// should consume instead of parsing raw PTY output again.
-    #[allow(dead_code)]
-    pub(crate) fn visible_row_texts(&self) -> Vec<(i64, String)> {
-        let (rows, _) = self.size();
-        let mut visible_rows = Vec::with_capacity(rows as usize);
-        for row in 0..rows {
-            if let (Some(absolute_row), Some(text)) = (self.absolute_row(row), self.visible_row_text(row)) {
-                visible_rows.push((absolute_row, text));
-            }
-        }
-        visible_rows
     }
 
     /// Return logical buffer row identities in top-to-bottom order.
@@ -497,11 +429,6 @@ impl<'a> TerminalCellView<'a> {
         !ch.is_control() && ch.width().unwrap_or(0) == 0
     }
 
-    #[cfg(test)]
-    pub(crate) fn has_contents(&self) -> bool {
-        !self.cell.flags.intersects(Flags::WIDE_CHAR_SPACER | Flags::LEADING_WIDE_CHAR_SPACER) && Self::is_renderable_primary_char(self.cell.c)
-    }
-
     /// Return the display symbol for a terminal cell.
     pub(crate) fn symbol<'b>(&self, scratch: &'b mut String) -> &'b str {
         if self.cell.flags.intersects(Flags::WIDE_CHAR_SPACER | Flags::LEADING_WIDE_CHAR_SPACER) {
@@ -567,12 +494,6 @@ impl<'a> TerminalCellView<'a> {
             glyph: self.glyph(),
             style: self.style(),
         }
-    }
-
-    #[cfg(test)]
-    pub(crate) fn contents(&self) -> String {
-        let mut scratch = String::new();
-        self.symbol(&mut scratch).to_owned()
     }
 
     pub(crate) fn bold(&self) -> bool {

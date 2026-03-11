@@ -30,11 +30,6 @@ pub(super) struct TerminalEventListener {
 }
 
 impl TerminalEventListener {
-    pub(super) fn new(rows: u16, cols: u16, input_writer: Option<TerminalInputWriter>) -> Self {
-        let (allow_remote_clipboard_write, remote_clipboard_max_bytes) = Self::current_remote_clipboard_policy();
-        Self::new_with_remote_clipboard_policy(rows, cols, input_writer, allow_remote_clipboard_write, remote_clipboard_max_bytes)
-    }
-
     pub(super) fn new_with_host(rows: u16, cols: u16, input_writer: Option<TerminalInputWriter>, host_callbacks: TerminalHostCallbacks) -> Self {
         let (allow_remote_clipboard_write, remote_clipboard_max_bytes) = Self::current_remote_clipboard_policy();
         Self::new_with_host_and_remote_clipboard_policy(
@@ -42,23 +37,6 @@ impl TerminalEventListener {
             cols,
             input_writer,
             host_callbacks,
-            allow_remote_clipboard_write,
-            remote_clipboard_max_bytes,
-        )
-    }
-
-    pub(super) fn new_with_remote_clipboard_policy(
-        rows: u16,
-        cols: u16,
-        input_writer: Option<TerminalInputWriter>,
-        allow_remote_clipboard_write: bool,
-        remote_clipboard_max_bytes: usize,
-    ) -> Self {
-        Self::new_with_host_and_remote_clipboard_policy(
-            rows,
-            cols,
-            input_writer,
-            TerminalHostCallbacks::default(),
             allow_remote_clipboard_write,
             remote_clipboard_max_bytes,
         )

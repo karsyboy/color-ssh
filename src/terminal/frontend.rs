@@ -101,38 +101,10 @@ pub(crate) struct TerminalCursorState {
     hidden: bool,
 }
 
-#[cfg_attr(not(test), allow(dead_code))]
-impl TerminalCursorState {
-    pub(crate) fn position(self) -> TerminalCursorSnapshot {
-        self.position
-    }
-
-    pub(crate) fn hidden(self) -> bool {
-        self.hidden
-    }
-
-    pub(crate) fn viewport_position(self, viewport_size: (u16, u16)) -> Option<TerminalCursorSnapshot> {
-        (!self.hidden && self.position.row() < viewport_size.0 && self.position.col() < viewport_size.1).then_some(self.position)
-    }
-}
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) struct TerminalMouseProtocolState {
     mode: MouseProtocolMode,
     encoding: MouseProtocolEncoding,
-}
-
-#[cfg_attr(not(test), allow(dead_code))]
-impl TerminalMouseProtocolState {
-    #[allow(dead_code)]
-    pub(crate) fn mode(self) -> MouseProtocolMode {
-        self.mode
-    }
-
-    #[allow(dead_code)]
-    pub(crate) fn encoding(self) -> MouseProtocolEncoding {
-        self.encoding
-    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -160,7 +132,6 @@ pub(crate) struct TerminalFrontendSnapshot {
     mouse_protocol: TerminalMouseProtocolState,
 }
 
-#[cfg_attr(not(test), allow(dead_code))]
 impl TerminalFrontendSnapshot {
     pub(crate) fn viewport(&self) -> &TerminalViewport {
         &self.viewport
@@ -170,25 +141,12 @@ impl TerminalFrontendSnapshot {
         self.viewport
     }
 
-    pub(crate) fn cursor(&self) -> TerminalCursorState {
-        self.cursor
-    }
-
-    pub(crate) fn visible_cursor(&self) -> Option<TerminalCursorSnapshot> {
-        self.cursor.viewport_position(self.viewport.size())
-    }
-
     pub(crate) fn scrollback(&self) -> TerminalScrollbackState {
         self.scrollback
     }
 
     pub(crate) fn is_alternate_screen(&self) -> bool {
         self.alternate_screen
-    }
-
-    #[allow(dead_code)]
-    pub(crate) fn mouse_protocol(&self) -> TerminalMouseProtocolState {
-        self.mouse_protocol
     }
 
     pub(crate) fn build_highlight_overlay(&self, overlay_engine: &mut HighlightOverlayEngine, render_epoch: u64) -> HighlightOverlay {
@@ -208,20 +166,9 @@ pub(crate) struct TerminalSessionSnapshot {
     frontend: TerminalFrontendSnapshot,
 }
 
-#[cfg_attr(not(test), allow(dead_code))]
 impl TerminalSessionSnapshot {
     pub(super) fn new(render_epoch: u64, frontend: TerminalFrontendSnapshot) -> Self {
         Self { render_epoch, frontend }
-    }
-
-    #[allow(dead_code)]
-    pub(crate) fn render_epoch(&self) -> u64 {
-        self.render_epoch
-    }
-
-    #[allow(dead_code)]
-    pub(crate) fn frontend(&self) -> &TerminalFrontendSnapshot {
-        &self.frontend
     }
 
     pub(crate) fn viewport(&self) -> &TerminalViewport {
@@ -238,12 +185,6 @@ impl TerminalSessionSnapshot {
 }
 
 impl<'a> TerminalViewModel<'a> {
-    /// Snapshot the renderer-facing terminal state a frontend needs to paint a frame.
-    #[cfg_attr(not(test), allow(dead_code))]
-    pub(crate) fn frontend_snapshot(&self, max_rows: u16, max_cols: u16) -> TerminalFrontendSnapshot {
-        self.frontend_snapshot_at_scrollback(max_rows, max_cols, self.engine.term.grid().display_offset())
-    }
-
     /// Snapshot the renderer-facing terminal state for an explicit scrollback
     /// offset without mutating the live engine state.
     pub(crate) fn frontend_snapshot_at_scrollback(&self, max_rows: u16, max_cols: u16, display_scrollback: usize) -> TerminalFrontendSnapshot {

@@ -94,15 +94,6 @@ pub(crate) fn resolve_host_by_destination<'a>(destination: &str, hosts: &'a [Inv
     Some(first)
 }
 
-#[cfg_attr(not(test), allow(dead_code))]
-pub(crate) fn resolve_pass_entry_from_hosts(destination: &str, explicit_entry: Option<&str>, hosts: &[InventoryHost]) -> Option<String> {
-    if let Some(explicit_entry) = explicit_entry {
-        return Some(explicit_entry.to_string());
-    }
-
-    resolve_host_by_destination(destination, hosts).and_then(|host| host.vault_pass.clone())
-}
-
 fn inspect_ssh_args(args: &[String]) -> SshArgInspection {
     let mut inspection = SshArgInspection::default();
     let mut skip_next = false;
