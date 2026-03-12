@@ -2,6 +2,7 @@
 
 mod app;
 mod host_browser;
+mod host_editor;
 mod quick_connect;
 mod rdp_prompt;
 mod tabs;
@@ -9,6 +10,7 @@ mod vault;
 
 pub(crate) use app::{AppState, ConnectRequest, HOST_PANEL_MAX_WIDTH, HOST_PANEL_MIN_WIDTH};
 pub(crate) use host_browser::{HostSearchEntry, HostTreeRow, HostTreeRowKind};
+pub(crate) use host_editor::{HostContextMenuAction, HostContextMenuState, HostDeleteConfirmState, HostEditorField, HostEditorMode, HostEditorState};
 pub(crate) use quick_connect::{QuickConnectField, QuickConnectRow, QuickConnectState, QuickConnectSubmission, QuickConnectValidationError};
 pub(crate) use rdp_prompt::{
     RdpCredentialLaunchContext, RdpCredentialSubmission, RdpCredentialValidationError, RdpCredentialsAction, RdpCredentialsField, RdpCredentialsState,

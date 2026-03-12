@@ -3,6 +3,7 @@
 mod init;
 
 use super::host_browser::{HostSearchEntry, HostTreeRow};
+use super::host_editor::{HostContextMenuState, HostDeleteConfirmState, HostEditorState};
 use super::quick_connect::QuickConnectState;
 use super::rdp_prompt::RdpCredentialsState;
 use super::tabs::{HostTab, TerminalSearchState};
@@ -75,6 +76,9 @@ pub(crate) struct AppState {
     pub(crate) host_panel_visible: bool,
     pub(crate) host_info_visible: bool,
     pub(crate) quick_connect: Option<QuickConnectState>,
+    pub(crate) host_context_menu: Option<HostContextMenuState>,
+    pub(crate) host_editor: Option<HostEditorState>,
+    pub(crate) host_delete_confirm: Option<HostDeleteConfirmState>,
     pub(crate) rdp_credentials: Option<RdpCredentialsState>,
     pub(crate) vault_unlock: Option<VaultUnlockState>,
     pub(crate) vault_status_modal: Option<VaultStatusModalState>,
@@ -354,6 +358,9 @@ impl AppState {
             host_panel_visible: true,
             host_info_visible: init.host_info_visible,
             quick_connect: None,
+            host_context_menu: None,
+            host_editor: None,
+            host_delete_confirm: None,
             rdp_credentials: None,
             vault_unlock: None,
             vault_status_modal: None,

@@ -215,6 +215,12 @@ impl AppState {
             KeyCode::Char('q') if self.focus_on_manager && key.modifiers.is_empty() => {
                 self.open_quick_connect_modal();
             }
+            KeyCode::Char('e') if self.focus_on_manager && key.modifiers.is_empty() => {
+                self.open_host_editor_for_selected_host();
+            }
+            KeyCode::Char('n') if self.focus_on_manager && key.modifiers.is_empty() => {
+                self.open_host_editor_for_new_entry_from_selection();
+            }
             KeyCode::Char('v') if self.focus_on_manager && key.modifiers.is_empty() => {
                 if self.vault_status.unlocked {
                     self.open_vault_status_modal();

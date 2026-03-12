@@ -103,6 +103,16 @@ impl AppState {
             return Ok(());
         }
 
+        if self.host_context_menu.is_some() {
+            self.handle_host_context_menu_key(key);
+            return Ok(());
+        }
+
+        if self.host_editor.is_some() {
+            self.handle_host_editor_key(key);
+            return Ok(());
+        }
+
         if self.vault_unlock.is_some() {
             self.handle_vault_unlock_key(key);
             return Ok(());
@@ -136,6 +146,11 @@ impl AppState {
 
     pub(crate) fn handle_paste(&mut self, pasted: String) -> io::Result<()> {
         if pasted.is_empty() {
+            return Ok(());
+        }
+
+        if self.host_editor.is_some() {
+            self.handle_host_editor_paste(&pasted);
             return Ok(());
         }
 

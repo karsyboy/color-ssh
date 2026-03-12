@@ -44,6 +44,16 @@ impl AppState {
             return Ok(());
         }
 
+        if self.host_context_menu.is_some() {
+            self.handle_host_context_menu_mouse(mouse);
+            return Ok(());
+        }
+
+        if self.host_editor.is_some() {
+            self.handle_host_editor_mouse(mouse);
+            return Ok(());
+        }
+
         if self.current_tab_search().map(|search_state| search_state.active).unwrap_or(false) && self.is_pty_mouse_mode_active() {
             self.clear_terminal_search();
         }
@@ -335,6 +345,39 @@ impl AppState {
                 }
             }
             MouseEventKind::Down(MouseButton::Right) => {
+                let host_area = self.host_list_area;
+                if self.host_panel_visible
+                    && host_area.width > 0
+                    && host_area.height > 0
+                    && mouse.column >= host_area.x
+                    && mouse.column < host_area.x + host_area.width
+                    && mouse.row >= host_area.y
+                    && mouse.row < host_area.y + host_area.height
+                {
+                    self.focus_manager_panel();
+                    let clicked_row = (mouse.row - host_area.y) as usize;
+                    let clicked_index = self.host_scroll_offset + clicked_row;
+
+                    if clicked_index < self.visible_host_rows.len() {
+                        self.set_selected_row(clicked_index);
+                        match self.visible_host_rows[clicked_index].kind {
+                            HostTreeRowKind::Host(_) => {
+                                self.open_host_context_menu_for_selected_host(mouse.column, mouse.row);
+                            }
+                            HostTreeRowKind::Folder(_) => {
+                                let source_file = self.selected_source_file_for_new_entry();
+                                self.open_host_context_menu_for_new_entry(mouse.column, mouse.row, source_file);
+                            }
+                        }
+                    } else {
+                        let source_file = self.selected_source_file_for_new_entry();
+                        self.open_host_context_menu_for_new_entry(mouse.column, mouse.row, source_file);
+                    }
+
+                    self.clear_selection_state();
+                    return Ok(());
+                }
+
                 if self.mouse_to_vt_coords(mouse.column, mouse.row).is_some() && self.current_selection().is_some() {
                     return Ok(());
                 }

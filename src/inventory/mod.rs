@@ -1,5 +1,6 @@
 //! YAML inventory loading and SSH config migration.
 
+mod edit;
 mod error;
 mod include;
 mod migration;
@@ -16,6 +17,7 @@ pub use path::{expand_tilde, get_default_inventory_path};
 use std::io;
 use std::path::Path;
 
+pub(crate) use edit::{EditableInventoryHost, create_inventory_host_entry, delete_inventory_host_entry, update_inventory_host_entry};
 pub(crate) use migration::migrate_default_ssh_config_to_inventory;
 pub(crate) use tree::sort_tree_folder_by_host_name;
 pub(crate) use watcher::{InventoryWatchPlan, build_inventory_watch_plan, should_reload_for_inventory_event};

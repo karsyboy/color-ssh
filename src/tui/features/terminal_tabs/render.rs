@@ -238,6 +238,9 @@ impl AppState {
         );
 
         self.render_global_status_bar(frame, status_area);
+        self.render_host_context_menu(frame);
+        self.render_host_editor_modal(frame, size);
+        self.render_host_delete_confirm_modal(frame, size);
         self.render_quick_connect_modal(frame, size);
         self.render_rdp_credentials_modal(frame, size);
         self.render_vault_unlock_modal(frame, size);

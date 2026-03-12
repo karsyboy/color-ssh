@@ -1,0 +1,417 @@
+//! Host editor keyboard handling and persistence integration.
+
+use crate::auth::vault;
+use crate::inventory::{create_inventory_host_entry, delete_inventory_host_entry, update_inventory_host_entry};
+use crate::tui::{AppState, HostContextMenuAction, HostContextMenuState, HostDeleteConfirmState, HostEditorField, HostEditorMode, HostEditorState};
+use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+use std::path::PathBuf;
+
+impl AppState {
+    pub(crate) fn open_host_context_menu_for_selected_host(&mut self, column: u16, row: u16) {
+        self.host_context_menu = Some(HostContextMenuState::for_host(column, row));
+        self.mark_ui_dirty();
+    }
+
+    pub(crate) fn open_host_context_menu_for_new_entry(&mut self, column: u16, row: u16, source_file: PathBuf) {
+        self.host_context_menu = Some(HostContextMenuState::for_new_entry(column, row, source_file));
+        self.mark_ui_dirty();
+    }
+
+    pub(crate) fn selected_source_file_for_new_entry(&self) -> PathBuf {
+        if let Some(host_idx) = self.selected_host_idx()
+            && let Some(host) = self.hosts.get(host_idx)
+        {
+            return host.source_file.clone();
+        }
+
+        if let Some(folder_id) = self.selected_folder_id()
+            && let Some(folder) = self.folder_by_id(folder_id)
+        {
+            return folder.path.clone();
+        }
+
+        self.host_tree_root.path.clone()
+    }
+
+    pub(crate) fn open_host_editor_for_selected_host(&mut self) {
+        let Some(host_idx) = self.selected_host_idx() else {
+            return;
+        };
+        let Some(host) = self.hosts.get(host_idx).cloned() else {
+            return;
+        };
+        let profiles = self.discover_quick_connect_profiles();
+        let vault_entries = self.discover_host_editor_vault_pass_entries();
+
+        self.host_context_menu = None;
+        self.host_delete_confirm = None;
+        self.host_editor = Some(HostEditorState::new_edit(&host, profiles, vault_entries));
+        self.mark_ui_dirty();
+    }
+
+    pub(crate) fn open_host_editor_for_new_entry(&mut self, source_file: PathBuf) {
+        let profiles = self.discover_quick_connect_profiles();
+        let vault_entries = self.discover_host_editor_vault_pass_entries();
+
+        self.host_context_menu = None;
+        self.host_delete_confirm = None;
+        self.host_editor = Some(HostEditorState::new_create(source_file, profiles, vault_entries));
+        self.mark_ui_dirty();
+    }
+
+    pub(crate) fn open_host_editor_for_new_entry_from_selection(&mut self) {
+        let source_file = self.selected_source_file_for_new_entry();
+        self.open_host_editor_for_new_entry(source_file);
+    }
+
+    fn discover_host_editor_vault_pass_entries(&self) -> Vec<String> {
+        vault::list_entries().unwrap_or_default()
+    }
+
+    pub(crate) fn handle_host_context_menu_key(&mut self, key: KeyEvent) {
+        let mut should_close = false;
+        let mut action = None;
+
+        if let Some(menu) = self.host_context_menu.as_mut() {
+            match key.code {
+                KeyCode::Esc => should_close = true,
+                KeyCode::Tab | KeyCode::Down => menu.select_next(),
+                KeyCode::BackTab | KeyCode::Up => menu.select_prev(),
+                KeyCode::Enter => action = menu.selected_action(),
+                KeyCode::Char('e') if key.modifiers.is_empty() => action = Some(HostContextMenuAction::EditEntry),
+                KeyCode::Char('n') if key.modifiers.is_empty() => action = Some(HostContextMenuAction::NewEntry),
+                _ => {}
+            }
+        }
+
+        if should_close {
+            self.host_context_menu = None;
+            self.mark_ui_dirty();
+            return;
+        }
+
+        if let Some(action) = action {
+            self.execute_host_context_menu_action(action);
+        }
+    }
+
+    pub(crate) fn execute_host_context_menu_action(&mut self, action: HostContextMenuAction) {
+        match action {
+            HostContextMenuAction::EditEntry => {
+                self.open_host_editor_for_selected_host();
+            }
+            HostContextMenuAction::NewEntry => {
+                let source_file = self
+                    .host_context_menu
+                    .as_ref()
+                    .and_then(|menu| menu.new_entry_source_file.clone())
+                    .unwrap_or_else(|| self.selected_source_file_for_new_entry());
+                self.open_host_editor_for_new_entry(source_file);
+            }
+        }
+    }
+
+    pub(crate) fn handle_host_editor_key(&mut self, key: KeyEvent) {
+        if self.host_delete_confirm.is_some() {
+            self.handle_host_delete_confirm_key(key);
+            return;
+        }
+
+        let mut should_submit = false;
+        let mut should_close = false;
+        let mut should_open_delete_confirm = false;
+
+        if let Some(form) = self.host_editor.as_mut() {
+            form.finish_mouse_selection();
+            match key.code {
+                KeyCode::Esc => {
+                    should_close = true;
+                }
+                KeyCode::Tab | KeyCode::Down => form.select_next_field(),
+                KeyCode::BackTab | KeyCode::Up => form.select_prev_field(),
+                KeyCode::Enter => match form.selected {
+                    HostEditorField::Protocol => form.toggle_protocol_forward(),
+                    HostEditorField::Profile => form.select_next_profile(),
+                    HostEditorField::VaultPass => form.select_next_vault_pass(),
+                    HostEditorField::Save => should_submit = true,
+                    HostEditorField::Delete => should_open_delete_confirm = true,
+                    HostEditorField::Cancel => should_close = true,
+                    HostEditorField::IdentitiesOnly => form.cycle_identities_only_forward(),
+                    _ => form.select_next_field(),
+                },
+                KeyCode::Char('d') if key.modifiers.is_empty() && form.mode == HostEditorMode::Edit && form.selected == HostEditorField::Delete => {
+                    should_open_delete_confirm = true;
+                }
+                KeyCode::Char(' ') => {
+                    if form.selected == HostEditorField::IdentitiesOnly {
+                        form.cycle_identities_only_forward();
+                    }
+                }
+                KeyCode::Left => match form.selected {
+                    HostEditorField::Protocol => form.toggle_protocol_backward(),
+                    HostEditorField::Profile => form.select_prev_profile(),
+                    HostEditorField::VaultPass => form.select_prev_vault_pass(),
+                    HostEditorField::IdentitiesOnly => form.cycle_identities_only_backward(),
+                    _ => form.move_cursor_left(form.selected),
+                },
+                KeyCode::Right => match form.selected {
+                    HostEditorField::Protocol => form.toggle_protocol_forward(),
+                    HostEditorField::Profile => form.select_next_profile(),
+                    HostEditorField::VaultPass => form.select_next_vault_pass(),
+                    HostEditorField::IdentitiesOnly => form.cycle_identities_only_forward(),
+                    _ => form.move_cursor_right(form.selected),
+                },
+                KeyCode::Home => {
+                    if form.selected != HostEditorField::Protocol {
+                        form.move_cursor_home(form.selected);
+                    }
+                }
+                KeyCode::End => {
+                    if form.selected != HostEditorField::Protocol {
+                        form.move_cursor_end(form.selected);
+                    }
+                }
+                KeyCode::Backspace => {
+                    if form.selected != HostEditorField::Protocol {
+                        form.backspace(form.selected);
+                        form.error = None;
+                    }
+                }
+                KeyCode::Delete => {
+                    if form.selected != HostEditorField::Protocol {
+                        form.delete(form.selected);
+                        form.error = None;
+                    }
+                }
+                KeyCode::Char('a') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                    if form.selected != HostEditorField::Protocol {
+                        form.move_cursor_home(form.selected);
+                    }
+                }
+                KeyCode::Char('e') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                    if form.selected != HostEditorField::Protocol {
+                        form.move_cursor_end(form.selected);
+                    }
+                }
+                KeyCode::Char(ch)
+                    if !key.modifiers.contains(KeyModifiers::CONTROL)
+                        && !key.modifiers.contains(KeyModifiers::ALT)
+                        && form.selected != HostEditorField::Protocol
+                        && form.text_field(form.selected).is_some() =>
+                {
+                    form.insert_char(form.selected, ch);
+                    form.error = None;
+                }
+                _ => {}
+            }
+        }
+
+        if should_submit {
+            self.submit_host_editor();
+        } else if should_open_delete_confirm {
+            self.open_host_delete_confirmation();
+        } else if should_close {
+            self.host_editor = None;
+            self.host_delete_confirm = None;
+            self.mark_ui_dirty();
+        }
+    }
+
+    pub(crate) fn handle_host_editor_paste(&mut self, pasted: &str) {
+        if self.host_delete_confirm.is_some() {
+            return;
+        }
+
+        let Some(form) = self.host_editor.as_mut() else {
+            return;
+        };
+        form.finish_mouse_selection();
+
+        if form.selected == HostEditorField::Protocol || form.text_field(form.selected).is_none() {
+            return;
+        }
+
+        let filtered: String = pasted.chars().filter(|ch| !ch.is_control()).collect();
+        if filtered.is_empty() {
+            return;
+        }
+
+        let field = form.selected;
+        for ch in filtered.chars() {
+            form.insert_char(field, ch);
+        }
+        form.error = None;
+    }
+
+    pub(crate) fn open_host_delete_confirmation(&mut self) {
+        let Some(form) = self.host_editor.as_ref() else {
+            return;
+        };
+
+        if form.mode != HostEditorMode::Edit {
+            return;
+        }
+
+        let host_name = form
+            .original_name
+            .clone()
+            .or_else(|| {
+                let trimmed = form.name.value.trim();
+                (!trimmed.is_empty()).then(|| trimmed.to_string())
+            })
+            .unwrap_or_else(|| "entry".to_string());
+
+        self.host_delete_confirm = Some(HostDeleteConfirmState { host_name });
+        self.mark_ui_dirty();
+    }
+
+    pub(crate) fn handle_host_delete_confirm_key(&mut self, key: KeyEvent) {
+        match key.code {
+            KeyCode::Esc | KeyCode::Char('n') if key.modifiers.is_empty() => {
+                self.host_delete_confirm = None;
+                self.mark_ui_dirty();
+            }
+            KeyCode::Enter | KeyCode::Char('y') if key.modifiers.is_empty() => {
+                self.confirm_host_delete();
+            }
+            _ => {}
+        }
+    }
+
+    fn confirm_host_delete(&mut self) {
+        let Some(form) = self.host_editor.as_ref() else {
+            self.host_delete_confirm = None;
+            return;
+        };
+
+        let source_file = form.source_file.clone();
+        let host_name = form
+            .original_name
+            .clone()
+            .or_else(|| {
+                let trimmed = form.name.value.trim();
+                (!trimmed.is_empty()).then(|| trimmed.to_string())
+            })
+            .unwrap_or_default();
+
+        if host_name.is_empty() {
+            self.host_delete_confirm = None;
+            if let Some(form) = self.host_editor.as_mut() {
+                form.error = Some("Cannot delete: host name is empty.".to_string());
+            }
+            self.mark_ui_dirty();
+            return;
+        }
+
+        match delete_inventory_host_entry(&source_file, &host_name) {
+            Ok(()) => {
+                self.host_delete_confirm = None;
+                let root_path = self.host_tree_root.path.clone();
+                if let Err(err) = self.reload_inventory_tree_from_path(&root_path) {
+                    if let Some(form) = self.host_editor.as_mut() {
+                        form.error = Some(format!("Deleted entry, but reload failed: {err}"));
+                    }
+                } else {
+                    self.host_editor = None;
+                }
+                self.mark_ui_dirty();
+            }
+            Err(err) => {
+                self.host_delete_confirm = None;
+                if let Some(form) = self.host_editor.as_mut() {
+                    form.error = Some(format!("Failed to delete entry: {err}"));
+                }
+                self.mark_ui_dirty();
+            }
+        }
+    }
+
+    pub(crate) fn submit_host_editor(&mut self) {
+        let Some(form) = self.host_editor.as_ref() else {
+            return;
+        };
+
+        let submission = match form.build_submission() {
+            Ok(submission) => submission,
+            Err(err) => {
+                if let Some(form) = self.host_editor.as_mut() {
+                    form.error = Some(err.message());
+                }
+                self.mark_ui_dirty();
+                return;
+            }
+        };
+
+        if self.host_name_exists(&submission.host.name, submission.original_name.as_deref()) {
+            if let Some(form) = self.host_editor.as_mut() {
+                form.error = Some(format!("Host '{}' already exists.", submission.host.name));
+            }
+            self.mark_ui_dirty();
+            return;
+        }
+
+        let operation_result = if let Some(original_name) = submission.original_name.as_deref() {
+            update_inventory_host_entry(&submission.source_file, original_name, &submission.host)
+        } else {
+            create_inventory_host_entry(&submission.source_file, &submission.folder_path, &submission.host)
+        };
+
+        if let Err(err) = operation_result {
+            if let Some(form) = self.host_editor.as_mut() {
+                form.error = Some(format!("Failed to save entry: {err}"));
+            }
+            self.mark_ui_dirty();
+            return;
+        }
+
+        let root_path = self.host_tree_root.path.clone();
+        if let Err(err) = self.reload_inventory_tree_from_path(&root_path) {
+            if let Some(form) = self.host_editor.as_mut() {
+                form.error = Some(format!("Entry saved, but reload failed: {err}"));
+            }
+            self.mark_ui_dirty();
+            return;
+        }
+
+        let host_name = submission.host.name.clone();
+        let _ = self.select_host_row_by_name(&host_name);
+        self.host_delete_confirm = None;
+        self.host_editor = None;
+        self.mark_ui_dirty();
+    }
+
+    fn host_name_exists(&self, candidate_name: &str, original_name: Option<&str>) -> bool {
+        self.hosts.iter().any(|host| {
+            if host.name != candidate_name {
+                return false;
+            }
+
+            if let Some(original_name) = original_name {
+                host.name != original_name
+            } else {
+                true
+            }
+        })
+    }
+
+    fn select_host_row_by_name(&mut self, name: &str) -> bool {
+        let selected_row = self.visible_host_rows.iter().position(|row| {
+            if let crate::tui::HostTreeRowKind::Host(host_idx) = row.kind {
+                return self.hosts.get(host_idx).is_some_and(|host| host.name == name);
+            }
+
+            false
+        });
+
+        if let Some(selected_row) = selected_row {
+            self.set_selected_row(selected_row);
+            true
+        } else {
+            false
+        }
+    }
+}
+
+#[cfg(test)]
+#[path = "../../../test/tui/features/host_editor/input.rs"]
+mod tests;
