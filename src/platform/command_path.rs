@@ -51,7 +51,12 @@ pub(crate) fn cossh_path() -> io::Result<PathBuf> {
 
 pub(crate) fn xfreerdp_path() -> io::Result<PathBuf> {
     resolve_cached(&XFREERDP_PATH, "xfreerdp3/xfreerdp", || {
-        resolve_path_from_env_candidates(&["xfreerdp3", "xfreerdp"])
+        resolve_path_from_env_candidates(&["xfreerdp3", "xfreerdp"]).map_err(|err| {
+            io::Error::new(
+                err.kind(),
+                format!("{}. Install FreeRDP (`xfreerdp3` or `xfreerdp`) and ensure the binary is in PATH", err),
+            )
+        })
     })
 }
 
@@ -73,16 +78,26 @@ fn resolve_path_from_env(binary: &str) -> io::Result<PathBuf> {
 }
 
 fn resolve_path_from_env_candidates(binaries: &[&str]) -> io::Result<PathBuf> {
-    let mut last_error = None;
+    let mut failures: Vec<(String, io::Error)> = Vec::new();
 
     for &binary in binaries {
         match resolve_path_from_env(binary) {
             Ok(path) => return Ok(path),
-            Err(err) => last_error = Some(err),
+            Err(err) => failures.push((binary.to_string(), err)),
         }
     }
 
-    Err(last_error.unwrap_or_else(|| io::Error::new(io::ErrorKind::NotFound, "no candidate command names were provided")))
+    if failures.is_empty() {
+        return Err(io::Error::new(io::ErrorKind::NotFound, "no candidate command names were provided"));
+    }
+
+    let kind = failures
+        .iter()
+        .find_map(|(_, err)| (err.kind() != io::ErrorKind::NotFound).then_some(err.kind()))
+        .unwrap_or(io::ErrorKind::NotFound);
+    let details = failures.iter().map(|(binary, err)| format!("{binary}: {err}")).collect::<Vec<_>>().join("; ");
+
+    Err(io::Error::new(kind, format!("no usable command found in PATH ({details})")))
 }
 
 fn resolve_current_exe_path() -> io::Result<PathBuf> {

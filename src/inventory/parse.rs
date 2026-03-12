@@ -95,7 +95,7 @@ fn parse_inventory_host(mapping: &Mapping, source_file: &Path) -> InventoryResul
             "remote_forward" => host.remote_forward = parse_string_list(value, source_file, "remote_forward", false)?,
             "ssh_options" => merge_ssh_options(&mut host, value, source_file)?,
             "rdp_domain" => host.rdp_domain = optional_scalar_to_string(value, source_file, "rdp_domain")?,
-            "rdp_args" => host.rdp_args = parse_string_list(value, source_file, "rdp_args", true)?,
+            "rdp_args" => host.rdp_args = parse_string_list(value, source_file, "rdp_args", false)?,
             _ => {
                 // Preserve unknown host keys as custom SSH options.
                 let values = parse_ssh_option_values(value, source_file, &original_key)?;

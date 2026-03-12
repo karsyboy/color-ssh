@@ -57,6 +57,7 @@ inventory:
     protocol: rdp
     host: 10.0.0.20
     RdpDomain: ACME
+    rdp_args: "/drive:docs,/tmp/My Docs"
 "#,
     );
 
@@ -71,6 +72,7 @@ inventory:
     let desktop = host_named(&tree, "desktop01");
     assert_eq!(desktop.protocol, ConnectionProtocol::Rdp);
     assert_eq!(desktop.rdp.domain.as_deref(), Some("ACME"));
+    assert_eq!(desktop.rdp.args, vec!["/drive:docs,/tmp/My Docs".to_string()]);
 }
 
 #[test]

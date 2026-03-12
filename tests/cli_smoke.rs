@@ -1,11 +1,16 @@
 use std::process::{Command, Output};
 
 fn run_cossh(args: &[&str]) -> Output {
-    Command::new(env!("CARGO_BIN_EXE_cossh"))
-        .args(args)
-        .env("NO_COLOR", "1")
-        .output()
-        .expect("run cossh binary")
+    run_cossh_with_env(args, &[])
+}
+
+fn run_cossh_with_env(args: &[&str], env_overrides: &[(&str, &str)]) -> Output {
+    let mut command = Command::new(env!("CARGO_BIN_EXE_cossh"));
+    command.args(args).env("NO_COLOR", "1");
+    for (key, value) in env_overrides {
+        command.env(key, value);
+    }
+    command.output().expect("run cossh binary")
 }
 
 #[test]
@@ -36,4 +41,16 @@ fn invalid_profile_input_returns_cli_validation_error() {
 
     let stderr = String::from_utf8(output.stderr).expect("utf8 stderr output");
     assert!(stderr.contains("invalid profile name"));
+}
+
+#[test]
+fn rdp_missing_freerdp_dependency_surfaces_actionable_error() {
+    let output = run_cossh_with_env(&["rdp", "desktop01", "--user", "alice"], &[("PATH", "/tmp")]);
+    assert!(!output.status.success());
+
+    let stderr = String::from_utf8(output.stderr).expect("utf8 stderr output");
+    assert!(stderr.contains("xfreerdp3/xfreerdp"));
+    assert!(stderr.contains("xfreerdp3"));
+    assert!(stderr.contains("xfreerdp"));
+    assert!(stderr.contains("Install FreeRDP"));
 }
