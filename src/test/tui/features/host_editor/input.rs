@@ -365,6 +365,97 @@ fn protocol_switch_sets_default_ports_for_ssh_and_rdp() {
 }
 
 #[test]
+fn description_field_accepts_space_input() {
+    let mut app = AppState::new_for_tests();
+    app.host_editor = Some(HostEditorState::new_create(
+        PathBuf::from("/tmp/inventory.yaml"),
+        vec!["default".to_string()],
+        vec!["db_prod".to_string()],
+    ));
+
+    {
+        let form = app.host_editor.as_mut().expect("host editor state");
+        form.selected = HostEditorField::Description;
+    }
+
+    app.handle_host_editor_key(KeyEvent::new(KeyCode::Char('a'), KeyModifiers::NONE));
+    app.handle_host_editor_key(KeyEvent::new(KeyCode::Char(' '), KeyModifiers::NONE));
+    app.handle_host_editor_key(KeyEvent::new(KeyCode::Char('b'), KeyModifiers::NONE));
+
+    let form = app.host_editor.as_ref().expect("host editor state");
+    assert_eq!(form.description.value, "a b");
+}
+
+#[test]
+fn non_description_fields_ignore_space_input() {
+    let mut app = AppState::new_for_tests();
+    app.host_editor = Some(HostEditorState::new_create(
+        PathBuf::from("/tmp/inventory.yaml"),
+        vec!["default".to_string()],
+        vec!["db_prod".to_string()],
+    ));
+
+    {
+        let form = app.host_editor.as_mut().expect("host editor state");
+        form.selected = HostEditorField::Host;
+    }
+
+    app.handle_host_editor_key(KeyEvent::new(KeyCode::Char('a'), KeyModifiers::NONE));
+    app.handle_host_editor_key(KeyEvent::new(KeyCode::Char(' '), KeyModifiers::NONE));
+    app.handle_host_editor_key(KeyEvent::new(KeyCode::Char('b'), KeyModifiers::NONE));
+
+    let form = app.host_editor.as_ref().expect("host editor state");
+    assert_eq!(form.host.value, "ab");
+}
+
+#[test]
+fn host_editor_paste_preserves_spaces_only_for_description() {
+    let mut app = AppState::new_for_tests();
+    app.host_editor = Some(HostEditorState::new_create(
+        PathBuf::from("/tmp/inventory.yaml"),
+        vec!["default".to_string()],
+        vec!["db_prod".to_string()],
+    ));
+
+    {
+        let form = app.host_editor.as_mut().expect("host editor state");
+        form.selected = HostEditorField::Host;
+    }
+    app.handle_host_editor_paste("with spaces");
+    let form = app.host_editor.as_ref().expect("host editor state");
+    assert_eq!(form.host.value, "withspaces");
+
+    {
+        let form = app.host_editor.as_mut().expect("host editor state");
+        form.selected = HostEditorField::Description;
+    }
+    app.handle_host_editor_paste("more spaces");
+    let form = app.host_editor.as_ref().expect("host editor state");
+    assert_eq!(form.description.value, "more spaces");
+}
+
+#[test]
+fn identities_only_space_still_cycles_value() {
+    let mut app = AppState::new_for_tests();
+    app.host_editor = Some(HostEditorState::new_create(
+        PathBuf::from("/tmp/inventory.yaml"),
+        vec!["default".to_string()],
+        vec!["db_prod".to_string()],
+    ));
+
+    {
+        let form = app.host_editor.as_mut().expect("host editor state");
+        form.selected = HostEditorField::IdentitiesOnly;
+        assert_eq!(form.identities_only_display(), "auto");
+    }
+
+    app.handle_host_editor_key(KeyEvent::new(KeyCode::Char(' '), KeyModifiers::NONE));
+
+    let form = app.host_editor.as_ref().expect("host editor state");
+    assert_eq!(form.identities_only_display(), "yes");
+}
+
+#[test]
 fn host_editor_mouse_selection_allows_drag_highlight_and_delete() {
     let mut app = AppState::new_for_tests();
     app.last_terminal_size = (120, 40);

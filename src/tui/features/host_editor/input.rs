@@ -142,9 +142,12 @@ impl AppState {
                 KeyCode::Char('d') if key.modifiers.is_empty() && form.mode == HostEditorMode::Edit && form.selected == HostEditorField::Delete => {
                     should_open_delete_confirm = true;
                 }
-                KeyCode::Char(' ') => {
+                KeyCode::Char(' ') if !key.modifiers.contains(KeyModifiers::CONTROL) && !key.modifiers.contains(KeyModifiers::ALT) => {
                     if form.selected == HostEditorField::IdentitiesOnly {
                         form.cycle_identities_only_forward();
+                    } else if form.selected == HostEditorField::Description {
+                        form.insert_char(form.selected, ' ');
+                        form.error = None;
                     }
                 }
                 KeyCode::Left => match form.selected {
@@ -237,7 +240,17 @@ impl AppState {
         }
 
         let field = form.selected;
-        for ch in filtered.chars() {
+        let pasted = if field == HostEditorField::Description {
+            filtered
+        } else {
+            filtered.chars().filter(|ch| *ch != ' ').collect::<String>()
+        };
+
+        if pasted.is_empty() {
+            return;
+        }
+
+        for ch in pasted.chars() {
             form.insert_char(field, ch);
         }
         form.error = None;
