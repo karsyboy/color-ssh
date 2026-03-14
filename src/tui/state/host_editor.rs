@@ -939,7 +939,7 @@ impl HostEditorState {
             host: host.to_string(),
             user: optional_trimmed_string(&self.user.value),
             port,
-            profile: if is_rdp { None } else { optional_trimmed_string(&self.profile.value) },
+            profile: if is_rdp { None } else { optional_trimmed_profile(&self.profile.value) },
             vault_pass,
             hidden: self.hidden,
             ssh_identity_files: if is_rdp {
@@ -986,6 +986,15 @@ impl HostEditorState {
 fn optional_trimmed_string(value: &str) -> Option<String> {
     let trimmed = value.trim();
     if trimmed.is_empty() { None } else { Some(trimmed.to_string()) }
+}
+
+fn optional_trimmed_profile(value: &str) -> Option<String> {
+    let trimmed = value.trim();
+    if trimmed.is_empty() || trimmed.eq_ignore_ascii_case("default") {
+        None
+    } else {
+        Some(trimmed.to_string())
+    }
 }
 
 fn normalize_profile_options(profile_options: Vec<String>) -> Vec<String> {

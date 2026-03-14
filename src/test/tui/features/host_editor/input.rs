@@ -141,9 +141,47 @@ inventory:
 
     app.submit_host_editor();
 
-    assert!(app.hosts.iter().any(|host| host.name == "new-host"));
+    let host = app.hosts.iter().find(|host| host.name == "new-host").expect("new host present");
+    assert_eq!(host.profile, None);
     let rendered = fs::read_to_string(&inventory_path).expect("read inventory");
     assert!(rendered.contains("name: new-host"));
+    assert!(!rendered.contains("profile: default"));
+}
+
+#[test]
+fn edit_entry_selecting_default_profile_removes_profile_key() {
+    let workspace = TestWorkspace::new("tui", "host_editor_profile_default_edit").expect("temp workspace");
+    let inventory_path = workspace.join("cossh-inventory.yaml");
+    workspace
+        .write(
+            &inventory_path,
+            r#"
+inventory:
+  - name: alpha
+    protocol: ssh
+    host: alpha.example
+    profile: linux
+"#,
+        )
+        .expect("write inventory");
+
+    let mut app = AppState::new_for_tests();
+    seed_app_from_inventory(&mut app, &inventory_path);
+    app.set_selected_row(find_host_row(&app, "alpha"));
+
+    app.handle_manager_key(KeyEvent::new(KeyCode::Char('e'), KeyModifiers::NONE))
+        .expect("open edit modal");
+
+    let form = app.host_editor.as_mut().expect("host editor state");
+    form.profile.value = "default".to_string();
+
+    app.submit_host_editor();
+
+    let host = app.hosts.iter().find(|host| host.name == "alpha").expect("updated host");
+    assert_eq!(host.profile, None);
+
+    let rendered = fs::read_to_string(&inventory_path).expect("read inventory");
+    assert!(!rendered.contains("profile:"));
 }
 
 #[test]
