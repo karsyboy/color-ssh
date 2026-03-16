@@ -198,8 +198,14 @@ impl InventoryTreeModel {
 
 #[derive(Debug, Clone, Default)]
 pub(super) struct ParsedInventoryDocument {
-    pub include: Vec<String>,
+    pub include: Vec<InventoryIncludeRaw>,
     pub inventory: Vec<InventoryNodeRaw>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(super) struct InventoryIncludeRaw {
+    pub pattern: String,
+    pub folder_path: Vec<String>,
 }
 
 #[derive(Debug, Clone)]

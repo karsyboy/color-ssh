@@ -62,8 +62,8 @@ fn collect_watch_targets(
     let document = parse_inventory_document(&canonical)?;
     let parent_dir = canonical.parent().unwrap_or(Path::new("."));
 
-    for include_pattern in document.include {
-        let resolved_pattern = resolve_include_pattern(&include_pattern, parent_dir);
+    for include_entry in document.include {
+        let resolved_pattern = resolve_include_pattern(&include_entry.pattern, parent_dir);
         let resolved_path = PathBuf::from(&resolved_pattern);
         let include_dir = resolved_path
             .parent()

@@ -1,7 +1,7 @@
 //! YAML inventory parser and normalization helpers.
 
 use super::error::{InventoryResult, invalid_inventory};
-use super::model::{ConnectionProtocol, InventoryHostRaw, InventoryNodeRaw, ParsedInventoryDocument};
+use super::model::{ConnectionProtocol, InventoryHostRaw, InventoryIncludeRaw, InventoryNodeRaw, ParsedInventoryDocument};
 use serde_yml::{Mapping, Value};
 use std::fs;
 use std::path::Path;
@@ -20,7 +20,7 @@ fn parse_inventory_document_value(yaml: &Value, source_file: &Path) -> Inventory
     };
 
     let include = match mapping_value(mapping, "include") {
-        Some(value) => parse_string_list(value, source_file, "include", false)?,
+        Some(value) => parse_include_entries(value, source_file)?,
         None => Vec::new(),
     };
     let inventory = match mapping_value(mapping, "inventory") {
@@ -29,6 +29,43 @@ fn parse_inventory_document_value(yaml: &Value, source_file: &Path) -> Inventory
     };
 
     Ok(ParsedInventoryDocument { include, inventory })
+}
+
+fn parse_include_entries(value: &Value, source_file: &Path) -> InventoryResult<Vec<InventoryIncludeRaw>> {
+    let mut include = Vec::new();
+    parse_include_entries_with_path(value, source_file, &[], &mut include)?;
+    Ok(include)
+}
+
+fn parse_include_entries_with_path(value: &Value, source_file: &Path, folder_path: &[String], include: &mut Vec<InventoryIncludeRaw>) -> InventoryResult<()> {
+    match value {
+        Value::Null => Ok(()),
+        Value::Sequence(sequence) => {
+            for item in sequence {
+                parse_include_entries_with_path(item, source_file, folder_path, include)?;
+            }
+            Ok(())
+        }
+        Value::Mapping(mapping) => parse_include_mapping(mapping, source_file, folder_path, include),
+        _ => {
+            let pattern = scalar_to_string(value, source_file, "include")?;
+            include.push(InventoryIncludeRaw {
+                pattern,
+                folder_path: folder_path.to_vec(),
+            });
+            Ok(())
+        }
+    }
+}
+
+fn parse_include_mapping(mapping: &Mapping, source_file: &Path, folder_path: &[String], include: &mut Vec<InventoryIncludeRaw>) -> InventoryResult<()> {
+    for (raw_folder_name, value) in mapping {
+        let folder_name = scalar_to_string(raw_folder_name, source_file, "include folder name")?;
+        let mut nested_folder_path = folder_path.to_vec();
+        nested_folder_path.push(folder_name);
+        parse_include_entries_with_path(value, source_file, &nested_folder_path, include)?;
+    }
+    Ok(())
 }
 
 fn parse_inventory_nodes(value: &Value, source_file: &Path) -> InventoryResult<Vec<InventoryNodeRaw>> {

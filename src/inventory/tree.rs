@@ -97,7 +97,15 @@ fn load_document_recursive(
     );
     let parent_dir = canonical.parent().unwrap_or(Path::new("."));
 
-    for include_pattern in include {
+    for include_entry in include {
+        let include_pattern = include_entry.pattern;
+        let mut include_parent = &mut *folder;
+        let mut include_folder_path = folder_path.to_vec();
+        for segment in &include_entry.folder_path {
+            include_parent = include_parent.child_mut(segment, &canonical);
+            include_folder_path.push(segment.clone());
+        }
+
         let resolved_pattern = resolve_include_pattern(&include_pattern, parent_dir);
         let include_paths = expand_include_pattern(&resolved_pattern);
         if include_paths.is_empty() {
@@ -119,7 +127,7 @@ fn load_document_recursive(
 
         for include_path in include_paths {
             log_debug!("Loading include '{}' referenced by '{}'", include_path.display(), canonical.display());
-            load_include_document(&include_path, folder, hosts, seen_host_names, visited, folder_path)?;
+            load_include_document(&include_path, include_parent, hosts, seen_host_names, visited, &include_folder_path)?;
         }
     }
 
