@@ -19,7 +19,7 @@ use crate::terminal::{
 use crate::terminal::{apply_overlay_ranges, paint_terminal_viewport, render_reload_notice_toast};
 use crate::{Result, config, log, log_debug, log_error};
 use crossterm::{
-    cursor::MoveTo,
+    cursor,
     event::{
         self, DisableBracketedPaste, DisableMouseCapture, EnableBracketedPaste, EnableMouseCapture, Event, KeyCode, KeyEventKind, KeyModifiers, MouseButton,
         MouseEvent, MouseEventKind,
@@ -315,16 +315,17 @@ fn spawn_exit_watcher(
 
 fn run_pty_event_loop(runtime: &mut InteractivePtyRuntime) -> Result<std::process::ExitCode> {
     let mut mode_guard = TerminalModeGuard::enter()?;
+    let (width, height) = crossterm::terminal::size().unwrap_or((80, 24));
+    let inline_viewport_height = direct_runtime_inline_viewport_height(height, direct_runtime_current_cursor_row());
     let stdout = io::stdout();
     let backend = ratatui::backend::CrosstermBackend::new(stdout);
-    let (width, height) = crossterm::terminal::size().unwrap_or((80, 24));
     let mut terminal = Terminal::with_options(
         backend,
         TerminalOptions {
-            viewport: Viewport::Inline(height.max(1)),
+            viewport: Viewport::Inline(inline_viewport_height),
         },
     )?;
-    runtime.session.resize(height.max(1), width.max(1));
+    runtime.session.resize(inline_viewport_height, width.max(1));
 
     let mut scroll_offset = 0usize;
     let mut last_drawn_epoch = u64::MAX;
@@ -333,7 +334,7 @@ fn run_pty_event_loop(runtime: &mut InteractivePtyRuntime) -> Result<std::proces
     let mut exit_status = None;
     let mut reader_closed = false;
     let mut force_redraw = true;
-    let mut viewport_area = Rect::new(0, 0, width.max(1), height.max(1));
+    let mut viewport_area = Rect::new(0, 0, width.max(1), inline_viewport_height);
     let mut exit_received_at: Option<Instant> = None;
 
     loop {
@@ -410,12 +411,19 @@ fn run_pty_event_loop(runtime: &mut InteractivePtyRuntime) -> Result<std::proces
             continue;
         }
 
-        process_runtime_input_event(runtime, event::read()?, viewport_area, &mut scroll_offset, &mut force_redraw)?;
+        process_runtime_input_event(
+            runtime,
+            event::read()?,
+            viewport_area,
+            inline_viewport_height,
+            &mut scroll_offset,
+            &mut force_redraw,
+        )?;
     }
 
     let show_cursor_result = terminal.show_cursor();
     mode_guard.cleanup();
-    let restore_prompt_result = restore_host_terminal_prompt_line(viewport_area);
+    let restore_prompt_result = restore_host_terminal_prompt_line();
     if let Err(err) = show_cursor_result {
         return Err(err.into());
     }
@@ -440,6 +448,7 @@ fn process_runtime_input_event(
     runtime: &mut InteractivePtyRuntime,
     event: Event,
     viewport_area: Rect,
+    inline_viewport_height: u16,
     scroll_offset: &mut usize,
     force_redraw: &mut bool,
 ) -> io::Result<()> {
@@ -485,7 +494,8 @@ fn process_runtime_input_event(
             runtime.session.write_input(&bytes)?;
         }
         Event::Resize(width, height) => {
-            runtime.session.resize(height.max(1), width.max(1));
+            let runtime_rows = height.max(1).min(inline_viewport_height.max(1));
+            runtime.session.resize(runtime_rows, width.max(1));
             runtime.host_scrollback.invalidate();
             *force_redraw = true;
         }
@@ -650,14 +660,25 @@ fn current_mouse_protocol(session: &TerminalSession) -> io::Result<(MouseProtoco
     Ok(engine.view_model().mouse_protocol())
 }
 
-fn restore_host_terminal_prompt_line(viewport_area: Rect) -> io::Result<()> {
-    if viewport_area.height == 0 {
-        return Ok(());
-    }
+fn direct_runtime_current_cursor_row() -> Option<u16> {
+    cursor::position().ok().map(|(_, row)| row)
+}
 
+fn direct_runtime_inline_viewport_height(height: u16, cursor_row: Option<u16>) -> u16 {
+    let terminal_height = height.max(1);
+    match cursor_row {
+        Some(row) => terminal_height.saturating_sub(row).max(1),
+        None => terminal_height,
+    }
+}
+
+fn direct_runtime_exit_cleanup_sequence() -> &'static str {
+    "\x1b[0m\r\n"
+}
+
+fn restore_host_terminal_prompt_line() -> io::Result<()> {
     let mut stdout = io::stdout();
-    let bottom_row = viewport_area.y.saturating_add(viewport_area.height.saturating_sub(1));
-    execute!(stdout, MoveTo(0, bottom_row), Print("\x1b[0m\r\n"))?;
+    execute!(stdout, Print(direct_runtime_exit_cleanup_sequence()))?;
     Ok(())
 }
 
