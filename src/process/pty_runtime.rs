@@ -26,7 +26,7 @@ use crossterm::{
     },
     execute,
     style::Print,
-    terminal::{disable_raw_mode, enable_raw_mode},
+    terminal::{Clear, ClearType, disable_raw_mode, enable_raw_mode},
 };
 use ratatui::{
     Frame, Terminal, TerminalOptions, Viewport,
@@ -123,6 +123,87 @@ impl CapturedScrollbackInsertions {
 struct ScrollbackInsertion {
     viewport: TerminalViewport,
     overlay: HighlightOverlay,
+}
+
+type DirectRuntimeTerminal = Terminal<ratatui::backend::CrosstermBackend<io::Stdout>>;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum DirectRuntimeResizeDecision {
+    Noop,
+    Redraw,
+    RebuildTerminal { inline_viewport_height: u16 },
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum DirectRuntimePtySyncDecision {
+    Noop,
+    ResizePty { cols: u16, rows: u16 },
+}
+
+#[derive(Debug, Clone, Copy)]
+struct DirectRuntimeViewportState {
+    last_terminal_size: (u16, u16),
+    last_viewport_area: Rect,
+    last_reported_pty_size: (u16, u16),
+    inline_viewport_height: u16,
+}
+
+impl DirectRuntimeViewportState {
+    fn new(width: u16, height: u16) -> Self {
+        let (cols, rows) = direct_runtime_resize_dimensions(width, height);
+        let inline_viewport_height = direct_runtime_inline_viewport_height(rows);
+        Self {
+            last_terminal_size: (cols, rows),
+            last_viewport_area: Rect::new(0, 0, cols, rows),
+            last_reported_pty_size: (cols, rows),
+            inline_viewport_height,
+        }
+    }
+
+    fn current_terminal_size(&self) -> (u16, u16) {
+        self.last_terminal_size
+    }
+
+    fn inline_viewport_height(&self) -> u16 {
+        self.inline_viewport_height
+    }
+
+    fn last_viewport_area(&self) -> Rect {
+        self.last_viewport_area
+    }
+
+    fn observe_terminal_size(&mut self, width: u16, height: u16) -> DirectRuntimeResizeDecision {
+        let (cols, rows) = direct_runtime_resize_dimensions(width, height);
+        if (cols, rows) == self.last_terminal_size {
+            return DirectRuntimeResizeDecision::Noop;
+        }
+
+        self.last_terminal_size = (cols, rows);
+        let next_inline_viewport_height = direct_runtime_inline_viewport_height(rows);
+        if next_inline_viewport_height > self.inline_viewport_height {
+            self.inline_viewport_height = next_inline_viewport_height;
+            DirectRuntimeResizeDecision::RebuildTerminal {
+                inline_viewport_height: next_inline_viewport_height,
+            }
+        } else {
+            DirectRuntimeResizeDecision::Redraw
+        }
+    }
+
+    fn record_drawn_viewport(&mut self, area: Rect) -> DirectRuntimePtySyncDecision {
+        let area = direct_runtime_canonical_viewport_area(area);
+        self.last_viewport_area = area;
+        let next_pty_size = (area.width, area.height);
+        if next_pty_size == self.last_reported_pty_size {
+            return DirectRuntimePtySyncDecision::Noop;
+        }
+
+        self.last_reported_pty_size = next_pty_size;
+        DirectRuntimePtySyncDecision::ResizePty {
+            cols: next_pty_size.0,
+            rows: next_pty_size.1,
+        }
+    }
 }
 
 #[derive(Debug, Default)]
@@ -316,16 +397,10 @@ fn spawn_exit_watcher(
 fn run_pty_event_loop(runtime: &mut InteractivePtyRuntime) -> Result<std::process::ExitCode> {
     let mut mode_guard = TerminalModeGuard::enter()?;
     let (width, height) = crossterm::terminal::size().unwrap_or((80, 24));
-    let inline_viewport_height = direct_runtime_inline_viewport_height(height, direct_runtime_current_cursor_row());
-    let stdout = io::stdout();
-    let backend = ratatui::backend::CrosstermBackend::new(stdout);
-    let mut terminal = Terminal::with_options(
-        backend,
-        TerminalOptions {
-            viewport: Viewport::Inline(inline_viewport_height),
-        },
-    )?;
-    runtime.session.resize(inline_viewport_height, width.max(1));
+    let width = width.max(1);
+    let height = height.max(1);
+    let mut viewport_state = DirectRuntimeViewportState::new(width, height);
+    let mut terminal = build_direct_runtime_terminal(viewport_state.inline_viewport_height())?;
 
     let mut scroll_offset = 0usize;
     let mut last_drawn_epoch = u64::MAX;
@@ -334,10 +409,20 @@ fn run_pty_event_loop(runtime: &mut InteractivePtyRuntime) -> Result<std::proces
     let mut exit_status = None;
     let mut reader_closed = false;
     let mut force_redraw = true;
-    let mut viewport_area = Rect::new(0, 0, width.max(1), inline_viewport_height);
+    let mut viewport_area = viewport_state.last_viewport_area();
     let mut exit_received_at: Option<Instant> = None;
 
     loop {
+        let (current_width, current_height) = crossterm::terminal::size().unwrap_or(viewport_state.current_terminal_size());
+        match viewport_state.observe_terminal_size(current_width, current_height) {
+            DirectRuntimeResizeDecision::Noop => {}
+            DirectRuntimeResizeDecision::Redraw => force_redraw = true,
+            DirectRuntimeResizeDecision::RebuildTerminal { inline_viewport_height } => {
+                terminal = build_direct_runtime_terminal(inline_viewport_height)?;
+                force_redraw = true;
+            }
+        }
+
         if expire_reload_notice_toast(&mut runtime.reload_notice_toast) {
             force_redraw = true;
         }
@@ -369,7 +454,8 @@ fn run_pty_event_loop(runtime: &mut InteractivePtyRuntime) -> Result<std::proces
             }
 
             let mut render_error = None;
-            let mut drawn_area = viewport_area;
+            let previous_viewport_area = viewport_state.last_viewport_area();
+            let mut drawn_area = previous_viewport_area;
             terminal.draw(|frame| {
                 drawn_area = frame.area();
                 if let Err(err) = render_terminal_frame(
@@ -385,11 +471,15 @@ fn run_pty_event_loop(runtime: &mut InteractivePtyRuntime) -> Result<std::proces
             if let Some(err) = render_error {
                 return Err(err.into());
             }
+
+            let drawn_area = direct_runtime_canonical_viewport_area(drawn_area);
+            clear_obsolete_direct_runtime_area(previous_viewport_area, drawn_area)?;
+            let viewport_resized = direct_runtime_sync_viewport_size_if_needed(runtime, &mut viewport_state, drawn_area);
             viewport_area = drawn_area;
             last_drawn_epoch = runtime.session.render_epoch();
             last_draw_at = Instant::now();
             last_config_version = current_config_version;
-            force_redraw = false;
+            force_redraw = viewport_resized;
         }
 
         if exit_status.is_some() && reader_closed {
@@ -411,14 +501,7 @@ fn run_pty_event_loop(runtime: &mut InteractivePtyRuntime) -> Result<std::proces
             continue;
         }
 
-        process_runtime_input_event(
-            runtime,
-            event::read()?,
-            viewport_area,
-            inline_viewport_height,
-            &mut scroll_offset,
-            &mut force_redraw,
-        )?;
+        process_runtime_input_event(runtime, event::read()?, viewport_area, &mut scroll_offset, &mut force_redraw)?;
     }
 
     let show_cursor_result = terminal.show_cursor();
@@ -448,7 +531,6 @@ fn process_runtime_input_event(
     runtime: &mut InteractivePtyRuntime,
     event: Event,
     viewport_area: Rect,
-    inline_viewport_height: u16,
     scroll_offset: &mut usize,
     force_redraw: &mut bool,
 ) -> io::Result<()> {
@@ -494,9 +576,7 @@ fn process_runtime_input_event(
             runtime.session.write_input(&bytes)?;
         }
         Event::Resize(width, height) => {
-            let runtime_rows = height.max(1).min(inline_viewport_height.max(1));
-            runtime.session.resize(runtime_rows, width.max(1));
-            runtime.host_scrollback.invalidate();
+            let _ = (width, height);
             *force_redraw = true;
         }
         Event::Mouse(mouse) => {
@@ -660,16 +740,70 @@ fn current_mouse_protocol(session: &TerminalSession) -> io::Result<(MouseProtoco
     Ok(engine.view_model().mouse_protocol())
 }
 
-fn direct_runtime_current_cursor_row() -> Option<u16> {
-    cursor::position().ok().map(|(_, row)| row)
+fn direct_runtime_inline_viewport_height(height: u16) -> u16 {
+    height.max(1)
 }
 
-fn direct_runtime_inline_viewport_height(height: u16, cursor_row: Option<u16>) -> u16 {
-    let terminal_height = height.max(1);
-    match cursor_row {
-        Some(row) => terminal_height.saturating_sub(row).max(1),
-        None => terminal_height,
+fn direct_runtime_resize_rows(height: u16) -> u16 {
+    height.max(1)
+}
+
+fn direct_runtime_resize_dimensions(width: u16, height: u16) -> (u16, u16) {
+    (width.max(1), direct_runtime_resize_rows(height))
+}
+
+fn build_direct_runtime_terminal(inline_viewport_height: u16) -> io::Result<DirectRuntimeTerminal> {
+    let stdout = io::stdout();
+    let backend = ratatui::backend::CrosstermBackend::new(stdout);
+    Terminal::with_options(
+        backend,
+        TerminalOptions {
+            viewport: Viewport::Inline(inline_viewport_height.max(1)),
+        },
+    )
+}
+
+fn direct_runtime_canonical_viewport_area(area: Rect) -> Rect {
+    Rect::new(area.x, area.y, area.width.max(1), area.height.max(1))
+}
+
+fn direct_runtime_sync_viewport_size_if_needed(runtime: &mut InteractivePtyRuntime, viewport_state: &mut DirectRuntimeViewportState, drawn_area: Rect) -> bool {
+    match viewport_state.record_drawn_viewport(drawn_area) {
+        DirectRuntimePtySyncDecision::Noop => false,
+        DirectRuntimePtySyncDecision::ResizePty { cols, rows } => {
+            runtime.session.resize(rows, cols);
+            runtime.host_scrollback.invalidate();
+            true
+        }
     }
+}
+
+fn clear_obsolete_direct_runtime_area(previous_area: Rect, current_area: Rect) -> io::Result<()> {
+    if previous_area.width == 0 || previous_area.height == 0 {
+        return Ok(());
+    }
+
+    let current_area = direct_runtime_canonical_viewport_area(current_area);
+    let previous_bottom = previous_area.y.saturating_add(previous_area.height);
+    let current_bottom = current_area.y.saturating_add(current_area.height);
+    let overlap_top = previous_area.y.max(current_area.y);
+    let overlap_bottom = previous_bottom.min(current_bottom);
+    let mut stdout = io::stdout();
+
+    if current_area.width < previous_area.width {
+        let stale_cols_start = current_area.x.saturating_add(current_area.width);
+        for row in overlap_top..overlap_bottom {
+            execute!(stdout, cursor::MoveTo(stale_cols_start, row), Clear(ClearType::UntilNewLine))?;
+        }
+    }
+
+    if current_bottom < previous_bottom {
+        for row in current_bottom..previous_bottom {
+            execute!(stdout, cursor::MoveTo(previous_area.x, row), Clear(ClearType::UntilNewLine))?;
+        }
+    }
+
+    Ok(())
 }
 
 fn direct_runtime_exit_cleanup_sequence() -> &'static str {

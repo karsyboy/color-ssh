@@ -1,5 +1,6 @@
 use super::{
-    InteractiveSshRuntime, direct_runtime_exit_cleanup_sequence, direct_runtime_inline_viewport_height, encode_mouse_event, infer_scrolled_line_count,
+    DirectRuntimePtySyncDecision, DirectRuntimeResizeDecision, DirectRuntimeViewportState, InteractiveSshRuntime, direct_runtime_exit_cleanup_sequence,
+    direct_runtime_inline_viewport_height, direct_runtime_resize_dimensions, direct_runtime_resize_rows, encode_mouse_event, infer_scrolled_line_count,
     select_interactive_ssh_runtime, take_latest_reload_notice_toast,
 };
 use crate::config;
@@ -17,12 +18,78 @@ fn select_interactive_ssh_runtime_prefers_pty_only_for_direct_terminals() {
 
 #[test]
 fn direct_runtime_inline_viewport_uses_full_height_with_minimum_one_row() {
-    assert_eq!(direct_runtime_inline_viewport_height(24, Some(0)), 24);
-    assert_eq!(direct_runtime_inline_viewport_height(24, Some(12)), 12);
-    assert_eq!(direct_runtime_inline_viewport_height(24, Some(23)), 1);
-    assert_eq!(direct_runtime_inline_viewport_height(24, Some(50)), 1);
-    assert_eq!(direct_runtime_inline_viewport_height(24, None), 24);
-    assert_eq!(direct_runtime_inline_viewport_height(0, None), 1);
+    assert_eq!(direct_runtime_inline_viewport_height(24), 24);
+    assert_eq!(direct_runtime_inline_viewport_height(0), 1);
+}
+
+#[test]
+fn direct_runtime_resize_rows_tracks_terminal_height_with_minimum_one_row() {
+    assert_eq!(direct_runtime_resize_rows(24), 24);
+    assert_eq!(direct_runtime_resize_rows(1), 1);
+    assert_eq!(direct_runtime_resize_rows(0), 1);
+}
+
+#[test]
+fn direct_runtime_resize_dimensions_clamp_to_valid_pty_size() {
+    assert_eq!(direct_runtime_resize_dimensions(120, 24), (120, 24));
+    assert_eq!(direct_runtime_resize_dimensions(0, 24), (1, 24));
+    assert_eq!(direct_runtime_resize_dimensions(120, 0), (120, 1));
+}
+
+#[test]
+fn direct_runtime_viewport_state_noops_when_terminal_size_is_unchanged() {
+    let mut state = DirectRuntimeViewportState::new(120, 24);
+
+    assert_eq!(state.observe_terminal_size(120, 24), DirectRuntimeResizeDecision::Noop);
+}
+
+#[test]
+fn direct_runtime_viewport_state_shrink_requests_redraw_without_rebuild() {
+    let mut state = DirectRuntimeViewportState::new(120, 24);
+
+    assert_eq!(state.observe_terminal_size(100, 20), DirectRuntimeResizeDecision::Redraw);
+    assert_eq!(state.inline_viewport_height(), 24);
+}
+
+#[test]
+fn direct_runtime_viewport_state_growth_above_inline_cap_triggers_rebuild() {
+    let mut state = DirectRuntimeViewportState::new(120, 24);
+
+    assert_eq!(
+        state.observe_terminal_size(120, 40),
+        DirectRuntimeResizeDecision::RebuildTerminal { inline_viewport_height: 40 }
+    );
+    assert_eq!(state.inline_viewport_height(), 40);
+}
+
+#[test]
+fn direct_runtime_viewport_state_width_only_change_does_not_rebuild() {
+    let mut state = DirectRuntimeViewportState::new(120, 24);
+
+    assert_eq!(state.observe_terminal_size(140, 24), DirectRuntimeResizeDecision::Redraw);
+    assert_eq!(state.inline_viewport_height(), 24);
+}
+
+#[test]
+fn direct_runtime_viewport_state_shrink_sync_uses_drawn_viewport_size() {
+    let mut state = DirectRuntimeViewportState::new(120, 24);
+
+    assert_eq!(
+        state.record_drawn_viewport(Rect::new(0, 0, 80, 20)),
+        DirectRuntimePtySyncDecision::ResizePty { cols: 80, rows: 20 }
+    );
+}
+
+#[test]
+fn direct_runtime_viewport_state_duplicate_drawn_viewport_does_not_resend_pty_resize() {
+    let mut state = DirectRuntimeViewportState::new(120, 24);
+
+    assert_eq!(state.record_drawn_viewport(Rect::new(0, 0, 120, 24)), DirectRuntimePtySyncDecision::Noop);
+    assert_eq!(
+        state.record_drawn_viewport(Rect::new(0, 0, 90, 18)),
+        DirectRuntimePtySyncDecision::ResizePty { cols: 90, rows: 18 }
+    );
+    assert_eq!(state.record_drawn_viewport(Rect::new(0, 0, 90, 18)), DirectRuntimePtySyncDecision::Noop);
 }
 
 #[test]
