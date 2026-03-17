@@ -56,6 +56,7 @@ pub fn run_session_manager(runtime_profile: Option<String>) -> io::Result<()> {
     let mut app = AppState::new()?;
     let result = run_app(&mut terminal, &mut app);
     let selected_request = app.selected_host_to_connect.take();
+    app.terminate_all_sessions();
     let show_cursor_result = terminal.show_cursor();
 
     mode_guard.cleanup();

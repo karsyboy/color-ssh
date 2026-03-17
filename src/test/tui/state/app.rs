@@ -1,9 +1,95 @@
 use super::AppState;
 use crate::config;
-use crate::inventory::build_inventory_tree;
-use crate::terminal::TerminalGridPoint;
+use crate::inventory::{InventoryHost, build_inventory_tree};
+use crate::terminal::highlight_overlay::HighlightOverlayEngine;
+use crate::terminal::{TerminalChild, TerminalEngine, TerminalGridPoint, TerminalHostCallbacks, TerminalSession};
 use crate::test::support::{fs::TestWorkspace, state::TestStateGuard};
-use crate::tui::HostTreeRowKind;
+use crate::tui::{HostTab, HostTreeRowKind, TerminalSearchState};
+use portable_pty::{Child as PtyChild, ChildKiller, ExitStatus};
+use std::sync::{
+    Arc, Mutex,
+    atomic::{AtomicBool, AtomicU64, Ordering},
+};
+
+#[derive(Debug)]
+struct MockTerminalChild {
+    killed: Arc<AtomicBool>,
+}
+
+#[derive(Debug)]
+struct MockTerminalChildKiller {
+    killed: Arc<AtomicBool>,
+}
+
+impl ChildKiller for MockTerminalChild {
+    fn kill(&mut self) -> std::io::Result<()> {
+        self.killed.store(true, Ordering::Relaxed);
+        Ok(())
+    }
+
+    fn clone_killer(&self) -> Box<dyn ChildKiller + Send + Sync> {
+        Box::new(MockTerminalChildKiller {
+            killed: Arc::clone(&self.killed),
+        })
+    }
+}
+
+impl ChildKiller for MockTerminalChildKiller {
+    fn kill(&mut self) -> std::io::Result<()> {
+        self.killed.store(true, Ordering::Relaxed);
+        Ok(())
+    }
+
+    fn clone_killer(&self) -> Box<dyn ChildKiller + Send + Sync> {
+        Box::new(Self {
+            killed: Arc::clone(&self.killed),
+        })
+    }
+}
+
+impl PtyChild for MockTerminalChild {
+    fn try_wait(&mut self) -> std::io::Result<Option<ExitStatus>> {
+        Ok(Some(ExitStatus::with_exit_code(0)))
+    }
+
+    fn wait(&mut self) -> std::io::Result<ExitStatus> {
+        Ok(ExitStatus::with_exit_code(0))
+    }
+
+    fn process_id(&self) -> Option<u32> {
+        Some(42)
+    }
+}
+
+fn mock_terminal_session(killed: Arc<AtomicBool>) -> TerminalSession {
+    let child: Arc<Mutex<Box<dyn PtyChild + Send + Sync>>> = Arc::new(Mutex::new(Box::new(MockTerminalChild { killed })));
+    let engine = Arc::new(Mutex::new(TerminalEngine::new_with_host_and_remote_clipboard_policy(
+        24,
+        80,
+        100,
+        TerminalHostCallbacks::default(),
+        false,
+        1024,
+    )));
+    let exited = Arc::new(Mutex::new(false));
+    let render_epoch = Arc::new(AtomicU64::new(0));
+
+    TerminalSession::new(None, None, TerminalChild::Pty(child), engine, exited, render_epoch)
+}
+
+fn test_tab(name: &str, session: Option<TerminalSession>) -> HostTab {
+    HostTab {
+        host: InventoryHost::new(name.to_string()),
+        title: name.to_string(),
+        session,
+        session_error: None,
+        highlight_overlay: HighlightOverlayEngine::new(),
+        scroll_offset: 0,
+        terminal_search: TerminalSearchState::default(),
+        force_ssh_logging: false,
+        last_pty_size: None,
+    }
+}
 
 #[test]
 fn handle_terminal_resize_growing_and_shrinking_width_scales_host_panel_proportionally() {
@@ -81,6 +167,25 @@ fn current_selection_orders_typed_terminal_points() {
 
     assert_eq!(selection.start(), TerminalGridPoint::new(2, 3));
     assert_eq!(selection.end(), TerminalGridPoint::new(4, 10));
+}
+
+#[test]
+fn terminate_all_sessions_terminates_and_detaches_tab_children() {
+    let mut app = AppState::new_for_tests();
+    let first_killed = Arc::new(AtomicBool::new(false));
+    let second_killed = Arc::new(AtomicBool::new(false));
+
+    app.tabs = vec![
+        test_tab("alpha", Some(mock_terminal_session(Arc::clone(&first_killed)))),
+        test_tab("beta", Some(mock_terminal_session(Arc::clone(&second_killed)))),
+        test_tab("gamma", None),
+    ];
+
+    app.terminate_all_sessions();
+
+    assert!(first_killed.load(Ordering::Relaxed));
+    assert!(second_killed.load(Ordering::Relaxed));
+    assert!(app.tabs.iter().all(|tab| tab.session.is_none()));
 }
 
 fn seed_app_from_inventory(app: &mut AppState, inventory_path: &std::path::Path) {

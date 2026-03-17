@@ -190,6 +190,17 @@ impl AppState {
         Some(TerminalSelection::new(self.selection_start?, self.selection_end?).ordered())
     }
 
+    /// Terminate and detach every managed tab session.
+    pub(crate) fn terminate_all_sessions(&mut self) {
+        for tab in &mut self.tabs {
+            if let Some(mut session) = tab.session.take()
+                && !session.is_exited()
+            {
+                session.terminate();
+            }
+        }
+    }
+
     pub(crate) fn set_vault_status(&mut self, status: VaultStatus) {
         self.last_vault_status_refresh_at = Instant::now();
         if self.vault_status != status {
