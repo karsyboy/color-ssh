@@ -59,3 +59,21 @@ pub(crate) fn print_title_banner(show_title: bool) {
         println!("{line}\x1b[0m");
     }
 }
+
+/// Build startup banner bytes suitable for terminal-engine output streams.
+pub(crate) fn title_banner_viewport_output(show_title: bool) -> Option<String> {
+    if !show_title {
+        return None;
+    }
+
+    let mut output = String::new();
+    for line in TITLE_BANNER {
+        output.push_str(line);
+        output.push_str("\x1b[0m\r\n");
+    }
+    Some(output)
+}
+
+#[cfg(test)]
+#[path = "../test/runtime/startup.rs"]
+mod tests;

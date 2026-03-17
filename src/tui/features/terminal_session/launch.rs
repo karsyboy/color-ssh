@@ -70,12 +70,26 @@ fn auto_login_notice(host: &InventoryHost, detail: impl Into<String>) -> String 
     }
 }
 
-fn inject_launch_notice(engine: &Arc<Mutex<TerminalEngine>>, render_epoch: &Arc<AtomicU64>, notice: String) {
+fn inject_engine_output(engine: &Arc<Mutex<TerminalEngine>>, render_epoch: &Arc<AtomicU64>, output: &str) {
+    if output.is_empty() {
+        return;
+    }
+
     if let Ok(mut engine) = engine.lock() {
-        let message = format!("\r\n[color-ssh] {}\r\n", notice);
-        engine.process_output(message.as_bytes());
+        engine.process_output(output.as_bytes());
         render_epoch.fetch_add(1, Ordering::Relaxed);
     }
+}
+
+fn inject_title_banner(engine: &Arc<Mutex<TerminalEngine>>, render_epoch: &Arc<AtomicU64>, show_title: bool) {
+    if let Some(banner_output) = crate::runtime::title_banner_viewport_output(show_title) {
+        inject_engine_output(engine, render_epoch, &banner_output);
+    }
+}
+
+fn inject_launch_notice(engine: &Arc<Mutex<TerminalEngine>>, render_epoch: &Arc<AtomicU64>, notice: String) {
+    let message = format!("\r\n[color-ssh] {}\r\n", notice);
+    inject_engine_output(engine, render_epoch, &message);
 }
 
 fn rdp_session_launch_mode(launch_mode: process::RdpLaunchMode) -> RdpSessionLaunchMode {
@@ -151,6 +165,8 @@ fn spawn_pty_terminal_session(
     let pty_master = Arc::new(Mutex::new(spawned.master));
     let render_epoch = Arc::new(AtomicU64::new(0));
 
+    inject_title_banner(&engine, &render_epoch, session_profile.show_title);
+
     if let Some(notice) = launch_notice {
         inject_launch_notice(&engine, &render_epoch, notice);
     }
@@ -223,6 +239,8 @@ fn spawn_captured_terminal_session(
     let exited = Arc::new(Mutex::new(false));
     let render_epoch = Arc::new(AtomicU64::new(0));
     let closed_streams = Arc::new(AtomicUsize::new(0));
+
+    inject_title_banner(&engine, &render_epoch, session_profile.show_title);
 
     if let Some(notice) = launch_notice {
         inject_launch_notice(&engine, &render_epoch, notice);

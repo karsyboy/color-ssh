@@ -1,4 +1,6 @@
-use super::{protocol_command_for_non_interactive, protocol_reload_notice_target, resolve_runtime_profile_for_command};
+use super::{
+    protocol_command_for_non_interactive, protocol_reload_notice_target, resolve_runtime_profile_for_command, should_print_title_banner_before_protocol_launch,
+};
 use crate::args::{MainArgs, MainCommand, ProtocolCommand, RdpCommandArgs, SshCommandArgs, VaultCommand};
 use crate::config::ReloadNoticeTarget;
 use crate::inventory::{ConnectionProtocol, InventoryHost};
@@ -110,6 +112,30 @@ fn protocol_reload_notice_target_keeps_passthrough_paths_on_stderr() {
     assert_eq!(protocol_reload_notice_target(&interactive_ssh, false), ReloadNoticeTarget::Stderr);
     assert_eq!(protocol_reload_notice_target(&non_interactive_ssh, true), ReloadNoticeTarget::Stderr);
     assert_eq!(protocol_reload_notice_target(&rdp, true), ReloadNoticeTarget::Stderr);
+}
+
+#[test]
+fn title_banner_printing_moves_inside_direct_pty_viewport_for_interactive_ssh() {
+    let interactive_ssh = ProtocolCommand::Ssh(SshCommandArgs {
+        ssh_args: vec!["router01".to_string()],
+        is_non_interactive: false,
+    });
+    let non_interactive_ssh = ProtocolCommand::Ssh(SshCommandArgs {
+        ssh_args: vec!["router01".to_string()],
+        is_non_interactive: true,
+    });
+    let rdp = ProtocolCommand::Rdp(RdpCommandArgs {
+        target: "desktop01".to_string(),
+        user: None,
+        domain: None,
+        port: None,
+        extra_args: Vec::new(),
+    });
+
+    assert!(!should_print_title_banner_before_protocol_launch(&interactive_ssh, true));
+    assert!(should_print_title_banner_before_protocol_launch(&interactive_ssh, false));
+    assert!(should_print_title_banner_before_protocol_launch(&non_interactive_ssh, true));
+    assert!(should_print_title_banner_before_protocol_launch(&rdp, true));
 }
 
 #[test]

@@ -13,3 +13,4 @@ pub fn run() -> crate::Result<ExitCode> {
 }
 
 pub(crate) use reload_notice::{ReloadNoticeToast, format_reload_notice};
+pub(crate) use startup::title_banner_viewport_output;

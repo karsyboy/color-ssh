@@ -49,6 +49,7 @@ static CONFIG_VERSION: AtomicU64 = AtomicU64::new(0);
 #[derive(Debug, Clone)]
 pub(crate) struct InteractiveProfileSnapshot {
     pub(crate) auth_settings: AuthSettings,
+    pub(crate) show_title: bool,
     pub(crate) history_buffer: usize,
     pub(crate) remote_clipboard_write: bool,
     pub(crate) remote_clipboard_max_bytes: usize,
@@ -134,6 +135,7 @@ fn snapshot_from_loaded_config(config: Config, config_version: u64) -> Interacti
     let interactive = interactive_settings.unwrap_or_default();
     InteractiveProfileSnapshot {
         auth_settings,
+        show_title: settings.show_title,
         history_buffer: interactive.history_buffer,
         remote_clipboard_write: interactive.allow_remote_clipboard_write,
         remote_clipboard_max_bytes: interactive.remote_clipboard_max_bytes,
@@ -152,6 +154,7 @@ fn current_interactive_profile_snapshot() -> InteractiveProfileSnapshot {
         let interactive = cfg.interactive_settings.as_ref();
         InteractiveProfileSnapshot {
             auth_settings: cfg.auth_settings.clone(),
+            show_title: cfg.settings.show_title,
             history_buffer: interactive.map(|interactive| interactive.history_buffer).unwrap_or(1000),
             remote_clipboard_write: interactive.map(|interactive| interactive.allow_remote_clipboard_write).unwrap_or(false),
             remote_clipboard_max_bytes: interactive.map(|interactive| interactive.remote_clipboard_max_bytes).unwrap_or(4096),

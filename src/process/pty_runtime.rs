@@ -9,7 +9,7 @@ use super::command_spec::PreparedCommand;
 use super::map_exit_code;
 use super::{PtyLogTarget, io_other_error, spawn_pty_command, spawn_pty_output_reader};
 use crate::auth::secret::ExposeSecret;
-use crate::runtime::{ReloadNoticeToast, format_reload_notice};
+use crate::runtime::{ReloadNoticeToast, format_reload_notice, title_banner_viewport_output};
 use crate::terminal::highlight_overlay::{HighlightOverlay, HighlightOverlayEngine};
 use crate::terminal::terminal_host_callbacks;
 use crate::terminal::{
@@ -280,6 +280,10 @@ fn run_interactive_command(mut command_spec: PreparedCommand, log_target: PtyLog
     let history_buffer = direct_history_buffer();
     let mut runtime = spawn_interactive_pty_runtime(command_spec, history_buffer, log_target)?;
 
+    if let Some(banner_output) = title_banner_viewport_output(direct_runtime_show_title()) {
+        process_pty_output(&runtime.session, banner_output.as_bytes())?;
+    }
+
     if let Some(notice) = fallback_notice {
         let message = format!("\r\n[color-ssh] {}\r\n", notice);
         process_pty_output(&runtime.session, message.as_bytes())?;
@@ -314,6 +318,10 @@ fn direct_history_buffer() -> usize {
             .map(|interactive| interactive.history_buffer)
             .unwrap_or(DIRECT_RUNTIME_HISTORY_BUFFER)
     })
+}
+
+fn direct_runtime_show_title() -> bool {
+    config::with_current_config("reading direct interactive title banner setting", |cfg| cfg.settings.show_title)
 }
 
 fn spawn_interactive_pty_runtime(command_spec: PreparedCommand, history_buffer: usize, log_target: PtyLogTarget) -> io::Result<InteractivePtyRuntime> {
