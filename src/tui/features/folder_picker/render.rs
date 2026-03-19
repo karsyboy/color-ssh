@@ -88,7 +88,7 @@ impl AppState {
 
         let mut lines = Vec::new();
         lines.push(Line::from(vec![
-            Span::styled("Path: ", Style::default().fg(theme::ansi_bright_black())),
+            Span::styled("Folder: ", Style::default().fg(theme::ansi_bright_black())),
             Span::styled(state.folder_display_path(), Style::default().fg(theme::ansi_bright_white())),
         ]));
 
@@ -97,10 +97,7 @@ impl AppState {
             .fg(theme::selection_fg())
             .bg(theme::selection_bg())
             .add_modifier(Modifier::BOLD);
-        let mut name_spans = vec![Span::styled(
-            "New Name: ",
-            Style::default().fg(theme::ansi_yellow()).add_modifier(Modifier::BOLD),
-        )];
+        let mut name_spans = vec![Span::styled("Name: ", Style::default().fg(theme::ansi_yellow()).add_modifier(Modifier::BOLD))];
         name_spans.extend(build_edit_value_spans(
             &state.name,
             state.cursor,

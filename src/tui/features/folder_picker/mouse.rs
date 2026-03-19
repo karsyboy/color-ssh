@@ -5,8 +5,10 @@ use crate::tui::{AppState, FolderCreateState, FolderRenameState};
 use crossterm::event::{self, MouseButton, MouseEventKind};
 use ratatui::layout::Rect;
 
-const FOLDER_RENAME_LABEL_PREFIX: &str = "New Name: ";
+const FOLDER_RENAME_LABEL_PREFIX: &str = "Name: ";
 const FOLDER_CREATE_LABEL_PREFIX: &str = "Name: ";
+const FOLDER_RENAME_NAME_ROW_OFFSET: u16 = 1;
+const FOLDER_RENAME_ACTION_ROW_OFFSET: u16 = 3;
 const FOLDER_CREATE_PARENT_ROW_OFFSET: u16 = 0;
 const FOLDER_CREATE_NAME_ROW_OFFSET: u16 = 1;
 const FOLDER_CREATE_ACTION_ROW_OFFSET: u16 = 3;
@@ -45,8 +47,8 @@ impl AppState {
             return None;
         }
 
-        let width = full_area.width.clamp(56, 88);
-        let height = 8u16.min(full_area.height);
+        let width = full_area.width.clamp(46, 76);
+        let height = 6u16.min(full_area.height);
         let area = Self::centered_rect(width, height, full_area);
         let inner = Rect::new(
             area.x.saturating_add(1),
@@ -186,7 +188,7 @@ impl AppState {
                     return;
                 }
 
-                let action_row = inner.y.saturating_add(inner.height.saturating_sub(1));
+                let action_row = inner.y.saturating_add(FOLDER_RENAME_ACTION_ROW_OFFSET.min(inner.height.saturating_sub(1)));
                 if mouse.row == action_row {
                     if let Some(state) = self.folder_rename.as_mut() {
                         state.drag_anchor = None;
@@ -207,7 +209,7 @@ impl AppState {
                     return;
                 }
 
-                let name_row = inner.y.saturating_add(1);
+                let name_row = inner.y.saturating_add(FOLDER_RENAME_NAME_ROW_OFFSET.min(inner.height.saturating_sub(1)));
                 if mouse.row == name_row
                     && let Some(state) = self.folder_rename.as_mut()
                     && let Some(cursor) = Self::folder_rename_cursor_from_column(state, inner, mouse.column)

@@ -1205,6 +1205,68 @@ inventory:
 }
 
 #[test]
+fn folder_rename_modal_matches_create_modal_size_and_mouse_save() {
+    let workspace = TestWorkspace::new("tui", "host_editor_rename_modal_size_mouse_save").expect("temp workspace");
+    let inventory_path = workspace.join("cossh-inventory.yaml");
+    workspace
+        .write(
+            &inventory_path,
+            r#"
+inventory:
+  - Team:
+      - name: alpha
+        protocol: ssh
+        host: alpha.example
+"#,
+        )
+        .expect("write inventory");
+
+    let mut app = AppState::new_for_tests();
+    app.last_terminal_size = (120, 40);
+    seed_app_from_inventory(&mut app, &inventory_path);
+    let folder_row = find_folder_row(&app, "Team");
+    app.set_selected_row(folder_row);
+
+    app.handle_manager_key(KeyEvent::new(KeyCode::Char('n'), KeyModifiers::CONTROL))
+        .expect("ctrl+n opens folder create modal");
+    let (create_area, create_inner) = app.folder_create_modal_layout().expect("create modal layout");
+    app.folder_create = None;
+
+    app.handle_manager_key(KeyEvent::new(KeyCode::Char('r'), KeyModifiers::CONTROL))
+        .expect("ctrl+r opens folder rename modal");
+    assert!(app.folder_rename.is_some(), "rename modal should open");
+    let (rename_area, rename_inner) = app.folder_rename_modal_layout().expect("rename modal layout");
+    assert_eq!(rename_area.width, create_area.width);
+    assert_eq!(rename_area.height, create_area.height);
+    assert_eq!(rename_inner.width, create_inner.width);
+    assert_eq!(rename_inner.height, create_inner.height);
+
+    {
+        let state = app.folder_rename.as_mut().expect("rename modal");
+        state.name = "RenamedByMouse".to_string();
+        state.cursor = state.name.chars().count();
+        state.selection = None;
+    }
+
+    let action_row = rename_inner.y.saturating_add(3u16.min(rename_inner.height.saturating_sub(1)));
+    let save_col = rename_inner.x.saturating_add(1);
+    app.handle_mouse(MouseEvent {
+        kind: MouseEventKind::Down(MouseButton::Left),
+        column: save_col,
+        row: action_row,
+        modifiers: KeyModifiers::NONE,
+    })
+    .expect("mouse click save");
+
+    assert!(app.folder_rename.is_none(), "rename modal should close after save");
+    assert!(app.visible_host_rows.iter().any(|row| row.display_name == "RenamedByMouse"));
+
+    let rendered = fs::read_to_string(&inventory_path).expect("read inventory");
+    assert!(rendered.contains("RenamedByMouse:"));
+    assert!(!rendered.contains("Team:"));
+}
+
+#[test]
 fn delete_folder_context_action_opens_confirm_with_entry_count_and_deletes() {
     let workspace = TestWorkspace::new("tui", "host_editor_delete_folder").expect("temp workspace");
     let inventory_path = workspace.join("cossh-inventory.yaml");
