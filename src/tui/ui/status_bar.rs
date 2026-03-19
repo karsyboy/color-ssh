@@ -18,6 +18,7 @@ enum StatusContext {
     TerminalSearch,
     Host,
     Terminal,
+    Editor,
 }
 
 impl AppState {
@@ -55,6 +56,7 @@ impl AppState {
             StatusContext::TerminalSearch => self.build_terminal_search_status_spans(),
             StatusContext::Host => self.build_manager_status_spans(),
             StatusContext::Terminal => self.build_terminal_status_spans(),
+            StatusContext::Editor => self.build_editor_status_spans(),
         }
     }
 
@@ -66,6 +68,9 @@ impl AppState {
     fn resolve_status_context(&self) -> StatusContext {
         if self.search_mode {
             return StatusContext::HostSearch;
+        }
+        if self.has_terminal_focus() && self.is_selected_tab_editor() {
+            return StatusContext::Editor;
         }
         if self.has_terminal_focus() && self.current_tab_search().is_some_and(|search_state| search_state.active) {
             return StatusContext::TerminalSearch;
@@ -167,7 +172,7 @@ impl AppState {
 
     // Terminal context.
     fn build_terminal_status_spans(&self) -> (Vec<Span<'_>>, Vec<Span<'_>>) {
-        if self.tabs.is_empty() || self.selected_tab >= self.tabs.len() {
+        let Some(tab) = self.selected_terminal_tab() else {
             return (
                 vec![
                     Span::styled("Terminal", Style::default().fg(theme::ansi_yellow()).add_modifier(Modifier::BOLD)),
@@ -176,9 +181,7 @@ impl AppState {
                 ],
                 Vec::new(),
             );
-        }
-
-        let tab = &self.tabs[self.selected_tab];
+        };
         let is_exited = tab.session.as_ref().map(|session| session.is_exited()).unwrap_or(true);
 
         let status_icon_color = if is_exited { theme::ansi_red() } else { theme::ansi_green() };
@@ -243,6 +246,50 @@ impl AppState {
             Span::styled("^W", Style::default().fg(theme::ansi_red())),
             Span::styled(":close", Style::default().fg(theme::ansi_bright_black())),
         ]);
+
+        (left, right)
+    }
+
+    fn build_editor_status_spans(&self) -> (Vec<Span<'_>>, Vec<Span<'_>>) {
+        let Some(form) = self.selected_host_editor() else {
+            return (
+                vec![
+                    Span::styled("Editor", Style::default().fg(theme::ansi_bright_cyan()).add_modifier(Modifier::BOLD)),
+                    Span::styled(" | ", Style::default().fg(theme::ansi_bright_black())),
+                    Span::styled("No active editor", Style::default().fg(theme::ansi_bright_black())),
+                ],
+                Vec::new(),
+            );
+        };
+
+        let title = match form.mode {
+            crate::tui::HostEditorMode::Create => "New Entry".to_string(),
+            crate::tui::HostEditorMode::Edit => {
+                let name = form.name.value.trim();
+                if !name.is_empty() {
+                    name.to_string()
+                } else {
+                    form.original_name.clone().unwrap_or_else(|| "Entry".to_string())
+                }
+            }
+        };
+
+        let left = vec![
+            Span::styled("Editor", Style::default().fg(theme::ansi_bright_cyan()).add_modifier(Modifier::BOLD)),
+            Self::context_split_indicator(),
+            Span::styled(title, Style::default().fg(theme::ansi_bright_white())),
+        ];
+
+        let right = vec![
+            Span::styled("Tab/↑/↓", Style::default().fg(theme::ansi_cyan())),
+            Span::styled(":field | ", Style::default().fg(theme::ansi_bright_black())),
+            Span::styled("Enter", Style::default().fg(theme::ansi_green())),
+            Span::styled(":save/next | ", Style::default().fg(theme::ansi_bright_black())),
+            Span::styled("Esc", Style::default().fg(theme::ansi_yellow())),
+            Span::styled(":close | ", Style::default().fg(theme::ansi_bright_black())),
+            Span::styled("^W", Style::default().fg(theme::ansi_red())),
+            Span::styled(":close tab", Style::default().fg(theme::ansi_bright_black())),
+        ];
 
         (left, right)
     }

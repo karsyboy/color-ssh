@@ -82,12 +82,14 @@ impl AppState {
         }
     }
 
-    pub(crate) fn host_editor_modal_layout(&self) -> Option<(Rect, Rect)> {
-        let form = self.host_editor.as_ref()?;
-        let full_area = Rect::new(0, 0, self.last_terminal_size.0, self.last_terminal_size.1);
-        let width = full_area.width.clamp(74, 136);
-        let height = form.modal_height();
-        let area = Self::centered_rect(width, height, full_area);
+    pub(crate) fn host_editor_tab_layout(&self, tab_content_area: Rect) -> Option<(Rect, Rect)> {
+        self.selected_host_editor()?;
+
+        if tab_content_area.width == 0 || tab_content_area.height == 0 {
+            return None;
+        }
+
+        let area = tab_content_area;
         let inner = Rect::new(
             area.x.saturating_add(1),
             area.y.saturating_add(1),
@@ -97,22 +99,22 @@ impl AppState {
         Some((area, inner))
     }
 
-    pub(crate) fn handle_host_editor_mouse(&mut self, mouse: event::MouseEvent) {
-        let Some((modal_area, inner_area)) = self.host_editor_modal_layout() else {
+    pub(crate) fn handle_host_editor_mouse(&mut self, mouse: event::MouseEvent, tab_content_area: Rect) {
+        let Some((area, inner_area)) = self.host_editor_tab_layout(tab_content_area) else {
             return;
         };
 
         match mouse.kind {
             MouseEventKind::Down(MouseButton::Left) => {
-                if !Self::host_editor_point_in_rect(modal_area, mouse.column, mouse.row) {
-                    if let Some(form) = self.host_editor.as_mut() {
+                if !Self::host_editor_point_in_rect(area, mouse.column, mouse.row) {
+                    if let Some(form) = self.selected_host_editor_mut() {
                         form.finish_mouse_selection();
                     }
                     return;
                 }
 
                 if !Self::host_editor_point_in_rect(inner_area, mouse.column, mouse.row) {
-                    if let Some(form) = self.host_editor.as_mut() {
+                    if let Some(form) = self.selected_host_editor_mut() {
                         form.finish_mouse_selection();
                     }
                     return;
@@ -137,7 +139,7 @@ impl AppState {
         let mut should_open_delete_confirm = false;
         let field = self.host_editor_field_at_point(local_row, mouse_col, inner_area);
 
-        if let Some(form) = self.host_editor.as_mut() {
+        if let Some(form) = self.selected_host_editor_mut() {
             form.finish_mouse_selection();
 
             let Some(field) = field else {
@@ -172,14 +174,13 @@ impl AppState {
         } else if should_open_delete_confirm {
             self.open_host_delete_confirmation();
         } else if should_close {
-            self.host_editor = None;
             self.host_delete_confirm = None;
-            self.mark_ui_dirty();
+            self.close_selected_editor_tab();
         }
     }
 
     fn handle_host_editor_left_drag(&mut self, mouse_col: u16, inner_area: Rect) {
-        let Some(form) = self.host_editor.as_mut() else {
+        let Some(form) = self.selected_host_editor_mut() else {
             return;
         };
         let Some(field) = form.mouse_drag_field() else {
@@ -192,7 +193,7 @@ impl AppState {
     }
 
     fn handle_host_editor_left_release(&mut self, mouse_col: u16, inner_area: Rect) {
-        let Some(form) = self.host_editor.as_mut() else {
+        let Some(form) = self.selected_host_editor_mut() else {
             return;
         };
 
@@ -206,7 +207,7 @@ impl AppState {
     }
 
     fn host_editor_field_at_point(&self, local_row: u16, mouse_col: u16, inner_area: Rect) -> Option<crate::tui::HostEditorField> {
-        let form = self.host_editor.as_ref()?;
+        let form = self.selected_host_editor()?;
         if local_row < 2 {
             return None;
         }

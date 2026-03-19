@@ -239,7 +239,6 @@ impl AppState {
 
         self.render_global_status_bar(frame, status_area);
         self.render_host_context_menu(frame);
-        self.render_host_editor_modal(frame, size);
         self.render_host_delete_confirm_modal(frame, size);
         self.render_quick_connect_modal(frame, size);
         self.render_rdp_credentials_modal(frame, size);
@@ -299,21 +298,35 @@ impl AppState {
         while idx < self.tabs.len() && used < visible_tab_width {
             let tab = &self.tabs[idx];
             let is_selected = idx == self.selected_tab && !self.focus_on_manager;
-            let style = if is_selected {
-                Style::default()
-                    .fg(theme::ansi_yellow())
-                    .bg(theme::tab_active_bg())
-                    .add_modifier(Modifier::BOLD)
+            let is_editor_tab = tab.editor().is_some();
+            let (style, close_style) = if is_editor_tab {
+                if is_selected {
+                    (
+                        Style::default().fg(theme::ansi_black()).bg(theme::ansi_cyan()).add_modifier(Modifier::BOLD),
+                        Style::default().fg(theme::ansi_red()).bg(theme::ansi_cyan()).add_modifier(Modifier::BOLD),
+                    )
+                } else {
+                    (
+                        Style::default().fg(theme::ansi_bright_cyan()).bg(theme::tab_inactive_bg()),
+                        Style::default().fg(theme::ansi_red()).bg(theme::tab_inactive_bg()).add_modifier(Modifier::BOLD),
+                    )
+                }
+            } else if is_selected {
+                (
+                    Style::default()
+                        .fg(theme::ansi_yellow())
+                        .bg(theme::tab_active_bg())
+                        .add_modifier(Modifier::BOLD),
+                    Style::default()
+                        .fg(theme::ansi_bright_red())
+                        .bg(theme::tab_active_bg())
+                        .add_modifier(Modifier::BOLD),
+                )
             } else {
-                Style::default().fg(theme::ansi_white()).bg(theme::tab_inactive_bg())
-            };
-            let close_style = if is_selected {
-                Style::default()
-                    .fg(theme::ansi_bright_red())
-                    .bg(theme::tab_active_bg())
-                    .add_modifier(Modifier::BOLD)
-            } else {
-                Style::default().fg(theme::ansi_red()).bg(theme::tab_inactive_bg()).add_modifier(Modifier::BOLD)
+                (
+                    Style::default().fg(theme::ansi_white()).bg(theme::tab_inactive_bg()),
+                    Style::default().fg(theme::ansi_red()).bg(theme::tab_inactive_bg()).add_modifier(Modifier::BOLD),
+                )
             };
 
             let mut push_clipped = |text: &str, text_style: Style| {
@@ -329,7 +342,7 @@ impl AppState {
                 }
             };
 
-            push_clipped(&format!("{} ", tab.title), style);
+            push_clipped(&format!("{} ", tab.title()), style);
             push_clipped("×", close_style);
             push_clipped(" ", Style::default().fg(theme::ansi_bright_black()));
             idx += 1;
@@ -355,28 +368,41 @@ impl AppState {
         }
 
         let (content_area, scrollbar_area) = split_terminal_content_and_scrollbar(area);
-        self.resize_current_pty(content_area);
         self.tab_content_area = content_area;
         self.tab_scrollbar_area = scrollbar_area;
 
-        let scroll_offset = self.tabs[tab_idx].scroll_offset;
+        if let Some(editor_state) = self.tabs[tab_idx].editor_state() {
+            self.render_host_editor_tab(frame, content_area, editor_state);
+            return;
+        }
+
+        self.resize_current_pty(content_area);
+
+        let scroll_offset = self.terminal_tab(tab_idx).map_or(0, |terminal| terminal.scroll_offset);
         let selection = current_selection(self.selection_start, self.selection_end);
         let (search_row_ranges, current_search_range) = self.current_tab_search().map_or((None, None), |search| {
             (Some(search.highlight_row_ranges.clone()), search.current_highlight_range)
         });
 
-        let mut highlight_overlay_engine = std::mem::take(&mut self.tabs[tab_idx].highlight_overlay);
+        let mut highlight_overlay_engine = match self.terminal_tab_mut(tab_idx) {
+            Some(terminal) => std::mem::take(&mut terminal.highlight_overlay),
+            None => return,
+        };
 
-        if let Some(session) = self.tabs[tab_idx].session.as_ref() {
+        if let Some(session) = self.terminal_tab(tab_idx).and_then(|terminal| terminal.session.as_ref()) {
             let render_state = session.snapshot_for_frontend(content_area.height, content_area.width, scroll_offset).ok();
 
             if let Some(render_state) = render_state {
                 let effective_scroll_offset = render_state.scrollback().display_offset();
                 let max_scrollback = render_state.scrollback().max_offset();
-                self.tabs[tab_idx].scroll_offset = effective_scroll_offset;
+                if let Some(terminal) = self.terminal_tab_mut(tab_idx) {
+                    terminal.scroll_offset = effective_scroll_offset;
+                }
                 let highlight_overlay = render_state.build_highlight_overlay(&mut highlight_overlay_engine);
                 let overlay_styles = highlight_overlay.styles();
-                self.tabs[tab_idx].highlight_overlay = highlight_overlay_engine;
+                if let Some(terminal) = self.terminal_tab_mut(tab_idx) {
+                    terminal.highlight_overlay = highlight_overlay_engine;
+                }
                 let mut active_overlay_row = None;
                 let mut active_overlay_row_ranges = None;
                 let mut active_search_row = None;
@@ -420,16 +446,22 @@ impl AppState {
                 if let Some(scrollbar) = terminal_scrollbar_geometry(scrollbar_area, content_area.height, max_scrollback, effective_scroll_offset) {
                     draw_terminal_scrollbar(frame, scrollbar);
                 }
-            } else {
-                self.tabs[tab_idx].highlight_overlay = highlight_overlay_engine;
+            } else if let Some(terminal) = self.terminal_tab_mut(tab_idx) {
+                terminal.highlight_overlay = highlight_overlay_engine;
             }
         } else {
-            self.tabs[tab_idx].highlight_overlay = highlight_overlay_engine;
-            let host_name = self.tabs[tab_idx].host.name.clone();
-            let reason = self.tabs[tab_idx]
-                .session_error
-                .as_deref()
-                .unwrap_or("The session process could not be started.");
+            if let Some(terminal) = self.terminal_tab_mut(tab_idx) {
+                terminal.highlight_overlay = highlight_overlay_engine;
+            }
+            let host_name = self
+                .terminal_tab(tab_idx)
+                .map(|terminal| terminal.host.name.clone())
+                .unwrap_or_else(|| "unknown".to_string());
+            let reason = self
+                .terminal_tab(tab_idx)
+                .and_then(|terminal| terminal.session_error.as_deref())
+                .unwrap_or("The session process could not be started.")
+                .to_string();
             let error_lines = vec![
                 Line::from(""),
                 Line::from(vec![

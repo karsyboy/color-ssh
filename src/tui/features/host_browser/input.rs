@@ -186,8 +186,10 @@ impl AppState {
                 }
             }
             KeyCode::Char('o') if key.modifiers.contains(KeyModifiers::CONTROL) => {
-                if !self.focus_on_manager && !self.tabs.is_empty() {
-                    let tab = &self.tabs[self.selected_tab];
+                if !self.focus_on_manager
+                    && !self.tabs.is_empty()
+                    && let Some(tab) = self.selected_terminal_tab()
+                {
                     self.selected_host_to_connect = Some(ConnectRequest {
                         target: tab.host.name.clone(),
                         profile: tab.host.profile.clone(),

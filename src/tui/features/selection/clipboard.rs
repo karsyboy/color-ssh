@@ -20,8 +20,7 @@ impl AppState {
             return;
         }
 
-        let tab = &self.tabs[self.selected_tab];
-        let session = match &tab.session {
+        let session = match self.selected_terminal_tab().and_then(|tab| tab.session.as_ref()) {
             Some(session) => session,
             None => return,
         };

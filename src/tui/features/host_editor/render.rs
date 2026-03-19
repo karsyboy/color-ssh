@@ -2,7 +2,7 @@
 
 use crate::tui::text_edit::{build_edit_value_spans, byte_index_for_char, char_len};
 use crate::tui::ui::theme;
-use crate::tui::{AppState, HostEditorField, HostEditorMode};
+use crate::tui::{AppState, HostEditorField, HostEditorMode, HostEditorState};
 use ratatui::{
     Frame,
     layout::Rect,
@@ -55,14 +55,12 @@ impl AppState {
         frame.render_widget(Paragraph::new(lines), inner);
     }
 
-    pub(crate) fn render_host_editor_modal(&self, frame: &mut Frame, full_area: Rect) {
-        let Some(form) = self.host_editor.as_ref() else {
+    pub(crate) fn render_host_editor_tab(&self, frame: &mut Frame, full_area: Rect, form: &HostEditorState) {
+        if full_area.width < 2 || full_area.height < 2 {
             return;
-        };
+        }
 
-        let width = full_area.width.clamp(74, 136);
-        let height = form.modal_height();
-        let area = Self::centered_rect(width, height, full_area);
+        let area = full_area;
         let inner = Rect::new(
             area.x.saturating_add(1),
             area.y.saturating_add(1),
@@ -70,7 +68,6 @@ impl AppState {
             area.height.saturating_sub(2),
         );
 
-        frame.render_widget(Clear, area);
         let block = Block::default()
             .borders(Borders::ALL)
             .border_style(Style::default().fg(theme::ansi_cyan()))

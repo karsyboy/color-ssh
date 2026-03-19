@@ -6,7 +6,7 @@ use super::host_browser::{HostSearchEntry, HostTreeRow};
 use super::host_editor::{HostContextMenuState, HostDeleteConfirmState, HostEditorState};
 use super::quick_connect::QuickConnectState;
 use super::rdp_prompt::RdpCredentialsState;
-use super::tabs::{HostTab, TerminalSearchState};
+use super::tabs::{EditorTabState, HostTab, TerminalSearchState, TerminalTabState};
 use super::vault::{VaultStatusModalState, VaultUnlockState};
 use crate::auth::ipc::{self, VaultStatus, VaultStatusEvent, VaultStatusEventKind};
 use crate::config;
@@ -77,7 +77,6 @@ pub(crate) struct AppState {
     pub(crate) host_info_visible: bool,
     pub(crate) quick_connect: Option<QuickConnectState>,
     pub(crate) host_context_menu: Option<HostContextMenuState>,
-    pub(crate) host_editor: Option<HostEditorState>,
     pub(crate) host_delete_confirm: Option<HostDeleteConfirmState>,
     pub(crate) rdp_credentials: Option<RdpCredentialsState>,
     pub(crate) vault_unlock: Option<VaultUnlockState>,
@@ -121,7 +120,7 @@ impl AppState {
     fn current_render_epoch(&self) -> u64 {
         self.tabs
             .iter()
-            .filter_map(|tab| tab.session.as_ref())
+            .filter_map(|tab| tab.terminal().and_then(|terminal| terminal.session.as_ref()))
             .fold(0u64, |acc, session| acc.wrapping_add(session.render_epoch()))
     }
 
@@ -179,11 +178,57 @@ impl AppState {
 
     // Current-tab search accessors.
     pub(crate) fn current_tab_search(&self) -> Option<&TerminalSearchState> {
-        self.tabs.get(self.selected_tab).map(|tab| &tab.terminal_search)
+        self.tabs
+            .get(self.selected_tab)
+            .and_then(HostTab::terminal)
+            .map(|terminal| &terminal.terminal_search)
     }
 
     pub(crate) fn current_tab_search_mut(&mut self) -> Option<&mut TerminalSearchState> {
-        self.tabs.get_mut(self.selected_tab).map(|tab| &mut tab.terminal_search)
+        self.tabs
+            .get_mut(self.selected_tab)
+            .and_then(HostTab::terminal_mut)
+            .map(|terminal| &mut terminal.terminal_search)
+    }
+
+    pub(crate) fn selected_terminal_tab(&self) -> Option<&TerminalTabState> {
+        self.tabs.get(self.selected_tab).and_then(HostTab::terminal)
+    }
+
+    pub(crate) fn selected_terminal_tab_mut(&mut self) -> Option<&mut TerminalTabState> {
+        self.tabs.get_mut(self.selected_tab).and_then(HostTab::terminal_mut)
+    }
+
+    pub(crate) fn selected_editor_tab(&self) -> Option<&EditorTabState> {
+        self.tabs.get(self.selected_tab).and_then(HostTab::editor)
+    }
+
+    pub(crate) fn selected_editor_tab_mut(&mut self) -> Option<&mut EditorTabState> {
+        self.tabs.get_mut(self.selected_tab).and_then(HostTab::editor_mut)
+    }
+
+    pub(crate) fn selected_host_editor(&self) -> Option<&HostEditorState> {
+        self.selected_editor_tab().map(|editor| &editor.editor_state)
+    }
+
+    pub(crate) fn selected_host_editor_mut(&mut self) -> Option<&mut HostEditorState> {
+        self.selected_editor_tab_mut().map(|editor| &mut editor.editor_state)
+    }
+
+    pub(crate) fn is_selected_tab_editor(&self) -> bool {
+        self.selected_editor_tab().is_some()
+    }
+
+    pub(crate) fn is_selected_tab_terminal(&self) -> bool {
+        self.selected_terminal_tab().is_some()
+    }
+
+    pub(crate) fn terminal_tab(&self, tab_idx: usize) -> Option<&TerminalTabState> {
+        self.tabs.get(tab_idx).and_then(HostTab::terminal)
+    }
+
+    pub(crate) fn terminal_tab_mut(&mut self, tab_idx: usize) -> Option<&mut TerminalTabState> {
+        self.tabs.get_mut(tab_idx).and_then(HostTab::terminal_mut)
     }
 
     pub(crate) fn current_selection(&self) -> Option<TerminalSelection> {
@@ -193,7 +238,7 @@ impl AppState {
     /// Terminate and detach every managed tab session.
     pub(crate) fn terminate_all_sessions(&mut self) {
         for tab in &mut self.tabs {
-            if let Some(mut session) = tab.session.take()
+            if let Some(mut session) = tab.terminal_mut().and_then(|terminal| terminal.session.take())
                 && !session.is_exited()
             {
                 session.terminate();
@@ -299,7 +344,10 @@ impl AppState {
             .tabs
             .iter()
             .enumerate()
-            .filter_map(|(tab_idx, tab)| (tab.host.profile.as_deref() == Some(profile)).then_some(tab_idx))
+            .filter_map(|(tab_idx, tab)| {
+                tab.terminal()
+                    .and_then(|terminal| (terminal.host.profile.as_deref() == Some(profile)).then_some(tab_idx))
+            })
             .collect::<Vec<_>>();
 
         if matching_tabs.is_empty() {
@@ -308,7 +356,9 @@ impl AppState {
 
         let session_profile = config::interactive_profile_snapshot(Some(profile))?;
         for tab_idx in &matching_tabs {
-            self.tabs[*tab_idx].highlight_overlay = crate::terminal::highlight_overlay::HighlightOverlayEngine::from_snapshot(&session_profile);
+            if let Some(terminal) = self.tabs[*tab_idx].terminal_mut() {
+                terminal.highlight_overlay = crate::terminal::highlight_overlay::HighlightOverlayEngine::from_snapshot(&session_profile);
+            }
         }
 
         self.mark_ui_dirty();
@@ -370,7 +420,6 @@ impl AppState {
             host_info_visible: init.host_info_visible,
             quick_connect: None,
             host_context_menu: None,
-            host_editor: None,
             host_delete_confirm: None,
             rdp_credentials: None,
             vault_unlock: None,

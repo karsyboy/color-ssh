@@ -4,7 +4,7 @@ use crate::inventory::{InventoryHost, build_inventory_tree};
 use crate::terminal::highlight_overlay::HighlightOverlayEngine;
 use crate::terminal::{TerminalChild, TerminalEngine, TerminalGridPoint, TerminalHostCallbacks, TerminalSession};
 use crate::test::support::{fs::TestWorkspace, state::TestStateGuard};
-use crate::tui::{HostTab, HostTreeRowKind, TerminalSearchState};
+use crate::tui::{HostTab, HostTreeRowKind, TerminalSearchState, TerminalTabState};
 use portable_pty::{Child as PtyChild, ChildKiller, ExitStatus};
 use std::sync::{
     Arc, Mutex,
@@ -78,7 +78,7 @@ fn mock_terminal_session(killed: Arc<AtomicBool>) -> TerminalSession {
 }
 
 fn test_tab(name: &str, session: Option<TerminalSession>) -> HostTab {
-    HostTab {
+    HostTab::new_terminal(TerminalTabState {
         host: InventoryHost::new(name.to_string()),
         title: name.to_string(),
         session,
@@ -88,7 +88,7 @@ fn test_tab(name: &str, session: Option<TerminalSession>) -> HostTab {
         terminal_search: TerminalSearchState::default(),
         force_ssh_logging: false,
         last_pty_size: None,
-    }
+    })
 }
 
 #[test]
@@ -185,7 +185,11 @@ fn terminate_all_sessions_terminates_and_detaches_tab_children() {
 
     assert!(first_killed.load(Ordering::Relaxed));
     assert!(second_killed.load(Ordering::Relaxed));
-    assert!(app.tabs.iter().all(|tab| tab.session.is_none()));
+    assert!(
+        app.tabs
+            .iter()
+            .all(|tab| tab.terminal().and_then(|terminal| terminal.session.as_ref()).is_none())
+    );
 }
 
 fn seed_app_from_inventory(app: &mut AppState, inventory_path: &std::path::Path) {

@@ -74,9 +74,14 @@ impl AppState {
         }
 
         let idx = self.selected_tab;
-        if let Some(session) = self.tabs.get_mut(idx).and_then(|tab| tab.session.take()) {
+        let closing_editor_tab = self.tabs[idx].editor().is_some();
+        if let Some(session) = self.terminal_tab_mut(idx).and_then(|terminal| terminal.session.take()) {
             let mut session = session;
             session.terminate();
+        }
+
+        if closing_editor_tab {
+            self.host_delete_confirm = None;
         }
 
         self.tabs.remove(idx);
@@ -105,11 +110,6 @@ impl AppState {
 
         if self.host_context_menu.is_some() {
             self.handle_host_context_menu_key(key);
-            return Ok(());
-        }
-
-        if self.host_editor.is_some() {
-            self.handle_host_editor_key(key);
             return Ok(());
         }
 
@@ -149,11 +149,6 @@ impl AppState {
             return Ok(());
         }
 
-        if self.host_editor.is_some() {
-            self.handle_host_editor_paste(&pasted);
-            return Ok(());
-        }
-
         if self.vault_unlock.is_some() {
             self.handle_vault_unlock_paste(&pasted);
             return Ok(());
@@ -178,13 +173,20 @@ impl AppState {
             return Ok(());
         }
 
+        if !self.focus_on_manager && self.is_selected_tab_editor() {
+            self.handle_host_editor_paste(&pasted);
+            return Ok(());
+        }
+
         if !self.focus_on_manager && self.current_tab_search().map(|search_state| search_state.active).unwrap_or(false) {
             self.handle_terminal_search_paste(&pasted);
             return Ok(());
         }
 
         if !self.focus_on_manager && !self.tabs.is_empty() && self.selected_tab < self.tabs.len() {
-            self.tabs[self.selected_tab].scroll_offset = 0;
+            if let Some(terminal) = self.selected_terminal_tab_mut() {
+                terminal.scroll_offset = 0;
+            }
             self.clear_selection_state();
             let bracketed = self.pty_bracketed_paste_enabled();
             let bytes = encode_paste_bytes(&pasted, bracketed);
@@ -196,6 +198,46 @@ impl AppState {
 
     // Terminal-tab key handling.
     pub(crate) fn handle_tab_key(&mut self, key: KeyEvent) -> io::Result<()> {
+        if self.is_selected_tab_editor() {
+            match key.code {
+                KeyCode::Char('b') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                    self.host_panel_visible = !self.host_panel_visible;
+                }
+                KeyCode::Char('w') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                    self.close_current_tab();
+                }
+                KeyCode::BackTab => {
+                    self.focus_manager_panel();
+                }
+                KeyCode::Left if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                    self.move_selected_tab_left();
+                }
+                KeyCode::Right if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                    self.move_selected_tab_right();
+                }
+                KeyCode::Left if key.modifiers.contains(KeyModifiers::ALT) => {
+                    if self.selected_tab > 0 {
+                        self.selected_tab -= 1;
+                        self.clear_selection_state();
+                        self.ensure_tab_visible();
+                    }
+                }
+                KeyCode::Right if key.modifiers.contains(KeyModifiers::ALT) => {
+                    if self.selected_tab < self.tabs.len().saturating_sub(1) {
+                        self.selected_tab += 1;
+                        self.clear_selection_state();
+                        self.ensure_tab_visible();
+                    }
+                }
+                _ => self.handle_host_editor_key(key),
+            }
+            return Ok(());
+        }
+
+        if !self.is_selected_tab_terminal() {
+            return Ok(());
+        }
+
         if self.current_tab_search().map(|search_state| search_state.active).unwrap_or(false) {
             return self.handle_terminal_search_key(key);
         }
@@ -259,27 +301,36 @@ impl AppState {
             }
             KeyCode::PageUp if key.modifiers.contains(KeyModifiers::SHIFT) => {
                 let max_scrollback = self.max_scrollback_for_tab(self.selected_tab);
-                let tab = &mut self.tabs[self.selected_tab];
-                tab.scroll_offset = tab.scroll_offset.saturating_add(10).min(max_scrollback);
+                if let Some(terminal) = self.selected_terminal_tab_mut() {
+                    terminal.scroll_offset = terminal.scroll_offset.saturating_add(10).min(max_scrollback);
+                }
             }
             KeyCode::PageDown if key.modifiers.contains(KeyModifiers::SHIFT) => {
-                let tab = &mut self.tabs[self.selected_tab];
-                tab.scroll_offset = tab.scroll_offset.saturating_sub(10);
+                if let Some(terminal) = self.selected_terminal_tab_mut() {
+                    terminal.scroll_offset = terminal.scroll_offset.saturating_sub(10);
+                }
             }
             KeyCode::Enter => {
-                let tab = &self.tabs[self.selected_tab];
-                let is_exited = tab.session.as_ref().map(|session| session.is_exited()).unwrap_or(true);
+                let is_exited = self
+                    .selected_terminal_tab()
+                    .and_then(|terminal| terminal.session.as_ref())
+                    .map(|session| session.is_exited())
+                    .unwrap_or(true);
 
                 if is_exited {
                     self.reconnect_session();
                 } else {
-                    self.tabs[self.selected_tab].scroll_offset = 0;
+                    if let Some(terminal) = self.selected_terminal_tab_mut() {
+                        terminal.scroll_offset = 0;
+                    }
                     self.clear_selection_state();
                     self.send_key_to_pty(key)?;
                 }
             }
             _ => {
-                self.tabs[self.selected_tab].scroll_offset = 0;
+                if let Some(terminal) = self.selected_terminal_tab_mut() {
+                    terminal.scroll_offset = 0;
+                }
                 self.clear_selection_state();
                 self.send_key_to_pty(key)?;
             }
@@ -290,12 +341,10 @@ impl AppState {
 
     // PTY write helpers.
     pub(crate) fn write_bytes_to_active_pty(&mut self, bytes: &[u8]) -> io::Result<()> {
-        if self.selected_tab >= self.tabs.len() {
+        let Some(terminal) = self.selected_terminal_tab_mut() else {
             return Ok(());
-        }
-
-        let tab = &mut self.tabs[self.selected_tab];
-        let Some(session) = &mut tab.session else {
+        };
+        let Some(session) = &mut terminal.session else {
             return Ok(());
         };
         if let Err(err) = session.write_input(bytes) {
@@ -308,12 +357,10 @@ impl AppState {
     }
 
     fn pty_bracketed_paste_enabled(&self) -> bool {
-        if self.selected_tab >= self.tabs.len() {
+        let Some(terminal) = self.selected_terminal_tab() else {
             return false;
-        }
-
-        let tab = &self.tabs[self.selected_tab];
-        let Some(session) = &tab.session else {
+        };
+        let Some(session) = &terminal.session else {
             return false;
         };
 
@@ -345,7 +392,7 @@ impl AppState {
         if idx >= self.tabs.len() {
             return 0;
         }
-        tab_title_display_width(&self.tabs[idx].title)
+        tab_title_display_width(&self.tabs[idx].title())
     }
 
     // Keep selected tab visible after focus/selection moves.

@@ -7,7 +7,9 @@ use crate::process::{PtyLogTarget, spawn_captured_command, spawn_pty_command, sp
 use crate::terminal::highlight_overlay::HighlightOverlayEngine;
 use crate::terminal::terminal_host_callbacks;
 use crate::terminal::{TerminalChild, TerminalEngine, TerminalSession};
-use crate::tui::{AppState, HostTab, QuickConnectSubmission, RdpCredentialLaunchContext, RdpCredentialsAction, TerminalSearchState, VaultUnlockAction};
+use crate::tui::{
+    AppState, HostTab, QuickConnectSubmission, RdpCredentialLaunchContext, RdpCredentialsAction, TerminalSearchState, TerminalTabState, VaultUnlockAction,
+};
 use crate::{debug_enabled, log_debug, log_error};
 use std::io;
 use std::sync::{
@@ -314,7 +316,11 @@ impl AppState {
     }
 
     fn next_tab_title(&self, host: &InventoryHost) -> String {
-        let existing_count = self.tabs.iter().filter(|tab| tab.host.name == host.name).count();
+        let existing_count = self
+            .tabs
+            .iter()
+            .filter(|tab| tab.terminal().is_some_and(|terminal| terminal.host.name == host.name))
+            .count();
         if existing_count == 0 {
             host.name.clone()
         } else {
@@ -331,7 +337,7 @@ impl AppState {
         highlight_overlay: HighlightOverlayEngine,
         force_ssh_logging: bool,
     ) {
-        let tab = HostTab {
+        let tab = HostTab::new_terminal(TerminalTabState {
             title,
             host,
             session,
@@ -341,7 +347,7 @@ impl AppState {
             terminal_search: TerminalSearchState::default(),
             force_ssh_logging,
             last_pty_size: None,
-        };
+        });
 
         self.tabs.push(tab);
         self.selected_tab = self.tabs.len() - 1;
@@ -638,7 +644,7 @@ impl AppState {
                 Err(err) => self.open_host_tab_error(*host, force_ssh_logging, err.to_string()),
             },
             VaultUnlockAction::ReconnectTab { tab_index, .. } => {
-                let Some(host) = self.tabs.get(tab_index).map(|tab| tab.host.clone()) else {
+                let Some(host) = self.terminal_tab(tab_index).map(|tab| tab.host.clone()) else {
                     return;
                 };
                 match Self::resolve_session_profile(&host) {
@@ -657,7 +663,7 @@ impl AppState {
                     Err(err) => {
                         let err_message = err.to_string();
                         log_error!("Failed to prepare {} reconnect: {}", host.protocol.display_name(), err_message);
-                        if let Some(tab) = self.tabs.get_mut(tab_index) {
+                        if let Some(tab) = self.terminal_tab_mut(tab_index) {
                             tab.session = None;
                             tab.session_error = Some(err_message);
                         }
@@ -798,13 +804,15 @@ impl AppState {
         }
 
         let tab_index = self.selected_tab;
-        let host = self.tabs[tab_index].host.clone();
+        let Some(host) = self.terminal_tab(tab_index).map(|tab| tab.host.clone()) else {
+            return;
+        };
         let session_profile = match Self::resolve_session_profile(&host) {
             Ok(session_profile) => session_profile,
             Err(err) => {
                 let err_message = err.to_string();
                 log_error!("Failed to prepare {} reconnect: {}", host.protocol.display_name(), err_message);
-                if let Some(tab) = self.tabs.get_mut(tab_index) {
+                if let Some(tab) = self.terminal_tab_mut(tab_index) {
                     tab.session = None;
                     tab.session_error = Some(err_message);
                 }
@@ -838,7 +846,9 @@ impl AppState {
             return;
         }
 
-        let tab = &self.tabs[tab_index];
+        let Some(tab) = self.terminal_tab(tab_index) else {
+            return;
+        };
         let tab_title = tab.title.clone();
         let force_ssh_logging = tab.force_ssh_logging;
         let (initial_rows, initial_cols) = tab.last_pty_size.unwrap_or_else(|| self.initial_pty_size());
@@ -861,7 +871,9 @@ impl AppState {
 
         match Self::spawn_session(&host, &tab_title, &session_profile, session_launch_options) {
             Ok(session) => {
-                let tab = &mut self.tabs[tab_index];
+                let Some(tab) = self.terminal_tab_mut(tab_index) else {
+                    return;
+                };
                 tab.host = host.clone();
                 tab.session = Some(session);
                 tab.session_error = None;
@@ -879,9 +891,10 @@ impl AppState {
             Err(err) => {
                 let err_message = err.to_string();
                 log_error!("Failed to reconnect {} session: {}", host.protocol.display_name(), err_message);
-                let tab = &mut self.tabs[tab_index];
-                tab.session = None;
-                tab.session_error = Some(err_message);
+                if let Some(tab) = self.terminal_tab_mut(tab_index) {
+                    tab.session = None;
+                    tab.session_error = Some(err_message);
+                }
             }
         }
     }
@@ -889,7 +902,7 @@ impl AppState {
     pub(crate) fn resize_current_pty(&mut self, area: ratatui::layout::Rect) {
         if !self.tabs.is_empty()
             && self.selected_tab < self.tabs.len()
-            && let Some(tab) = self.tabs.get_mut(self.selected_tab)
+            && let Some(tab) = self.selected_terminal_tab_mut()
             && let Some(session) = &mut tab.session
         {
             let rows = area.height.max(1);

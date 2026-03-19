@@ -15,5 +15,5 @@ pub(crate) use quick_connect::{QuickConnectField, QuickConnectRow, QuickConnectS
 pub(crate) use rdp_prompt::{
     RdpCredentialLaunchContext, RdpCredentialSubmission, RdpCredentialValidationError, RdpCredentialsAction, RdpCredentialsField, RdpCredentialsState,
 };
-pub(crate) use tabs::{HostTab, TerminalSearchState};
+pub(crate) use tabs::{EditorTabId, EditorTabState, HostTab, TerminalSearchState, TerminalTabState};
 pub(crate) use vault::{VaultStatusModalState, VaultUnlockAction, VaultUnlockState};

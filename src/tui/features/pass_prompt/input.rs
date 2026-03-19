@@ -25,7 +25,7 @@ impl AppState {
         match action {
             VaultUnlockAction::UnlockVault => None,
             VaultUnlockAction::OpenHostTab { host, .. } => Some(&host.protocol),
-            VaultUnlockAction::ReconnectTab { tab_index, .. } => self.tabs.get(*tab_index).map(|tab| &tab.host.protocol),
+            VaultUnlockAction::ReconnectTab { tab_index, .. } => self.terminal_tab(*tab_index).map(|tab| &tab.host.protocol),
         }
     }
 

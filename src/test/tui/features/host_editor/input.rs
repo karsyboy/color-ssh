@@ -1,7 +1,7 @@
 use super::*;
 use crate::inventory::build_inventory_tree;
 use crate::test::support::fs::TestWorkspace;
-use crate::tui::{HostEditorField, HostEditorMode, HostEditorState};
+use crate::tui::{EditorTabId, EditorTabState, HostEditorField, HostEditorMode, HostEditorState, HostTab};
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers, MouseButton, MouseEvent, MouseEventKind};
 use ratatui::layout::Rect;
 use std::fs;
@@ -31,6 +31,21 @@ fn find_host_row(app: &AppState, host_name: &str) -> usize {
         .unwrap_or_else(|| panic!("host row '{host_name}' not found"))
 }
 
+fn open_test_editor(app: &mut AppState, editor_state: HostEditorState) {
+    let editor_id = match editor_state.mode {
+        HostEditorMode::Create => EditorTabId::for_new_entry(editor_state.source_file.clone()),
+        HostEditorMode::Edit => EditorTabId::ExistingHost {
+            source_file: editor_state.source_file.clone(),
+            host_name: editor_state.original_name.clone().unwrap_or_else(|| editor_state.name.value.trim().to_string()),
+        },
+    };
+
+    app.tabs.push(HostTab::new_editor(EditorTabState { id: editor_id, editor_state }));
+    app.selected_tab = app.tabs.len().saturating_sub(1);
+    app.focus_on_manager = false;
+    app.tab_content_area = Rect::new(0, 0, 120, 40);
+}
+
 #[test]
 fn edit_entry_updates_inventory_and_reloads_host_view() {
     let workspace = TestWorkspace::new("tui", "host_editor_edit").expect("temp workspace");
@@ -54,7 +69,7 @@ inventory:
     app.handle_manager_key(KeyEvent::new(KeyCode::Char('e'), KeyModifiers::NONE))
         .expect("open edit modal");
 
-    let form = app.host_editor.as_mut().expect("host editor state");
+    let form = app.selected_host_editor_mut().expect("host editor state");
     form.host.value = "alpha-updated.example".to_string();
 
     app.submit_host_editor();
@@ -90,7 +105,7 @@ inventory:
         .expect("open edit modal");
 
     {
-        let form = app.host_editor.as_mut().expect("host editor state");
+        let form = app.selected_host_editor_mut().expect("host editor state");
         form.selected = HostEditorField::Delete;
     }
 
@@ -132,7 +147,7 @@ inventory:
         .expect("open create modal");
 
     {
-        let form = app.host_editor.as_mut().expect("create host editor state");
+        let form = app.selected_host_editor_mut().expect("create host editor state");
         assert_eq!(form.mode, crate::tui::HostEditorMode::Create);
         assert_eq!(form.source_file, inventory_path);
         form.name.value = "new-host".to_string();
@@ -172,7 +187,7 @@ inventory:
     app.handle_manager_key(KeyEvent::new(KeyCode::Char('e'), KeyModifiers::NONE))
         .expect("open edit modal");
 
-    let form = app.host_editor.as_mut().expect("host editor state");
+    let form = app.selected_host_editor_mut().expect("host editor state");
     form.profile.value = "default".to_string();
 
     app.submit_host_editor();
@@ -205,7 +220,7 @@ inventory:
     app.open_host_editor_for_new_entry(inventory_path.clone());
 
     {
-        let form = app.host_editor.as_mut().expect("create host editor state");
+        let form = app.selected_host_editor_mut().expect("create host editor state");
         form.name.value = "nested-host".to_string();
         form.host.value = "nested.example".to_string();
         form.folder_path.value = "/folder/folder1/".to_string();
@@ -273,19 +288,22 @@ inventory:
 #[test]
 fn protocol_field_cycles_with_arrow_keys_and_filters_visible_fields_by_protocol() {
     let mut app = AppState::new_for_tests();
-    app.host_editor = Some(HostEditorState::new_create(
-        PathBuf::from("/tmp/inventory.yaml"),
-        vec!["default".to_string(), "work".to_string()],
-        vec!["rdp_lab".to_string()],
-    ));
+    open_test_editor(
+        &mut app,
+        HostEditorState::new_create(
+            PathBuf::from("/tmp/inventory.yaml"),
+            vec!["default".to_string(), "work".to_string()],
+            vec!["rdp_lab".to_string()],
+        ),
+    );
 
     {
-        let form = app.host_editor.as_mut().expect("host editor state");
+        let form = app.selected_host_editor_mut().expect("host editor state");
         form.selected = HostEditorField::Protocol;
     }
     app.handle_host_editor_key(KeyEvent::new(KeyCode::Right, KeyModifiers::NONE));
 
-    let form = app.host_editor.as_ref().expect("host editor state");
+    let form = app.selected_host_editor().expect("host editor state");
     assert_eq!(form.protocol.value, "rdp");
     assert!(!form.visible_fields().contains(&HostEditorField::Profile));
     assert!(!form.visible_fields().contains(&HostEditorField::IdentityFile));
@@ -293,11 +311,11 @@ fn protocol_field_cycles_with_arrow_keys_and_filters_visible_fields_by_protocol(
     assert!(form.visible_fields().contains(&HostEditorField::RdpArgs));
     assert!(!form.visible_fields().contains(&HostEditorField::Hidden));
 
-    let form = app.host_editor.as_mut().expect("host editor state");
+    let form = app.selected_host_editor_mut().expect("host editor state");
     form.selected = HostEditorField::Protocol;
     app.handle_host_editor_key(KeyEvent::new(KeyCode::Left, KeyModifiers::NONE));
 
-    let form = app.host_editor.as_ref().expect("host editor state");
+    let form = app.selected_host_editor().expect("host editor state");
     assert_eq!(form.protocol.value, "ssh");
     assert!(form.visible_fields().contains(&HostEditorField::Profile));
     assert!(form.visible_fields().contains(&HostEditorField::IdentityFile));
@@ -307,42 +325,48 @@ fn protocol_field_cycles_with_arrow_keys_and_filters_visible_fields_by_protocol(
 #[test]
 fn profile_field_cycles_with_arrow_keys() {
     let mut app = AppState::new_for_tests();
-    app.host_editor = Some(HostEditorState::new_create(
-        PathBuf::from("/tmp/inventory.yaml"),
-        vec!["default".to_string(), "work".to_string()],
-        Vec::new(),
-    ));
+    open_test_editor(
+        &mut app,
+        HostEditorState::new_create(
+            PathBuf::from("/tmp/inventory.yaml"),
+            vec!["default".to_string(), "work".to_string()],
+            Vec::new(),
+        ),
+    );
 
-    let form = app.host_editor.as_mut().expect("host editor state");
+    let form = app.selected_host_editor_mut().expect("host editor state");
     form.selected = HostEditorField::Profile;
     assert_eq!(form.mode, HostEditorMode::Create);
     assert_eq!(form.profile.value, "default");
 
     app.handle_host_editor_key(KeyEvent::new(KeyCode::Right, KeyModifiers::NONE));
-    assert_eq!(app.host_editor.as_ref().expect("host editor state").profile.value.as_str(), "work");
+    assert_eq!(app.selected_host_editor().expect("host editor state").profile.value.as_str(), "work");
 
     app.handle_host_editor_key(KeyEvent::new(KeyCode::Left, KeyModifiers::NONE));
-    assert_eq!(app.host_editor.as_ref().expect("host editor state").profile.value.as_str(), "default");
+    assert_eq!(app.selected_host_editor().expect("host editor state").profile.value.as_str(), "default");
 }
 
 #[test]
 fn vault_pass_field_cycles_with_arrow_keys() {
     let mut app = AppState::new_for_tests();
-    app.host_editor = Some(HostEditorState::new_create(
-        PathBuf::from("/tmp/inventory.yaml"),
-        vec!["default".to_string()],
-        vec!["db_prod".to_string(), "rdp_lab".to_string()],
-    ));
+    open_test_editor(
+        &mut app,
+        HostEditorState::new_create(
+            PathBuf::from("/tmp/inventory.yaml"),
+            vec!["default".to_string()],
+            vec!["db_prod".to_string(), "rdp_lab".to_string()],
+        ),
+    );
 
-    let form = app.host_editor.as_mut().expect("host editor state");
+    let form = app.selected_host_editor_mut().expect("host editor state");
     form.selected = HostEditorField::VaultPass;
     assert_eq!(form.vault_pass.value, "db_prod");
 
     app.handle_host_editor_key(KeyEvent::new(KeyCode::Right, KeyModifiers::NONE));
-    assert_eq!(app.host_editor.as_ref().expect("host editor state").vault_pass.value.as_str(), "rdp_lab");
+    assert_eq!(app.selected_host_editor().expect("host editor state").vault_pass.value.as_str(), "rdp_lab");
 
     app.handle_host_editor_key(KeyEvent::new(KeyCode::Left, KeyModifiers::NONE));
-    assert_eq!(app.host_editor.as_ref().expect("host editor state").vault_pass.value.as_str(), "db_prod");
+    assert_eq!(app.selected_host_editor().expect("host editor state").vault_pass.value.as_str(), "db_prod");
 }
 
 #[test]
@@ -365,39 +389,38 @@ fn selected_form_fields_do_not_show_examples() {
 #[test]
 fn protocol_switch_sets_default_ports_for_ssh_and_rdp() {
     let mut app = AppState::new_for_tests();
-    app.host_editor = Some(HostEditorState::new_create(
-        PathBuf::from("/tmp/inventory.yaml"),
-        vec!["default".to_string()],
-        vec!["db_prod".to_string()],
-    ));
+    open_test_editor(
+        &mut app,
+        HostEditorState::new_create(PathBuf::from("/tmp/inventory.yaml"), vec!["default".to_string()], vec!["db_prod".to_string()]),
+    );
 
     {
-        let form = app.host_editor.as_mut().expect("host editor state");
+        let form = app.selected_host_editor_mut().expect("host editor state");
         assert_eq!(form.port.value, "22");
         form.selected = HostEditorField::Protocol;
     }
 
     app.handle_host_editor_key(KeyEvent::new(KeyCode::Right, KeyModifiers::NONE));
     {
-        let form = app.host_editor.as_ref().expect("host editor state");
+        let form = app.selected_host_editor().expect("host editor state");
         assert_eq!(form.protocol.value, "rdp");
         assert_eq!(form.port.value, "3389");
     }
 
     app.handle_host_editor_key(KeyEvent::new(KeyCode::Left, KeyModifiers::NONE));
     {
-        let form = app.host_editor.as_ref().expect("host editor state");
+        let form = app.selected_host_editor().expect("host editor state");
         assert_eq!(form.protocol.value, "ssh");
         assert_eq!(form.port.value, "22");
     }
 
     {
-        let form = app.host_editor.as_mut().expect("host editor state");
+        let form = app.selected_host_editor_mut().expect("host editor state");
         form.port.value = "3390".to_string();
         form.selected = HostEditorField::Protocol;
     }
     app.handle_host_editor_key(KeyEvent::new(KeyCode::Right, KeyModifiers::NONE));
-    let form = app.host_editor.as_ref().expect("host editor state");
+    let form = app.selected_host_editor().expect("host editor state");
     assert_eq!(form.protocol.value, "rdp");
     assert_eq!(form.port.value, "3390");
 }
@@ -405,14 +428,13 @@ fn protocol_switch_sets_default_ports_for_ssh_and_rdp() {
 #[test]
 fn description_field_accepts_space_input() {
     let mut app = AppState::new_for_tests();
-    app.host_editor = Some(HostEditorState::new_create(
-        PathBuf::from("/tmp/inventory.yaml"),
-        vec!["default".to_string()],
-        vec!["db_prod".to_string()],
-    ));
+    open_test_editor(
+        &mut app,
+        HostEditorState::new_create(PathBuf::from("/tmp/inventory.yaml"), vec!["default".to_string()], vec!["db_prod".to_string()]),
+    );
 
     {
-        let form = app.host_editor.as_mut().expect("host editor state");
+        let form = app.selected_host_editor_mut().expect("host editor state");
         form.selected = HostEditorField::Description;
     }
 
@@ -420,21 +442,20 @@ fn description_field_accepts_space_input() {
     app.handle_host_editor_key(KeyEvent::new(KeyCode::Char(' '), KeyModifiers::NONE));
     app.handle_host_editor_key(KeyEvent::new(KeyCode::Char('b'), KeyModifiers::NONE));
 
-    let form = app.host_editor.as_ref().expect("host editor state");
+    let form = app.selected_host_editor().expect("host editor state");
     assert_eq!(form.description.value, "a b");
 }
 
 #[test]
 fn non_description_fields_ignore_space_input() {
     let mut app = AppState::new_for_tests();
-    app.host_editor = Some(HostEditorState::new_create(
-        PathBuf::from("/tmp/inventory.yaml"),
-        vec!["default".to_string()],
-        vec!["db_prod".to_string()],
-    ));
+    open_test_editor(
+        &mut app,
+        HostEditorState::new_create(PathBuf::from("/tmp/inventory.yaml"), vec!["default".to_string()], vec!["db_prod".to_string()]),
+    );
 
     {
-        let form = app.host_editor.as_mut().expect("host editor state");
+        let form = app.selected_host_editor_mut().expect("host editor state");
         form.selected = HostEditorField::Host;
     }
 
@@ -442,54 +463,52 @@ fn non_description_fields_ignore_space_input() {
     app.handle_host_editor_key(KeyEvent::new(KeyCode::Char(' '), KeyModifiers::NONE));
     app.handle_host_editor_key(KeyEvent::new(KeyCode::Char('b'), KeyModifiers::NONE));
 
-    let form = app.host_editor.as_ref().expect("host editor state");
+    let form = app.selected_host_editor().expect("host editor state");
     assert_eq!(form.host.value, "ab");
 }
 
 #[test]
 fn host_editor_paste_preserves_spaces_only_for_description() {
     let mut app = AppState::new_for_tests();
-    app.host_editor = Some(HostEditorState::new_create(
-        PathBuf::from("/tmp/inventory.yaml"),
-        vec!["default".to_string()],
-        vec!["db_prod".to_string()],
-    ));
+    open_test_editor(
+        &mut app,
+        HostEditorState::new_create(PathBuf::from("/tmp/inventory.yaml"), vec!["default".to_string()], vec!["db_prod".to_string()]),
+    );
 
     {
-        let form = app.host_editor.as_mut().expect("host editor state");
+        let form = app.selected_host_editor_mut().expect("host editor state");
         form.selected = HostEditorField::Host;
     }
     app.handle_host_editor_paste("with spaces");
-    let form = app.host_editor.as_ref().expect("host editor state");
+    let form = app.selected_host_editor().expect("host editor state");
     assert_eq!(form.host.value, "withspaces");
 
     {
-        let form = app.host_editor.as_mut().expect("host editor state");
+        let form = app.selected_host_editor_mut().expect("host editor state");
         form.selected = HostEditorField::Description;
     }
     app.handle_host_editor_paste("more spaces");
-    let form = app.host_editor.as_ref().expect("host editor state");
+    let form = app.selected_host_editor().expect("host editor state");
     assert_eq!(form.description.value, "more spaces");
 }
 
 #[test]
 fn identities_only_space_still_cycles_value() {
     let mut app = AppState::new_for_tests();
-    app.host_editor = Some(HostEditorState::new_create(
-        PathBuf::from("/tmp/inventory.yaml"),
-        vec!["default".to_string()],
-        vec!["db_prod".to_string()],
-    ));
+    open_test_editor(
+        &mut app,
+        HostEditorState::new_create(PathBuf::from("/tmp/inventory.yaml"), vec!["default".to_string()], vec!["db_prod".to_string()]),
+    );
 
     {
-        let form = app.host_editor.as_mut().expect("host editor state");
+        let form = app.selected_host_editor_mut().expect("host editor state");
         form.selected = HostEditorField::IdentitiesOnly;
         assert_eq!(form.identities_only_display(), "auto");
     }
 
     app.handle_host_editor_key(KeyEvent::new(KeyCode::Char(' '), KeyModifiers::NONE));
 
-    let form = app.host_editor.as_ref().expect("host editor state");
+    let form = app.selected_host_editor().expect("host editor state");
     assert_eq!(form.identities_only_display(), "yes");
 }
 
@@ -497,22 +516,20 @@ fn identities_only_space_still_cycles_value() {
 fn host_editor_mouse_selection_allows_drag_highlight_and_delete() {
     let mut app = AppState::new_for_tests();
     app.last_terminal_size = (120, 40);
-    app.host_editor = Some(HostEditorState::new_create(
-        PathBuf::from("/tmp/inventory.yaml"),
-        vec!["default".to_string()],
-        vec!["db_prod".to_string()],
-    ));
+    open_test_editor(
+        &mut app,
+        HostEditorState::new_create(PathBuf::from("/tmp/inventory.yaml"), vec!["default".to_string()], vec!["db_prod".to_string()]),
+    );
 
     {
-        let form = app.host_editor.as_mut().expect("host editor state");
+        let form = app.selected_host_editor_mut().expect("host editor state");
         form.host.value = "alpha.example".to_string();
         form.host.cursor = form.host.value.chars().count();
     }
 
-    let (_, inner) = app.host_editor_modal_layout().expect("host editor layout");
+    let (_, inner) = app.host_editor_tab_layout(app.tab_content_area).expect("host editor layout");
     let host_row_index = app
-        .host_editor
-        .as_ref()
+        .selected_host_editor()
         .expect("host editor state")
         .visible_fields()
         .iter()
@@ -545,7 +562,7 @@ fn host_editor_mouse_selection_allows_drag_highlight_and_delete() {
 
     app.handle_host_editor_key(KeyEvent::new(KeyCode::Delete, KeyModifiers::NONE));
 
-    let form = app.host_editor.as_ref().expect("host editor state");
+    let form = app.selected_host_editor().expect("host editor state");
     assert_eq!(form.selected, HostEditorField::Host);
     assert_eq!(form.host.value, ".example");
 }
@@ -572,10 +589,11 @@ inventory:
     app.set_selected_row(find_host_row(&app, "alpha"));
     app.handle_manager_key(KeyEvent::new(KeyCode::Char('e'), KeyModifiers::NONE))
         .expect("open edit modal");
+    app.tab_content_area = Rect::new(0, 0, 120, 40);
 
-    let (_, inner) = app.host_editor_modal_layout().expect("host editor layout");
+    let (_, inner) = app.host_editor_tab_layout(app.tab_content_area).expect("host editor layout");
     let action_row = {
-        let form = app.host_editor.as_ref().expect("host editor state");
+        let form = app.selected_host_editor().expect("host editor state");
         let non_action_rows = form.visible_fields().iter().filter(|field| !field.is_action()).count() as u16;
         inner.y.saturating_add(2).saturating_add(non_action_rows).saturating_add(3)
     };
@@ -601,7 +619,7 @@ inventory:
         modifiers: KeyModifiers::NONE,
     })
     .expect("mouse click cancel action");
-    assert!(app.host_editor.is_none());
+    assert!(app.selected_host_editor().is_none());
 }
 
 #[test]
@@ -632,15 +650,14 @@ fn selected_field_scrolls_horizontally_when_cursor_moves_past_visible_width() {
 fn mouse_click_maps_to_visible_scrolled_text_column_in_host_editor() {
     let mut app = AppState::new_for_tests();
     app.last_terminal_size = (120, 40);
-    app.host_editor = Some(HostEditorState::new_create(
-        PathBuf::from("/tmp/inventory.yaml"),
-        vec!["default".to_string()],
-        vec!["db_prod".to_string()],
-    ));
+    open_test_editor(
+        &mut app,
+        HostEditorState::new_create(PathBuf::from("/tmp/inventory.yaml"), vec!["default".to_string()], vec!["db_prod".to_string()]),
+    );
 
     let (row, text_start_col, expected_cursor) = {
-        let (_, inner) = app.host_editor_modal_layout().expect("host editor layout");
-        let form = app.host_editor.as_mut().expect("host editor state");
+        let (_, inner) = app.host_editor_tab_layout(app.tab_content_area).expect("host editor layout");
+        let form = app.selected_host_editor_mut().expect("host editor state");
         form.selected = HostEditorField::Host;
         form.host.value = "abcdefghijklmnopqrstuvwxyz0123456789".to_string();
         form.host.cursor = form.host.value.chars().count();
@@ -665,7 +682,7 @@ fn mouse_click_maps_to_visible_scrolled_text_column_in_host_editor() {
     })
     .expect("mouse click in host text column");
 
-    let form = app.host_editor.as_ref().expect("host editor state");
+    let form = app.selected_host_editor().expect("host editor state");
     assert_eq!(form.selected, HostEditorField::Host);
     assert_eq!(form.host.cursor, expected_cursor);
 }

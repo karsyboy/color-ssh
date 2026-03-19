@@ -126,7 +126,7 @@ impl AppState {
     fn base_host_for_rdp_credentials_action(&self, action: &RdpCredentialsAction) -> Option<crate::inventory::InventoryHost> {
         match action {
             RdpCredentialsAction::OpenHostTab { host, .. } => Some((**host).clone()),
-            RdpCredentialsAction::ReconnectTab { tab_index, .. } => self.tabs.get(*tab_index).map(|tab| tab.host.clone()),
+            RdpCredentialsAction::ReconnectTab { tab_index, .. } => self.terminal_tab(*tab_index).map(|tab| tab.host.clone()),
         }
     }
 
@@ -165,7 +165,7 @@ impl AppState {
                 Err(err) => {
                     let err_message = err.to_string();
                     log_error!("Failed to prepare RDP reconnect: {}", err_message);
-                    if let Some(tab) = self.tabs.get_mut(tab_index) {
+                    if let Some(tab) = self.terminal_tab_mut(tab_index) {
                         tab.session = None;
                         tab.session_error = Some(err_message);
                     }

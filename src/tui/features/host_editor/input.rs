@@ -2,7 +2,10 @@
 
 use crate::auth::vault;
 use crate::inventory::{create_inventory_host_entry, delete_inventory_host_entry, update_inventory_host_entry};
-use crate::tui::{AppState, HostContextMenuAction, HostContextMenuState, HostDeleteConfirmState, HostEditorField, HostEditorMode, HostEditorState};
+use crate::tui::{
+    AppState, EditorTabId, EditorTabState, HostContextMenuAction, HostContextMenuState, HostDeleteConfirmState, HostEditorField, HostEditorMode,
+    HostEditorState, HostTab,
+};
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use std::path::PathBuf;
 
@@ -33,6 +36,57 @@ impl AppState {
         self.host_tree_root.path.clone()
     }
 
+    fn find_editor_tab_index(&self, target_id: &EditorTabId) -> Option<usize> {
+        self.tabs
+            .iter()
+            .position(|tab| tab.editor().is_some_and(|editor_tab| &editor_tab.id == target_id))
+    }
+
+    fn open_or_focus_host_editor_tab(&mut self, editor_id: EditorTabId, editor_state: HostEditorState) {
+        self.host_context_menu = None;
+        self.host_delete_confirm = None;
+
+        if let Some(tab_idx) = self.find_editor_tab_index(&editor_id) {
+            self.selected_tab = tab_idx;
+            self.focus_on_manager = false;
+            self.search_mode = false;
+            self.quick_connect = None;
+            self.ensure_tab_visible();
+            self.mark_ui_dirty();
+            return;
+        }
+
+        self.tabs.push(HostTab::new_editor(EditorTabState { id: editor_id, editor_state }));
+
+        self.selected_tab = self.tabs.len().saturating_sub(1);
+        self.focus_on_manager = false;
+        self.search_mode = false;
+        self.quick_connect = None;
+        self.ensure_tab_visible();
+        self.mark_ui_dirty();
+    }
+
+    pub(crate) fn close_selected_editor_tab(&mut self) {
+        if self.tabs.is_empty() || self.selected_tab >= self.tabs.len() || self.tabs[self.selected_tab].editor().is_none() {
+            return;
+        }
+
+        self.host_delete_confirm = None;
+        self.tabs.remove(self.selected_tab);
+
+        if self.selected_tab >= self.tabs.len() && self.selected_tab > 0 {
+            self.selected_tab -= 1;
+        }
+
+        if self.tabs.is_empty() {
+            self.focus_manager_panel();
+        } else {
+            self.ensure_tab_visible();
+        }
+
+        self.mark_ui_dirty();
+    }
+
     pub(crate) fn open_host_editor_for_selected_host(&mut self) {
         let Some(host_idx) = self.selected_host_idx() else {
             return;
@@ -40,23 +94,20 @@ impl AppState {
         let Some(host) = self.hosts.get(host_idx).cloned() else {
             return;
         };
+
         let profiles = self.discover_quick_connect_profiles();
         let vault_entries = self.discover_host_editor_vault_pass_entries();
-
-        self.host_context_menu = None;
-        self.host_delete_confirm = None;
-        self.host_editor = Some(HostEditorState::new_edit(&host, profiles, vault_entries));
-        self.mark_ui_dirty();
+        let editor_state = HostEditorState::new_edit(&host, profiles, vault_entries);
+        let editor_id = EditorTabId::for_existing_host(&host);
+        self.open_or_focus_host_editor_tab(editor_id, editor_state);
     }
 
     pub(crate) fn open_host_editor_for_new_entry(&mut self, source_file: PathBuf) {
         let profiles = self.discover_quick_connect_profiles();
         let vault_entries = self.discover_host_editor_vault_pass_entries();
-
-        self.host_context_menu = None;
-        self.host_delete_confirm = None;
-        self.host_editor = Some(HostEditorState::new_create(source_file, profiles, vault_entries));
-        self.mark_ui_dirty();
+        let editor_state = HostEditorState::new_create(source_file.clone(), profiles, vault_entries);
+        let editor_id = EditorTabId::for_new_entry(source_file);
+        self.open_or_focus_host_editor_tab(editor_id, editor_state);
     }
 
     pub(crate) fn open_host_editor_for_new_entry_from_selection(&mut self) {
@@ -121,7 +172,7 @@ impl AppState {
         let mut should_close = false;
         let mut should_open_delete_confirm = false;
 
-        if let Some(form) = self.host_editor.as_mut() {
+        if let Some(form) = self.selected_host_editor_mut() {
             form.finish_mouse_selection();
             match key.code {
                 KeyCode::Esc => {
@@ -214,9 +265,8 @@ impl AppState {
         } else if should_open_delete_confirm {
             self.open_host_delete_confirmation();
         } else if should_close {
-            self.host_editor = None;
             self.host_delete_confirm = None;
-            self.mark_ui_dirty();
+            self.close_selected_editor_tab();
         }
     }
 
@@ -225,7 +275,7 @@ impl AppState {
             return;
         }
 
-        let Some(form) = self.host_editor.as_mut() else {
+        let Some(form) = self.selected_host_editor_mut() else {
             return;
         };
         form.finish_mouse_selection();
@@ -257,7 +307,7 @@ impl AppState {
     }
 
     pub(crate) fn open_host_delete_confirmation(&mut self) {
-        let Some(form) = self.host_editor.as_ref() else {
+        let Some(form) = self.selected_host_editor() else {
             return;
         };
 
@@ -292,7 +342,7 @@ impl AppState {
     }
 
     fn confirm_host_delete(&mut self) {
-        let Some(form) = self.host_editor.as_ref() else {
+        let Some(form) = self.selected_host_editor() else {
             self.host_delete_confirm = None;
             return;
         };
@@ -309,7 +359,7 @@ impl AppState {
 
         if host_name.is_empty() {
             self.host_delete_confirm = None;
-            if let Some(form) = self.host_editor.as_mut() {
+            if let Some(form) = self.selected_host_editor_mut() {
                 form.error = Some("Cannot delete: host name is empty.".to_string());
             }
             self.mark_ui_dirty();
@@ -321,17 +371,17 @@ impl AppState {
                 self.host_delete_confirm = None;
                 let root_path = self.host_tree_root.path.clone();
                 if let Err(err) = self.reload_inventory_tree_from_path(&root_path) {
-                    if let Some(form) = self.host_editor.as_mut() {
+                    if let Some(form) = self.selected_host_editor_mut() {
                         form.error = Some(format!("Deleted entry, but reload failed: {err}"));
                     }
+                    self.mark_ui_dirty();
                 } else {
-                    self.host_editor = None;
+                    self.close_selected_editor_tab();
                 }
-                self.mark_ui_dirty();
             }
             Err(err) => {
                 self.host_delete_confirm = None;
-                if let Some(form) = self.host_editor.as_mut() {
+                if let Some(form) = self.selected_host_editor_mut() {
                     form.error = Some(format!("Failed to delete entry: {err}"));
                 }
                 self.mark_ui_dirty();
@@ -340,14 +390,14 @@ impl AppState {
     }
 
     pub(crate) fn submit_host_editor(&mut self) {
-        let Some(form) = self.host_editor.as_ref() else {
+        let Some(form) = self.selected_host_editor() else {
             return;
         };
 
         let submission = match form.build_submission() {
             Ok(submission) => submission,
             Err(err) => {
-                if let Some(form) = self.host_editor.as_mut() {
+                if let Some(form) = self.selected_host_editor_mut() {
                     form.error = Some(err.message());
                 }
                 self.mark_ui_dirty();
@@ -356,7 +406,7 @@ impl AppState {
         };
 
         if self.host_name_exists(&submission.host.name, submission.original_name.as_deref()) {
-            if let Some(form) = self.host_editor.as_mut() {
+            if let Some(form) = self.selected_host_editor_mut() {
                 form.error = Some(format!("Host '{}' already exists.", submission.host.name));
             }
             self.mark_ui_dirty();
@@ -370,7 +420,7 @@ impl AppState {
         };
 
         if let Err(err) = operation_result {
-            if let Some(form) = self.host_editor.as_mut() {
+            if let Some(form) = self.selected_host_editor_mut() {
                 form.error = Some(format!("Failed to save entry: {err}"));
             }
             self.mark_ui_dirty();
@@ -379,7 +429,7 @@ impl AppState {
 
         let root_path = self.host_tree_root.path.clone();
         if let Err(err) = self.reload_inventory_tree_from_path(&root_path) {
-            if let Some(form) = self.host_editor.as_mut() {
+            if let Some(form) = self.selected_host_editor_mut() {
                 form.error = Some(format!("Entry saved, but reload failed: {err}"));
             }
             self.mark_ui_dirty();
@@ -389,8 +439,7 @@ impl AppState {
         let host_name = submission.host.name.clone();
         let _ = self.select_host_row_by_name(&host_name);
         self.host_delete_confirm = None;
-        self.host_editor = None;
-        self.mark_ui_dirty();
+        self.close_selected_editor_tab();
     }
 
     fn host_name_exists(&self, candidate_name: &str, original_name: Option<&str>) -> bool {

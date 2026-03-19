@@ -572,6 +572,7 @@ impl HostEditorState {
         self.vault_pass = TextInput::new(self.vault_pass_options[self.vault_pass_index].clone());
     }
 
+    #[cfg(test)]
     pub(crate) fn modal_height(&self) -> u16 {
         let visible_fields = self.visible_fields();
         let non_action_rows = visible_fields.iter().filter(|field| !field.is_action()).count() as u16;
