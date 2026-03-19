@@ -228,8 +228,18 @@ impl AppState {
             return;
         };
 
-        let width = full_area.width.clamp(52, 92);
-        let height = 6;
+        let trimmed_name = confirm.host_name.trim();
+        let compact_name = if trimmed_name.chars().count() > 36 {
+            format!("{}…", trimmed_name.chars().take(35).collect::<String>())
+        } else {
+            trimmed_name.to_string()
+        };
+
+        let prompt = format!("Delete '{compact_name}'?");
+        let controls = "Enter/y delete · Esc/n cancel";
+        let content_width = prompt.chars().count().max(controls.chars().count()) as u16;
+        let width = content_width.saturating_add(4).clamp(34, 72).min(full_area.width);
+        let height = 5;
         let area = Self::centered_rect(width, height, full_area);
         let inner = Rect::new(
             area.x.saturating_add(1),
@@ -247,17 +257,11 @@ impl AppState {
 
         let lines = vec![
             Line::from(vec![
-                Span::styled("Delete entry ", Style::default().fg(theme::ansi_bright_white())),
-                Span::styled(
-                    format!("'{}'", confirm.host_name),
-                    Style::default().fg(theme::ansi_red()).add_modifier(Modifier::BOLD),
-                ),
+                Span::styled("Delete ", Style::default().fg(theme::ansi_bright_white())),
+                Span::styled(format!("'{compact_name}'"), Style::default().fg(theme::ansi_red()).add_modifier(Modifier::BOLD)),
                 Span::styled("?", Style::default().fg(theme::ansi_bright_white())),
             ]),
-            Line::from(vec![Span::styled(
-                "[y/Enter] Delete  |  [Esc/n] Cancel",
-                Style::default().fg(theme::ansi_bright_black()),
-            )]),
+            Line::from(vec![Span::styled(controls, Style::default().fg(theme::ansi_bright_black()))]),
         ];
 
         frame.render_widget(Paragraph::new(lines), inner);

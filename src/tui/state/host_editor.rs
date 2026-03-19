@@ -386,7 +386,9 @@ pub(crate) struct HostEditorState {
 
 #[derive(Debug, Clone)]
 pub(crate) struct HostDeleteConfirmState {
+    pub(crate) source_file: PathBuf,
     pub(crate) host_name: String,
+    pub(crate) from_editor: bool,
 }
 
 #[derive(Debug, Clone)]

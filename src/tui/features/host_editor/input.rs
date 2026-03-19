@@ -185,6 +185,37 @@ impl AppState {
         self.mark_ui_dirty();
     }
 
+    fn open_host_delete_confirmation_with_target(&mut self, source_file: PathBuf, host_name: String, from_editor: bool) {
+        let host_name = host_name.trim().to_string();
+        if host_name.is_empty() {
+            return;
+        }
+
+        self.host_context_menu = None;
+        self.host_delete_confirm = Some(HostDeleteConfirmState {
+            source_file,
+            host_name,
+            from_editor,
+        });
+        self.mark_ui_dirty();
+    }
+
+    fn open_host_delete_confirmation_for_host_idx(&mut self, host_idx: usize) {
+        let Some(host) = self.hosts.get(host_idx) else {
+            return;
+        };
+
+        self.open_host_delete_confirmation_with_target(host.source_file.clone(), host.name.clone(), false);
+    }
+
+    pub(crate) fn open_host_delete_confirmation_for_selected_host(&mut self) {
+        let Some(host_idx) = self.selected_host_idx() else {
+            return;
+        };
+
+        self.open_host_delete_confirmation_for_host_idx(host_idx);
+    }
+
     pub(crate) fn handle_host_context_menu_key(&mut self, key: KeyEvent) {
         let mut should_close = false;
         let mut action = None;
@@ -263,8 +294,7 @@ impl AppState {
             }
             HostContextMenuAction::DeleteEntry => {
                 if let HostContextMenuTarget::Host { host_idx } = menu.target {
-                    self.open_host_editor_for_host_idx(host_idx);
-                    self.open_host_delete_confirmation();
+                    self.open_host_delete_confirmation_for_host_idx(host_idx);
                 }
             }
             HostContextMenuAction::Connect => {
@@ -490,8 +520,7 @@ impl AppState {
             })
             .unwrap_or_else(|| "entry".to_string());
 
-        self.host_delete_confirm = Some(HostDeleteConfirmState { host_name });
-        self.mark_ui_dirty();
+        self.open_host_delete_confirmation_with_target(form.source_file.clone(), host_name, true);
     }
 
     pub(crate) fn handle_host_delete_confirm_key(&mut self, key: KeyEvent) {
@@ -508,25 +537,22 @@ impl AppState {
     }
 
     fn confirm_host_delete(&mut self) {
-        let Some(form) = self.selected_host_editor() else {
-            self.host_delete_confirm = None;
+        let Some(confirm) = self.host_delete_confirm.clone() else {
             return;
         };
 
-        let source_file = form.source_file.clone();
-        let host_name = form
-            .original_name
-            .clone()
-            .or_else(|| {
-                let trimmed = form.name.value.trim();
-                (!trimmed.is_empty()).then(|| trimmed.to_string())
-            })
-            .unwrap_or_default();
+        let source_file = confirm.source_file;
+        let host_name = confirm.host_name.trim().to_string();
+        let from_editor = confirm.from_editor;
 
         if host_name.is_empty() {
             self.host_delete_confirm = None;
-            if let Some(form) = self.selected_host_editor_mut() {
-                form.error = Some("Cannot delete: host name is empty.".to_string());
+            if from_editor {
+                if let Some(form) = self.selected_host_editor_mut() {
+                    form.error = Some("Cannot delete: host name is empty.".to_string());
+                }
+            } else {
+                self.reload_notice_toast = Some(ReloadNoticeToast::new(format_reload_notice("Cannot delete: host name is empty.")));
             }
             self.mark_ui_dirty();
             return;
@@ -537,18 +563,28 @@ impl AppState {
                 self.host_delete_confirm = None;
                 let root_path = self.host_tree_root.path.clone();
                 if let Err(err) = self.reload_inventory_tree_from_path(&root_path) {
-                    if let Some(form) = self.selected_host_editor_mut() {
-                        form.error = Some(format!("Deleted entry, but reload failed: {err}"));
+                    if from_editor {
+                        if let Some(form) = self.selected_host_editor_mut() {
+                            form.error = Some(format!("Deleted entry, but reload failed: {err}"));
+                        }
+                    } else {
+                        self.reload_notice_toast = Some(ReloadNoticeToast::new(format_reload_notice(&format!(
+                            "Deleted entry, but reload failed: {err}"
+                        ))));
                     }
                     self.mark_ui_dirty();
-                } else {
+                } else if from_editor {
                     self.close_selected_editor_tab();
                 }
             }
             Err(err) => {
                 self.host_delete_confirm = None;
-                if let Some(form) = self.selected_host_editor_mut() {
-                    form.error = Some(format!("Failed to delete entry: {err}"));
+                if from_editor {
+                    if let Some(form) = self.selected_host_editor_mut() {
+                        form.error = Some(format!("Failed to delete entry: {err}"));
+                    }
+                } else {
+                    self.reload_notice_toast = Some(ReloadNoticeToast::new(format_reload_notice(&format!("Failed to delete entry: {err}"))));
                 }
                 self.mark_ui_dirty();
             }
