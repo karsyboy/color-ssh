@@ -1,7 +1,7 @@
 //! Folder picker and folder-management keyboard handling.
 
 use crate::inventory::{
-    FolderId, InventoryHost, TreeFolder, create_inventory_folder, delete_inventory_folder, move_inventory_host_entry, rename_inventory_folder,
+    FolderId, InventoryHost, TreeFolder, create_inventory_folder, delete_inventory_folder, move_inventory_host_entry, relocate_inventory_folder,
 };
 use crate::runtime::{ReloadNoticeToast, format_reload_notice};
 use crate::tui::text_edit;
@@ -77,6 +77,26 @@ impl AppState {
         self.open_folder_picker(
             source_file,
             FolderPickerMode::CreateFolderParent {
+                folder_name: state.name,
+                name_cursor: state.cursor,
+                name_selection: state.selection,
+                parent_folder_path: initial_folder_path.clone(),
+            },
+            initial_folder_path,
+        );
+    }
+
+    pub(crate) fn open_folder_picker_for_rename_folder_parent(&mut self) {
+        let Some(state) = self.folder_rename.clone() else {
+            return;
+        };
+
+        let source_file = state.source_file.clone();
+        let initial_folder_path = state.parent_folder_path.clone();
+        self.open_folder_picker(
+            source_file,
+            FolderPickerMode::RenameFolderParent {
+                source_folder_path: state.folder_path,
                 folder_name: state.name,
                 name_cursor: state.cursor,
                 name_selection: state.selection,
@@ -217,11 +237,13 @@ impl AppState {
 
         let mut should_submit = false;
         let mut should_close = false;
+        let mut should_pick_parent = false;
         if let Some(state) = self.folder_rename.as_mut() {
             state.drag_anchor = None;
             match key.code {
                 KeyCode::Esc => should_close = true,
                 KeyCode::Enter => should_submit = true,
+                KeyCode::Tab | KeyCode::BackTab => should_pick_parent = true,
                 KeyCode::Left => text_edit::move_cursor_left(&state.name, &mut state.cursor, &mut state.selection),
                 KeyCode::Right => text_edit::move_cursor_right(&state.name, &mut state.cursor, &mut state.selection),
                 KeyCode::Home => text_edit::move_cursor_home(&mut state.cursor, &mut state.selection),
@@ -240,6 +262,7 @@ impl AppState {
                 KeyCode::Char('e') if key.modifiers.contains(KeyModifiers::CONTROL) => {
                     text_edit::move_cursor_end(&state.name, &mut state.cursor, &mut state.selection)
                 }
+                KeyCode::Char('p') if key.modifiers.contains(KeyModifiers::CONTROL) => should_pick_parent = true,
                 KeyCode::Char(ch) if !key.modifiers.contains(KeyModifiers::CONTROL) && !key.modifiers.contains(KeyModifiers::ALT) => {
                     text_edit::insert_char(&mut state.name, &mut state.cursor, &mut state.selection, ch);
                     state.error = None;
@@ -248,6 +271,10 @@ impl AppState {
             }
         }
 
+        if should_pick_parent {
+            self.open_folder_picker_for_rename_folder_parent();
+            return;
+        }
         if should_submit {
             self.submit_folder_rename();
             return;
@@ -379,6 +406,30 @@ impl AppState {
         Some(state)
     }
 
+    fn folder_rename_state_from_picker_mode(source_file: PathBuf, parent_folder_path: Vec<String>, mode: &FolderPickerMode) -> Option<FolderRenameState> {
+        let FolderPickerMode::RenameFolderParent {
+            source_folder_path,
+            folder_name,
+            name_cursor,
+            name_selection,
+            ..
+        } = mode
+        else {
+            return None;
+        };
+        if source_folder_path.is_empty() {
+            return None;
+        }
+
+        let mut state = FolderRenameState::new(source_file, source_folder_path.clone());
+        state.parent_folder_path = parent_folder_path;
+        state.name = folder_name.clone();
+        state.cursor = (*name_cursor).min(text_edit::char_len(&state.name));
+        state.selection = text_edit::normalized_selection(&state.name, *name_selection);
+        state.drag_anchor = None;
+        Some(state)
+    }
+
     pub(crate) fn cancel_folder_picker(&mut self) {
         let Some(picker) = self.folder_picker.clone() else {
             return;
@@ -389,6 +440,12 @@ impl AppState {
             && let Some(state) = Self::folder_create_state_from_picker_mode(picker.source_file.clone(), parent_folder_path.clone(), &picker.mode)
         {
             self.folder_create = Some(state);
+        }
+
+        if let FolderPickerMode::RenameFolderParent { parent_folder_path, .. } = &picker.mode
+            && let Some(state) = Self::folder_rename_state_from_picker_mode(picker.source_file.clone(), parent_folder_path.clone(), &picker.mode)
+        {
+            self.folder_rename = Some(state);
         }
 
         self.mark_ui_dirty();
@@ -421,6 +478,12 @@ impl AppState {
                 }
                 self.mark_ui_dirty();
             }
+            FolderPickerMode::RenameFolderParent { .. } => {
+                if let Some(state) = Self::folder_rename_state_from_picker_mode(source_file, selected_folder_path, &picker.mode) {
+                    self.folder_rename = Some(state);
+                }
+                self.mark_ui_dirty();
+            }
             FolderPickerMode::MoveHost { host_name } => {
                 match move_inventory_host_entry(&source_file, &host_name, &selected_folder_path) {
                     Ok(()) => {
@@ -446,12 +509,10 @@ impl AppState {
         };
 
         let new_name = state.name.trim().to_string();
-        match rename_inventory_folder(&state.source_file, &state.folder_path, &new_name) {
+        match relocate_inventory_folder(&state.source_file, &state.folder_path, &state.parent_folder_path, &new_name) {
             Ok(()) => {
-                let mut renamed_path = state.folder_path.clone();
-                if let Some(last) = renamed_path.last_mut() {
-                    *last = new_name.clone();
-                }
+                let mut renamed_path = state.parent_folder_path.clone();
+                renamed_path.push(new_name.clone());
                 self.folder_rename = None;
                 let root_path = self.host_tree_root.path.clone();
                 if let Err(err) = self.reload_inventory_tree_from_path(&root_path) {

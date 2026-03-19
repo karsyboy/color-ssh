@@ -12,6 +12,13 @@ pub(crate) enum FolderPickerMode {
         name_selection: Option<(usize, usize)>,
         parent_folder_path: Vec<String>,
     },
+    RenameFolderParent {
+        source_folder_path: Vec<String>,
+        folder_name: String,
+        name_cursor: usize,
+        name_selection: Option<(usize, usize)>,
+        parent_folder_path: Vec<String>,
+    },
     MoveHost {
         host_name: String,
     },
@@ -47,7 +54,7 @@ impl FolderPickerState {
     pub(crate) fn title(&self) -> &'static str {
         match self.mode {
             FolderPickerMode::CreatePlacement => " Select Placement Folder ",
-            FolderPickerMode::CreateFolderParent { .. } => " Select Parent Folder ",
+            FolderPickerMode::CreateFolderParent { .. } | FolderPickerMode::RenameFolderParent { .. } => " Select Parent Folder ",
             FolderPickerMode::MoveHost { .. } => " Move Entry to Folder ",
         }
     }
@@ -85,6 +92,7 @@ impl FolderPickerState {
 pub(crate) struct FolderRenameState {
     pub(crate) source_file: PathBuf,
     pub(crate) folder_path: Vec<String>,
+    pub(crate) parent_folder_path: Vec<String>,
     pub(crate) name: String,
     pub(crate) cursor: usize,
     pub(crate) selection: Option<(usize, usize)>,
@@ -95,10 +103,12 @@ pub(crate) struct FolderRenameState {
 impl FolderRenameState {
     pub(crate) fn new(source_file: PathBuf, folder_path: Vec<String>) -> Self {
         let current_name = folder_path.last().cloned().unwrap_or_default();
+        let parent_folder_path = folder_path[..folder_path.len().saturating_sub(1)].to_vec();
         let cursor = text_edit::char_len(&current_name);
         Self {
             source_file,
             folder_path,
+            parent_folder_path,
             name: current_name,
             cursor,
             selection: None,
@@ -107,11 +117,11 @@ impl FolderRenameState {
         }
     }
 
-    pub(crate) fn folder_display_path(&self) -> String {
-        if self.folder_path.is_empty() {
+    pub(crate) fn parent_display_path(&self) -> String {
+        if self.parent_folder_path.is_empty() {
             "/".to_string()
         } else {
-            format!("/{}", self.folder_path.join("/"))
+            format!("/{}", self.parent_folder_path.join("/"))
         }
     }
 }

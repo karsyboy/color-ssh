@@ -19,7 +19,7 @@ use std::path::Path;
 
 pub(crate) use edit::{
     EditableInventoryHost, create_inventory_folder, create_inventory_host_entry, delete_inventory_folder, delete_inventory_host_entry,
-    move_inventory_host_entry, rename_inventory_folder, update_inventory_host_entry,
+    move_inventory_host_entry, relocate_inventory_folder, update_inventory_host_entry,
 };
 pub(crate) use migration::migrate_default_ssh_config_to_inventory;
 pub(crate) use tree::sort_tree_folder_by_host_name;

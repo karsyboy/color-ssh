@@ -88,8 +88,9 @@ impl AppState {
 
         let mut lines = Vec::new();
         lines.push(Line::from(vec![
-            Span::styled("Folder: ", Style::default().fg(theme::ansi_bright_black())),
-            Span::styled(state.folder_display_path(), Style::default().fg(theme::ansi_bright_white())),
+            Span::styled("Parent: ", Style::default().fg(theme::ansi_bright_black())),
+            Span::styled(state.parent_display_path(), Style::default().fg(theme::ansi_bright_white())),
+            Span::styled("  (Tab/Ctrl+P to change)", Style::default().fg(theme::ansi_bright_black())),
         ]));
 
         let cursor_style = Style::default().fg(theme::ansi_black()).bg(theme::ansi_cyan()).add_modifier(Modifier::BOLD);

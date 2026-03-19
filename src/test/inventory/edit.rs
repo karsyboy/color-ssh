@@ -1,6 +1,6 @@
 use super::{
     EditableInventoryHost, create_inventory_folder, create_inventory_host_entry, delete_inventory_folder, delete_inventory_host_entry,
-    move_inventory_host_entry, rename_inventory_folder, update_inventory_host_entry,
+    move_inventory_host_entry, relocate_inventory_folder, update_inventory_host_entry,
 };
 use crate::inventory::{ConnectionProtocol, build_inventory_tree};
 use crate::test::support::fs::TestWorkspace;
@@ -226,7 +226,7 @@ inventory:
         )
         .expect("write inventory");
 
-    rename_inventory_folder(&inventory_path, &["old-folder".to_string()], "new-folder").expect("rename folder");
+    relocate_inventory_folder(&inventory_path, &["old-folder".to_string()], &[], "new-folder").expect("rename folder");
 
     let tree = build_inventory_tree(&inventory_path).expect("reload inventory");
     let host = tree.hosts.iter().find(|item| item.name == "alpha").expect("host");
@@ -235,6 +235,46 @@ inventory:
     let rendered = fs::read_to_string(&inventory_path).expect("read inventory");
     assert!(rendered.contains("new-folder:"));
     assert!(!rendered.contains("old-folder:"));
+}
+
+#[test]
+fn relocate_inventory_folder_moves_and_renames_folder() {
+    let workspace = TestWorkspace::new("inventory", "edit_relocate_folder").expect("temp workspace");
+    let inventory_path = workspace.join("cossh-inventory.yaml");
+    workspace
+        .write(
+            &inventory_path,
+            r#"
+inventory:
+  - GroupA:
+      - Old:
+          - name: alpha
+            protocol: ssh
+            host: alpha.example
+  - GroupB:
+      - name: beta
+        protocol: ssh
+        host: beta.example
+"#,
+        )
+        .expect("write inventory");
+
+    relocate_inventory_folder(
+        &inventory_path,
+        &["GroupA".to_string(), "Old".to_string()],
+        &["GroupB".to_string()],
+        "NewFolder",
+    )
+    .expect("relocate folder");
+
+    let tree = build_inventory_tree(&inventory_path).expect("reload inventory");
+    let host = tree.hosts.iter().find(|item| item.name == "alpha").expect("moved host");
+    assert_eq!(host.source_folder_path, vec!["GroupB".to_string(), "NewFolder".to_string()]);
+
+    let rendered = fs::read_to_string(&inventory_path).expect("read inventory");
+    assert!(rendered.contains("GroupB:"));
+    assert!(rendered.contains("NewFolder:"));
+    assert!(!rendered.contains("Old:"));
 }
 
 #[test]

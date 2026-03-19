@@ -131,7 +131,7 @@ pub(crate) fn move_inventory_host_entry(source_file: &Path, host_name: &str, tar
     write_inventory_document(source_file, &document)
 }
 
-pub(crate) fn rename_inventory_folder(source_file: &Path, folder_path: &[String], new_name: &str) -> io::Result<()> {
+pub(crate) fn relocate_inventory_folder(source_file: &Path, folder_path: &[String], target_parent_path: &[String], new_name: &str) -> io::Result<()> {
     if folder_path.is_empty() {
         return Err(io::Error::new(io::ErrorKind::InvalidInput, "cannot rename the inventory root folder"));
     }
@@ -144,53 +144,40 @@ pub(crate) fn rename_inventory_folder(source_file: &Path, folder_path: &[String]
         return Err(io::Error::new(io::ErrorKind::InvalidInput, "folder name cannot include path separator '/'"));
     }
 
-    let parent_path = &folder_path[..folder_path.len().saturating_sub(1)];
+    let current_parent_path = &folder_path[..folder_path.len().saturating_sub(1)];
     let current_name = &folder_path[folder_path.len().saturating_sub(1)];
-    if current_name == sanitized_name {
+    if current_parent_path == target_parent_path && current_name == sanitized_name {
         return Ok(());
+    }
+    if target_parent_path.starts_with(folder_path) {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "folder cannot be moved into itself or one of its descendants",
+        ));
     }
 
     let mut document = load_inventory_document(source_file)?;
     let nodes = inventory_nodes_mut(&mut document, source_file)?;
-    let parent_nodes = find_folder_nodes_mut(nodes, parent_path, source_file)?;
 
-    if parent_nodes
-        .iter()
-        .any(|node| folder_entry_name(node).is_some_and(|name| name == sanitized_name))
-    {
-        return Err(io::Error::new(
-            io::ErrorKind::AlreadyExists,
-            format!(
-                "folder '{}' already exists under '{}' in '{}'",
-                sanitized_name,
-                if parent_path.is_empty() {
-                    "/".to_string()
-                } else {
-                    format!("/{}", parent_path.join("/"))
-                },
-                source_file.display()
-            ),
-        ));
-    }
+    let mut folder_node = {
+        let current_parent_nodes = find_folder_nodes_mut(nodes, current_parent_path, source_file)?;
+        let folder_index = current_parent_nodes
+            .iter()
+            .position(|node| folder_entry_name(node).is_some_and(|name| name == current_name))
+            .ok_or_else(|| {
+                io::Error::new(
+                    io::ErrorKind::NotFound,
+                    format!(
+                        "inventory folder '{}' was not found in '{}'",
+                        format_args!("/{}", folder_path.join("/")),
+                        source_file.display()
+                    ),
+                )
+            })?;
+        current_parent_nodes.remove(folder_index)
+    };
 
-    let folder_index = parent_nodes
-        .iter()
-        .position(|node| folder_entry_name(node).is_some_and(|name| name == current_name))
-        .ok_or_else(|| {
-            io::Error::new(
-                io::ErrorKind::NotFound,
-                format!(
-                    "inventory folder '{}' was not found in '{}'",
-                    format_args!("/{}", folder_path.join("/")),
-                    source_file.display()
-                ),
-            )
-        })?;
-
-    let node = parent_nodes
-        .get_mut(folder_index)
-        .ok_or_else(|| io::Error::new(io::ErrorKind::NotFound, "folder index disappeared unexpectedly"))?;
-    let Value::Mapping(mapping) = node else {
+    let Value::Mapping(mapping) = &mut folder_node else {
         return Err(io::Error::new(
             io::ErrorKind::InvalidData,
             format!("folder '{}' in '{}' must be a YAML mapping", current_name, source_file.display()),
@@ -210,6 +197,27 @@ pub(crate) fn rename_inventory_folder(source_file: &Path, folder_path: &[String]
         )
     })?;
     mapping.insert(Value::String(sanitized_name.to_string()), items);
+
+    let target_nodes = ensure_folder_nodes(nodes, target_parent_path, source_file)?;
+    if target_nodes
+        .iter()
+        .any(|node| folder_entry_name(node).is_some_and(|name| name == sanitized_name))
+    {
+        return Err(io::Error::new(
+            io::ErrorKind::AlreadyExists,
+            format!(
+                "folder '{}' already exists under '{}' in '{}'",
+                sanitized_name,
+                if target_parent_path.is_empty() {
+                    "/".to_string()
+                } else {
+                    format!("/{}", target_parent_path.join("/"))
+                },
+                source_file.display()
+            ),
+        ));
+    }
+    target_nodes.push(folder_node);
 
     write_inventory_document(source_file, &document)
 }

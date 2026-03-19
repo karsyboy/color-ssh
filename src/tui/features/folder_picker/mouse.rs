@@ -6,6 +6,7 @@ use crossterm::event::{self, MouseButton, MouseEventKind};
 use ratatui::layout::Rect;
 
 const FOLDER_RENAME_LABEL_PREFIX: &str = "Name: ";
+const FOLDER_RENAME_PARENT_ROW_OFFSET: u16 = 0;
 const FOLDER_CREATE_LABEL_PREFIX: &str = "Name: ";
 const FOLDER_RENAME_NAME_ROW_OFFSET: u16 = 1;
 const FOLDER_RENAME_ACTION_ROW_OFFSET: u16 = 3;
@@ -206,6 +207,15 @@ impl AppState {
                         self.folder_rename = None;
                         self.mark_ui_dirty();
                     }
+                    return;
+                }
+
+                let parent_row = inner.y.saturating_add(FOLDER_RENAME_PARENT_ROW_OFFSET);
+                if mouse.row == parent_row {
+                    if let Some(state) = self.folder_rename.as_mut() {
+                        state.drag_anchor = None;
+                    }
+                    self.open_folder_picker_for_rename_folder_parent();
                     return;
                 }
 

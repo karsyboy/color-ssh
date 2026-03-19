@@ -1561,6 +1561,71 @@ inventory:
 }
 
 #[test]
+fn manager_ctrl_r_shortcut_can_change_parent_folder_before_rename() {
+    let workspace = TestWorkspace::new("tui", "host_browser_rename_folder_shortcut_change_parent").expect("temp workspace");
+    let inventory_path = workspace.join("cossh-inventory.yaml");
+    workspace
+        .write(
+            &inventory_path,
+            r#"
+inventory:
+  - GroupA:
+      - Old:
+          - name: alpha
+            protocol: ssh
+            host: alpha.example
+  - GroupB:
+      - name: beta
+        protocol: ssh
+        host: beta.example
+"#,
+        )
+        .expect("write inventory");
+
+    let mut app = AppState::new_for_tests();
+    seed_app_from_inventory(&mut app, &inventory_path);
+    app.set_selected_row(find_folder_row(&app, "Old"));
+
+    app.handle_manager_key(KeyEvent::new(KeyCode::Char('r'), KeyModifiers::CONTROL))
+        .expect("ctrl+r opens folder rename modal");
+    {
+        let state = app.folder_rename.as_mut().expect("folder rename modal");
+        assert_eq!(state.parent_folder_path, vec!["GroupA".to_string()]);
+        state.name = "MovedFolder".to_string();
+        state.cursor = state.name.chars().count();
+        state.selection = None;
+    }
+
+    app.handle_folder_rename_key(KeyEvent::new(KeyCode::Tab, KeyModifiers::NONE));
+    {
+        let picker = app.folder_picker.as_mut().expect("parent folder picker");
+        assert!(matches!(picker.mode, crate::tui::FolderPickerMode::RenameFolderParent { .. }));
+        picker.selected = picker
+            .rows
+            .iter()
+            .position(|row| row.folder_path == vec!["GroupB".to_string()])
+            .expect("group b row in picker");
+    }
+    app.handle_folder_picker_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+
+    {
+        let state = app.folder_rename.as_ref().expect("folder rename modal restored");
+        assert_eq!(state.parent_folder_path, vec!["GroupB".to_string()]);
+        assert_eq!(state.name, "MovedFolder");
+    }
+
+    app.handle_folder_rename_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+
+    let moved_host = app.hosts.iter().find(|host| host.name == "alpha").expect("moved host");
+    assert_eq!(moved_host.source_folder_path, vec!["GroupB".to_string(), "MovedFolder".to_string()]);
+
+    let rendered = fs::read_to_string(&inventory_path).expect("read inventory");
+    assert!(rendered.contains("GroupB:"));
+    assert!(rendered.contains("MovedFolder:"));
+    assert!(!rendered.contains("Old:"));
+}
+
+#[test]
 fn canceling_parent_picker_restores_folder_create_modal() {
     let workspace = TestWorkspace::new("tui", "host_browser_create_folder_cancel_picker").expect("temp workspace");
     let inventory_path = workspace.join("cossh-inventory.yaml");
