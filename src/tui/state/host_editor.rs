@@ -1,7 +1,7 @@
 //! Host editor state used by TUI create/edit/delete workflows.
 
 use crate::args::validate_vault_entry_name;
-use crate::inventory::{ConnectionProtocol, EditableInventoryHost, InventoryHost, SshOptionMap};
+use crate::inventory::{ConnectionProtocol, EditableInventoryHost, FolderId, InventoryHost, SshOptionMap};
 use crate::tui::text_edit;
 use serde_yml::{Mapping, Value};
 use std::collections::{BTreeMap, HashSet};
@@ -10,16 +10,35 @@ use std::path::PathBuf;
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum HostContextMenuAction {
     EditEntry,
-    NewEntry,
+    DuplicateEntry,
+    MoveToFolder,
+    DeleteEntry,
+    Connect,
+    NewEntryInFolder,
+    RenameFolder,
+    DeleteFolder,
 }
 
 impl HostContextMenuAction {
     pub(crate) fn label(self) -> &'static str {
         match self {
             Self::EditEntry => "Edit Entry",
-            Self::NewEntry => "New Entry",
+            Self::DuplicateEntry => "Duplicate Entry",
+            Self::MoveToFolder => "Move to Folder...",
+            Self::DeleteEntry => "Delete Entry",
+            Self::Connect => "Connect",
+            Self::NewEntryInFolder => "New Entry in this Folder",
+            Self::RenameFolder => "Rename Folder",
+            Self::DeleteFolder => "Delete Folder",
         }
     }
+}
+
+#[derive(Debug, Clone)]
+pub(crate) enum HostContextMenuTarget {
+    Host { host_idx: usize },
+    Folder { folder_id: FolderId, source_file: PathBuf },
+    Background { source_file: PathBuf },
 }
 
 #[derive(Debug, Clone)]
@@ -28,17 +47,37 @@ pub(crate) struct HostContextMenuState {
     pub(crate) row: u16,
     pub(crate) actions: Vec<HostContextMenuAction>,
     pub(crate) selected: usize,
-    pub(crate) new_entry_source_file: Option<PathBuf>,
+    pub(crate) target: HostContextMenuTarget,
 }
 
 impl HostContextMenuState {
-    pub(crate) fn for_host(column: u16, row: u16) -> Self {
+    pub(crate) fn for_host(column: u16, row: u16, host_idx: usize) -> Self {
         Self {
             column,
             row,
-            actions: vec![HostContextMenuAction::EditEntry],
+            actions: vec![
+                HostContextMenuAction::EditEntry,
+                HostContextMenuAction::DuplicateEntry,
+                HostContextMenuAction::MoveToFolder,
+                HostContextMenuAction::DeleteEntry,
+                HostContextMenuAction::Connect,
+            ],
             selected: 0,
-            new_entry_source_file: None,
+            target: HostContextMenuTarget::Host { host_idx },
+        }
+    }
+
+    pub(crate) fn for_folder(column: u16, row: u16, folder_id: FolderId, source_file: PathBuf) -> Self {
+        Self {
+            column,
+            row,
+            actions: vec![
+                HostContextMenuAction::NewEntryInFolder,
+                HostContextMenuAction::RenameFolder,
+                HostContextMenuAction::DeleteFolder,
+            ],
+            selected: 0,
+            target: HostContextMenuTarget::Folder { folder_id, source_file },
         }
     }
 
@@ -46,14 +85,18 @@ impl HostContextMenuState {
         Self {
             column,
             row,
-            actions: vec![HostContextMenuAction::NewEntry],
+            actions: vec![HostContextMenuAction::NewEntryInFolder],
             selected: 0,
-            new_entry_source_file: Some(source_file),
+            target: HostContextMenuTarget::Background { source_file },
         }
     }
 
     pub(crate) fn selected_action(&self) -> Option<HostContextMenuAction> {
         self.actions.get(self.selected).copied()
+    }
+
+    pub(crate) fn has_action(&self, action: HostContextMenuAction) -> bool {
+        self.actions.contains(&action)
     }
 
     pub(crate) fn select_next(&mut self) {
@@ -74,6 +117,14 @@ impl HostContextMenuState {
             self.selected = self.actions.len().saturating_sub(1);
         } else {
             self.selected = self.selected.saturating_sub(1);
+        }
+    }
+
+    pub(crate) fn title(&self) -> &'static str {
+        match self.target {
+            HostContextMenuTarget::Host { .. } => " Host Menu ",
+            HostContextMenuTarget::Folder { .. } => " Folder Menu ",
+            HostContextMenuTarget::Background { .. } => " Inventory Menu ",
         }
     }
 }
@@ -1125,12 +1176,11 @@ impl HostEditorState {
 }
 
 fn default_collapsed_sections() -> HashSet<HostEditorSection> {
-    HashSet::from([
-        HostEditorSection::ProxyForwarding,
-        HostEditorSection::AdvancedSsh,
-        HostEditorSection::Rdp,
-        HostEditorSection::Placement,
-    ])
+    HostEditorSection::ordered()
+        .iter()
+        .copied()
+        .filter(|section| section.is_collapsible() && !matches!(section, HostEditorSection::Authentication))
+        .collect()
 }
 
 fn optional_trimmed_string(value: &str) -> Option<String> {

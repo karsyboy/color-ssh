@@ -368,13 +368,17 @@ impl AppState {
 
                     if clicked_index < self.visible_host_rows.len() {
                         self.set_selected_row(clicked_index);
-                        match self.visible_host_rows[clicked_index].kind {
-                            HostTreeRowKind::Host(_) => {
-                                self.open_host_context_menu_for_selected_host(mouse.column, mouse.row);
+                        let row_kind = self.visible_host_rows[clicked_index].kind;
+                        match row_kind {
+                            HostTreeRowKind::Host(host_idx) => {
+                                self.open_host_context_menu_for_selected_host(mouse.column, mouse.row, host_idx);
                             }
-                            HostTreeRowKind::Folder(_) => {
-                                let source_file = self.selected_source_file_for_new_entry();
-                                self.open_host_context_menu_for_new_entry(mouse.column, mouse.row, source_file);
+                            HostTreeRowKind::Folder(folder_id) => {
+                                let source_file = self
+                                    .folder_by_id(folder_id)
+                                    .map(|folder| folder.path.clone())
+                                    .unwrap_or_else(|| self.selected_source_file_for_new_entry());
+                                self.open_host_context_menu_for_folder(mouse.column, mouse.row, folder_id, source_file);
                             }
                         }
                     } else {

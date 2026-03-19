@@ -273,7 +273,16 @@ inventory:
     .expect("right click host row");
 
     let menu = app.host_context_menu.as_ref().expect("host context menu");
-    assert_eq!(menu.actions, vec![crate::tui::HostContextMenuAction::EditEntry]);
+    assert_eq!(
+        menu.actions,
+        vec![
+            crate::tui::HostContextMenuAction::EditEntry,
+            crate::tui::HostContextMenuAction::DuplicateEntry,
+            crate::tui::HostContextMenuAction::MoveToFolder,
+            crate::tui::HostContextMenuAction::DeleteEntry,
+            crate::tui::HostContextMenuAction::Connect,
+        ]
+    );
 
     app.host_context_menu = None;
 
@@ -286,7 +295,7 @@ inventory:
     .expect("right click empty host area");
 
     let menu = app.host_context_menu.as_ref().expect("empty context menu");
-    assert_eq!(menu.actions, vec![crate::tui::HostContextMenuAction::NewEntry]);
+    assert_eq!(menu.actions, vec![crate::tui::HostContextMenuAction::NewEntryInFolder]);
 
     let row_before = app.selected_host_row;
     app.handle_manager_key(KeyEvent::new(KeyCode::Down, KeyModifiers::NONE)).expect("manager down");
@@ -374,6 +383,50 @@ fn advanced_ssh_section_defaults_collapsed_and_toggles_with_enter_and_space() {
     let form = app.selected_host_editor().expect("host editor state");
     assert!(form.section_collapsed(HostEditorSection::AdvancedSsh));
     assert!(!form.visible_fields().contains(&HostEditorField::SshOptions));
+}
+
+#[test]
+fn editor_open_defaults_expand_basic_and_authentication_only() {
+    let workspace = TestWorkspace::new("tui", "host_editor_section_defaults").expect("temp workspace");
+    let inventory_path = workspace.join("cossh-inventory.yaml");
+    workspace
+        .write(
+            &inventory_path,
+            r#"
+inventory:
+  - name: alpha
+    protocol: ssh
+    host: alpha.example
+"#,
+        )
+        .expect("write inventory");
+
+    let mut app = AppState::new_for_tests();
+    seed_app_from_inventory(&mut app, &inventory_path);
+
+    app.open_host_editor_for_new_entry(inventory_path.clone());
+    {
+        let form = app.selected_host_editor().expect("create host editor state");
+        assert!(!form.section_collapsed(HostEditorSection::Basic));
+        assert!(!form.section_collapsed(HostEditorSection::Authentication));
+        assert!(form.section_collapsed(HostEditorSection::ProxyForwarding));
+        assert!(form.section_collapsed(HostEditorSection::AdvancedSsh));
+        assert!(form.section_collapsed(HostEditorSection::Rdp));
+        assert!(form.section_collapsed(HostEditorSection::Placement));
+    }
+
+    app.close_selected_editor_tab();
+    app.set_selected_row(find_host_row(&app, "alpha"));
+    app.open_host_editor_for_selected_host();
+    {
+        let form = app.selected_host_editor().expect("edit host editor state");
+        assert!(!form.section_collapsed(HostEditorSection::Basic));
+        assert!(!form.section_collapsed(HostEditorSection::Authentication));
+        assert!(form.section_collapsed(HostEditorSection::ProxyForwarding));
+        assert!(form.section_collapsed(HostEditorSection::AdvancedSsh));
+        assert!(form.section_collapsed(HostEditorSection::Rdp));
+        assert!(form.section_collapsed(HostEditorSection::Placement));
+    }
 }
 
 #[test]

@@ -34,7 +34,7 @@ impl AppState {
         let block = Block::default()
             .borders(Borders::ALL)
             .border_style(Style::default().fg(theme::ansi_cyan()))
-            .title(" Host Menu ");
+            .title(menu.title());
         frame.render_widget(block, area);
 
         let lines = menu

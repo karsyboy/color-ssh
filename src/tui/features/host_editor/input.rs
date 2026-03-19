@@ -1,17 +1,23 @@
 //! Host editor keyboard handling and persistence integration.
 
 use crate::auth::vault;
-use crate::inventory::{create_inventory_host_entry, delete_inventory_host_entry, update_inventory_host_entry};
+use crate::inventory::{FolderId, TreeFolder, create_inventory_host_entry, delete_inventory_host_entry, update_inventory_host_entry};
+use crate::runtime::{ReloadNoticeToast, format_reload_notice};
 use crate::tui::{
-    AppState, EditorTabId, EditorTabState, HostContextMenuAction, HostContextMenuState, HostDeleteConfirmState, HostEditorField, HostEditorMode,
-    HostEditorState, HostEditorVisibleItem, HostTab,
+    AppState, EditorTabId, EditorTabState, HostContextMenuAction, HostContextMenuState, HostContextMenuTarget, HostDeleteConfirmState, HostEditorField,
+    HostEditorMode, HostEditorState, HostEditorVisibleItem, HostTab, HostTreeRowKind,
 };
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use std::path::PathBuf;
 
 impl AppState {
-    pub(crate) fn open_host_context_menu_for_selected_host(&mut self, column: u16, row: u16) {
-        self.host_context_menu = Some(HostContextMenuState::for_host(column, row));
+    pub(crate) fn open_host_context_menu_for_selected_host(&mut self, column: u16, row: u16, host_idx: usize) {
+        self.host_context_menu = Some(HostContextMenuState::for_host(column, row, host_idx));
+        self.mark_ui_dirty();
+    }
+
+    pub(crate) fn open_host_context_menu_for_folder(&mut self, column: u16, row: u16, folder_id: FolderId, source_file: PathBuf) {
+        self.host_context_menu = Some(HostContextMenuState::for_folder(column, row, folder_id, source_file));
         self.mark_ui_dirty();
     }
 
@@ -34,6 +40,37 @@ impl AppState {
         }
 
         self.host_tree_root.path.clone()
+    }
+
+    fn folder_segments_for_folder_id(folder: &TreeFolder, folder_id: FolderId, segments: &mut Vec<String>) -> bool {
+        for child in &folder.children {
+            segments.push(child.name.clone());
+            if child.id == folder_id {
+                return true;
+            }
+            if Self::folder_segments_for_folder_id(child, folder_id, segments) {
+                return true;
+            }
+            let _ = segments.pop();
+        }
+        false
+    }
+
+    fn folder_path_segments_by_id(&self, folder_id: FolderId) -> Option<Vec<String>> {
+        let mut segments = Vec::new();
+        if Self::folder_segments_for_folder_id(&self.host_tree_root, folder_id, &mut segments) {
+            Some(segments)
+        } else {
+            None
+        }
+    }
+
+    fn render_folder_path_input(folder_path: &[String]) -> String {
+        if folder_path.is_empty() {
+            "/".to_string()
+        } else {
+            format!("/{}/", folder_path.join("/"))
+        }
     }
 
     fn find_editor_tab_index(&self, target_id: &EditorTabId) -> Option<usize> {
@@ -91,6 +128,10 @@ impl AppState {
         let Some(host_idx) = self.selected_host_idx() else {
             return;
         };
+        self.open_host_editor_for_host_idx(host_idx);
+    }
+
+    fn open_host_editor_for_host_idx(&mut self, host_idx: usize) {
         let Some(host) = self.hosts.get(host_idx).cloned() else {
             return;
         };
@@ -103,9 +144,16 @@ impl AppState {
     }
 
     pub(crate) fn open_host_editor_for_new_entry(&mut self, source_file: PathBuf) {
+        self.open_host_editor_for_new_entry_with_folder_path(source_file, Vec::new());
+    }
+
+    fn open_host_editor_for_new_entry_with_folder_path(&mut self, source_file: PathBuf, folder_path: Vec<String>) {
         let profiles = self.discover_quick_connect_profiles();
         let vault_entries = self.discover_host_editor_vault_pass_entries();
-        let editor_state = HostEditorState::new_create(source_file.clone(), profiles, vault_entries);
+        let mut editor_state = HostEditorState::new_create(source_file.clone(), profiles, vault_entries);
+        editor_state.folder_path.value = Self::render_folder_path_input(&folder_path);
+        editor_state.folder_path.cursor = editor_state.folder_path.value.chars().count();
+        editor_state.folder_path.selection = None;
         let editor_id = EditorTabId::for_new_entry(source_file);
         self.open_or_focus_host_editor_tab(editor_id, editor_state);
     }
@@ -119,6 +167,24 @@ impl AppState {
         vault::list_entries().unwrap_or_default()
     }
 
+    fn select_visible_host_row_for_host_idx(&mut self, host_idx: usize) -> bool {
+        let Some(row_idx) = self
+            .visible_host_rows
+            .iter()
+            .position(|row| matches!(row.kind, HostTreeRowKind::Host(idx) if idx == host_idx))
+        else {
+            return false;
+        };
+
+        self.set_selected_row(row_idx);
+        true
+    }
+
+    fn open_host_context_menu_placeholder(&mut self, message: impl Into<String>) {
+        self.reload_notice_toast = Some(ReloadNoticeToast::new(format_reload_notice(&message.into())));
+        self.mark_ui_dirty();
+    }
+
     pub(crate) fn handle_host_context_menu_key(&mut self, key: KeyEvent) {
         let mut should_close = false;
         let mut action = None;
@@ -129,8 +195,27 @@ impl AppState {
                 KeyCode::Tab | KeyCode::Down => menu.select_next(),
                 KeyCode::BackTab | KeyCode::Up => menu.select_prev(),
                 KeyCode::Enter => action = menu.selected_action(),
-                KeyCode::Char('e') if key.modifiers.is_empty() => action = Some(HostContextMenuAction::EditEntry),
-                KeyCode::Char('n') if key.modifiers.is_empty() => action = Some(HostContextMenuAction::NewEntry),
+                KeyCode::Char('c') if key.modifiers.is_empty() && menu.has_action(HostContextMenuAction::Connect) => {
+                    action = Some(HostContextMenuAction::Connect);
+                }
+                KeyCode::Char('d') if key.modifiers.is_empty() && menu.has_action(HostContextMenuAction::DeleteEntry) => {
+                    action = Some(HostContextMenuAction::DeleteEntry);
+                }
+                KeyCode::Char('d') if key.modifiers.is_empty() && menu.has_action(HostContextMenuAction::DeleteFolder) => {
+                    action = Some(HostContextMenuAction::DeleteFolder);
+                }
+                KeyCode::Char('e') if key.modifiers.is_empty() && menu.has_action(HostContextMenuAction::EditEntry) => {
+                    action = Some(HostContextMenuAction::EditEntry);
+                }
+                KeyCode::Char('m') if key.modifiers.is_empty() && menu.has_action(HostContextMenuAction::MoveToFolder) => {
+                    action = Some(HostContextMenuAction::MoveToFolder);
+                }
+                KeyCode::Char('n') if key.modifiers.is_empty() && menu.has_action(HostContextMenuAction::NewEntryInFolder) => {
+                    action = Some(HostContextMenuAction::NewEntryInFolder);
+                }
+                KeyCode::Char('r') if key.modifiers.is_empty() && menu.has_action(HostContextMenuAction::RenameFolder) => {
+                    action = Some(HostContextMenuAction::RenameFolder);
+                }
                 _ => {}
             }
         }
@@ -147,17 +232,78 @@ impl AppState {
     }
 
     pub(crate) fn execute_host_context_menu_action(&mut self, action: HostContextMenuAction) {
+        let Some(menu) = self.host_context_menu.clone() else {
+            return;
+        };
+        self.host_context_menu = None;
+
         match action {
             HostContextMenuAction::EditEntry => {
-                self.open_host_editor_for_selected_host();
+                if let HostContextMenuTarget::Host { host_idx } = menu.target {
+                    self.open_host_editor_for_host_idx(host_idx);
+                }
             }
-            HostContextMenuAction::NewEntry => {
-                let source_file = self
-                    .host_context_menu
-                    .as_ref()
-                    .and_then(|menu| menu.new_entry_source_file.clone())
-                    .unwrap_or_else(|| self.selected_source_file_for_new_entry());
-                self.open_host_editor_for_new_entry(source_file);
+            HostContextMenuAction::DuplicateEntry => {
+                let host_name = match menu.target {
+                    HostContextMenuTarget::Host { host_idx } => self.hosts.get(host_idx).map(|host| host.name.clone()),
+                    _ => None,
+                }
+                .unwrap_or_else(|| "entry".to_string());
+                self.open_host_context_menu_placeholder(format!("Duplicate Entry for '{host_name}' is not implemented yet (Phase 5 foundation)."));
+            }
+            HostContextMenuAction::MoveToFolder => {
+                let host_name = match menu.target {
+                    HostContextMenuTarget::Host { host_idx } => self.hosts.get(host_idx).map(|host| host.name.clone()),
+                    _ => None,
+                }
+                .unwrap_or_else(|| "entry".to_string());
+                self.open_host_context_menu_placeholder(format!(
+                    "Move to Folder for '{host_name}' is not implemented yet (folder picker in a later phase)."
+                ));
+            }
+            HostContextMenuAction::DeleteEntry => {
+                if let HostContextMenuTarget::Host { host_idx } = menu.target {
+                    self.open_host_editor_for_host_idx(host_idx);
+                    self.open_host_delete_confirmation();
+                }
+            }
+            HostContextMenuAction::Connect => {
+                if let HostContextMenuTarget::Host { host_idx } = menu.target
+                    && self.select_visible_host_row_for_host_idx(host_idx)
+                {
+                    self.select_host_to_connect();
+                }
+            }
+            HostContextMenuAction::NewEntryInFolder => match menu.target {
+                HostContextMenuTarget::Folder { folder_id, source_file } => {
+                    let folder_path = self.folder_path_segments_by_id(folder_id).unwrap_or_default();
+                    self.open_host_editor_for_new_entry_with_folder_path(source_file, folder_path);
+                }
+                HostContextMenuTarget::Background { source_file } => {
+                    self.open_host_editor_for_new_entry(source_file);
+                }
+                HostContextMenuTarget::Host { host_idx } => {
+                    let Some(host) = self.hosts.get(host_idx).cloned() else {
+                        return;
+                    };
+                    self.open_host_editor_for_new_entry_with_folder_path(host.source_file.clone(), host.source_folder_path.clone());
+                }
+            },
+            HostContextMenuAction::RenameFolder => {
+                let folder_name = match menu.target {
+                    HostContextMenuTarget::Folder { folder_id, .. } => self.folder_by_id(folder_id).map(|folder| folder.name.clone()),
+                    _ => None,
+                }
+                .unwrap_or_else(|| "folder".to_string());
+                self.open_host_context_menu_placeholder(format!("Rename Folder for '{folder_name}' is not implemented yet."));
+            }
+            HostContextMenuAction::DeleteFolder => {
+                let folder_name = match menu.target {
+                    HostContextMenuTarget::Folder { folder_id, .. } => self.folder_by_id(folder_id).map(|folder| folder.name.clone()),
+                    _ => None,
+                }
+                .unwrap_or_else(|| "folder".to_string());
+                self.open_host_context_menu_placeholder(format!("Delete Folder for '{folder_name}' is not implemented yet."));
             }
         }
     }

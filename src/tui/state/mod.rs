@@ -11,8 +11,8 @@ mod vault;
 pub(crate) use app::{AppState, ConnectRequest, HOST_PANEL_MAX_WIDTH, HOST_PANEL_MIN_WIDTH};
 pub(crate) use host_browser::{HostSearchEntry, HostTreeRow, HostTreeRowKind};
 pub(crate) use host_editor::{
-    HostContextMenuAction, HostContextMenuState, HostDeleteConfirmState, HostEditorField, HostEditorMode, HostEditorSection, HostEditorState,
-    HostEditorVisibleItem,
+    HostContextMenuAction, HostContextMenuState, HostContextMenuTarget, HostDeleteConfirmState, HostEditorField, HostEditorMode, HostEditorSection,
+    HostEditorState, HostEditorVisibleItem,
 };
 pub(crate) use quick_connect::{QuickConnectField, QuickConnectRow, QuickConnectState, QuickConnectSubmission, QuickConnectValidationError};
 pub(crate) use rdp_prompt::{
