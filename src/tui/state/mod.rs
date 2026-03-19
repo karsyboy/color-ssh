@@ -10,7 +10,7 @@ mod tabs;
 mod vault;
 
 pub(crate) use app::{AppState, ConnectRequest, HOST_PANEL_MAX_WIDTH, HOST_PANEL_MIN_WIDTH};
-pub(crate) use folder_picker::{FolderDeleteConfirmState, FolderPickerMode, FolderPickerRow, FolderPickerState, FolderRenameState};
+pub(crate) use folder_picker::{FolderCreateState, FolderDeleteConfirmState, FolderPickerMode, FolderPickerRow, FolderPickerState, FolderRenameState};
 pub(crate) use host_browser::{HostSearchEntry, HostTreeRow, HostTreeRowKind};
 pub(crate) use host_editor::{
     HostContextMenuAction, HostContextMenuState, HostContextMenuTarget, HostDeleteConfirmState, HostEditorField, HostEditorMode, HostEditorSection,

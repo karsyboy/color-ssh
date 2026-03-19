@@ -225,6 +225,9 @@ impl AppState {
             KeyCode::Char('e') if self.focus_on_manager && key.modifiers.is_empty() => {
                 self.open_host_editor_for_selected_host();
             }
+            KeyCode::Char('n') if self.focus_on_manager && key.modifiers.contains(KeyModifiers::CONTROL) => {
+                self.open_folder_create_for_selected_row();
+            }
             KeyCode::Char('n') if self.focus_on_manager && key.modifiers.is_empty() => {
                 self.open_host_editor_for_new_entry_from_selection();
             }
@@ -326,7 +329,7 @@ impl AppState {
                     self.set_selected_row(row_count.saturating_sub(1));
                 }
             }
-            KeyCode::Enter if self.focus_on_manager => {
+            KeyCode::Enter if self.focus_on_manager && key.modifiers.is_empty() => {
                 if let Some(folder_id) = self.selected_folder_id() {
                     self.toggle_folder(folder_id);
                 } else {

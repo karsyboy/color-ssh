@@ -15,6 +15,7 @@ pub(crate) enum HostContextMenuAction {
     DeleteEntry,
     Connect,
     NewEntryInFolder,
+    NewFolder,
     RenameFolder,
     DeleteFolder,
 }
@@ -28,6 +29,7 @@ impl HostContextMenuAction {
             Self::DeleteEntry => "Delete Entry",
             Self::Connect => "Connect",
             Self::NewEntryInFolder => "New Entry in this Folder",
+            Self::NewFolder => "New Folder",
             Self::RenameFolder => "Rename Folder",
             Self::DeleteFolder => "Delete Folder",
         }
@@ -73,6 +75,7 @@ impl HostContextMenuState {
             row,
             actions: vec![
                 HostContextMenuAction::NewEntryInFolder,
+                HostContextMenuAction::NewFolder,
                 HostContextMenuAction::RenameFolder,
                 HostContextMenuAction::DeleteFolder,
             ],
@@ -85,7 +88,7 @@ impl HostContextMenuState {
         Self {
             column,
             row,
-            actions: vec![HostContextMenuAction::NewEntryInFolder],
+            actions: vec![HostContextMenuAction::NewEntryInFolder, HostContextMenuAction::NewFolder],
             selected: 0,
             target: HostContextMenuTarget::Background { source_file },
         }

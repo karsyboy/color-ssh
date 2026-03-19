@@ -419,11 +419,47 @@ inventory:
     .expect("right click empty host area");
 
     let menu = app.host_context_menu.as_ref().expect("empty context menu");
-    assert_eq!(menu.actions, vec![crate::tui::HostContextMenuAction::NewEntryInFolder]);
+    assert_eq!(
+        menu.actions,
+        vec![
+            crate::tui::HostContextMenuAction::NewEntryInFolder,
+            crate::tui::HostContextMenuAction::NewFolder,
+        ]
+    );
 
     let row_before = app.selected_host_row;
     app.handle_manager_key(KeyEvent::new(KeyCode::Down, KeyModifiers::NONE)).expect("manager down");
     assert!(app.selected_host_row >= row_before);
+}
+
+#[test]
+fn host_context_menu_ctrl_x_shortcut_opens_move_picker() {
+    let workspace = TestWorkspace::new("tui", "host_editor_context_move_shortcut").expect("temp workspace");
+    let inventory_path = workspace.join("cossh-inventory.yaml");
+    workspace
+        .write(
+            &inventory_path,
+            r#"
+inventory:
+  - TeamA:
+      - name: alpha
+        protocol: ssh
+        host: alpha.example
+"#,
+        )
+        .expect("write inventory");
+
+    let mut app = AppState::new_for_tests();
+    seed_app_from_inventory(&mut app, &inventory_path);
+    app.set_selected_row(find_host_row(&app, "alpha"));
+    let host_idx = app.selected_host_idx().expect("selected host");
+
+    app.open_host_context_menu_for_selected_host(1, 1, host_idx);
+    app.handle_host_context_menu_key(KeyEvent::new(KeyCode::Char('x'), KeyModifiers::CONTROL));
+
+    assert!(app.host_context_menu.is_none(), "context menu should close after shortcut action");
+    let picker = app.folder_picker.as_ref().expect("folder picker opened");
+    assert!(matches!(picker.mode, crate::tui::FolderPickerMode::MoveHost { .. }));
 }
 
 #[test]
@@ -1309,6 +1345,45 @@ inventory:
 }
 
 #[test]
+fn manager_modified_enter_does_not_trigger_connect_or_folder_toggle() {
+    let workspace = TestWorkspace::new("tui", "host_browser_modified_enter_guard").expect("temp workspace");
+    let inventory_path = workspace.join("cossh-inventory.yaml");
+    workspace
+        .write(
+            &inventory_path,
+            r#"
+inventory:
+  - Group:
+      - name: alpha
+        protocol: ssh
+        host: alpha.example
+"#,
+        )
+        .expect("write inventory");
+
+    let mut app = AppState::new_for_tests();
+    seed_app_from_inventory(&mut app, &inventory_path);
+
+    app.set_selected_row(find_host_row(&app, "alpha"));
+    app.handle_manager_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::CONTROL))
+        .expect("ctrl+enter should be ignored by manager enter action");
+    assert!(
+        app.selected_host_to_connect.is_none(),
+        "modified enter should not trigger host connection selection"
+    );
+
+    let folder_row = find_folder_row(&app, "Group");
+    app.set_selected_row(folder_row);
+    let expanded_before = app.visible_host_rows[folder_row].expanded;
+
+    app.handle_manager_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::ALT))
+        .expect("alt+enter should be ignored by manager enter action");
+    let expanded_after = app.visible_host_rows[folder_row].expanded;
+
+    assert_eq!(expanded_after, expanded_before, "modified enter should not toggle folder expansion");
+}
+
+#[test]
 fn manager_ctrl_r_shortcut_opens_folder_rename_modal_for_folder_row() {
     let workspace = TestWorkspace::new("tui", "host_browser_rename_shortcut").expect("temp workspace");
     let inventory_path = workspace.join("cossh-inventory.yaml");
@@ -1333,6 +1408,264 @@ inventory:
         .expect("ctrl+r opens folder rename modal");
 
     assert!(app.folder_rename.is_some());
+}
+
+#[test]
+fn manager_ctrl_n_shortcut_can_change_parent_folder_before_create() {
+    let workspace = TestWorkspace::new("tui", "host_browser_create_folder_shortcut").expect("temp workspace");
+    let inventory_path = workspace.join("cossh-inventory.yaml");
+    workspace
+        .write(
+            &inventory_path,
+            r#"
+inventory:
+  - GroupA:
+      - name: alpha
+        protocol: ssh
+        host: alpha.example
+  - GroupB:
+      - name: beta
+        protocol: ssh
+        host: beta.example
+"#,
+        )
+        .expect("write inventory");
+
+    let mut app = AppState::new_for_tests();
+    seed_app_from_inventory(&mut app, &inventory_path);
+    app.set_selected_row(find_folder_row(&app, "GroupA"));
+
+    app.handle_manager_key(KeyEvent::new(KeyCode::Char('n'), KeyModifiers::CONTROL))
+        .expect("ctrl+n opens folder create modal");
+
+    {
+        let state = app.folder_create.as_mut().expect("folder create modal");
+        assert_eq!(state.parent_folder_path, vec!["GroupA".to_string()]);
+        state.name = "NewChild".to_string();
+        state.cursor = state.name.chars().count();
+        state.selection = None;
+    }
+
+    app.handle_folder_create_key(KeyEvent::new(KeyCode::Tab, KeyModifiers::NONE));
+    {
+        let picker = app.folder_picker.as_mut().expect("parent folder picker");
+        assert!(matches!(picker.mode, crate::tui::FolderPickerMode::CreateFolderParent { .. }));
+        picker.selected = picker
+            .rows
+            .iter()
+            .position(|row| row.folder_path == vec!["GroupB".to_string()])
+            .expect("group b row in picker");
+    }
+    app.handle_folder_picker_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+
+    {
+        let state = app.folder_create.as_ref().expect("folder create modal restored");
+        assert_eq!(state.parent_folder_path, vec!["GroupB".to_string()]);
+        assert_eq!(state.name, "NewChild");
+    }
+
+    app.handle_folder_create_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+
+    assert!(app.visible_host_rows.iter().any(|row| row.display_name == "NewChild"));
+    let rendered = fs::read_to_string(&inventory_path).expect("read inventory");
+    assert!(rendered.contains("GroupA:"));
+    assert!(rendered.contains("GroupB:"));
+    assert!(rendered.contains("NewChild:"));
+}
+
+#[test]
+fn canceling_parent_picker_restores_folder_create_modal() {
+    let workspace = TestWorkspace::new("tui", "host_browser_create_folder_cancel_picker").expect("temp workspace");
+    let inventory_path = workspace.join("cossh-inventory.yaml");
+    workspace
+        .write(
+            &inventory_path,
+            r#"
+inventory:
+  - Group:
+      - name: alpha
+        protocol: ssh
+        host: alpha.example
+"#,
+        )
+        .expect("write inventory");
+
+    let mut app = AppState::new_for_tests();
+    seed_app_from_inventory(&mut app, &inventory_path);
+    app.set_selected_row(find_folder_row(&app, "Group"));
+
+    app.handle_manager_key(KeyEvent::new(KeyCode::Char('n'), KeyModifiers::CONTROL))
+        .expect("ctrl+n opens folder create modal");
+    {
+        let state = app.folder_create.as_mut().expect("folder create modal");
+        state.name = "Draft".to_string();
+        state.cursor = state.name.chars().count();
+        state.selection = None;
+    }
+
+    app.handle_folder_create_key(KeyEvent::new(KeyCode::Tab, KeyModifiers::NONE));
+    assert!(app.folder_picker.is_some(), "parent picker opened");
+    app.handle_folder_picker_key(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE));
+
+    assert!(app.folder_picker.is_none(), "picker closed");
+    let state = app.folder_create.as_ref().expect("folder create modal restored");
+    assert_eq!(state.parent_folder_path, vec!["Group".to_string()]);
+    assert_eq!(state.name, "Draft");
+}
+
+#[test]
+fn folder_create_modal_mouse_supports_save_and_cancel_actions() {
+    let workspace = TestWorkspace::new("tui", "host_browser_create_folder_mouse_actions").expect("temp workspace");
+    let inventory_path = workspace.join("cossh-inventory.yaml");
+    workspace
+        .write(
+            &inventory_path,
+            r#"
+inventory:
+  - Group:
+      - name: alpha
+        protocol: ssh
+        host: alpha.example
+"#,
+        )
+        .expect("write inventory");
+
+    let mut app = AppState::new_for_tests();
+    app.last_terminal_size = (120, 40);
+    seed_app_from_inventory(&mut app, &inventory_path);
+    app.set_selected_row(find_folder_row(&app, "Group"));
+
+    app.handle_manager_key(KeyEvent::new(KeyCode::Char('n'), KeyModifiers::CONTROL))
+        .expect("ctrl+n opens folder create modal");
+    {
+        let state = app.folder_create.as_mut().expect("folder create modal");
+        state.name = "MouseCreated".to_string();
+        state.cursor = state.name.chars().count();
+        state.selection = None;
+    }
+
+    let (_, inner) = app.folder_create_modal_layout().expect("folder create layout");
+    let action_row = inner.y.saturating_add(3u16.min(inner.height.saturating_sub(1)));
+    let save_col = inner.x.saturating_add(1);
+
+    app.handle_mouse(MouseEvent {
+        kind: MouseEventKind::Down(MouseButton::Left),
+        column: save_col,
+        row: action_row,
+        modifiers: KeyModifiers::NONE,
+    })
+    .expect("mouse click save action");
+
+    assert!(app.folder_create.is_none(), "save click should close create modal");
+    assert!(app.visible_host_rows.iter().any(|row| row.display_name == "MouseCreated"));
+    let rendered = fs::read_to_string(&inventory_path).expect("read inventory");
+    assert!(rendered.contains("MouseCreated:"));
+
+    app.handle_manager_key(KeyEvent::new(KeyCode::Char('n'), KeyModifiers::CONTROL))
+        .expect("ctrl+n opens folder create modal again");
+    {
+        let state = app.folder_create.as_mut().expect("folder create modal");
+        state.name = "ShouldNotExist".to_string();
+        state.cursor = state.name.chars().count();
+        state.selection = None;
+    }
+
+    let (_, inner) = app.folder_create_modal_layout().expect("folder create layout");
+    let action_row = inner.y.saturating_add(3u16.min(inner.height.saturating_sub(1)));
+    let save_end = inner.x.saturating_add("[ Enter ] Save".chars().count() as u16);
+    let cancel_col = save_end.saturating_add(" | ".chars().count() as u16).saturating_add(1);
+
+    app.handle_mouse(MouseEvent {
+        kind: MouseEventKind::Down(MouseButton::Left),
+        column: cancel_col,
+        row: action_row,
+        modifiers: KeyModifiers::NONE,
+    })
+    .expect("mouse click cancel action");
+
+    assert!(app.folder_create.is_none(), "cancel click should close create modal");
+    let rendered = fs::read_to_string(&inventory_path).expect("read inventory");
+    assert!(!rendered.contains("ShouldNotExist:"));
+}
+
+#[test]
+fn folder_create_text_shortcuts_match_modal_text_editing_conventions() {
+    let workspace = TestWorkspace::new("tui", "host_browser_create_folder_text_shortcuts").expect("temp workspace");
+    let inventory_path = workspace.join("cossh-inventory.yaml");
+    workspace
+        .write(
+            &inventory_path,
+            r#"
+inventory:
+  - Group:
+      - name: alpha
+        protocol: ssh
+        host: alpha.example
+"#,
+        )
+        .expect("write inventory");
+
+    let mut app = AppState::new_for_tests();
+    seed_app_from_inventory(&mut app, &inventory_path);
+    app.set_selected_row(find_folder_row(&app, "Group"));
+    app.handle_manager_key(KeyEvent::new(KeyCode::Char('n'), KeyModifiers::CONTROL))
+        .expect("ctrl+n opens folder create modal");
+
+    app.handle_folder_create_key(KeyEvent::new(KeyCode::Char('a'), KeyModifiers::NONE));
+    app.handle_folder_create_key(KeyEvent::new(KeyCode::Char('b'), KeyModifiers::NONE));
+    app.handle_folder_create_key(KeyEvent::new(KeyCode::Char('c'), KeyModifiers::NONE));
+    app.handle_folder_create_key(KeyEvent::new(KeyCode::Char('a'), KeyModifiers::CONTROL));
+    app.handle_folder_create_key(KeyEvent::new(KeyCode::Char('z'), KeyModifiers::NONE));
+
+    let state = app.folder_create.as_ref().expect("folder create modal");
+    assert_eq!(state.name, "z");
+    assert_eq!(state.cursor, 1);
+    assert!(state.selection.is_none());
+}
+
+#[test]
+fn folder_context_menu_new_folder_action_opens_create_modal() {
+    let workspace = TestWorkspace::new("tui", "host_editor_context_new_folder").expect("temp workspace");
+    let inventory_path = workspace.join("cossh-inventory.yaml");
+    workspace
+        .write(
+            &inventory_path,
+            r#"
+inventory:
+  - Team:
+      - name: alpha
+        protocol: ssh
+        host: alpha.example
+"#,
+        )
+        .expect("write inventory");
+
+    let mut app = AppState::new_for_tests();
+    seed_app_from_inventory(&mut app, &inventory_path);
+
+    let folder_row = find_folder_row(&app, "Team");
+    let folder_id = match app.visible_host_rows[folder_row].kind {
+        crate::tui::HostTreeRowKind::Folder(folder_id) => folder_id,
+        _ => panic!("expected folder row"),
+    };
+
+    app.open_host_context_menu_for_folder(1, 1, folder_id, inventory_path.clone());
+    app.execute_host_context_menu_action(crate::tui::HostContextMenuAction::NewFolder);
+    assert!(app.folder_create.is_some(), "new folder action should open create modal");
+
+    {
+        let state = app.folder_create.as_mut().expect("create modal");
+        assert_eq!(state.parent_folder_path, vec!["Team".to_string()]);
+        state.name = "Nested".to_string();
+        state.cursor = state.name.chars().count();
+        state.selection = None;
+    }
+    app.handle_folder_create_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+
+    assert!(app.visible_host_rows.iter().any(|row| row.display_name == "Nested"));
+    let rendered = fs::read_to_string(&inventory_path).expect("read inventory");
+    assert!(rendered.contains("Team:"));
+    assert!(rendered.contains("Nested:"));
 }
 
 #[test]

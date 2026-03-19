@@ -1,11 +1,15 @@
 //! Folder picker and folder-management mouse handling.
 
 use crate::tui::text_edit;
-use crate::tui::{AppState, FolderRenameState};
+use crate::tui::{AppState, FolderCreateState, FolderRenameState};
 use crossterm::event::{self, MouseButton, MouseEventKind};
 use ratatui::layout::Rect;
 
 const FOLDER_RENAME_LABEL_PREFIX: &str = "New Name: ";
+const FOLDER_CREATE_LABEL_PREFIX: &str = "Name: ";
+const FOLDER_CREATE_PARENT_ROW_OFFSET: u16 = 0;
+const FOLDER_CREATE_NAME_ROW_OFFSET: u16 = 1;
+const FOLDER_CREATE_ACTION_ROW_OFFSET: u16 = 3;
 const SELECT_ACTION_LABEL: &str = "[ Enter ] Select";
 const SAVE_ACTION_LABEL: &str = "[ Enter ] Save";
 const ACTION_SEPARATOR: &str = " | ";
@@ -54,6 +58,26 @@ impl AppState {
         Some((area, inner))
     }
 
+    pub(crate) fn folder_create_modal_layout(&self) -> Option<(Rect, Rect)> {
+        self.folder_create.as_ref()?;
+        let full_area = Rect::new(0, 0, self.last_terminal_size.0, self.last_terminal_size.1);
+        if full_area.width == 0 || full_area.height == 0 {
+            return None;
+        }
+
+        let width = full_area.width.clamp(46, 76);
+        let height = 6u16.min(full_area.height);
+        let area = Self::centered_rect(width, height, full_area);
+        let inner = Rect::new(
+            area.x.saturating_add(1),
+            area.y.saturating_add(1),
+            area.width.saturating_sub(2),
+            area.height.saturating_sub(2),
+        );
+
+        Some((area, inner))
+    }
+
     pub(crate) fn folder_delete_confirm_modal_layout(&self) -> Option<(Rect, Rect)> {
         self.folder_delete_confirm.as_ref()?;
         let full_area = Rect::new(0, 0, self.last_terminal_size.0, self.last_terminal_size.1);
@@ -82,8 +106,7 @@ impl AppState {
         match mouse.kind {
             MouseEventKind::Down(MouseButton::Left) => {
                 if !Self::folder_picker_point_in_rect(area, mouse.column, mouse.row) {
-                    self.folder_picker = None;
-                    self.mark_ui_dirty();
+                    self.cancel_folder_picker();
                     return;
                 }
 
@@ -103,8 +126,7 @@ impl AppState {
                     let cancel_start = select_end.saturating_add(ACTION_SEPARATOR.chars().count() as u16);
                     let cancel_end = cancel_start.saturating_add(CANCEL_ACTION_LABEL.chars().count() as u16);
                     if mouse.column >= cancel_start && mouse.column < cancel_end {
-                        self.folder_picker = None;
-                        self.mark_ui_dirty();
+                        self.cancel_folder_picker();
                     }
                     return;
                 }
@@ -194,6 +216,59 @@ impl AppState {
         }
     }
 
+    pub(crate) fn handle_folder_create_mouse(&mut self, mouse: event::MouseEvent) {
+        let Some((area, inner)) = self.folder_create_modal_layout() else {
+            return;
+        };
+
+        if let MouseEventKind::Down(MouseButton::Left) = mouse.kind {
+            if !Self::folder_picker_point_in_rect(area, mouse.column, mouse.row) {
+                self.folder_create = None;
+                self.mark_ui_dirty();
+                return;
+            }
+
+            if !Self::folder_picker_point_in_rect(inner, mouse.column, mouse.row) {
+                return;
+            }
+
+            let action_row = inner.y.saturating_add(FOLDER_CREATE_ACTION_ROW_OFFSET.min(inner.height.saturating_sub(1)));
+            if mouse.row == action_row {
+                let save_start = inner.x;
+                let save_end = save_start.saturating_add(SAVE_ACTION_LABEL.chars().count() as u16);
+                if mouse.column >= save_start && mouse.column < save_end {
+                    self.submit_folder_create();
+                    return;
+                }
+
+                let cancel_start = save_end.saturating_add(ACTION_SEPARATOR.chars().count() as u16);
+                let cancel_end = cancel_start.saturating_add(CANCEL_ACTION_LABEL.chars().count() as u16);
+                if mouse.column >= cancel_start && mouse.column < cancel_end {
+                    self.folder_create = None;
+                    self.mark_ui_dirty();
+                }
+                return;
+            }
+
+            let parent_row = inner.y.saturating_add(FOLDER_CREATE_PARENT_ROW_OFFSET);
+            if mouse.row == parent_row {
+                self.open_folder_picker_for_create_folder_parent();
+                return;
+            }
+
+            let name_row = inner.y.saturating_add(FOLDER_CREATE_NAME_ROW_OFFSET.min(inner.height.saturating_sub(1)));
+            if mouse.row == name_row
+                && let Some(state) = self.folder_create.as_mut()
+            {
+                state.selection = None;
+                if let Some(cursor) = Self::folder_create_cursor_from_column(state, inner, mouse.column) {
+                    state.cursor = cursor;
+                }
+                self.mark_ui_dirty();
+            }
+        }
+    }
+
     pub(crate) fn handle_folder_delete_confirm_mouse(&mut self, mouse: event::MouseEvent) {
         let Some((area, _)) = self.folder_delete_confirm_modal_layout() else {
             return;
@@ -224,6 +299,16 @@ impl AppState {
     fn folder_rename_cursor_from_column(state: &FolderRenameState, inner: Rect, mouse_col: u16) -> Option<usize> {
         let value_start = inner.x.saturating_add(FOLDER_RENAME_LABEL_PREFIX.chars().count() as u16);
         let value_width = inner.width.saturating_sub(FOLDER_RENAME_LABEL_PREFIX.chars().count() as u16);
+        if value_width == 0 {
+            return Some(0);
+        }
+        let offset = mouse_col.saturating_sub(value_start) as usize;
+        Some(offset.min(text_edit::char_len(&state.name)))
+    }
+
+    fn folder_create_cursor_from_column(state: &FolderCreateState, inner: Rect, mouse_col: u16) -> Option<usize> {
+        let value_start = inner.x.saturating_add(FOLDER_CREATE_LABEL_PREFIX.chars().count() as u16);
+        let value_width = inner.width.saturating_sub(FOLDER_CREATE_LABEL_PREFIX.chars().count() as u16);
         if value_width == 0 {
             return Some(0);
         }

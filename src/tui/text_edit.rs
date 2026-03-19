@@ -54,6 +54,93 @@ pub(crate) fn delete_selection(text: &mut String, cursor: &mut usize, selection:
     true
 }
 
+pub(crate) fn move_cursor_left(text: &str, cursor: &mut usize, selection: &mut TextSelection) {
+    clamp_cursor(text, cursor);
+    let active_selection = normalized_selection(text, *selection);
+    *selection = None;
+    if let Some((start, _)) = active_selection {
+        *cursor = start;
+    } else if *cursor > 0 {
+        *cursor -= 1;
+    }
+}
+
+pub(crate) fn move_cursor_right(text: &str, cursor: &mut usize, selection: &mut TextSelection) {
+    clamp_cursor(text, cursor);
+    let len = char_len(text);
+    let active_selection = normalized_selection(text, *selection);
+    *selection = None;
+    if let Some((_, end)) = active_selection {
+        *cursor = end;
+    } else if *cursor < len {
+        *cursor += 1;
+    }
+}
+
+pub(crate) fn move_cursor_home(cursor: &mut usize, selection: &mut TextSelection) {
+    *cursor = 0;
+    *selection = None;
+}
+
+pub(crate) fn move_cursor_end(text: &str, cursor: &mut usize, selection: &mut TextSelection) {
+    *cursor = char_len(text);
+    *selection = None;
+}
+
+pub(crate) fn select_all(text: &str, cursor: &mut usize, selection: &mut TextSelection) {
+    let len = char_len(text);
+    if len == 0 {
+        *selection = None;
+        *cursor = 0;
+    } else {
+        *selection = Some((0, len));
+        *cursor = len;
+    }
+}
+
+pub(crate) fn insert_char(text: &mut String, cursor: &mut usize, selection: &mut TextSelection, ch: char) {
+    let _ = delete_selection(text, cursor, selection);
+    clamp_cursor(text, cursor);
+    let insert_at = byte_index_for_char(text, *cursor);
+    text.insert(insert_at, ch);
+    *cursor += 1;
+    *selection = None;
+}
+
+pub(crate) fn backspace(text: &mut String, cursor: &mut usize, selection: &mut TextSelection) {
+    if delete_selection(text, cursor, selection) {
+        return;
+    }
+
+    clamp_cursor(text, cursor);
+    if *cursor == 0 {
+        return;
+    }
+
+    let end = byte_index_for_char(text, *cursor);
+    let start = byte_index_for_char(text, cursor.saturating_sub(1));
+    text.replace_range(start..end, "");
+    *cursor = cursor.saturating_sub(1);
+    *selection = None;
+}
+
+pub(crate) fn delete_char(text: &mut String, cursor: &mut usize, selection: &mut TextSelection) {
+    if delete_selection(text, cursor, selection) {
+        return;
+    }
+
+    clamp_cursor(text, cursor);
+    let len = char_len(text);
+    if *cursor >= len {
+        return;
+    }
+
+    let start = byte_index_for_char(text, *cursor);
+    let end = byte_index_for_char(text, cursor.saturating_add(1));
+    text.replace_range(start..end, "");
+    *selection = None;
+}
+
 fn push_if_non_empty<'a>(spans: &mut Vec<Span<'a>>, text: &'a str, style: Style) {
     if !text.is_empty() {
         spans.push(Span::styled(text, style));

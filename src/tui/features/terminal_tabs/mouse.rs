@@ -58,6 +58,11 @@ impl AppState {
             return Ok(());
         }
 
+        if self.folder_create.is_some() {
+            self.handle_folder_create_mouse(mouse);
+            return Ok(());
+        }
+
         if self.folder_rename.is_some() {
             self.handle_folder_rename_mouse(mouse);
             return Ok(());

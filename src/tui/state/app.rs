@@ -2,7 +2,7 @@
 
 mod init;
 
-use super::folder_picker::{FolderDeleteConfirmState, FolderPickerState, FolderRenameState};
+use super::folder_picker::{FolderCreateState, FolderDeleteConfirmState, FolderPickerState, FolderRenameState};
 use super::host_browser::{HostSearchEntry, HostTreeRow};
 use super::host_editor::{HostContextMenuState, HostDeleteConfirmState, HostEditorState};
 use super::quick_connect::QuickConnectState;
@@ -81,6 +81,7 @@ pub(crate) struct AppState {
     pub(crate) host_context_menu: Option<HostContextMenuState>,
     pub(crate) host_delete_confirm: Option<HostDeleteConfirmState>,
     pub(crate) folder_picker: Option<FolderPickerState>,
+    pub(crate) folder_create: Option<FolderCreateState>,
     pub(crate) folder_rename: Option<FolderRenameState>,
     pub(crate) folder_delete_confirm: Option<FolderDeleteConfirmState>,
     pub(crate) rdp_credentials: Option<RdpCredentialsState>,
@@ -428,6 +429,7 @@ impl AppState {
             host_context_menu: None,
             host_delete_confirm: None,
             folder_picker: None,
+            folder_create: None,
             folder_rename: None,
             folder_delete_confirm: None,
             rdp_credentials: None,

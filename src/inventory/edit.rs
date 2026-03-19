@@ -66,6 +66,44 @@ pub(crate) fn create_inventory_host_entry(source_file: &Path, folder_path: &[Str
     write_inventory_document(source_file, &document)
 }
 
+pub(crate) fn create_inventory_folder(source_file: &Path, parent_folder_path: &[String], folder_name: &str) -> io::Result<()> {
+    let sanitized_name = folder_name.trim();
+    if sanitized_name.is_empty() {
+        return Err(io::Error::new(io::ErrorKind::InvalidInput, "folder name cannot be empty"));
+    }
+    if sanitized_name.contains('/') {
+        return Err(io::Error::new(io::ErrorKind::InvalidInput, "folder name cannot include path separator '/'"));
+    }
+
+    let mut document = load_inventory_document(source_file)?;
+    let nodes = inventory_nodes_mut(&mut document, source_file)?;
+    let parent_nodes = ensure_folder_nodes(nodes, parent_folder_path, source_file)?;
+
+    if parent_nodes
+        .iter()
+        .any(|node| folder_entry_name(node).is_some_and(|name| name == sanitized_name))
+    {
+        return Err(io::Error::new(
+            io::ErrorKind::AlreadyExists,
+            format!(
+                "folder '{}' already exists under '{}' in '{}'",
+                sanitized_name,
+                if parent_folder_path.is_empty() {
+                    "/".to_string()
+                } else {
+                    format!("/{}", parent_folder_path.join("/"))
+                },
+                source_file.display()
+            ),
+        ));
+    }
+
+    let mut folder_mapping = Mapping::new();
+    folder_mapping.insert(Value::String(sanitized_name.to_string()), Value::Sequence(Vec::new()));
+    parent_nodes.push(Value::Mapping(folder_mapping));
+    write_inventory_document(source_file, &document)
+}
+
 pub(crate) fn move_inventory_host_entry(source_file: &Path, host_name: &str, target_folder_path: &[String]) -> io::Result<()> {
     let mut document = load_inventory_document(source_file)?;
     let nodes = inventory_nodes_mut(&mut document, source_file)?;

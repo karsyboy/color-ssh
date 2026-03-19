@@ -241,6 +241,7 @@ impl AppState {
         self.render_host_context_menu(frame);
         self.render_host_delete_confirm_modal(frame, size);
         self.render_folder_picker_modal(frame, size);
+        self.render_folder_create_modal(frame, size);
         self.render_folder_rename_modal(frame, size);
         self.render_folder_delete_confirm_modal(frame, size);
         self.render_quick_connect_modal(frame, size);

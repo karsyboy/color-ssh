@@ -6,7 +6,15 @@ use std::path::PathBuf;
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum FolderPickerMode {
     CreatePlacement,
-    MoveHost { host_name: String },
+    CreateFolderParent {
+        folder_name: String,
+        name_cursor: usize,
+        name_selection: Option<(usize, usize)>,
+        parent_folder_path: Vec<String>,
+    },
+    MoveHost {
+        host_name: String,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -39,6 +47,7 @@ impl FolderPickerState {
     pub(crate) fn title(&self) -> &'static str {
         match self.mode {
             FolderPickerMode::CreatePlacement => " Select Placement Folder ",
+            FolderPickerMode::CreateFolderParent { .. } => " Select Parent Folder ",
             FolderPickerMode::MoveHost { .. } => " Move Entry to Folder ",
         }
     }
@@ -101,6 +110,37 @@ impl FolderRenameState {
             "/".to_string()
         } else {
             format!("/{}", self.folder_path.join("/"))
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+pub(crate) struct FolderCreateState {
+    pub(crate) source_file: PathBuf,
+    pub(crate) parent_folder_path: Vec<String>,
+    pub(crate) name: String,
+    pub(crate) cursor: usize,
+    pub(crate) selection: Option<(usize, usize)>,
+    pub(crate) error: Option<String>,
+}
+
+impl FolderCreateState {
+    pub(crate) fn new(source_file: PathBuf, parent_folder_path: Vec<String>) -> Self {
+        Self {
+            source_file,
+            parent_folder_path,
+            name: String::new(),
+            cursor: 0,
+            selection: None,
+            error: None,
+        }
+    }
+
+    pub(crate) fn parent_display_path(&self) -> String {
+        if self.parent_folder_path.is_empty() {
+            "/".to_string()
+        } else {
+            format!("/{}", self.parent_folder_path.join("/"))
         }
     }
 }

@@ -1,6 +1,6 @@
 use super::{
-    EditableInventoryHost, create_inventory_host_entry, delete_inventory_folder, delete_inventory_host_entry, move_inventory_host_entry,
-    rename_inventory_folder, update_inventory_host_entry,
+    EditableInventoryHost, create_inventory_folder, create_inventory_host_entry, delete_inventory_folder, delete_inventory_host_entry,
+    move_inventory_host_entry, rename_inventory_folder, update_inventory_host_entry,
 };
 use crate::inventory::{ConnectionProtocol, build_inventory_tree};
 use crate::test::support::fs::TestWorkspace;
@@ -117,6 +117,61 @@ inventory:
     let rendered = fs::read_to_string(&inventory_path).expect("read inventory");
     assert!(rendered.contains("folder:"));
     assert!(rendered.contains("folder1:"));
+}
+
+#[test]
+fn create_inventory_folder_creates_folder_in_nested_parent_path() {
+    let workspace = TestWorkspace::new("inventory", "edit_create_inventory_folder").expect("temp workspace");
+    let inventory_path = workspace.join("cossh-inventory.yaml");
+    workspace
+        .write(
+            &inventory_path,
+            r#"
+inventory:
+  - Team:
+      - name: alpha
+        protocol: ssh
+        host: alpha.example
+"#,
+        )
+        .expect("write inventory");
+
+    create_inventory_folder(&inventory_path, &["Team".to_string()], "NewFolder").expect("create folder");
+
+    let tree = build_inventory_tree(&inventory_path).expect("reload inventory");
+    assert!(
+        tree.root
+            .children
+            .iter()
+            .find(|folder| folder.name == "Team")
+            .is_some_and(|team| team.children.iter().any(|child| child.name == "NewFolder"))
+    );
+
+    let rendered = fs::read_to_string(&inventory_path).expect("read inventory");
+    assert!(rendered.contains("Team:"));
+    assert!(rendered.contains("NewFolder:"));
+}
+
+#[test]
+fn create_inventory_folder_rejects_duplicate_name_under_same_parent() {
+    let workspace = TestWorkspace::new("inventory", "edit_create_inventory_folder_duplicate").expect("temp workspace");
+    let inventory_path = workspace.join("cossh-inventory.yaml");
+    workspace
+        .write(
+            &inventory_path,
+            r#"
+inventory:
+  - Team:
+      - Existing:
+          - name: alpha
+            protocol: ssh
+            host: alpha.example
+"#,
+        )
+        .expect("write inventory");
+
+    let err = create_inventory_folder(&inventory_path, &["Team".to_string()], "Existing").expect_err("duplicate folder should fail");
+    assert_eq!(err.kind(), std::io::ErrorKind::AlreadyExists);
 }
 
 #[test]

@@ -138,6 +138,8 @@ impl AppState {
         let mut right = vec![
             Span::styled("n", Style::default().fg(theme::ansi_yellow())),
             Span::styled(":new · ", Style::default().fg(theme::ansi_bright_black())),
+            Span::styled("^n", Style::default().fg(theme::ansi_cyan())),
+            Span::styled(":new-folder · ", Style::default().fg(theme::ansi_bright_black())),
         ];
 
         if self.selected_folder_id().is_some() {

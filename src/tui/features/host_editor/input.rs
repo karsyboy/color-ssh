@@ -52,6 +52,7 @@ impl AppState {
         self.host_context_menu = None;
         self.host_delete_confirm = None;
         self.folder_picker = None;
+        self.folder_create = None;
         self.folder_rename = None;
         self.folder_delete_confirm = None;
 
@@ -271,6 +272,9 @@ impl AppState {
                 KeyCode::Char('n') if key.modifiers.is_empty() && menu.has_action(HostContextMenuAction::NewEntryInFolder) => {
                     action = Some(HostContextMenuAction::NewEntryInFolder);
                 }
+                KeyCode::Char('n') if key.modifiers.contains(KeyModifiers::CONTROL) && menu.has_action(HostContextMenuAction::NewFolder) => {
+                    action = Some(HostContextMenuAction::NewFolder);
+                }
                 KeyCode::Char('r') if key.modifiers.contains(KeyModifiers::CONTROL) && menu.has_action(HostContextMenuAction::RenameFolder) => {
                     action = Some(HostContextMenuAction::RenameFolder);
                 }
@@ -337,6 +341,22 @@ impl AppState {
                     };
                     let folder_path = self.host_folder_path_in_source(&host);
                     self.open_host_editor_for_new_entry_with_folder_path(host.source_file.clone(), folder_path);
+                }
+            },
+            HostContextMenuAction::NewFolder => match menu.target {
+                HostContextMenuTarget::Folder { folder_id, source_file } => {
+                    let parent_folder_path = self.folder_path_segments_by_id_in_source(folder_id, &source_file).unwrap_or_default();
+                    self.open_folder_create_modal(source_file, parent_folder_path);
+                }
+                HostContextMenuTarget::Background { source_file } => {
+                    self.open_folder_create_modal(source_file, Vec::new());
+                }
+                HostContextMenuTarget::Host { host_idx } => {
+                    let Some(host) = self.hosts.get(host_idx).cloned() else {
+                        return;
+                    };
+                    let parent_folder_path = self.host_folder_path_in_source(&host);
+                    self.open_folder_create_modal(host.source_file.clone(), parent_folder_path);
                 }
             },
             HostContextMenuAction::RenameFolder => {

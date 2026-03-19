@@ -133,6 +133,66 @@ impl AppState {
         frame.render_widget(Paragraph::new(lines), inner);
     }
 
+    pub(crate) fn render_folder_create_modal(&self, frame: &mut Frame, _full_area: Rect) {
+        let Some(state) = self.folder_create.as_ref() else {
+            return;
+        };
+        let Some((area, inner)) = self.folder_create_modal_layout() else {
+            return;
+        };
+
+        frame.render_widget(Clear, area);
+        let block = Block::default()
+            .borders(Borders::ALL)
+            .border_style(Style::default().fg(theme::ansi_cyan()))
+            .title(" New Folder ");
+        frame.render_widget(block, area);
+
+        let mut lines = Vec::new();
+        lines.push(Line::from(vec![
+            Span::styled("Parent: ", Style::default().fg(theme::ansi_bright_black())),
+            Span::styled(state.parent_display_path(), Style::default().fg(theme::ansi_bright_white())),
+            Span::styled("  (Tab/Ctrl+P to change)", Style::default().fg(theme::ansi_bright_black())),
+        ]));
+
+        let cursor_style = Style::default().fg(theme::ansi_black()).bg(theme::ansi_cyan()).add_modifier(Modifier::BOLD);
+        let selected_region = Style::default()
+            .fg(theme::selection_fg())
+            .bg(theme::selection_bg())
+            .add_modifier(Modifier::BOLD);
+        let mut name_spans = vec![Span::styled("Name: ", Style::default().fg(theme::ansi_yellow()).add_modifier(Modifier::BOLD))];
+        name_spans.extend(build_edit_value_spans(
+            &state.name,
+            state.cursor,
+            state.selection,
+            Style::default().fg(theme::ansi_bright_white()).add_modifier(Modifier::BOLD),
+            cursor_style,
+            selected_region,
+        ));
+        lines.push(Line::from(name_spans));
+
+        let message_line = if let Some(error) = state.error.as_ref() {
+            Line::from(vec![Span::styled(
+                error.clone(),
+                Style::default().fg(theme::ansi_red()).add_modifier(Modifier::BOLD),
+            )])
+        } else {
+            Line::from(vec![Span::styled(
+                "Use a plain folder name without '/'.",
+                Style::default().fg(theme::ansi_bright_black()),
+            )])
+        };
+        lines.push(message_line);
+
+        lines.push(Line::from(vec![
+            Span::styled(SAVE_ACTION_LABEL, Style::default().fg(theme::ansi_green()).add_modifier(Modifier::BOLD)),
+            Span::styled(ACTION_SEPARATOR, Style::default().fg(theme::ansi_bright_black())),
+            Span::styled(CANCEL_ACTION_LABEL, Style::default().fg(theme::ansi_yellow()).add_modifier(Modifier::BOLD)),
+        ]));
+
+        frame.render_widget(Paragraph::new(lines), inner);
+    }
+
     pub(crate) fn render_folder_delete_confirm_modal(&self, frame: &mut Frame, _full_area: Rect) {
         let Some(confirm) = self.folder_delete_confirm.as_ref() else {
             return;

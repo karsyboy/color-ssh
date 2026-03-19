@@ -123,6 +123,11 @@ impl AppState {
             return Ok(());
         }
 
+        if self.folder_create.is_some() {
+            self.handle_folder_create_key(key);
+            return Ok(());
+        }
+
         if self.folder_rename.is_some() {
             self.handle_folder_rename_key(key);
             return Ok(());
@@ -176,6 +181,11 @@ impl AppState {
 
         if self.folder_rename.is_some() {
             self.handle_folder_rename_paste(&pasted);
+            return Ok(());
+        }
+
+        if self.folder_create.is_some() {
+            self.handle_folder_create_paste(&pasted);
             return Ok(());
         }
 
