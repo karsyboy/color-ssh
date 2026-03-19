@@ -540,7 +540,11 @@ impl HostEditorState {
     }
 
     pub(crate) fn hint_text(&self) -> &'static str {
-        "[←/→] Cycle Protocol/Profile/Vault"
+        if self.mode == HostEditorMode::Edit {
+            "Help: Tab/↑/↓ next · Enter toggle/submit · Space toggle section/flags · Ctrl+D delete · Esc cancel"
+        } else {
+            "Help: Tab/↑/↓ next · Enter toggle/submit · Space toggle section/flags · Esc cancel"
+        }
     }
 
     fn section_template_fields(section: HostEditorSection) -> &'static [HostEditorField] {

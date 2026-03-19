@@ -214,6 +214,11 @@ impl AppState {
                 self.search_query_cursor = char_len(&self.search_query);
                 self.search_query_selection = None;
             }
+            KeyCode::Char('/') if self.focus_on_manager && key.modifiers.is_empty() => {
+                self.search_mode = true;
+                self.search_query_cursor = char_len(&self.search_query);
+                self.search_query_selection = None;
+            }
             KeyCode::Char('q') if self.focus_on_manager && key.modifiers.is_empty() => {
                 self.open_quick_connect_modal();
             }
@@ -223,8 +228,23 @@ impl AppState {
             KeyCode::Char('n') if self.focus_on_manager && key.modifiers.is_empty() => {
                 self.open_host_editor_for_new_entry_from_selection();
             }
-            KeyCode::Char('d') if self.focus_on_manager && key.modifiers.is_empty() => {
-                self.open_host_delete_confirmation_for_selected_host();
+            KeyCode::Char('d') if self.focus_on_manager && key.modifiers.contains(KeyModifiers::CONTROL) => {
+                if self.selected_folder_id().is_some() {
+                    self.open_folder_delete_confirmation_for_selected_folder();
+                } else {
+                    self.open_host_delete_confirmation_for_selected_host();
+                }
+            }
+            KeyCode::Char('r') if self.focus_on_manager && key.modifiers.contains(KeyModifiers::CONTROL) => {
+                self.open_folder_rename_for_selected_folder();
+            }
+            KeyCode::Char('m') if self.focus_on_manager && key.modifiers.contains(KeyModifiers::CONTROL) => {
+                if let Some(host_idx) = self.selected_host_idx() {
+                    self.open_folder_picker_for_move_host(host_idx);
+                }
+            }
+            KeyCode::Char('c') if self.focus_on_manager && key.modifiers.contains(KeyModifiers::CONTROL) && self.search_query.is_empty() => {
+                self.open_host_editor_for_selected_host_duplicate();
             }
             KeyCode::Char('v') if self.focus_on_manager && key.modifiers.is_empty() => {
                 if self.vault_status.unlocked {

@@ -5,7 +5,7 @@ use crossterm::event::{self, MouseButton, MouseEventKind};
 use ratatui::layout::Rect;
 
 const SAVE_LABEL: &str = "[ Enter ] Save Entry";
-const DELETE_LABEL: &str = "[ d ] Delete Entry";
+const DELETE_LABEL: &str = "[ Ctrl+D ] Delete Entry";
 const CANCEL_LABEL: &str = "[ Esc ] Cancel";
 const ACTION_SEPARATOR: &str = " | ";
 // Rendered lines between the last editable field and the bottom action row:

@@ -140,6 +140,37 @@ inventory:
 }
 
 #[test]
+fn editor_ctrl_d_shortcut_opens_delete_confirmation_in_edit_mode() {
+    let workspace = TestWorkspace::new("tui", "host_editor_ctrl_d_delete").expect("temp workspace");
+    let inventory_path = workspace.join("cossh-inventory.yaml");
+    workspace
+        .write(
+            &inventory_path,
+            r#"
+inventory:
+  - name: alpha
+    protocol: ssh
+    host: alpha.example
+"#,
+        )
+        .expect("write inventory");
+
+    let mut app = AppState::new_for_tests();
+    seed_app_from_inventory(&mut app, &inventory_path);
+    app.set_selected_row(find_host_row(&app, "alpha"));
+    app.handle_manager_key(KeyEvent::new(KeyCode::Char('e'), KeyModifiers::NONE))
+        .expect("open edit modal");
+
+    {
+        let form = app.selected_host_editor_mut().expect("editor form");
+        form.selected = HostEditorField::Name.into();
+    }
+    app.handle_host_editor_key(KeyEvent::new(KeyCode::Char('d'), KeyModifiers::CONTROL));
+
+    assert_eq!(app.host_delete_confirm.as_ref().map(|confirm| confirm.host_name.as_str()), Some("alpha"));
+}
+
+#[test]
 fn manager_delete_shortcut_deletes_host_without_opening_editor_tab() {
     let workspace = TestWorkspace::new("tui", "host_browser_delete_shortcut").expect("temp workspace");
     let inventory_path = workspace.join("cossh-inventory.yaml");
@@ -162,7 +193,7 @@ inventory:
     seed_app_from_inventory(&mut app, &inventory_path);
     app.set_selected_row(find_host_row(&app, "alpha"));
 
-    app.handle_manager_key(KeyEvent::new(KeyCode::Char('d'), KeyModifiers::NONE))
+    app.handle_manager_key(KeyEvent::new(KeyCode::Char('d'), KeyModifiers::CONTROL))
         .expect("open delete confirmation from manager");
 
     assert_eq!(app.host_delete_confirm.as_ref().map(|confirm| confirm.host_name.as_str()), Some("alpha"));
@@ -173,7 +204,7 @@ inventory:
     assert!(app.host_delete_confirm.is_none());
     assert!(app.hosts.iter().any(|host| host.name == "alpha"));
 
-    app.handle_manager_key(KeyEvent::new(KeyCode::Char('d'), KeyModifiers::NONE))
+    app.handle_manager_key(KeyEvent::new(KeyCode::Char('d'), KeyModifiers::CONTROL))
         .expect("re-open delete confirmation");
     app.handle_key(KeyEvent::new(KeyCode::Char('y'), KeyModifiers::NONE))
         .expect("confirm delete from top-level key handler");
@@ -189,7 +220,7 @@ inventory:
 }
 
 #[test]
-fn manager_delete_shortcut_ignores_folder_rows() {
+fn manager_delete_shortcut_on_folder_rows_opens_folder_delete_confirmation() {
     let workspace = TestWorkspace::new("tui", "host_browser_delete_folder_guard").expect("temp workspace");
     let inventory_path = workspace.join("cossh-inventory.yaml");
     workspace
@@ -215,10 +246,13 @@ inventory:
         .expect("folder row");
     app.set_selected_row(folder_row_idx);
 
-    app.handle_manager_key(KeyEvent::new(KeyCode::Char('d'), KeyModifiers::NONE))
+    app.handle_manager_key(KeyEvent::new(KeyCode::Char('d'), KeyModifiers::CONTROL))
         .expect("delete shortcut on folder row");
 
     assert!(app.host_delete_confirm.is_none());
+    assert!(app.folder_delete_confirm.is_some());
+    app.handle_folder_delete_confirm_key(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE));
+    assert!(app.folder_delete_confirm.is_none());
     assert!(app.hosts.iter().any(|host| host.name == "alpha"));
 }
 
@@ -844,6 +878,33 @@ fn non_description_fields_ignore_space_input() {
 }
 
 #[test]
+fn manager_slash_shortcut_enters_search_mode() {
+    let workspace = TestWorkspace::new("tui", "host_browser_slash_search").expect("temp workspace");
+    let inventory_path = workspace.join("cossh-inventory.yaml");
+    workspace
+        .write(
+            &inventory_path,
+            r#"
+inventory:
+  - name: alpha
+    protocol: ssh
+    host: alpha.example
+"#,
+        )
+        .expect("write inventory");
+
+    let mut app = AppState::new_for_tests();
+    seed_app_from_inventory(&mut app, &inventory_path);
+    assert!(!app.search_mode);
+
+    app.handle_manager_key(KeyEvent::new(KeyCode::Char('/'), KeyModifiers::NONE))
+        .expect("slash enters search mode");
+
+    assert!(app.search_mode);
+    assert_eq!(app.search_query_cursor, app.search_query.chars().count());
+}
+
+#[test]
 fn host_editor_paste_preserves_spaces_only_for_description() {
     let mut app = AppState::new_for_tests();
     open_test_editor(
@@ -1182,7 +1243,9 @@ inventory:
     app.handle_host_delete_confirm_key(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE));
     assert!(app.host_delete_confirm.is_none());
 
-    let cancel_col = inner.x.saturating_add(("[ Enter ] Save Entry | [ d ] Delete Entry | ".chars().count()) as u16);
+    let cancel_col = inner
+        .x
+        .saturating_add(("[ Enter ] Save Entry | [ Ctrl+D ] Delete Entry | ".chars().count()) as u16);
     app.handle_mouse(MouseEvent {
         kind: MouseEventKind::Down(MouseButton::Left),
         column: cancel_col,
@@ -1191,6 +1254,93 @@ inventory:
     })
     .expect("mouse click cancel action");
     assert!(app.selected_host_editor().is_none());
+}
+
+#[test]
+fn manager_ctrl_c_shortcut_duplicates_selected_host() {
+    let workspace = TestWorkspace::new("tui", "host_browser_duplicate_shortcut").expect("temp workspace");
+    let inventory_path = workspace.join("cossh-inventory.yaml");
+    workspace
+        .write(
+            &inventory_path,
+            r#"
+inventory:
+  - name: alpha
+    protocol: ssh
+    host: alpha.example
+"#,
+        )
+        .expect("write inventory");
+
+    let mut app = AppState::new_for_tests();
+    seed_app_from_inventory(&mut app, &inventory_path);
+    app.set_selected_row(find_host_row(&app, "alpha"));
+
+    app.handle_manager_key(KeyEvent::new(KeyCode::Char('c'), KeyModifiers::CONTROL))
+        .expect("ctrl+c duplicates selected host");
+
+    let form = app.selected_host_editor().expect("duplicate editor opened");
+    assert_eq!(form.mode, HostEditorMode::Create);
+    assert_eq!(form.name.value, "alpha (copy)");
+}
+
+#[test]
+fn manager_ctrl_m_shortcut_opens_move_folder_picker_for_host() {
+    let workspace = TestWorkspace::new("tui", "host_browser_move_shortcut").expect("temp workspace");
+    let inventory_path = workspace.join("cossh-inventory.yaml");
+    workspace
+        .write(
+            &inventory_path,
+            r#"
+inventory:
+  - TeamA:
+      - name: alpha
+        protocol: ssh
+        host: alpha.example
+  - TeamB:
+      - name: beta
+        protocol: ssh
+        host: beta.example
+"#,
+        )
+        .expect("write inventory");
+
+    let mut app = AppState::new_for_tests();
+    seed_app_from_inventory(&mut app, &inventory_path);
+    app.set_selected_row(find_host_row(&app, "alpha"));
+
+    app.handle_manager_key(KeyEvent::new(KeyCode::Char('m'), KeyModifiers::CONTROL))
+        .expect("ctrl+m opens move picker");
+
+    let picker = app.folder_picker.as_ref().expect("folder picker opened");
+    assert!(matches!(picker.mode, crate::tui::FolderPickerMode::MoveHost { .. }));
+}
+
+#[test]
+fn manager_ctrl_r_shortcut_opens_folder_rename_modal_for_folder_row() {
+    let workspace = TestWorkspace::new("tui", "host_browser_rename_shortcut").expect("temp workspace");
+    let inventory_path = workspace.join("cossh-inventory.yaml");
+    workspace
+        .write(
+            &inventory_path,
+            r#"
+inventory:
+  - Group:
+      - name: alpha
+        protocol: ssh
+        host: alpha.example
+"#,
+        )
+        .expect("write inventory");
+
+    let mut app = AppState::new_for_tests();
+    seed_app_from_inventory(&mut app, &inventory_path);
+    app.set_selected_row(find_folder_row(&app, "Group"));
+
+    app.handle_manager_key(KeyEvent::new(KeyCode::Char('r'), KeyModifiers::CONTROL))
+        .expect("ctrl+r opens folder rename modal");
+
+    assert!(app.folder_rename.is_some());
 }
 
 #[test]

@@ -136,34 +136,51 @@ impl AppState {
         }
 
         let mut right = vec![
-            Span::styled("↑/↓", Style::default().fg(theme::ansi_cyan())),
-            Span::styled(":move · ", Style::default().fg(theme::ansi_bright_black())),
-            Span::styled("Enter", Style::default().fg(theme::ansi_green())),
-            Span::styled(":open · ", Style::default().fg(theme::ansi_bright_black())),
-            Span::styled("^F", Style::default().fg(theme::ansi_yellow())),
-            Span::styled(":find · ", Style::default().fg(theme::ansi_bright_black())),
-            Span::styled("e", Style::default().fg(theme::ansi_yellow())),
-            Span::styled(":edit · ", Style::default().fg(theme::ansi_bright_black())),
-            Span::styled("d", Style::default().fg(theme::ansi_red())),
-            Span::styled(":delete · ", Style::default().fg(theme::ansi_bright_black())),
             Span::styled("n", Style::default().fg(theme::ansi_yellow())),
             Span::styled(":new · ", Style::default().fg(theme::ansi_bright_black())),
+        ];
+
+        if self.selected_folder_id().is_some() {
+            right.extend([
+                Span::styled("^r", Style::default().fg(theme::ansi_cyan())),
+                Span::styled(":rename · ", Style::default().fg(theme::ansi_bright_black())),
+                Span::styled("^d", Style::default().fg(theme::ansi_red())),
+                Span::styled(":delete · ", Style::default().fg(theme::ansi_bright_black())),
+            ]);
+        } else if self.selected_host_idx().is_some() {
+            right.extend([
+                Span::styled("e", Style::default().fg(theme::ansi_yellow())),
+                Span::styled(":edit · ", Style::default().fg(theme::ansi_bright_black())),
+                Span::styled("^c", Style::default().fg(theme::ansi_cyan())),
+                Span::styled(":duplicate · ", Style::default().fg(theme::ansi_bright_black())),
+                Span::styled("^m", Style::default().fg(theme::ansi_cyan())),
+                Span::styled(":move · ", Style::default().fg(theme::ansi_bright_black())),
+                Span::styled("^d", Style::default().fg(theme::ansi_red())),
+                Span::styled(":delete · ", Style::default().fg(theme::ansi_bright_black())),
+            ]);
+        }
+
+        right.extend([
+            Span::styled("q", Style::default().fg(theme::ansi_yellow())),
+            Span::styled(":quick-connect · ", Style::default().fg(theme::ansi_bright_black())),
+            Span::styled("↑/↓", Style::default().fg(theme::ansi_cyan())),
+            Span::styled(":move · ", Style::default().fg(theme::ansi_bright_black())),
+            Span::styled("^←/^→", Style::default().fg(theme::ansi_cyan())),
+            Span::styled(":resize · ", Style::default().fg(theme::ansi_bright_black())),
             Span::styled("c", Style::default().fg(theme::ansi_cyan())),
             Span::styled(":collapse · ", Style::default().fg(theme::ansi_bright_black())),
             Span::styled("i", Style::default().fg(theme::ansi_cyan())),
             Span::styled(":info · ", Style::default().fg(theme::ansi_bright_black())),
-            Span::styled("^←/^→", Style::default().fg(theme::ansi_cyan())),
-            Span::styled(":resize · ", Style::default().fg(theme::ansi_bright_black())),
-            Span::styled("q", Style::default().fg(theme::ansi_yellow())),
-            Span::styled(":quick · ", Style::default().fg(theme::ansi_bright_black())),
-        ];
+            Span::styled("/", Style::default().fg(theme::ansi_cyan())),
+            Span::styled(":search · ", Style::default().fg(theme::ansi_bright_black())),
+        ]);
 
         if !self.tabs.is_empty() {
+            right.push(Span::styled(" · ", Style::default().fg(theme::ansi_bright_black())));
             right.push(Span::styled("S-Tab", Style::default().fg(theme::ansi_cyan())));
-            right.push(Span::styled(":tabs · ", Style::default().fg(theme::ansi_bright_black())));
+            right.push(Span::styled(":tabs", Style::default().fg(theme::ansi_bright_black())));
         }
-
-        right.push(Span::styled("^Q", Style::default().fg(theme::ansi_red())));
+        right.push(Span::styled("^q", Style::default().fg(theme::ansi_red())));
         right.push(Span::styled(":quit", Style::default().fg(theme::ansi_bright_black())));
         (left, right)
     }
@@ -279,16 +296,18 @@ impl AppState {
             Span::styled(title, Style::default().fg(theme::ansi_bright_white())),
         ];
 
-        let right = vec![
-            Span::styled("Tab/↑/↓", Style::default().fg(theme::ansi_cyan())),
-            Span::styled(":item · ", Style::default().fg(theme::ansi_bright_black())),
+        let mut right = vec![
+            Span::styled("Tab", Style::default().fg(theme::ansi_cyan())),
+            Span::styled(":next · ", Style::default().fg(theme::ansi_bright_black())),
             Span::styled("Enter", Style::default().fg(theme::ansi_green())),
-            Span::styled("/", Style::default().fg(theme::ansi_bright_black())),
-            Span::styled("Space", Style::default().fg(theme::ansi_green())),
-            Span::styled(":toggle/use · ", Style::default().fg(theme::ansi_bright_black())),
-            Span::styled("Esc/^W", Style::default().fg(theme::ansi_red())),
-            Span::styled(":close", Style::default().fg(theme::ansi_bright_black())),
+            Span::styled(":toggle/submit · ", Style::default().fg(theme::ansi_bright_black())),
         ];
+        if form.mode == crate::tui::HostEditorMode::Edit {
+            right.push(Span::styled("^d", Style::default().fg(theme::ansi_red())));
+            right.push(Span::styled(":delete · ", Style::default().fg(theme::ansi_bright_black())));
+        }
+        right.push(Span::styled("Esc", Style::default().fg(theme::ansi_red())));
+        right.push(Span::styled(":cancel", Style::default().fg(theme::ansi_bright_black())));
 
         (left, right)
     }

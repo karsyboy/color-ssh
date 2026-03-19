@@ -103,6 +103,13 @@ impl AppState {
         self.open_host_editor_for_host_idx(host_idx);
     }
 
+    pub(crate) fn open_host_editor_for_selected_host_duplicate(&mut self) {
+        let Some(host_idx) = self.selected_host_idx() else {
+            return;
+        };
+        self.open_host_editor_for_duplicate_host_idx(host_idx);
+    }
+
     fn open_host_editor_for_host_idx(&mut self, host_idx: usize) {
         let Some(host) = self.hosts.get(host_idx).cloned() else {
             return;
@@ -199,6 +206,34 @@ impl AppState {
         self.open_host_delete_confirmation_for_host_idx(host_idx);
     }
 
+    pub(crate) fn open_folder_rename_for_selected_folder(&mut self) {
+        let Some(folder_id) = self.selected_folder_id() else {
+            return;
+        };
+        let Some(folder) = self.folder_by_id(folder_id) else {
+            return;
+        };
+
+        let source_file = folder.path.clone();
+        let folder_path = self.folder_path_segments_by_id_in_source(folder_id, &source_file).unwrap_or_default();
+        self.open_folder_rename_modal(source_file, folder_path);
+    }
+
+    pub(crate) fn open_folder_delete_confirmation_for_selected_folder(&mut self) {
+        let Some(folder_id) = self.selected_folder_id() else {
+            return;
+        };
+        let Some(folder) = self.folder_by_id(folder_id) else {
+            return;
+        };
+
+        let source_file = folder.path.clone();
+        let folder_path = self.folder_path_segments_by_id_in_source(folder_id, &source_file).unwrap_or_default();
+        let folder_name = folder.name.clone();
+        let removed_entry_count = self.folder_descendant_host_count(folder_id);
+        self.open_folder_delete_confirm_modal(source_file, folder_path, folder_name, removed_entry_count);
+    }
+
     pub(crate) fn handle_host_context_menu_key(&mut self, key: KeyEvent) {
         let mut should_close = false;
         let mut action = None;
@@ -212,17 +247,23 @@ impl AppState {
                 KeyCode::Char('c') if key.modifiers.is_empty() && menu.has_action(HostContextMenuAction::Connect) => {
                     action = Some(HostContextMenuAction::Connect);
                 }
-                KeyCode::Char('d') if key.modifiers.is_empty() && menu.has_action(HostContextMenuAction::DeleteEntry) => {
+                KeyCode::Char('d') if key.modifiers.contains(KeyModifiers::CONTROL) && menu.has_action(HostContextMenuAction::DeleteEntry) => {
                     action = Some(HostContextMenuAction::DeleteEntry);
                 }
-                KeyCode::Char('d') if key.modifiers.is_empty() && menu.has_action(HostContextMenuAction::DeleteFolder) => {
+                KeyCode::Char('d') if key.modifiers.contains(KeyModifiers::CONTROL) && menu.has_action(HostContextMenuAction::DeleteFolder) => {
                     action = Some(HostContextMenuAction::DeleteFolder);
                 }
                 KeyCode::Char('e') if key.modifiers.is_empty() && menu.has_action(HostContextMenuAction::EditEntry) => {
                     action = Some(HostContextMenuAction::EditEntry);
                 }
+                KeyCode::Char('c') if key.modifiers.contains(KeyModifiers::CONTROL) && menu.has_action(HostContextMenuAction::DuplicateEntry) => {
+                    action = Some(HostContextMenuAction::DuplicateEntry);
+                }
                 KeyCode::Char('u') if key.modifiers.is_empty() && menu.has_action(HostContextMenuAction::DuplicateEntry) => {
                     action = Some(HostContextMenuAction::DuplicateEntry);
+                }
+                KeyCode::Char('m') if key.modifiers.contains(KeyModifiers::CONTROL) && menu.has_action(HostContextMenuAction::MoveToFolder) => {
+                    action = Some(HostContextMenuAction::MoveToFolder);
                 }
                 KeyCode::Char('m') if key.modifiers.is_empty() && menu.has_action(HostContextMenuAction::MoveToFolder) => {
                     action = Some(HostContextMenuAction::MoveToFolder);
@@ -230,7 +271,7 @@ impl AppState {
                 KeyCode::Char('n') if key.modifiers.is_empty() && menu.has_action(HostContextMenuAction::NewEntryInFolder) => {
                     action = Some(HostContextMenuAction::NewEntryInFolder);
                 }
-                KeyCode::Char('r') if key.modifiers.is_empty() && menu.has_action(HostContextMenuAction::RenameFolder) => {
+                KeyCode::Char('r') if key.modifiers.contains(KeyModifiers::CONTROL) && menu.has_action(HostContextMenuAction::RenameFolder) => {
                     action = Some(HostContextMenuAction::RenameFolder);
                 }
                 _ => {}
@@ -350,7 +391,7 @@ impl AppState {
                         _ => form.select_next_field(),
                     },
                 },
-                KeyCode::Char('d') if key.modifiers.is_empty() && form.mode == HostEditorMode::Edit && form.is_selected_field(HostEditorField::Delete) => {
+                KeyCode::Char('d') if key.modifiers.contains(KeyModifiers::CONTROL) && form.mode == HostEditorMode::Edit => {
                     should_open_delete_confirm = true;
                 }
                 KeyCode::Char(' ') if !key.modifiers.contains(KeyModifiers::CONTROL) && !key.modifiers.contains(KeyModifiers::ALT) => match form.selected {
