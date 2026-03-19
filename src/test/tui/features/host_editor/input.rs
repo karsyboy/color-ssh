@@ -1277,7 +1277,7 @@ inventory:
 }
 
 #[test]
-fn manager_ctrl_m_shortcut_opens_move_folder_picker_for_host() {
+fn manager_ctrl_x_shortcut_opens_move_folder_picker_for_host() {
     let workspace = TestWorkspace::new("tui", "host_browser_move_shortcut").expect("temp workspace");
     let inventory_path = workspace.join("cossh-inventory.yaml");
     workspace
@@ -1301,8 +1301,8 @@ inventory:
     seed_app_from_inventory(&mut app, &inventory_path);
     app.set_selected_row(find_host_row(&app, "alpha"));
 
-    app.handle_manager_key(KeyEvent::new(KeyCode::Char('m'), KeyModifiers::CONTROL))
-        .expect("ctrl+m opens move picker");
+    app.handle_manager_key(KeyEvent::new(KeyCode::Char('x'), KeyModifiers::CONTROL))
+        .expect("ctrl+x opens move picker");
 
     let picker = app.folder_picker.as_ref().expect("folder picker opened");
     assert!(matches!(picker.mode, crate::tui::FolderPickerMode::MoveHost { .. }));

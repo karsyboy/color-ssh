@@ -238,7 +238,7 @@ impl AppState {
             KeyCode::Char('r') if self.focus_on_manager && key.modifiers.contains(KeyModifiers::CONTROL) => {
                 self.open_folder_rename_for_selected_folder();
             }
-            KeyCode::Char('m') if self.focus_on_manager && key.modifiers.contains(KeyModifiers::CONTROL) => {
+            KeyCode::Char('x') if self.focus_on_manager && key.modifiers.contains(KeyModifiers::CONTROL) => {
                 if let Some(host_idx) = self.selected_host_idx() {
                     self.open_folder_picker_for_move_host(host_idx);
                 }

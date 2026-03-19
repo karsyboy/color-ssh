@@ -153,7 +153,7 @@ impl AppState {
                 Span::styled(":edit · ", Style::default().fg(theme::ansi_bright_black())),
                 Span::styled("^c", Style::default().fg(theme::ansi_cyan())),
                 Span::styled(":duplicate · ", Style::default().fg(theme::ansi_bright_black())),
-                Span::styled("^m", Style::default().fg(theme::ansi_cyan())),
+                Span::styled("^x", Style::default().fg(theme::ansi_cyan())),
                 Span::styled(":move · ", Style::default().fg(theme::ansi_bright_black())),
                 Span::styled("^d", Style::default().fg(theme::ansi_red())),
                 Span::styled(":delete · ", Style::default().fg(theme::ansi_bright_black())),

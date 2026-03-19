@@ -262,7 +262,7 @@ impl AppState {
                 KeyCode::Char('u') if key.modifiers.is_empty() && menu.has_action(HostContextMenuAction::DuplicateEntry) => {
                     action = Some(HostContextMenuAction::DuplicateEntry);
                 }
-                KeyCode::Char('m') if key.modifiers.contains(KeyModifiers::CONTROL) && menu.has_action(HostContextMenuAction::MoveToFolder) => {
+                KeyCode::Char('x') if key.modifiers.contains(KeyModifiers::CONTROL) && menu.has_action(HostContextMenuAction::MoveToFolder) => {
                     action = Some(HostContextMenuAction::MoveToFolder);
                 }
                 KeyCode::Char('m') if key.modifiers.is_empty() && menu.has_action(HostContextMenuAction::MoveToFolder) => {
