@@ -591,7 +591,7 @@ impl AppState {
         }
     }
 
-    fn confirm_host_delete(&mut self) {
+    pub(crate) fn confirm_host_delete(&mut self) {
         let Some(confirm) = self.host_delete_confirm.clone() else {
             return;
         };

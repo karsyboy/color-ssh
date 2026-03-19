@@ -220,6 +220,116 @@ inventory:
 }
 
 #[test]
+fn host_delete_confirm_modal_supports_mouse_confirm_cancel_and_outside_dismissal() {
+    let workspace = TestWorkspace::new("tui", "host_delete_confirm_mouse").expect("temp workspace");
+    let inventory_path = workspace.join("cossh-inventory.yaml");
+    workspace
+        .write(
+            &inventory_path,
+            r#"
+inventory:
+  - name: alpha
+    protocol: ssh
+    host: alpha.example
+  - name: beta
+    protocol: ssh
+    host: beta.example
+"#,
+        )
+        .expect("write inventory");
+
+    let mut app = AppState::new_for_tests();
+    app.last_terminal_size = (120, 40);
+    seed_app_from_inventory(&mut app, &inventory_path);
+    app.set_selected_row(find_host_row(&app, "alpha"));
+
+    app.handle_manager_key(KeyEvent::new(KeyCode::Char('d'), KeyModifiers::CONTROL))
+        .expect("open delete confirmation");
+    let (_, inner) = app.host_delete_confirm_modal_layout().expect("delete modal layout");
+    let action_row = inner.y.saturating_add(inner.height.saturating_sub(1));
+    let cancel_col = inner.x.saturating_add("[ Enter/Y ] Delete | ".chars().count() as u16).saturating_add(1);
+    app.handle_mouse(MouseEvent {
+        kind: MouseEventKind::Down(MouseButton::Left),
+        column: cancel_col,
+        row: action_row,
+        modifiers: KeyModifiers::NONE,
+    })
+    .expect("mouse click cancel action");
+    assert!(app.host_delete_confirm.is_none(), "cancel click should close delete confirmation");
+    assert!(app.hosts.iter().any(|host| host.name == "alpha"));
+
+    app.handle_manager_key(KeyEvent::new(KeyCode::Char('d'), KeyModifiers::CONTROL))
+        .expect("re-open delete confirmation");
+    let (area, _) = app.host_delete_confirm_modal_layout().expect("delete modal layout");
+    app.handle_mouse(MouseEvent {
+        kind: MouseEventKind::Down(MouseButton::Left),
+        column: area.x.saturating_sub(1),
+        row: area.y.saturating_sub(1),
+        modifiers: KeyModifiers::NONE,
+    })
+    .expect("outside click dismiss");
+    assert!(app.host_delete_confirm.is_none(), "outside click should dismiss delete confirmation");
+    assert!(app.hosts.iter().any(|host| host.name == "alpha"));
+
+    app.handle_manager_key(KeyEvent::new(KeyCode::Char('d'), KeyModifiers::CONTROL))
+        .expect("open delete confirmation for confirm");
+    let (_, inner) = app.host_delete_confirm_modal_layout().expect("delete modal layout");
+    let action_row = inner.y.saturating_add(inner.height.saturating_sub(1));
+    let delete_col = inner.x.saturating_add(1);
+    app.handle_mouse(MouseEvent {
+        kind: MouseEventKind::Down(MouseButton::Left),
+        column: delete_col,
+        row: action_row,
+        modifiers: KeyModifiers::NONE,
+    })
+    .expect("mouse click delete action");
+
+    assert!(app.host_delete_confirm.is_none(), "confirm click should close delete confirmation");
+    assert!(app.hosts.iter().all(|host| host.name != "alpha"));
+    assert!(app.hosts.iter().any(|host| host.name == "beta"));
+}
+
+#[test]
+fn host_delete_confirm_modal_matches_folder_delete_modal_sizing() {
+    let workspace = TestWorkspace::new("tui", "delete_confirm_modal_sizing").expect("temp workspace");
+    let inventory_path = workspace.join("cossh-inventory.yaml");
+    workspace
+        .write(
+            &inventory_path,
+            r#"
+inventory:
+  - Group:
+      - name: alpha
+        protocol: ssh
+        host: alpha.example
+"#,
+        )
+        .expect("write inventory");
+
+    let mut app = AppState::new_for_tests();
+    app.last_terminal_size = (120, 40);
+    seed_app_from_inventory(&mut app, &inventory_path);
+
+    app.set_selected_row(find_host_row(&app, "alpha"));
+    app.handle_manager_key(KeyEvent::new(KeyCode::Char('d'), KeyModifiers::CONTROL))
+        .expect("open host delete confirmation");
+    let (host_area, host_inner) = app.host_delete_confirm_modal_layout().expect("host delete modal layout");
+    app.host_delete_confirm = None;
+
+    app.set_selected_row(find_folder_row(&app, "Group"));
+    app.handle_manager_key(KeyEvent::new(KeyCode::Char('d'), KeyModifiers::CONTROL))
+        .expect("open folder delete confirmation");
+    let (folder_area, folder_inner) = app.folder_delete_confirm_modal_layout().expect("folder delete modal layout");
+
+    assert_eq!(host_area.width, folder_area.width);
+    assert_eq!(host_area.height, folder_area.height);
+    assert_eq!(host_inner.width, folder_inner.width);
+    assert_eq!(host_inner.height, folder_inner.height);
+    assert_eq!(host_area.height, 5);
+    assert_eq!(folder_area.height, 5);
+}
+
+#[test]
 fn manager_delete_shortcut_on_folder_rows_opens_folder_delete_confirmation() {
     let workspace = TestWorkspace::new("tui", "host_browser_delete_folder_guard").expect("temp workspace");
     let inventory_path = workspace.join("cossh-inventory.yaml");
@@ -1319,6 +1429,85 @@ inventory:
 }
 
 #[test]
+fn folder_delete_confirm_modal_supports_mouse_confirm_cancel_and_outside_dismissal() {
+    let workspace = TestWorkspace::new("tui", "folder_delete_confirm_mouse").expect("temp workspace");
+    let inventory_path = workspace.join("cossh-inventory.yaml");
+    workspace
+        .write(
+            &inventory_path,
+            r#"
+inventory:
+  - Keep:
+      - name: keep-host
+        protocol: ssh
+        host: keep.example
+  - Remove:
+      - name: alpha
+        protocol: ssh
+        host: alpha.example
+      - Nested:
+          - name: beta
+            protocol: ssh
+            host: beta.example
+"#,
+        )
+        .expect("write inventory");
+
+    let mut app = AppState::new_for_tests();
+    app.last_terminal_size = (120, 40);
+    seed_app_from_inventory(&mut app, &inventory_path);
+    app.set_selected_row(find_folder_row(&app, "Remove"));
+
+    app.handle_manager_key(KeyEvent::new(KeyCode::Char('d'), KeyModifiers::CONTROL))
+        .expect("open folder delete confirmation");
+    let (_, inner) = app.folder_delete_confirm_modal_layout().expect("folder delete modal layout");
+    let action_row = inner.y.saturating_add(inner.height.saturating_sub(1));
+    let cancel_col = inner.x.saturating_add("[ Enter/Y ] Delete | ".chars().count() as u16).saturating_add(1);
+    app.handle_mouse(MouseEvent {
+        kind: MouseEventKind::Down(MouseButton::Left),
+        column: cancel_col,
+        row: action_row,
+        modifiers: KeyModifiers::NONE,
+    })
+    .expect("mouse click cancel action");
+    assert!(app.folder_delete_confirm.is_none(), "cancel click should close folder delete confirmation");
+    assert!(app.hosts.iter().any(|host| host.name == "alpha"));
+    assert!(app.hosts.iter().any(|host| host.name == "beta"));
+
+    app.handle_manager_key(KeyEvent::new(KeyCode::Char('d'), KeyModifiers::CONTROL))
+        .expect("re-open folder delete confirmation");
+    let (area, _) = app.folder_delete_confirm_modal_layout().expect("folder delete modal layout");
+    app.handle_mouse(MouseEvent {
+        kind: MouseEventKind::Down(MouseButton::Left),
+        column: area.x.saturating_sub(1),
+        row: area.y.saturating_sub(1),
+        modifiers: KeyModifiers::NONE,
+    })
+    .expect("outside click dismiss");
+    assert!(app.folder_delete_confirm.is_none(), "outside click should dismiss folder delete confirmation");
+    assert!(app.hosts.iter().any(|host| host.name == "alpha"));
+    assert!(app.hosts.iter().any(|host| host.name == "beta"));
+
+    app.handle_manager_key(KeyEvent::new(KeyCode::Char('d'), KeyModifiers::CONTROL))
+        .expect("open folder delete confirmation for confirm");
+    let (_, inner) = app.folder_delete_confirm_modal_layout().expect("folder delete modal layout");
+    let action_row = inner.y.saturating_add(inner.height.saturating_sub(1));
+    let delete_col = inner.x.saturating_add(1);
+    app.handle_mouse(MouseEvent {
+        kind: MouseEventKind::Down(MouseButton::Left),
+        column: delete_col,
+        row: action_row,
+        modifiers: KeyModifiers::NONE,
+    })
+    .expect("mouse click delete action");
+
+    assert!(app.folder_delete_confirm.is_none(), "confirm click should close folder delete confirmation");
+    assert!(app.hosts.iter().any(|host| host.name == "keep-host"));
+    assert!(app.hosts.iter().all(|host| host.name != "alpha"));
+    assert!(app.hosts.iter().all(|host| host.name != "beta"));
+}
+
+#[test]
 fn host_editor_bottom_action_row_supports_mouse_clicks() {
     let workspace = TestWorkspace::new("tui", "host_editor_mouse_actions").expect("temp workspace");
     let inventory_path = workspace.join("cossh-inventory.yaml");
@@ -1623,6 +1812,54 @@ inventory:
     assert!(rendered.contains("GroupB:"));
     assert!(rendered.contains("MovedFolder:"));
     assert!(!rendered.contains("Old:"));
+}
+
+#[test]
+fn folder_rename_parent_picker_excludes_current_folder_and_descendants() {
+    let workspace = TestWorkspace::new("tui", "host_browser_rename_folder_picker_filter").expect("temp workspace");
+    let inventory_path = workspace.join("cossh-inventory.yaml");
+    workspace
+        .write(
+            &inventory_path,
+            r#"
+inventory:
+  - GroupA:
+      - Old:
+          - Nested:
+              - name: alpha
+                protocol: ssh
+                host: alpha.example
+  - GroupB:
+      - name: beta
+        protocol: ssh
+        host: beta.example
+"#,
+        )
+        .expect("write inventory");
+
+    let mut app = AppState::new_for_tests();
+    seed_app_from_inventory(&mut app, &inventory_path);
+    app.set_selected_row(find_folder_row(&app, "Old"));
+
+    app.handle_manager_key(KeyEvent::new(KeyCode::Char('r'), KeyModifiers::CONTROL))
+        .expect("ctrl+r opens folder rename modal");
+    app.handle_folder_rename_key(KeyEvent::new(KeyCode::Tab, KeyModifiers::NONE));
+
+    let picker = app.folder_picker.as_ref().expect("parent folder picker");
+    assert!(matches!(picker.mode, crate::tui::FolderPickerMode::RenameFolderParent { .. }));
+    assert!(picker.rows.iter().any(|row| row.folder_path == vec!["GroupA".to_string()]));
+    assert!(picker.rows.iter().any(|row| row.folder_path == vec!["GroupB".to_string()]));
+    assert!(
+        picker.rows.iter().all(|row| row.folder_path != vec!["GroupA".to_string(), "Old".to_string()]),
+        "current folder should not be selectable as its own parent destination"
+    );
+    assert!(
+        picker
+            .rows
+            .iter()
+            .all(|row| row.folder_path != vec!["GroupA".to_string(), "Old".to_string(), "Nested".to_string()]),
+        "descendant folders should not be selectable as parent destinations"
+    );
 }
 
 #[test]

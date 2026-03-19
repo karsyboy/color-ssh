@@ -1,5 +1,6 @@
 //! Folder picker and folder-management modal rendering.
 
+use super::{FOLDER_DELETE_CONFIRM_ACTION_SEPARATOR, FOLDER_DELETE_CONFIRM_CANCEL_LABEL, FOLDER_DELETE_CONFIRM_DELETE_LABEL};
 use crate::tui::AppState;
 use crate::tui::text_edit::build_edit_value_spans;
 use crate::tui::ui::theme;
@@ -220,10 +221,17 @@ impl AppState {
                 Span::styled("?", Style::default().fg(theme::ansi_bright_white())),
             ]),
             Line::from(vec![Span::styled(mode_line, Style::default().fg(theme::ansi_bright_white()))]),
-            Line::from(vec![Span::styled(
-                "Enter/y delete · Esc/n cancel",
-                Style::default().fg(theme::ansi_bright_black()),
-            )]),
+            Line::from(vec![
+                Span::styled(
+                    FOLDER_DELETE_CONFIRM_DELETE_LABEL,
+                    Style::default().fg(theme::ansi_red()).add_modifier(Modifier::BOLD),
+                ),
+                Span::styled(FOLDER_DELETE_CONFIRM_ACTION_SEPARATOR, Style::default().fg(theme::ansi_bright_black())),
+                Span::styled(
+                    FOLDER_DELETE_CONFIRM_CANCEL_LABEL,
+                    Style::default().fg(theme::ansi_yellow()).add_modifier(Modifier::BOLD),
+                ),
+            ]),
         ];
 
         frame.render_widget(Paragraph::new(lines), inner);

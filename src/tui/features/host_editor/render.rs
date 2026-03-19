@@ -1,5 +1,6 @@
 //! Host editor rendering.
 
+use super::{HOST_DELETE_CONFIRM_ACTION_SEPARATOR, HOST_DELETE_CONFIRM_CANCEL_LABEL, HOST_DELETE_CONFIRM_DELETE_LABEL};
 use crate::tui::features::host_editor::scroll::{
     body_content_width, body_items as editor_body_items, body_scroll_offset as editor_body_scroll_offset, body_viewport_height as editor_body_viewport_height,
     footer_visible_lines as editor_footer_visible_lines, scrollbar_geometry as editor_scrollbar_geometry,
@@ -270,45 +271,46 @@ impl AppState {
         }
     }
 
-    pub(crate) fn render_host_delete_confirm_modal(&self, frame: &mut Frame, full_area: Rect) {
+    pub(crate) fn render_host_delete_confirm_modal(&self, frame: &mut Frame, _full_area: Rect) {
         let Some(confirm) = self.host_delete_confirm.as_ref() else {
+            return;
+        };
+        let Some((area, inner)) = self.host_delete_confirm_modal_layout() else {
             return;
         };
 
         let trimmed_name = confirm.host_name.trim();
         let compact_name = if trimmed_name.chars().count() > 36 {
-            format!("{}…", trimmed_name.chars().take(35).collect::<String>())
+            format!("{}...", trimmed_name.chars().take(35).collect::<String>())
         } else {
             trimmed_name.to_string()
         };
-
-        let prompt = format!("Delete '{compact_name}'?");
-        let controls = "Enter/y delete · Esc/n cancel";
-        let content_width = prompt.chars().count().max(controls.chars().count()) as u16;
-        let width = content_width.saturating_add(4).clamp(34, 72).min(full_area.width);
-        let height = 5;
-        let area = Self::centered_rect(width, height, full_area);
-        let inner = Rect::new(
-            area.x.saturating_add(1),
-            area.y.saturating_add(1),
-            area.width.saturating_sub(2),
-            area.height.saturating_sub(2),
-        );
 
         frame.render_widget(Clear, area);
         let block = Block::default()
             .borders(Borders::ALL)
             .border_style(Style::default().fg(theme::ansi_red()))
-            .title(" Confirm Delete ");
+            .title(" Delete Entry ");
         frame.render_widget(block, area);
 
         let lines = vec![
             Line::from(vec![
                 Span::styled("Delete ", Style::default().fg(theme::ansi_bright_white())),
-                Span::styled(format!("'{compact_name}'"), Style::default().fg(theme::ansi_red()).add_modifier(Modifier::BOLD)),
+                Span::styled(compact_name, Style::default().fg(theme::ansi_red()).add_modifier(Modifier::BOLD)),
                 Span::styled("?", Style::default().fg(theme::ansi_bright_white())),
             ]),
-            Line::from(vec![Span::styled(controls, Style::default().fg(theme::ansi_bright_black()))]),
+            Line::from(vec![Span::styled("1 entry will be removed.", Style::default().fg(theme::ansi_bright_white()))]),
+            Line::from(vec![
+                Span::styled(
+                    HOST_DELETE_CONFIRM_DELETE_LABEL,
+                    Style::default().fg(theme::ansi_red()).add_modifier(Modifier::BOLD),
+                ),
+                Span::styled(HOST_DELETE_CONFIRM_ACTION_SEPARATOR, Style::default().fg(theme::ansi_bright_black())),
+                Span::styled(
+                    HOST_DELETE_CONFIRM_CANCEL_LABEL,
+                    Style::default().fg(theme::ansi_yellow()).add_modifier(Modifier::BOLD),
+                ),
+            ]),
         ];
 
         frame.render_widget(Paragraph::new(lines), inner);

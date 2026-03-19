@@ -1,5 +1,6 @@
 //! Folder picker and folder-management mouse handling.
 
+use super::{FOLDER_DELETE_CONFIRM_ACTION_SEPARATOR, FOLDER_DELETE_CONFIRM_CANCEL_LABEL, FOLDER_DELETE_CONFIRM_DELETE_LABEL};
 use crate::tui::text_edit;
 use crate::tui::{AppState, FolderCreateState, FolderRenameState};
 use crossterm::event::{self, MouseButton, MouseEventKind};
@@ -89,7 +90,7 @@ impl AppState {
         }
 
         let width = full_area.width.clamp(46, 80);
-        let height = 6u16.min(full_area.height);
+        let height = 5u16.min(full_area.height);
         let area = Self::centered_rect(width, height, full_area);
         let inner = Rect::new(
             area.x.saturating_add(1),
@@ -339,13 +340,41 @@ impl AppState {
     }
 
     pub(crate) fn handle_folder_delete_confirm_mouse(&mut self, mouse: event::MouseEvent) {
-        let Some((area, _)) = self.folder_delete_confirm_modal_layout() else {
+        let Some((area, inner)) = self.folder_delete_confirm_modal_layout() else {
             return;
         };
 
-        if let MouseEventKind::Down(MouseButton::Left) = mouse.kind
-            && !Self::folder_picker_point_in_rect(area, mouse.column, mouse.row)
-        {
+        if mouse.kind != MouseEventKind::Down(MouseButton::Left) {
+            return;
+        }
+
+        if !Self::folder_picker_point_in_rect(area, mouse.column, mouse.row) {
+            self.folder_delete_confirm = None;
+            self.mark_ui_dirty();
+            return;
+        }
+
+        if !Self::folder_picker_point_in_rect(inner, mouse.column, mouse.row) {
+            return;
+        }
+
+        let action_row = inner.y.saturating_add(inner.height.saturating_sub(1));
+        if mouse.row != action_row {
+            return;
+        }
+
+        let mut col = inner.x;
+        let delete_width = FOLDER_DELETE_CONFIRM_DELETE_LABEL.chars().count() as u16;
+        if mouse.column >= col && mouse.column < col.saturating_add(delete_width) {
+            self.confirm_folder_delete();
+            return;
+        }
+
+        col = col
+            .saturating_add(delete_width)
+            .saturating_add(FOLDER_DELETE_CONFIRM_ACTION_SEPARATOR.chars().count() as u16);
+        let cancel_width = FOLDER_DELETE_CONFIRM_CANCEL_LABEL.chars().count() as u16;
+        if mouse.column >= col && mouse.column < col.saturating_add(cancel_width) {
             self.folder_delete_confirm = None;
             self.mark_ui_dirty();
         }

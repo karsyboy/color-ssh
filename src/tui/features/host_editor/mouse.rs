@@ -1,5 +1,6 @@
 //! Host editor mouse helpers.
 
+use super::{HOST_DELETE_CONFIRM_ACTION_SEPARATOR, HOST_DELETE_CONFIRM_CANCEL_LABEL, HOST_DELETE_CONFIRM_DELETE_LABEL};
 use crate::tui::features::host_editor::scroll::{
     EditorScrollbarGeometry, body_content_width as editor_body_content_width, body_items as host_editor_body_items,
     body_scroll_offset as host_editor_body_scroll_offset, body_viewport_height as host_editor_body_viewport_height, scroll_offset_from_scrollbar_row,
@@ -15,6 +16,67 @@ const CANCEL_LABEL: &str = "[ Esc ] Cancel";
 const ACTION_SEPARATOR: &str = " | ";
 
 impl AppState {
+    pub(crate) fn host_delete_confirm_modal_layout(&self) -> Option<(Rect, Rect)> {
+        self.host_delete_confirm.as_ref()?;
+        let full_area = Rect::new(0, 0, self.last_terminal_size.0, self.last_terminal_size.1);
+        if full_area.width == 0 || full_area.height == 0 {
+            return None;
+        }
+
+        let width = full_area.width.clamp(46, 80);
+        let height = 5u16.min(full_area.height);
+        let area = Self::centered_rect(width, height, full_area);
+        let inner = Rect::new(
+            area.x.saturating_add(1),
+            area.y.saturating_add(1),
+            area.width.saturating_sub(2),
+            area.height.saturating_sub(2),
+        );
+
+        Some((area, inner))
+    }
+
+    pub(crate) fn handle_host_delete_confirm_mouse(&mut self, mouse: event::MouseEvent) {
+        let Some((area, inner)) = self.host_delete_confirm_modal_layout() else {
+            return;
+        };
+
+        if mouse.kind != MouseEventKind::Down(MouseButton::Left) {
+            return;
+        }
+
+        if !Self::host_editor_point_in_rect(area, mouse.column, mouse.row) {
+            self.host_delete_confirm = None;
+            self.mark_ui_dirty();
+            return;
+        }
+
+        if !Self::host_editor_point_in_rect(inner, mouse.column, mouse.row) {
+            return;
+        }
+
+        let action_row = inner.y.saturating_add(inner.height.saturating_sub(1));
+        if mouse.row != action_row {
+            return;
+        }
+
+        let mut col = inner.x;
+        let delete_width = HOST_DELETE_CONFIRM_DELETE_LABEL.chars().count() as u16;
+        if mouse.column >= col && mouse.column < col.saturating_add(delete_width) {
+            self.confirm_host_delete();
+            return;
+        }
+
+        col = col
+            .saturating_add(delete_width)
+            .saturating_add(HOST_DELETE_CONFIRM_ACTION_SEPARATOR.chars().count() as u16);
+        let cancel_width = HOST_DELETE_CONFIRM_CANCEL_LABEL.chars().count() as u16;
+        if mouse.column >= col && mouse.column < col.saturating_add(cancel_width) {
+            self.host_delete_confirm = None;
+            self.mark_ui_dirty();
+        }
+    }
+
     fn host_editor_scrollbar_geometry(form: &HostEditorState, inner_area: Rect) -> Option<EditorScrollbarGeometry> {
         let body_items = host_editor_body_items(form);
         let total_body_lines = body_items.len().saturating_add(2);

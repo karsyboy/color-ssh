@@ -50,6 +50,7 @@ impl AppState {
         }
 
         if self.host_delete_confirm.is_some() {
+            self.handle_host_delete_confirm_mouse(mouse);
             return Ok(());
         }
 
@@ -582,38 +583,33 @@ impl AppState {
         let visual_col = (column.saturating_sub(self.tab_bar_area.x)) as usize;
         let tab_widths: Vec<usize> = self.tabs.iter().enumerate().map(|(idx, _)| self.tab_display_width(idx)).collect();
         let available_width = self.tab_bar_area.width as usize;
-        self.tab_scroll_offset = self.normalize_tab_scroll_offset(self.tab_scroll_offset, available_width);
+        let metrics = self.tab_bar_viewport_metrics(self.tab_scroll_offset, available_width);
+        self.tab_scroll_offset = metrics.scroll_offset;
 
-        let has_left_overflow = self.prev_tab_scroll_offset(self.tab_scroll_offset, available_width).is_some();
-        let left_slot = if has_left_overflow { 1 } else { 0 };
-        let has_right_overflow = self.next_tab_scroll_offset(self.tab_scroll_offset, available_width).is_some();
-        let right_slot = if has_right_overflow { 1 } else { 0 };
-        let visible_tab_width = available_width.saturating_sub(left_slot + right_slot);
-
-        if has_left_overflow && visual_col == 0 {
+        if metrics.has_left_overflow && visual_col == 0 {
             return Some(TabBarHit::LeftOverflow);
         }
-        if has_right_overflow && visual_col == available_width.saturating_sub(1) {
+        if metrics.has_right_overflow && visual_col == available_width.saturating_sub(1) {
             return Some(TabBarHit::RightOverflow);
         }
 
-        if visual_col < left_slot || visual_col >= left_slot + visible_tab_width {
+        if visual_col < metrics.left_slot || visual_col >= metrics.left_slot + metrics.visible_tab_width {
             return None;
         }
-        let local_col = visual_col - left_slot;
+        let local_col = visual_col - metrics.left_slot;
 
         let mut running_start = 0usize;
         let mut first_visible_idx = 0usize;
-        while first_visible_idx < self.tabs.len() && running_start + tab_widths[first_visible_idx] <= self.tab_scroll_offset {
+        while first_visible_idx < self.tabs.len() && running_start + tab_widths[first_visible_idx] <= metrics.scroll_offset {
             running_start += tab_widths[first_visible_idx];
             first_visible_idx += 1;
         }
 
         let mut used = 0usize;
         let mut idx = first_visible_idx;
-        while idx < self.tabs.len() && used < visible_tab_width {
+        while idx < self.tabs.len() && used < metrics.visible_tab_width {
             let tab_width = tab_widths[idx];
-            let visible_end = (used + tab_width).min(visible_tab_width);
+            let visible_end = (used + tab_width).min(metrics.visible_tab_width);
             if local_col < visible_end {
                 let close_pos = used + self.tab_title_display_width(idx) + 1;
                 if close_pos < visible_end && local_col == close_pos {
@@ -725,3 +721,7 @@ impl AppState {
         self.write_bytes_to_active_pty(&bytes)
     }
 }
+
+#[cfg(test)]
+#[path = "../../../test/tui/features/terminal_tabs/mouse.rs"]
+mod tests;

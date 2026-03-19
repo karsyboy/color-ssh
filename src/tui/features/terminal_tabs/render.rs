@@ -277,29 +277,24 @@ impl AppState {
         }
         let tab_widths: Vec<usize> = self.tabs.iter().enumerate().map(|(idx, _)| self.tab_display_width(idx)).collect();
         let available_width = area.width as usize;
-        self.tab_scroll_offset = self.normalize_tab_scroll_offset(self.tab_scroll_offset, available_width);
-
-        let has_left_overflow = self.prev_tab_scroll_offset(self.tab_scroll_offset, available_width).is_some();
-        let left_slot = if has_left_overflow { 1 } else { 0 };
-        let has_right_overflow = self.next_tab_scroll_offset(self.tab_scroll_offset, available_width).is_some();
-        let right_slot = if has_right_overflow { 1 } else { 0 };
-        let visible_tab_width = available_width.saturating_sub(left_slot + right_slot);
+        let metrics = self.tab_bar_viewport_metrics(self.tab_scroll_offset, available_width);
+        self.tab_scroll_offset = metrics.scroll_offset;
 
         let mut spans: Vec<Span> = Vec::new();
-        if has_left_overflow {
+        if metrics.has_left_overflow {
             spans.push(Span::styled("◀", Style::default().fg(theme::ansi_cyan())));
         }
 
         let mut running_start = 0usize;
         let mut first_visible_idx = 0usize;
-        while first_visible_idx < self.tabs.len() && running_start + tab_widths[first_visible_idx] <= self.tab_scroll_offset {
+        while first_visible_idx < self.tabs.len() && running_start + tab_widths[first_visible_idx] <= metrics.scroll_offset {
             running_start += tab_widths[first_visible_idx];
             first_visible_idx += 1;
         }
 
         let mut used = 0usize;
         let mut idx = first_visible_idx;
-        while idx < self.tabs.len() && used < visible_tab_width {
+        while idx < self.tabs.len() && used < metrics.visible_tab_width {
             let tab = &self.tabs[idx];
             let is_selected = idx == self.selected_tab && !self.focus_on_manager;
             let is_editor_tab = tab.editor().is_some();
@@ -334,10 +329,10 @@ impl AppState {
             };
 
             let mut push_clipped = |text: &str, text_style: Style| {
-                if used >= visible_tab_width {
+                if used >= metrics.visible_tab_width {
                     return;
                 }
-                let remaining = visible_tab_width - used;
+                let remaining = metrics.visible_tab_width - used;
                 let chunk = truncate_to_display_width(text, remaining);
                 if !chunk.is_empty() {
                     let width = display_width(&chunk);
@@ -352,12 +347,12 @@ impl AppState {
             idx += 1;
         }
 
-        let remaining = visible_tab_width.saturating_sub(used);
+        let remaining = metrics.visible_tab_width.saturating_sub(used);
         if remaining > 0 {
             spans.push(Span::raw(" ".repeat(remaining)));
         }
 
-        if has_right_overflow {
+        if metrics.has_right_overflow {
             spans.push(Span::styled("▶", Style::default().fg(theme::ansi_cyan())));
         }
 

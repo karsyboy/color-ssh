@@ -278,6 +278,78 @@ inventory:
 }
 
 #[test]
+fn relocate_inventory_folder_rejects_moves_into_descendants() {
+    let workspace = TestWorkspace::new("inventory", "edit_relocate_folder_descendant_reject").expect("temp workspace");
+    let inventory_path = workspace.join("cossh-inventory.yaml");
+    workspace
+        .write(
+            &inventory_path,
+            r#"
+inventory:
+  - Group:
+      - Old:
+          - Nested:
+              - name: alpha
+                protocol: ssh
+                host: alpha.example
+"#,
+        )
+        .expect("write inventory");
+
+    let err = relocate_inventory_folder(
+        &inventory_path,
+        &["Group".to_string(), "Old".to_string()],
+        &["Group".to_string(), "Old".to_string(), "Nested".to_string()],
+        "Moved",
+    )
+    .expect_err("moving folder into descendant should fail");
+
+    assert_eq!(err.kind(), std::io::ErrorKind::InvalidInput);
+
+    let tree = build_inventory_tree(&inventory_path).expect("reload inventory");
+    let host = tree.hosts.iter().find(|item| item.name == "alpha").expect("host preserved");
+    assert_eq!(host.source_folder_path, vec!["Group".to_string(), "Old".to_string(), "Nested".to_string()]);
+}
+
+#[test]
+fn relocate_inventory_folder_rejects_duplicate_target_name_under_destination_parent() {
+    let workspace = TestWorkspace::new("inventory", "edit_relocate_folder_duplicate_target").expect("temp workspace");
+    let inventory_path = workspace.join("cossh-inventory.yaml");
+    workspace
+        .write(
+            &inventory_path,
+            r#"
+inventory:
+  - GroupA:
+      - Old:
+          - name: alpha
+            protocol: ssh
+            host: alpha.example
+  - GroupB:
+      - NewFolder:
+          - name: beta
+            protocol: ssh
+            host: beta.example
+"#,
+        )
+        .expect("write inventory");
+
+    let err = relocate_inventory_folder(
+        &inventory_path,
+        &["GroupA".to_string(), "Old".to_string()],
+        &["GroupB".to_string()],
+        "NewFolder",
+    )
+    .expect_err("duplicate destination folder should fail");
+
+    assert_eq!(err.kind(), std::io::ErrorKind::AlreadyExists);
+
+    let tree = build_inventory_tree(&inventory_path).expect("reload inventory");
+    let alpha = tree.hosts.iter().find(|item| item.name == "alpha").expect("alpha host preserved");
+    assert_eq!(alpha.source_folder_path, vec!["GroupA".to_string(), "Old".to_string()]);
+}
+
+#[test]
 fn delete_inventory_folder_removes_descendants_and_returns_host_count() {
     let workspace = TestWorkspace::new("inventory", "edit_delete_folder").expect("temp workspace");
     let inventory_path = workspace.join("cossh-inventory.yaml");

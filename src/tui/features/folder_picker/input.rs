@@ -376,7 +376,7 @@ impl AppState {
     }
 
     fn open_folder_picker(&mut self, source_file: PathBuf, mode: FolderPickerMode, initial_folder_path: Vec<String>) {
-        let rows = self.folder_picker_rows_for_source_file(&source_file);
+        let rows = self.folder_picker_rows_for_mode(&source_file, &mode);
         let selected = rows.iter().position(|row| row.folder_path == initial_folder_path).unwrap_or(0);
 
         self.host_context_menu = None;
@@ -563,7 +563,7 @@ impl AppState {
         }
     }
 
-    fn confirm_folder_delete(&mut self) {
+    pub(crate) fn confirm_folder_delete(&mut self) {
         let Some(confirm) = self.folder_delete_confirm.clone() else {
             return;
         };
@@ -600,6 +600,17 @@ impl AppState {
         let mut current_path = Vec::new();
         Self::collect_folder_picker_rows(source_root, source_file, 1, &mut current_path, &mut rows);
         rows
+    }
+
+    fn folder_picker_rows_for_mode(&self, source_file: &Path, mode: &FolderPickerMode) -> Vec<FolderPickerRow> {
+        let rows = self.folder_picker_rows_for_source_file(source_file);
+        let FolderPickerMode::RenameFolderParent { source_folder_path, .. } = mode else {
+            return rows;
+        };
+
+        rows.into_iter()
+            .filter(|row| row.folder_path != *source_folder_path && !row.folder_path.starts_with(source_folder_path))
+            .collect()
     }
 
     fn collect_folder_picker_rows(folder: &TreeFolder, source_file: &Path, depth: usize, current_path: &mut Vec<String>, rows: &mut Vec<FolderPickerRow>) {

@@ -93,6 +93,8 @@ impl AppState {
 
         if self.tabs.is_empty() {
             self.focus_manager_panel();
+        } else {
+            self.ensure_tab_visible();
         }
     }
 
@@ -443,14 +445,37 @@ impl AppState {
             return;
         }
 
-        let mut start_pos: usize = 0;
-        for tab_index in 0..self.selected_tab {
-            start_pos += self.tab_display_width(tab_index);
-        }
-        let end_pos = start_pos + self.tab_display_width(self.selected_tab);
+        let selected_start = self.tab_start_offset(self.selected_tab);
+        let selected_width = self.tab_display_width(self.selected_tab);
+        let selected_end = selected_start + selected_width;
 
-        if start_pos < self.tab_scroll_offset || end_pos > self.tab_scroll_offset + tab_bar_width {
-            self.tab_scroll_offset = start_pos;
+        let mut target_offset = self.normalize_tab_scroll_offset(self.tab_scroll_offset, tab_bar_width);
+        if selected_start < target_offset {
+            target_offset = selected_start;
+        } else {
+            loop {
+                let metrics = self.tab_bar_viewport_metrics(target_offset, tab_bar_width);
+                if metrics.visible_tab_width == 0 {
+                    break;
+                }
+
+                if selected_width >= metrics.visible_tab_width || selected_end <= metrics.scroll_offset + metrics.visible_tab_width {
+                    target_offset = metrics.scroll_offset;
+                    break;
+                }
+
+                let Some(next_offset) = self.next_tab_scroll_offset(metrics.scroll_offset, tab_bar_width) else {
+                    target_offset = metrics.scroll_offset;
+                    break;
+                };
+                if next_offset == metrics.scroll_offset {
+                    target_offset = metrics.scroll_offset;
+                    break;
+                }
+                target_offset = next_offset;
+            }
         }
+
+        self.tab_scroll_offset = self.normalize_tab_scroll_offset(target_offset, tab_bar_width);
     }
 }
