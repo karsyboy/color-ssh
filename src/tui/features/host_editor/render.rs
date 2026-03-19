@@ -2,7 +2,7 @@
 
 use crate::tui::text_edit::{build_edit_value_spans, byte_index_for_char, char_len};
 use crate::tui::ui::theme;
-use crate::tui::{AppState, HostEditorField, HostEditorMode, HostEditorState};
+use crate::tui::{AppState, HostEditorField, HostEditorMode, HostEditorSection, HostEditorState, HostEditorVisibleItem};
 use ratatui::{
     Frame,
     layout::Rect,
@@ -15,6 +15,10 @@ const SAVE_LABEL: &str = "[ Enter ] Save Entry";
 const DELETE_LABEL: &str = "[ d ] Delete Entry";
 const CANCEL_LABEL: &str = "[ Esc ] Cancel";
 const ACTION_SEPARATOR: &str = " | ";
+
+fn section_indicator(form: &HostEditorState, section: HostEditorSection) -> &'static str {
+    if form.section_collapsed(section) { "▸" } else { "▾" }
+}
 
 impl AppState {
     pub(crate) fn render_host_context_menu(&self, frame: &mut Frame) {
@@ -78,19 +82,21 @@ impl AppState {
         let normal_label = Style::default().fg(theme::ansi_bright_black());
         let selected_value = Style::default().fg(theme::ansi_bright_white()).add_modifier(Modifier::BOLD);
         let normal_value = Style::default().fg(theme::ansi_bright_white());
+        let selected_section = Style::default().fg(theme::ansi_cyan()).add_modifier(Modifier::BOLD);
+        let normal_section = Style::default().fg(theme::ansi_bright_cyan());
         let cursor_value = Style::default().fg(theme::ansi_black()).bg(theme::ansi_cyan()).add_modifier(Modifier::BOLD);
         let placeholder_value = Style::default().fg(theme::ansi_bright_black());
-        let save_style = if form.selected == HostEditorField::Save {
+        let save_style = if form.is_selected_field(HostEditorField::Save) {
             Style::default().fg(theme::ansi_green()).add_modifier(Modifier::BOLD)
         } else {
             Style::default().fg(theme::ansi_bright_black())
         };
-        let delete_style = if form.selected == HostEditorField::Delete {
+        let delete_style = if form.is_selected_field(HostEditorField::Delete) {
             Style::default().fg(theme::ansi_red()).add_modifier(Modifier::BOLD)
         } else {
             Style::default().fg(theme::ansi_bright_black())
         };
-        let cancel_style = if form.selected == HostEditorField::Cancel {
+        let cancel_style = if form.is_selected_field(HostEditorField::Cancel) {
             Style::default().fg(theme::ansi_yellow()).add_modifier(Modifier::BOLD)
         } else {
             Style::default().fg(theme::ansi_bright_black())
@@ -103,80 +109,85 @@ impl AppState {
         ])];
         lines.push(Line::from(""));
 
-        for field in form.visible_fields() {
-            if field.is_action() {
-                continue;
-            }
-
-            match field {
-                HostEditorField::Hidden => {
-                    let label_style = if form.selected == field { selected_label } else { normal_label };
-                    let value_style = if form.selected == field { selected_value } else { normal_value };
-                    lines.push(Line::from(vec![
-                        Span::styled(format!("{}: ", field.label()), label_style),
-                        Span::styled(form.hidden_display(), value_style),
-                    ]));
+        for item in form.visible_items() {
+            match item {
+                HostEditorVisibleItem::SectionHeader(section) => {
+                    let section_style = if form.is_selected_section(section) {
+                        selected_section
+                    } else {
+                        normal_section
+                    };
+                    let indicator = section_indicator(form, section);
+                    lines.push(Line::from(vec![Span::styled(format!("{indicator} {}", section.label()), section_style)]));
                 }
-                HostEditorField::IdentitiesOnly => {
-                    let label_style = if form.selected == field { selected_label } else { normal_label };
-                    let value_style = if form.selected == field { selected_value } else { normal_value };
-                    lines.push(Line::from(vec![
-                        Span::styled(format!("{}: ", field.label()), label_style),
-                        Span::styled(form.identities_only_display(), value_style),
-                    ]));
-                }
-                _ => {
-                    let label_style = if form.selected == field { selected_label } else { normal_label };
-                    let placeholder = form.field_example(field);
-                    let value_column_width = inner.width.saturating_sub(field.label().chars().count() as u16).saturating_sub(2);
+                HostEditorVisibleItem::Field(field) => {
+                    if field.is_action() {
+                        continue;
+                    }
 
-                    let value_spans = if let Some(text) = form.text_field(field) {
-                        let mut visible_text = text.value.as_str();
-                        let mut cursor = form.cursor_for_field(field).unwrap_or(text.cursor);
-                        let mut selection = form.selection_for_field(field);
-
-                        if form.selected == field {
-                            let scroll_offset = form.field_horizontal_scroll_offset(field, value_column_width);
-                            let visible_limit = value_column_width as usize;
-                            let start_byte = byte_index_for_char(text.value.as_str(), scroll_offset);
-                            let end_byte = byte_index_for_char(text.value.as_str(), scroll_offset.saturating_add(visible_limit));
-                            visible_text = &text.value[start_byte..end_byte];
-
-                            let visible_len = char_len(visible_text);
-                            cursor = cursor.saturating_sub(scroll_offset).min(visible_len);
-                            selection = selection.map(|(start, end)| {
-                                let start = start.saturating_sub(scroll_offset).min(visible_len);
-                                let end = end.saturating_sub(scroll_offset).min(visible_len);
-                                (start, end)
-                            });
+                    match field {
+                        HostEditorField::IdentitiesOnly => {
+                            let label_style = if form.is_selected_field(field) { selected_label } else { normal_label };
+                            let value_style = if form.is_selected_field(field) { selected_value } else { normal_value };
+                            lines.push(Line::from(vec![
+                                Span::styled(format!("{}: ", field.label()), label_style),
+                                Span::styled(form.identities_only_display(), value_style),
+                            ]));
                         }
+                        _ => {
+                            let label_style = if form.is_selected_field(field) { selected_label } else { normal_label };
+                            let placeholder = form.field_example(field);
+                            let value_column_width = inner.width.saturating_sub(field.label().chars().count() as u16).saturating_sub(2);
 
-                        if form.selected == field {
-                            if visible_text.is_empty() {
-                                if let Some(example) = placeholder {
-                                    vec![Span::styled(" ", cursor_value), Span::styled(example, placeholder_value)]
+                            let value_spans = if let Some(text) = form.text_field(field) {
+                                let mut visible_text = text.value.as_str();
+                                let mut cursor = form.cursor_for_field(field).unwrap_or(text.cursor);
+                                let mut selection = form.selection_for_field(field);
+
+                                if form.is_selected_field(field) {
+                                    let scroll_offset = form.field_horizontal_scroll_offset(field, value_column_width);
+                                    let visible_limit = value_column_width as usize;
+                                    let start_byte = byte_index_for_char(text.value.as_str(), scroll_offset);
+                                    let end_byte = byte_index_for_char(text.value.as_str(), scroll_offset.saturating_add(visible_limit));
+                                    visible_text = &text.value[start_byte..end_byte];
+
+                                    let visible_len = char_len(visible_text);
+                                    cursor = cursor.saturating_sub(scroll_offset).min(visible_len);
+                                    selection = selection.map(|(start, end)| {
+                                        let start = start.saturating_sub(scroll_offset).min(visible_len);
+                                        let end = end.saturating_sub(scroll_offset).min(visible_len);
+                                        (start, end)
+                                    });
+                                }
+
+                                if form.is_selected_field(field) {
+                                    if visible_text.is_empty() {
+                                        if let Some(example) = placeholder {
+                                            vec![Span::styled(" ", cursor_value), Span::styled(example, placeholder_value)]
+                                        } else {
+                                            build_edit_value_spans(visible_text, cursor, selection, selected_value, cursor_value, cursor_value)
+                                        }
+                                    } else {
+                                        build_edit_value_spans(visible_text, cursor, selection, selected_value, cursor_value, cursor_value)
+                                    }
+                                } else if text.value.is_empty() {
+                                    if let Some(example) = placeholder {
+                                        vec![Span::styled(example, placeholder_value)]
+                                    } else {
+                                        vec![Span::styled("", normal_value)]
+                                    }
                                 } else {
-                                    build_edit_value_spans(visible_text, cursor, selection, selected_value, cursor_value, cursor_value)
+                                    vec![Span::styled(text.value.as_str(), normal_value)]
                                 }
                             } else {
-                                build_edit_value_spans(visible_text, cursor, selection, selected_value, cursor_value, cursor_value)
-                            }
-                        } else if text.value.is_empty() {
-                            if let Some(example) = placeholder {
-                                vec![Span::styled(example, placeholder_value)]
-                            } else {
                                 vec![Span::styled("", normal_value)]
-                            }
-                        } else {
-                            vec![Span::styled(text.value.as_str(), normal_value)]
-                        }
-                    } else {
-                        vec![Span::styled("", normal_value)]
-                    };
+                            };
 
-                    let mut spans = vec![Span::styled(format!("{}: ", field.label()), label_style)];
-                    spans.extend(value_spans);
-                    lines.push(Line::from(spans));
+                            let mut spans = vec![Span::styled(format!("{}: ", field.label()), label_style)];
+                            spans.extend(value_spans);
+                            lines.push(Line::from(spans));
+                        }
+                    }
                 }
             }
         }

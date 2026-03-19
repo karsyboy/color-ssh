@@ -4,7 +4,7 @@ use crate::auth::vault;
 use crate::inventory::{create_inventory_host_entry, delete_inventory_host_entry, update_inventory_host_entry};
 use crate::tui::{
     AppState, EditorTabId, EditorTabState, HostContextMenuAction, HostContextMenuState, HostDeleteConfirmState, HostEditorField, HostEditorMode,
-    HostEditorState, HostTab,
+    HostEditorState, HostEditorVisibleItem, HostTab,
 };
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use std::path::PathBuf;
@@ -181,80 +181,98 @@ impl AppState {
                 KeyCode::Tab | KeyCode::Down => form.select_next_field(),
                 KeyCode::BackTab | KeyCode::Up => form.select_prev_field(),
                 KeyCode::Enter => match form.selected {
-                    HostEditorField::Protocol => form.toggle_protocol_forward(),
-                    HostEditorField::Profile => form.select_next_profile(),
-                    HostEditorField::VaultPass => form.select_next_vault_pass(),
-                    HostEditorField::Save => should_submit = true,
-                    HostEditorField::Delete => should_open_delete_confirm = true,
-                    HostEditorField::Cancel => should_close = true,
-                    HostEditorField::IdentitiesOnly => form.cycle_identities_only_forward(),
-                    _ => form.select_next_field(),
+                    HostEditorVisibleItem::SectionHeader(section) => form.toggle_section(section),
+                    HostEditorVisibleItem::Field(field) => match field {
+                        HostEditorField::Protocol => form.toggle_protocol_forward(),
+                        HostEditorField::Profile => form.select_next_profile(),
+                        HostEditorField::VaultPass => form.select_next_vault_pass(),
+                        HostEditorField::Save => should_submit = true,
+                        HostEditorField::Delete => should_open_delete_confirm = true,
+                        HostEditorField::Cancel => should_close = true,
+                        HostEditorField::IdentitiesOnly => form.cycle_identities_only_forward(),
+                        _ => form.select_next_field(),
+                    },
                 },
-                KeyCode::Char('d') if key.modifiers.is_empty() && form.mode == HostEditorMode::Edit && form.selected == HostEditorField::Delete => {
+                KeyCode::Char('d') if key.modifiers.is_empty() && form.mode == HostEditorMode::Edit && form.is_selected_field(HostEditorField::Delete) => {
                     should_open_delete_confirm = true;
                 }
-                KeyCode::Char(' ') if !key.modifiers.contains(KeyModifiers::CONTROL) && !key.modifiers.contains(KeyModifiers::ALT) => {
-                    if form.selected == HostEditorField::IdentitiesOnly {
-                        form.cycle_identities_only_forward();
-                    } else if form.selected == HostEditorField::Description {
-                        form.insert_char(form.selected, ' ');
+                KeyCode::Char(' ') if !key.modifiers.contains(KeyModifiers::CONTROL) && !key.modifiers.contains(KeyModifiers::ALT) => match form.selected {
+                    HostEditorVisibleItem::SectionHeader(section) => form.toggle_section(section),
+                    HostEditorVisibleItem::Field(HostEditorField::IdentitiesOnly) => form.cycle_identities_only_forward(),
+                    HostEditorVisibleItem::Field(HostEditorField::Description) => {
+                        form.insert_char(HostEditorField::Description, ' ');
                         form.error = None;
                     }
-                }
-                KeyCode::Left => match form.selected {
-                    HostEditorField::Protocol => form.toggle_protocol_backward(),
-                    HostEditorField::Profile => form.select_prev_profile(),
-                    HostEditorField::VaultPass => form.select_prev_vault_pass(),
-                    HostEditorField::IdentitiesOnly => form.cycle_identities_only_backward(),
-                    _ => form.move_cursor_left(form.selected),
+                    HostEditorVisibleItem::Field(_) => {}
                 },
-                KeyCode::Right => match form.selected {
-                    HostEditorField::Protocol => form.toggle_protocol_forward(),
-                    HostEditorField::Profile => form.select_next_profile(),
-                    HostEditorField::VaultPass => form.select_next_vault_pass(),
-                    HostEditorField::IdentitiesOnly => form.cycle_identities_only_forward(),
-                    _ => form.move_cursor_right(form.selected),
+                KeyCode::Left => match form.selected_field() {
+                    Some(HostEditorField::Protocol) => form.toggle_protocol_backward(),
+                    Some(HostEditorField::Profile) => form.select_prev_profile(),
+                    Some(HostEditorField::VaultPass) => form.select_prev_vault_pass(),
+                    Some(HostEditorField::IdentitiesOnly) => form.cycle_identities_only_backward(),
+                    Some(field) => form.move_cursor_left(field),
+                    None => {}
+                },
+                KeyCode::Right => match form.selected_field() {
+                    Some(HostEditorField::Protocol) => form.toggle_protocol_forward(),
+                    Some(HostEditorField::Profile) => form.select_next_profile(),
+                    Some(HostEditorField::VaultPass) => form.select_next_vault_pass(),
+                    Some(HostEditorField::IdentitiesOnly) => form.cycle_identities_only_forward(),
+                    Some(field) => form.move_cursor_right(field),
+                    None => {}
                 },
                 KeyCode::Home => {
-                    if form.selected != HostEditorField::Protocol {
-                        form.move_cursor_home(form.selected);
+                    if let Some(field) = form.selected_field()
+                        && field != HostEditorField::Protocol
+                    {
+                        form.move_cursor_home(field);
                     }
                 }
                 KeyCode::End => {
-                    if form.selected != HostEditorField::Protocol {
-                        form.move_cursor_end(form.selected);
+                    if let Some(field) = form.selected_field()
+                        && field != HostEditorField::Protocol
+                    {
+                        form.move_cursor_end(field);
                     }
                 }
                 KeyCode::Backspace => {
-                    if form.selected != HostEditorField::Protocol {
-                        form.backspace(form.selected);
+                    if let Some(field) = form.selected_field()
+                        && field != HostEditorField::Protocol
+                    {
+                        form.backspace(field);
                         form.error = None;
                     }
                 }
                 KeyCode::Delete => {
-                    if form.selected != HostEditorField::Protocol {
-                        form.delete(form.selected);
+                    if let Some(field) = form.selected_field()
+                        && field != HostEditorField::Protocol
+                    {
+                        form.delete(field);
                         form.error = None;
                     }
                 }
                 KeyCode::Char('a') if key.modifiers.contains(KeyModifiers::CONTROL) => {
-                    if form.selected != HostEditorField::Protocol {
-                        form.move_cursor_home(form.selected);
+                    if let Some(field) = form.selected_field()
+                        && field != HostEditorField::Protocol
+                    {
+                        form.move_cursor_home(field);
                     }
                 }
                 KeyCode::Char('e') if key.modifiers.contains(KeyModifiers::CONTROL) => {
-                    if form.selected != HostEditorField::Protocol {
-                        form.move_cursor_end(form.selected);
+                    if let Some(field) = form.selected_field()
+                        && field != HostEditorField::Protocol
+                    {
+                        form.move_cursor_end(field);
                     }
                 }
-                KeyCode::Char(ch)
-                    if !key.modifiers.contains(KeyModifiers::CONTROL)
-                        && !key.modifiers.contains(KeyModifiers::ALT)
-                        && form.selected != HostEditorField::Protocol
-                        && form.text_field(form.selected).is_some() =>
-                {
-                    form.insert_char(form.selected, ch);
-                    form.error = None;
+                KeyCode::Char(ch) if !key.modifiers.contains(KeyModifiers::CONTROL) && !key.modifiers.contains(KeyModifiers::ALT) => {
+                    if let Some(field) = form.selected_field()
+                        && field != HostEditorField::Protocol
+                        && form.text_field(field).is_some()
+                    {
+                        form.insert_char(field, ch);
+                        form.error = None;
+                    }
                 }
                 _ => {}
             }
@@ -280,7 +298,10 @@ impl AppState {
         };
         form.finish_mouse_selection();
 
-        if form.selected == HostEditorField::Protocol || form.text_field(form.selected).is_none() {
+        let Some(field) = form.selected_field() else {
+            return;
+        };
+        if field == HostEditorField::Protocol || form.text_field(field).is_none() {
             return;
         }
 
@@ -289,7 +310,6 @@ impl AppState {
             return;
         }
 
-        let field = form.selected;
         let pasted = if field == HostEditorField::Description {
             filtered
         } else {

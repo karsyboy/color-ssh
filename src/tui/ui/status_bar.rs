@@ -282,9 +282,11 @@ impl AppState {
 
         let right = vec![
             Span::styled("Tab/↑/↓", Style::default().fg(theme::ansi_cyan())),
-            Span::styled(":field | ", Style::default().fg(theme::ansi_bright_black())),
+            Span::styled(":item | ", Style::default().fg(theme::ansi_bright_black())),
             Span::styled("Enter", Style::default().fg(theme::ansi_green())),
-            Span::styled(":save/next | ", Style::default().fg(theme::ansi_bright_black())),
+            Span::styled("/", Style::default().fg(theme::ansi_bright_black())),
+            Span::styled("Space", Style::default().fg(theme::ansi_green())),
+            Span::styled(":toggle/use | ", Style::default().fg(theme::ansi_bright_black())),
             Span::styled("Esc", Style::default().fg(theme::ansi_yellow())),
             Span::styled(":close | ", Style::default().fg(theme::ansi_bright_black())),
             Span::styled("^W", Style::default().fg(theme::ansi_red())),

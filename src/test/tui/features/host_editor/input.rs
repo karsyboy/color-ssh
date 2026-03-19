@@ -1,7 +1,7 @@
 use super::*;
 use crate::inventory::build_inventory_tree;
 use crate::test::support::fs::TestWorkspace;
-use crate::tui::{EditorTabId, EditorTabState, HostEditorField, HostEditorMode, HostEditorState, HostTab};
+use crate::tui::{EditorTabId, EditorTabState, HostEditorField, HostEditorMode, HostEditorSection, HostEditorState, HostEditorVisibleItem, HostTab};
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers, MouseButton, MouseEvent, MouseEventKind};
 use ratatui::layout::Rect;
 use std::fs;
@@ -44,6 +44,14 @@ fn open_test_editor(app: &mut AppState, editor_state: HostEditorState) {
     app.selected_tab = app.tabs.len().saturating_sub(1);
     app.focus_on_manager = false;
     app.tab_content_area = Rect::new(0, 0, 120, 40);
+}
+
+fn editor_body_row_index(form: &HostEditorState, target: HostEditorVisibleItem) -> usize {
+    form.visible_items()
+        .into_iter()
+        .filter(|item| !matches!(item, HostEditorVisibleItem::Field(field) if field.is_action()))
+        .position(|item| item == target)
+        .expect("editor row index")
 }
 
 #[test]
@@ -106,7 +114,7 @@ inventory:
 
     {
         let form = app.selected_host_editor_mut().expect("host editor state");
-        form.selected = HostEditorField::Delete;
+        form.selected = HostEditorField::Delete.into();
     }
 
     app.handle_host_editor_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
@@ -299,7 +307,7 @@ fn protocol_field_cycles_with_arrow_keys_and_filters_visible_fields_by_protocol(
 
     {
         let form = app.selected_host_editor_mut().expect("host editor state");
-        form.selected = HostEditorField::Protocol;
+        form.selected = HostEditorField::Protocol.into();
     }
     app.handle_host_editor_key(KeyEvent::new(KeyCode::Right, KeyModifiers::NONE));
 
@@ -307,12 +315,15 @@ fn protocol_field_cycles_with_arrow_keys_and_filters_visible_fields_by_protocol(
     assert_eq!(form.protocol.value, "rdp");
     assert!(!form.visible_fields().contains(&HostEditorField::Profile));
     assert!(!form.visible_fields().contains(&HostEditorField::IdentityFile));
-    assert!(form.visible_fields().contains(&HostEditorField::RdpDomain));
-    assert!(form.visible_fields().contains(&HostEditorField::RdpArgs));
-    assert!(!form.visible_fields().contains(&HostEditorField::Hidden));
+    assert!(!form.visible_fields().contains(&HostEditorField::RdpDomain));
+    assert!(!form.visible_fields().contains(&HostEditorField::RdpArgs));
+    assert!(form.visible_sections().contains(&HostEditorSection::Rdp));
+    assert!(!form.visible_sections().contains(&HostEditorSection::ProxyForwarding));
+    assert!(!form.visible_sections().contains(&HostEditorSection::AdvancedSsh));
+    assert!(form.section_collapsed(HostEditorSection::Rdp));
 
     let form = app.selected_host_editor_mut().expect("host editor state");
-    form.selected = HostEditorField::Protocol;
+    form.selected = HostEditorField::Protocol.into();
     app.handle_host_editor_key(KeyEvent::new(KeyCode::Left, KeyModifiers::NONE));
 
     let form = app.selected_host_editor().expect("host editor state");
@@ -320,6 +331,111 @@ fn protocol_field_cycles_with_arrow_keys_and_filters_visible_fields_by_protocol(
     assert!(form.visible_fields().contains(&HostEditorField::Profile));
     assert!(form.visible_fields().contains(&HostEditorField::IdentityFile));
     assert!(!form.visible_fields().contains(&HostEditorField::RdpDomain));
+    assert!(form.visible_sections().contains(&HostEditorSection::Placement));
+    assert!(!form.visible_sections().contains(&HostEditorSection::Rdp));
+}
+
+#[test]
+fn advanced_ssh_section_defaults_collapsed_and_toggles_with_enter_and_space() {
+    let mut app = AppState::new_for_tests();
+    open_test_editor(
+        &mut app,
+        HostEditorState::new_create(
+            PathBuf::from("/tmp/inventory.yaml"),
+            vec!["default".to_string(), "work".to_string()],
+            vec!["rdp_lab".to_string()],
+        ),
+    );
+
+    {
+        let form = app.selected_host_editor().expect("host editor state");
+        assert!(form.section_collapsed(HostEditorSection::AdvancedSsh));
+        assert!(!form.visible_fields().contains(&HostEditorField::SshOptions));
+    }
+
+    {
+        let form = app.selected_host_editor_mut().expect("host editor state");
+        form.selected = HostEditorVisibleItem::SectionHeader(HostEditorSection::AdvancedSsh);
+    }
+    app.handle_host_editor_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+
+    {
+        let form = app.selected_host_editor().expect("host editor state");
+        assert!(!form.section_collapsed(HostEditorSection::AdvancedSsh));
+        assert!(form.visible_fields().contains(&HostEditorField::SshOptions));
+    }
+
+    {
+        let form = app.selected_host_editor_mut().expect("host editor state");
+        form.selected = HostEditorVisibleItem::SectionHeader(HostEditorSection::AdvancedSsh);
+    }
+    app.handle_host_editor_key(KeyEvent::new(KeyCode::Char(' '), KeyModifiers::NONE));
+
+    let form = app.selected_host_editor().expect("host editor state");
+    assert!(form.section_collapsed(HostEditorSection::AdvancedSsh));
+    assert!(!form.visible_fields().contains(&HostEditorField::SshOptions));
+}
+
+#[test]
+fn collapsed_sections_are_skipped_by_navigation() {
+    let mut app = AppState::new_for_tests();
+    open_test_editor(
+        &mut app,
+        HostEditorState::new_create(
+            PathBuf::from("/tmp/inventory.yaml"),
+            vec!["default".to_string(), "work".to_string()],
+            vec!["rdp_lab".to_string()],
+        ),
+    );
+
+    {
+        let form = app.selected_host_editor_mut().expect("host editor state");
+        form.toggle_section(HostEditorSection::Authentication);
+        form.selected = HostEditorVisibleItem::SectionHeader(HostEditorSection::Authentication);
+    }
+
+    app.handle_host_editor_key(KeyEvent::new(KeyCode::Tab, KeyModifiers::NONE));
+
+    let form = app.selected_host_editor().expect("host editor state");
+    assert_eq!(form.selected, HostEditorVisibleItem::SectionHeader(HostEditorSection::ProxyForwarding));
+    assert!(!form.visible_fields().contains(&HostEditorField::Profile));
+}
+
+#[test]
+fn placement_section_is_create_only() {
+    let workspace = TestWorkspace::new("tui", "host_editor_placement_section").expect("temp workspace");
+    let inventory_path = workspace.join("cossh-inventory.yaml");
+    workspace
+        .write(
+            &inventory_path,
+            r#"
+inventory:
+  - name: alpha
+    protocol: ssh
+    host: alpha.example
+"#,
+        )
+        .expect("write inventory");
+
+    let mut app = AppState::new_for_tests();
+    seed_app_from_inventory(&mut app, &inventory_path);
+    app.open_host_editor_for_new_entry(inventory_path.clone());
+
+    {
+        let form = app.selected_host_editor().expect("create host editor state");
+        assert!(form.visible_sections().contains(&HostEditorSection::Placement));
+        assert!(form.section_collapsed(HostEditorSection::Placement));
+        assert!(!form.visible_fields().contains(&HostEditorField::FolderPath));
+    }
+
+    app.close_selected_editor_tab();
+    app.set_selected_row(find_host_row(&app, "alpha"));
+    app.open_host_editor_for_selected_host();
+
+    let form = app.selected_host_editor().expect("edit host editor state");
+    assert_eq!(form.mode, HostEditorMode::Edit);
+    assert!(!form.visible_sections().contains(&HostEditorSection::Placement));
+    assert!(!form.visible_fields().contains(&HostEditorField::FolderPath));
 }
 
 #[test]
@@ -335,7 +451,7 @@ fn profile_field_cycles_with_arrow_keys() {
     );
 
     let form = app.selected_host_editor_mut().expect("host editor state");
-    form.selected = HostEditorField::Profile;
+    form.selected = HostEditorField::Profile.into();
     assert_eq!(form.mode, HostEditorMode::Create);
     assert_eq!(form.profile.value, "default");
 
@@ -359,7 +475,7 @@ fn vault_pass_field_cycles_with_arrow_keys() {
     );
 
     let form = app.selected_host_editor_mut().expect("host editor state");
-    form.selected = HostEditorField::VaultPass;
+    form.selected = HostEditorField::VaultPass.into();
     assert_eq!(form.vault_pass.value, "db_prod");
 
     app.handle_host_editor_key(KeyEvent::new(KeyCode::Right, KeyModifiers::NONE));
@@ -397,7 +513,7 @@ fn protocol_switch_sets_default_ports_for_ssh_and_rdp() {
     {
         let form = app.selected_host_editor_mut().expect("host editor state");
         assert_eq!(form.port.value, "22");
-        form.selected = HostEditorField::Protocol;
+        form.selected = HostEditorField::Protocol.into();
     }
 
     app.handle_host_editor_key(KeyEvent::new(KeyCode::Right, KeyModifiers::NONE));
@@ -417,7 +533,7 @@ fn protocol_switch_sets_default_ports_for_ssh_and_rdp() {
     {
         let form = app.selected_host_editor_mut().expect("host editor state");
         form.port.value = "3390".to_string();
-        form.selected = HostEditorField::Protocol;
+        form.selected = HostEditorField::Protocol.into();
     }
     app.handle_host_editor_key(KeyEvent::new(KeyCode::Right, KeyModifiers::NONE));
     let form = app.selected_host_editor().expect("host editor state");
@@ -435,7 +551,7 @@ fn description_field_accepts_space_input() {
 
     {
         let form = app.selected_host_editor_mut().expect("host editor state");
-        form.selected = HostEditorField::Description;
+        form.selected = HostEditorField::Description.into();
     }
 
     app.handle_host_editor_key(KeyEvent::new(KeyCode::Char('a'), KeyModifiers::NONE));
@@ -456,7 +572,7 @@ fn non_description_fields_ignore_space_input() {
 
     {
         let form = app.selected_host_editor_mut().expect("host editor state");
-        form.selected = HostEditorField::Host;
+        form.selected = HostEditorField::Host.into();
     }
 
     app.handle_host_editor_key(KeyEvent::new(KeyCode::Char('a'), KeyModifiers::NONE));
@@ -477,7 +593,7 @@ fn host_editor_paste_preserves_spaces_only_for_description() {
 
     {
         let form = app.selected_host_editor_mut().expect("host editor state");
-        form.selected = HostEditorField::Host;
+        form.selected = HostEditorField::Host.into();
     }
     app.handle_host_editor_paste("with spaces");
     let form = app.selected_host_editor().expect("host editor state");
@@ -485,7 +601,7 @@ fn host_editor_paste_preserves_spaces_only_for_description() {
 
     {
         let form = app.selected_host_editor_mut().expect("host editor state");
-        form.selected = HostEditorField::Description;
+        form.selected = HostEditorField::Description.into();
     }
     app.handle_host_editor_paste("more spaces");
     let form = app.selected_host_editor().expect("host editor state");
@@ -502,7 +618,7 @@ fn identities_only_space_still_cycles_value() {
 
     {
         let form = app.selected_host_editor_mut().expect("host editor state");
-        form.selected = HostEditorField::IdentitiesOnly;
+        form.selected = HostEditorField::IdentitiesOnly.into();
         assert_eq!(form.identities_only_display(), "auto");
     }
 
@@ -531,9 +647,10 @@ fn host_editor_mouse_selection_allows_drag_highlight_and_delete() {
     let host_row_index = app
         .selected_host_editor()
         .expect("host editor state")
-        .visible_fields()
-        .iter()
-        .position(|field| *field == HostEditorField::Host)
+        .visible_items()
+        .into_iter()
+        .filter(|item| !matches!(item, HostEditorVisibleItem::Field(field) if field.is_action()))
+        .position(|item| item == HostEditorVisibleItem::Field(HostEditorField::Host))
         .expect("host field row index");
     let row = inner.y.saturating_add(2).saturating_add(host_row_index as u16);
     let text_start_col = inner.x.saturating_add("Host: ".chars().count() as u16);
@@ -563,7 +680,7 @@ fn host_editor_mouse_selection_allows_drag_highlight_and_delete() {
     app.handle_host_editor_key(KeyEvent::new(KeyCode::Delete, KeyModifiers::NONE));
 
     let form = app.selected_host_editor().expect("host editor state");
-    assert_eq!(form.selected, HostEditorField::Host);
+    assert_eq!(form.selected, HostEditorVisibleItem::Field(HostEditorField::Host));
     assert_eq!(form.host.value, ".example");
 }
 
@@ -594,7 +711,11 @@ inventory:
     let (_, inner) = app.host_editor_tab_layout(app.tab_content_area).expect("host editor layout");
     let action_row = {
         let form = app.selected_host_editor().expect("host editor state");
-        let non_action_rows = form.visible_fields().iter().filter(|field| !field.is_action()).count() as u16;
+        let non_action_rows = form
+            .visible_items()
+            .iter()
+            .filter(|item| !matches!(item, HostEditorVisibleItem::Field(field) if field.is_action()))
+            .count() as u16;
         inner.y.saturating_add(2).saturating_add(non_action_rows).saturating_add(3)
     };
 
@@ -625,7 +746,11 @@ inventory:
 #[test]
 fn host_editor_modal_height_includes_bottom_action_row() {
     let form = HostEditorState::new_create(PathBuf::from("/tmp/inventory.yaml"), vec!["default".to_string()], vec!["db_prod".to_string()]);
-    let non_action_rows = form.visible_fields().iter().filter(|field| !field.is_action()).count() as u16;
+    let non_action_rows = form
+        .visible_items()
+        .iter()
+        .filter(|item| !matches!(item, HostEditorVisibleItem::Field(field) if field.is_action()))
+        .count() as u16;
     let rendered_lines = 2 + non_action_rows + 1 + 1 + 1 + 1;
     let inner_height = form.modal_height().saturating_sub(2);
 
@@ -638,7 +763,7 @@ fn host_editor_modal_height_includes_bottom_action_row() {
 #[test]
 fn selected_field_scrolls_horizontally_when_cursor_moves_past_visible_width() {
     let mut form = HostEditorState::new_create(PathBuf::from("/tmp/inventory.yaml"), vec!["default".to_string()], vec!["db_prod".to_string()]);
-    form.selected = HostEditorField::Host;
+    form.selected = HostEditorField::Host.into();
     form.host.value = "abcdefghijklmnopqrstuvwxyz0123456789".to_string();
     form.host.cursor = form.host.value.chars().count();
 
@@ -658,15 +783,11 @@ fn mouse_click_maps_to_visible_scrolled_text_column_in_host_editor() {
     let (row, text_start_col, expected_cursor) = {
         let (_, inner) = app.host_editor_tab_layout(app.tab_content_area).expect("host editor layout");
         let form = app.selected_host_editor_mut().expect("host editor state");
-        form.selected = HostEditorField::Host;
+        form.selected = HostEditorField::Host.into();
         form.host.value = "abcdefghijklmnopqrstuvwxyz0123456789".to_string();
         form.host.cursor = form.host.value.chars().count();
 
-        let host_row_index = form
-            .visible_fields()
-            .iter()
-            .position(|field| *field == HostEditorField::Host)
-            .expect("host row index") as u16;
+        let host_row_index = editor_body_row_index(form, HostEditorVisibleItem::Field(HostEditorField::Host)) as u16;
         let row = inner.y.saturating_add(2).saturating_add(host_row_index);
         let text_start_col = inner.x.saturating_add("Host: ".chars().count() as u16);
         let value_width = inner.width.saturating_sub("Host: ".chars().count() as u16);
@@ -683,6 +804,6 @@ fn mouse_click_maps_to_visible_scrolled_text_column_in_host_editor() {
     .expect("mouse click in host text column");
 
     let form = app.selected_host_editor().expect("host editor state");
-    assert_eq!(form.selected, HostEditorField::Host);
+    assert_eq!(form.selected, HostEditorVisibleItem::Field(HostEditorField::Host));
     assert_eq!(form.host.cursor, expected_cursor);
 }

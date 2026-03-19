@@ -1,6 +1,6 @@
 //! Host editor mouse helpers.
 
-use crate::tui::AppState;
+use crate::tui::{AppState, HostEditorField, HostEditorState, HostEditorVisibleItem};
 use crossterm::event::{self, MouseButton, MouseEventKind};
 use ratatui::layout::Rect;
 
@@ -137,35 +137,40 @@ impl AppState {
         let mut should_submit = false;
         let mut should_close = false;
         let mut should_open_delete_confirm = false;
-        let field = self.host_editor_field_at_point(local_row, mouse_col, inner_area);
+        let item = self.host_editor_item_at_point(local_row, mouse_col, inner_area);
 
         if let Some(form) = self.selected_host_editor_mut() {
             form.finish_mouse_selection();
 
-            let Some(field) = field else {
+            let Some(item) = item else {
                 return;
             };
-            form.selected = field;
+            form.selected = item;
 
-            match field {
-                crate::tui::HostEditorField::Save => {
-                    should_submit = true;
+            match item {
+                HostEditorVisibleItem::SectionHeader(section) => {
+                    form.toggle_section(section);
                 }
-                crate::tui::HostEditorField::Delete => {
-                    should_open_delete_confirm = true;
-                }
-                crate::tui::HostEditorField::Cancel => {
-                    should_close = true;
-                }
-                crate::tui::HostEditorField::IdentitiesOnly => {
-                    form.cycle_identities_only_forward();
-                }
-                crate::tui::HostEditorField::Protocol => {}
-                _ => {
-                    if let Some(offset) = Self::host_editor_text_offset(form, inner_area, field, mouse_col) {
-                        form.begin_mouse_selection(field, offset);
+                HostEditorVisibleItem::Field(field) => match field {
+                    HostEditorField::Save => {
+                        should_submit = true;
                     }
-                }
+                    HostEditorField::Delete => {
+                        should_open_delete_confirm = true;
+                    }
+                    HostEditorField::Cancel => {
+                        should_close = true;
+                    }
+                    HostEditorField::IdentitiesOnly => {
+                        form.cycle_identities_only_forward();
+                    }
+                    HostEditorField::Protocol => {}
+                    _ => {
+                        if let Some(offset) = Self::host_editor_text_offset(form, inner_area, field, mouse_col) {
+                            form.begin_mouse_selection(field, offset);
+                        }
+                    }
+                },
             }
         }
 
@@ -206,57 +211,58 @@ impl AppState {
         form.finish_mouse_selection();
     }
 
-    fn host_editor_field_at_point(&self, local_row: u16, mouse_col: u16, inner_area: Rect) -> Option<crate::tui::HostEditorField> {
+    fn host_editor_item_at_point(&self, local_row: u16, mouse_col: u16, inner_area: Rect) -> Option<HostEditorVisibleItem> {
         let form = self.selected_host_editor()?;
         if local_row < 2 {
             return None;
         }
 
         let row_idx = local_row.saturating_sub(2) as usize;
-        let visible_fields = form.visible_fields();
-        let field_rows = visible_fields.iter().copied().filter(|field| !field.is_action()).collect::<Vec<_>>();
+        let visible_items = form.visible_items();
+        let body_rows = visible_items
+            .iter()
+            .copied()
+            .filter(|item| !matches!(item, HostEditorVisibleItem::Field(field) if field.is_action()))
+            .collect::<Vec<_>>();
 
-        if row_idx < field_rows.len() {
-            return field_rows.get(row_idx).copied();
+        if row_idx < body_rows.len() {
+            return body_rows.get(row_idx).copied();
         }
 
-        if row_idx == field_rows.len().saturating_add(ACTION_ROW_OFFSET_AFTER_FIELDS) {
-            return Self::host_editor_action_hit(inner_area, mouse_col, &visible_fields);
+        if row_idx == body_rows.len().saturating_add(ACTION_ROW_OFFSET_AFTER_FIELDS) {
+            let visible_fields = form.visible_fields();
+            return Self::host_editor_action_hit(inner_area, mouse_col, visible_fields.contains(&HostEditorField::Delete));
         }
 
         None
     }
 
-    fn host_editor_action_hit(inner_area: Rect, mouse_col: u16, visible_fields: &[crate::tui::HostEditorField]) -> Option<crate::tui::HostEditorField> {
-        use crate::tui::HostEditorField;
-
+    fn host_editor_action_hit(inner_area: Rect, mouse_col: u16, include_delete: bool) -> Option<HostEditorVisibleItem> {
         let mut col = inner_area.x;
         let save_width = SAVE_LABEL.chars().count() as u16;
         if mouse_col >= col && mouse_col < col.saturating_add(save_width) {
-            return Some(HostEditorField::Save);
+            return Some(HostEditorVisibleItem::Field(HostEditorField::Save));
         }
 
         col = col.saturating_add(save_width).saturating_add(ACTION_SEPARATOR.chars().count() as u16);
 
-        if visible_fields.contains(&HostEditorField::Delete) {
+        if include_delete {
             let delete_width = DELETE_LABEL.chars().count() as u16;
             if mouse_col >= col && mouse_col < col.saturating_add(delete_width) {
-                return Some(HostEditorField::Delete);
+                return Some(HostEditorVisibleItem::Field(HostEditorField::Delete));
             }
             col = col.saturating_add(delete_width).saturating_add(ACTION_SEPARATOR.chars().count() as u16);
         }
 
         let cancel_width = CANCEL_LABEL.chars().count() as u16;
         if mouse_col >= col && mouse_col < col.saturating_add(cancel_width) {
-            return Some(HostEditorField::Cancel);
+            return Some(HostEditorVisibleItem::Field(HostEditorField::Cancel));
         }
 
         None
     }
 
-    fn host_editor_text_offset(form: &crate::tui::HostEditorState, inner_area: Rect, field: crate::tui::HostEditorField, mouse_col: u16) -> Option<usize> {
-        use crate::tui::HostEditorField;
-
+    fn host_editor_text_offset(form: &HostEditorState, inner_area: Rect, field: HostEditorField, mouse_col: u16) -> Option<usize> {
         let editable = matches!(
             field,
             HostEditorField::Name

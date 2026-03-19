@@ -4,7 +4,7 @@ use crate::args::validate_vault_entry_name;
 use crate::inventory::{ConnectionProtocol, EditableInventoryHost, InventoryHost, SshOptionMap};
 use crate::tui::text_edit;
 use serde_yml::{Mapping, Value};
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashSet};
 use std::path::PathBuf;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -94,7 +94,6 @@ pub(crate) enum HostEditorField {
     Port,
     Profile,
     VaultPass,
-    Hidden,
     IdentityFile,
     IdentitiesOnly,
     ProxyJump,
@@ -116,62 +115,6 @@ impl HostEditorField {
         matches!(self, Self::Save | Self::Delete | Self::Cancel)
     }
 
-    fn next(self) -> Self {
-        match self {
-            Self::Name => Self::Description,
-            Self::Description => Self::Protocol,
-            Self::Protocol => Self::Host,
-            Self::Host => Self::User,
-            Self::User => Self::Port,
-            Self::Port => Self::Profile,
-            Self::Profile => Self::VaultPass,
-            Self::VaultPass => Self::Hidden,
-            Self::Hidden => Self::IdentityFile,
-            Self::IdentityFile => Self::IdentitiesOnly,
-            Self::IdentitiesOnly => Self::ProxyJump,
-            Self::ProxyJump => Self::ProxyCommand,
-            Self::ProxyCommand => Self::ForwardAgent,
-            Self::ForwardAgent => Self::LocalForward,
-            Self::LocalForward => Self::RemoteForward,
-            Self::RemoteForward => Self::SshOptions,
-            Self::SshOptions => Self::RdpDomain,
-            Self::RdpDomain => Self::RdpArgs,
-            Self::RdpArgs => Self::FolderPath,
-            Self::FolderPath => Self::Save,
-            Self::Save => Self::Delete,
-            Self::Delete => Self::Cancel,
-            Self::Cancel => Self::Name,
-        }
-    }
-
-    fn prev(self) -> Self {
-        match self {
-            Self::Name => Self::Cancel,
-            Self::Description => Self::Name,
-            Self::Protocol => Self::Description,
-            Self::Host => Self::Protocol,
-            Self::User => Self::Host,
-            Self::Port => Self::User,
-            Self::Profile => Self::Port,
-            Self::VaultPass => Self::Profile,
-            Self::Hidden => Self::VaultPass,
-            Self::IdentityFile => Self::Hidden,
-            Self::IdentitiesOnly => Self::IdentityFile,
-            Self::ProxyJump => Self::IdentitiesOnly,
-            Self::ProxyCommand => Self::ProxyJump,
-            Self::ForwardAgent => Self::ProxyCommand,
-            Self::LocalForward => Self::ForwardAgent,
-            Self::RemoteForward => Self::LocalForward,
-            Self::SshOptions => Self::RemoteForward,
-            Self::RdpDomain => Self::SshOptions,
-            Self::RdpArgs => Self::RdpDomain,
-            Self::FolderPath => Self::RdpArgs,
-            Self::Save => Self::FolderPath,
-            Self::Delete => Self::Save,
-            Self::Cancel => Self::Delete,
-        }
-    }
-
     pub(crate) fn label(self) -> &'static str {
         match self {
             Self::Name => "Name",
@@ -182,7 +125,6 @@ impl HostEditorField {
             Self::Port => "Port",
             Self::Profile => "Profile",
             Self::VaultPass => "Vault Pass",
-            Self::Hidden => "Hidden",
             Self::IdentityFile => "Identity File",
             Self::IdentitiesOnly => "IdentitiesOnly",
             Self::ProxyJump => "Proxy Jump",
@@ -198,6 +140,67 @@ impl HostEditorField {
             Self::Delete => "Delete Entry",
             Self::Cancel => "Cancel",
         }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub(crate) enum HostEditorSection {
+    Basic,
+    Authentication,
+    ProxyForwarding,
+    AdvancedSsh,
+    Rdp,
+    Placement,
+}
+
+impl HostEditorSection {
+    const ORDERED: [Self; 6] = [
+        Self::Basic,
+        Self::Authentication,
+        Self::ProxyForwarding,
+        Self::AdvancedSsh,
+        Self::Rdp,
+        Self::Placement,
+    ];
+
+    pub(crate) fn ordered() -> &'static [Self] {
+        &Self::ORDERED
+    }
+
+    pub(crate) fn label(self) -> &'static str {
+        match self {
+            Self::Basic => "Basic",
+            Self::Authentication => "Authentication",
+            Self::ProxyForwarding => "Proxy & Forwarding",
+            Self::AdvancedSsh => "Advanced SSH",
+            Self::Rdp => "RDP",
+            Self::Placement => "Placement",
+        }
+    }
+
+    pub(crate) fn is_collapsible(self) -> bool {
+        !matches!(self, Self::Basic)
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum HostEditorVisibleItem {
+    SectionHeader(HostEditorSection),
+    Field(HostEditorField),
+}
+
+impl HostEditorVisibleItem {
+    pub(crate) fn as_field(self) -> Option<HostEditorField> {
+        match self {
+            Self::Field(field) => Some(field),
+            Self::SectionHeader(_) => None,
+        }
+    }
+}
+
+impl From<HostEditorField> for HostEditorVisibleItem {
+    fn from(field: HostEditorField) -> Self {
+        Self::Field(field)
     }
 }
 
@@ -300,7 +303,8 @@ pub(crate) struct HostEditorState {
     pub(crate) mode: HostEditorMode,
     pub(crate) source_file: PathBuf,
     pub(crate) original_name: Option<String>,
-    pub(crate) selected: HostEditorField,
+    pub(crate) selected: HostEditorVisibleItem,
+    pub(crate) collapsed_sections: HashSet<HostEditorSection>,
     pub(crate) name: TextInput,
     pub(crate) description: TextInput,
     pub(crate) protocol: TextInput,
@@ -382,7 +386,8 @@ impl HostEditorState {
             mode: HostEditorMode::Create,
             source_file,
             original_name: None,
-            selected: HostEditorField::Name,
+            selected: HostEditorVisibleItem::Field(HostEditorField::Name),
+            collapsed_sections: default_collapsed_sections(),
             name: TextInput::default(),
             description: TextInput::default(),
             protocol: TextInput::new("ssh".to_string()),
@@ -425,7 +430,8 @@ impl HostEditorState {
             mode: HostEditorMode::Edit,
             source_file: host.source_file.clone(),
             original_name: Some(host.name.clone()),
-            selected: HostEditorField::Name,
+            selected: HostEditorVisibleItem::Field(HostEditorField::Name),
+            collapsed_sections: default_collapsed_sections(),
             name: TextInput::new(host.name.clone()),
             description: TextInput::new(host.description.clone().unwrap_or_default()),
             protocol: TextInput::new(if matches!(host.protocol, ConnectionProtocol::Rdp) {
@@ -473,45 +479,142 @@ impl HostEditorState {
         "[←/→] Cycle Protocol/Profile/Vault"
     }
 
-    pub(crate) fn visible_fields(&self) -> Vec<HostEditorField> {
-        let mut fields = vec![
-            HostEditorField::Name,
-            HostEditorField::Description,
-            HostEditorField::Protocol,
-            HostEditorField::Host,
-            HostEditorField::User,
-            HostEditorField::Port,
-        ];
+    fn section_template_fields(section: HostEditorSection) -> &'static [HostEditorField] {
+        match section {
+            HostEditorSection::Basic => &[
+                HostEditorField::Name,
+                HostEditorField::Description,
+                HostEditorField::Protocol,
+                HostEditorField::Host,
+                HostEditorField::User,
+                HostEditorField::Port,
+            ],
+            HostEditorSection::Authentication => &[
+                HostEditorField::Profile,
+                HostEditorField::VaultPass,
+                HostEditorField::IdentityFile,
+                HostEditorField::IdentitiesOnly,
+            ],
+            HostEditorSection::ProxyForwarding => &[
+                HostEditorField::ProxyJump,
+                HostEditorField::ProxyCommand,
+                HostEditorField::ForwardAgent,
+                HostEditorField::LocalForward,
+                HostEditorField::RemoteForward,
+            ],
+            HostEditorSection::AdvancedSsh => &[HostEditorField::SshOptions],
+            HostEditorSection::Rdp => &[HostEditorField::RdpDomain, HostEditorField::RdpArgs],
+            HostEditorSection::Placement => &[HostEditorField::FolderPath],
+        }
+    }
 
-        if self.is_rdp() {
-            fields.push(HostEditorField::VaultPass);
-            fields.push(HostEditorField::RdpDomain);
-            fields.push(HostEditorField::RdpArgs);
+    fn section_for_field(field: HostEditorField) -> Option<HostEditorSection> {
+        match field {
+            HostEditorField::Name
+            | HostEditorField::Description
+            | HostEditorField::Protocol
+            | HostEditorField::Host
+            | HostEditorField::User
+            | HostEditorField::Port => Some(HostEditorSection::Basic),
+            HostEditorField::Profile | HostEditorField::VaultPass | HostEditorField::IdentityFile | HostEditorField::IdentitiesOnly => {
+                Some(HostEditorSection::Authentication)
+            }
+            HostEditorField::ProxyJump
+            | HostEditorField::ProxyCommand
+            | HostEditorField::ForwardAgent
+            | HostEditorField::LocalForward
+            | HostEditorField::RemoteForward => Some(HostEditorSection::ProxyForwarding),
+            HostEditorField::SshOptions => Some(HostEditorSection::AdvancedSsh),
+            HostEditorField::RdpDomain | HostEditorField::RdpArgs => Some(HostEditorSection::Rdp),
+            HostEditorField::FolderPath => Some(HostEditorSection::Placement),
+            HostEditorField::Save | HostEditorField::Delete | HostEditorField::Cancel => None,
+        }
+    }
+
+    fn field_matches_context(&self, field: HostEditorField) -> bool {
+        match field {
+            HostEditorField::Profile
+            | HostEditorField::IdentityFile
+            | HostEditorField::IdentitiesOnly
+            | HostEditorField::ProxyJump
+            | HostEditorField::ProxyCommand
+            | HostEditorField::ForwardAgent
+            | HostEditorField::LocalForward
+            | HostEditorField::RemoteForward
+            | HostEditorField::SshOptions => !self.is_rdp(),
+            HostEditorField::RdpDomain | HostEditorField::RdpArgs => self.is_rdp(),
+            HostEditorField::FolderPath => self.mode == HostEditorMode::Create,
+            _ => true,
+        }
+    }
+
+    fn visible_section_fields(&self, section: HostEditorSection) -> Vec<HostEditorField> {
+        Self::section_template_fields(section)
+            .iter()
+            .copied()
+            .filter(|field| self.field_matches_context(*field))
+            .collect()
+    }
+
+    pub(crate) fn visible_sections(&self) -> Vec<HostEditorSection> {
+        HostEditorSection::ordered()
+            .iter()
+            .copied()
+            .filter(|section| !self.visible_section_fields(*section).is_empty())
+            .collect()
+    }
+
+    pub(crate) fn section_collapsed(&self, section: HostEditorSection) -> bool {
+        section.is_collapsible() && self.collapsed_sections.contains(&section)
+    }
+
+    pub(crate) fn toggle_section(&mut self, section: HostEditorSection) {
+        if !section.is_collapsible() || !self.visible_sections().contains(&section) {
+            return;
+        }
+
+        if self.section_collapsed(section) {
+            self.collapsed_sections.remove(&section);
         } else {
-            fields.push(HostEditorField::Profile);
-            fields.push(HostEditorField::VaultPass);
-            fields.push(HostEditorField::IdentityFile);
-            fields.push(HostEditorField::IdentitiesOnly);
-            fields.push(HostEditorField::ProxyJump);
-            fields.push(HostEditorField::ProxyCommand);
-            fields.push(HostEditorField::ForwardAgent);
-            fields.push(HostEditorField::LocalForward);
-            fields.push(HostEditorField::RemoteForward);
-            fields.push(HostEditorField::SshOptions);
+            self.collapsed_sections.insert(section);
         }
 
-        if self.mode == HostEditorMode::Create {
-            fields.push(HostEditorField::FolderPath);
+        self.ensure_selected_item_visible();
+    }
+
+    pub(crate) fn visible_items(&self) -> Vec<HostEditorVisibleItem> {
+        let mut items = Vec::new();
+        for section in self.visible_sections() {
+            items.push(HostEditorVisibleItem::SectionHeader(section));
+            if self.section_collapsed(section) {
+                continue;
+            }
+            items.extend(self.visible_section_fields(section).into_iter().map(HostEditorVisibleItem::Field));
         }
 
-        fields.push(HostEditorField::Save);
-
+        items.push(HostEditorVisibleItem::Field(HostEditorField::Save));
         if self.mode == HostEditorMode::Edit {
-            fields.push(HostEditorField::Delete);
+            items.push(HostEditorVisibleItem::Field(HostEditorField::Delete));
         }
+        items.push(HostEditorVisibleItem::Field(HostEditorField::Cancel));
 
-        fields.push(HostEditorField::Cancel);
-        fields
+        items
+    }
+
+    pub(crate) fn visible_fields(&self) -> Vec<HostEditorField> {
+        self.visible_items().into_iter().filter_map(HostEditorVisibleItem::as_field).collect()
+    }
+
+    pub(crate) fn selected_field(&self) -> Option<HostEditorField> {
+        self.selected.as_field()
+    }
+
+    pub(crate) fn is_selected_field(&self, field: HostEditorField) -> bool {
+        self.selected == HostEditorVisibleItem::Field(field)
+    }
+
+    pub(crate) fn is_selected_section(&self, section: HostEditorSection) -> bool {
+        self.selected == HostEditorVisibleItem::SectionHeader(section)
     }
 
     pub(crate) fn is_rdp(&self) -> bool {
@@ -574,51 +677,93 @@ impl HostEditorState {
 
     #[cfg(test)]
     pub(crate) fn modal_height(&self) -> u16 {
-        let visible_fields = self.visible_fields();
-        let non_action_rows = visible_fields.iter().filter(|field| !field.is_action()).count() as u16;
-        let action_rows = if visible_fields.iter().any(|field| field.is_action()) { 1 } else { 0 };
+        let visible_items = self.visible_items();
+        let non_action_rows = visible_items
+            .iter()
+            .filter(|item| !matches!(item, HostEditorVisibleItem::Field(field) if field.is_action()))
+            .count() as u16;
+        let action_rows = if visible_items
+            .iter()
+            .any(|item| matches!(item, HostEditorVisibleItem::Field(field) if field.is_action()))
+        {
+            1
+        } else {
+            0
+        };
         let field_rows = non_action_rows.saturating_add(action_rows);
         // file row + spacer + message + hint + action row + borders
         field_rows.saturating_add(7)
     }
 
-    pub(crate) fn field_visible(&self, field: HostEditorField) -> bool {
-        self.visible_fields().contains(&field)
-    }
-
     pub(crate) fn select_next_field(&mut self) {
-        self.selected = self.next_visible_field_from(self.selected);
+        self.selected = self.next_visible_item_from(self.selected);
     }
 
     pub(crate) fn select_prev_field(&mut self) {
-        self.selected = self.prev_visible_field_from(self.selected);
+        self.selected = self.prev_visible_item_from(self.selected);
     }
 
-    fn next_visible_field_from(&self, field: HostEditorField) -> HostEditorField {
-        let mut next = field.next();
-        while !self.field_visible(next) {
-            next = next.next();
+    fn next_visible_item_from(&self, item: HostEditorVisibleItem) -> HostEditorVisibleItem {
+        let visible_items = self.visible_items();
+        if visible_items.is_empty() {
+            return HostEditorVisibleItem::Field(HostEditorField::Save);
         }
-        next
-    }
 
-    fn prev_visible_field_from(&self, field: HostEditorField) -> HostEditorField {
-        let mut prev = field.prev();
-        while !self.field_visible(prev) {
-            prev = prev.prev();
+        if let Some(idx) = visible_items.iter().position(|candidate| *candidate == item) {
+            let next_idx = (idx + 1) % visible_items.len();
+            return visible_items[next_idx];
         }
-        prev
+
+        visible_items[0]
     }
 
-    fn ensure_selected_field_visible(&mut self) {
-        if !self.field_visible(self.selected) {
-            self.selected = HostEditorField::Protocol;
+    fn prev_visible_item_from(&self, item: HostEditorVisibleItem) -> HostEditorVisibleItem {
+        let visible_items = self.visible_items();
+        if visible_items.is_empty() {
+            return HostEditorVisibleItem::Field(HostEditorField::Save);
+        }
+
+        if let Some(idx) = visible_items.iter().position(|candidate| *candidate == item) {
+            let prev_idx = if idx == 0 {
+                visible_items.len().saturating_sub(1)
+            } else {
+                idx.saturating_sub(1)
+            };
+            return visible_items[prev_idx];
+        }
+
+        visible_items[0]
+    }
+
+    fn ensure_selected_item_visible(&mut self) {
+        let visible_items = self.visible_items();
+        if visible_items.is_empty() {
+            self.selected = HostEditorVisibleItem::Field(HostEditorField::Save);
+            return;
+        }
+
+        if visible_items.contains(&self.selected) {
+            return;
+        }
+
+        if let Some(field) = self.selected_field()
+            && let Some(section) = Self::section_for_field(field)
+            && visible_items.contains(&HostEditorVisibleItem::SectionHeader(section))
+        {
+            self.selected = HostEditorVisibleItem::SectionHeader(section);
+            return;
+        }
+
+        if visible_items.contains(&HostEditorVisibleItem::Field(HostEditorField::Protocol)) {
+            self.selected = HostEditorVisibleItem::Field(HostEditorField::Protocol);
+        } else {
+            self.selected = visible_items[0];
         }
     }
 
     fn set_protocol_value(&mut self, protocol: &str) {
         self.protocol = TextInput::new(protocol.to_string());
-        self.ensure_selected_field_visible();
+        self.ensure_selected_item_visible();
     }
 
     fn apply_default_port_for_protocol_switch(&mut self, was_rdp: bool) {
@@ -657,10 +802,6 @@ impl HostEditorState {
         }
     }
 
-    pub(crate) fn hidden_display(&self) -> &'static str {
-        if self.hidden { "yes" } else { "no" }
-    }
-
     pub(crate) fn field_example(&self, field: HostEditorField) -> Option<&'static str> {
         match field {
             HostEditorField::Name => None,
@@ -671,7 +812,6 @@ impl HostEditorState {
             HostEditorField::Port => Some("22 or 3389"),
             HostEditorField::Profile => None,
             HostEditorField::VaultPass => None,
-            HostEditorField::Hidden => Some("yes | no"),
             HostEditorField::IdentityFile => Some("[\"~/.ssh/id_ed25519\"]"),
             HostEditorField::IdentitiesOnly => Some("auto | yes | no"),
             HostEditorField::ProxyJump => Some("jump.example.com"),
@@ -863,7 +1003,7 @@ impl HostEditorState {
             return 0;
         };
 
-        if self.selected != field {
+        if !self.is_selected_field(field) {
             return 0;
         }
 
@@ -982,6 +1122,15 @@ impl HostEditorState {
             host: editable_host,
         })
     }
+}
+
+fn default_collapsed_sections() -> HashSet<HostEditorSection> {
+    HashSet::from([
+        HostEditorSection::ProxyForwarding,
+        HostEditorSection::AdvancedSsh,
+        HostEditorSection::Rdp,
+        HostEditorSection::Placement,
+    ])
 }
 
 fn optional_trimmed_string(value: &str) -> Option<String> {
