@@ -143,6 +143,21 @@ impl AppState {
         self.open_or_focus_host_editor_tab(editor_id, editor_state);
     }
 
+    fn open_host_editor_for_duplicate_host_idx(&mut self, host_idx: usize) {
+        let Some(host) = self.hosts.get(host_idx).cloned() else {
+            return;
+        };
+
+        let profiles = self.discover_quick_connect_profiles();
+        let vault_entries = self.discover_host_editor_vault_pass_entries();
+        let mut editor_state = HostEditorState::new_duplicate(&host, profiles, vault_entries);
+        editor_state.folder_path.value = Self::render_folder_path_input(&host.source_folder_path);
+        editor_state.folder_path.cursor = editor_state.folder_path.value.chars().count();
+        editor_state.folder_path.selection = None;
+        let editor_id = EditorTabId::for_duplicate_host(&host);
+        self.open_or_focus_host_editor_tab(editor_id, editor_state);
+    }
+
     pub(crate) fn open_host_editor_for_new_entry(&mut self, source_file: PathBuf) {
         self.open_host_editor_for_new_entry_with_folder_path(source_file, Vec::new());
     }
@@ -238,6 +253,9 @@ impl AppState {
                 KeyCode::Char('e') if key.modifiers.is_empty() && menu.has_action(HostContextMenuAction::EditEntry) => {
                     action = Some(HostContextMenuAction::EditEntry);
                 }
+                KeyCode::Char('u') if key.modifiers.is_empty() && menu.has_action(HostContextMenuAction::DuplicateEntry) => {
+                    action = Some(HostContextMenuAction::DuplicateEntry);
+                }
                 KeyCode::Char('m') if key.modifiers.is_empty() && menu.has_action(HostContextMenuAction::MoveToFolder) => {
                     action = Some(HostContextMenuAction::MoveToFolder);
                 }
@@ -275,12 +293,9 @@ impl AppState {
                 }
             }
             HostContextMenuAction::DuplicateEntry => {
-                let host_name = match menu.target {
-                    HostContextMenuTarget::Host { host_idx } => self.hosts.get(host_idx).map(|host| host.name.clone()),
-                    _ => None,
+                if let HostContextMenuTarget::Host { host_idx } = menu.target {
+                    self.open_host_editor_for_duplicate_host_idx(host_idx);
                 }
-                .unwrap_or_else(|| "entry".to_string());
-                self.open_host_context_menu_placeholder(format!("Duplicate Entry for '{host_name}' is not implemented yet (Phase 5 foundation)."));
             }
             HostContextMenuAction::MoveToFolder => {
                 let host_name = match menu.target {

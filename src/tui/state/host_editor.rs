@@ -521,6 +521,17 @@ impl HostEditorState {
         state
     }
 
+    pub(crate) fn new_duplicate(host: &InventoryHost, profile_options: Vec<String>, vault_pass_options: Vec<String>) -> Self {
+        let mut state = Self::new_edit(host, profile_options, vault_pass_options);
+        state.mode = HostEditorMode::Create;
+        state.original_name = None;
+        state.selected = HostEditorVisibleItem::Field(HostEditorField::Name);
+        state.name = TextInput::new(duplicate_host_name(&host.name));
+        state.folder_path = TextInput::new("/".to_string());
+        state.error = None;
+        state
+    }
+
     pub(crate) fn title(&self) -> &'static str {
         match self.mode {
             HostEditorMode::Create => " New Inventory Entry ",
@@ -1183,6 +1194,15 @@ fn default_collapsed_sections() -> HashSet<HostEditorSection> {
         .copied()
         .filter(|section| section.is_collapsible() && !matches!(section, HostEditorSection::Authentication))
         .collect()
+}
+
+fn duplicate_host_name(source_name: &str) -> String {
+    let trimmed = source_name.trim();
+    if trimmed.is_empty() {
+        "entry (copy)".to_string()
+    } else {
+        format!("{trimmed} (copy)")
+    }
 }
 
 fn optional_trimmed_string(value: &str) -> Option<String> {

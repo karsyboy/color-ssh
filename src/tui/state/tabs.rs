@@ -30,6 +30,7 @@ pub(crate) struct HostTab {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum EditorTabId {
     NewEntry { source_file: PathBuf },
+    DuplicateEntry { source_file: PathBuf, source_host_name: String },
     ExistingHost { source_file: PathBuf, host_name: String },
 }
 
@@ -66,6 +67,13 @@ impl EditorTabId {
 
     pub(crate) fn for_new_entry(source_file: PathBuf) -> Self {
         Self::NewEntry { source_file }
+    }
+
+    pub(crate) fn for_duplicate_host(host: &InventoryHost) -> Self {
+        Self::DuplicateEntry {
+            source_file: host.source_file.clone(),
+            source_host_name: host.name.clone(),
+        }
     }
 }
 

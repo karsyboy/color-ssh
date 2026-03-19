@@ -386,6 +386,123 @@ inventory:
 }
 
 #[test]
+fn duplicate_entry_opens_prefilled_create_tab_and_saves_without_overwriting_original() {
+    let workspace = TestWorkspace::new("tui", "host_editor_duplicate").expect("temp workspace");
+    let inventory_path = workspace.join("cossh-inventory.yaml");
+    workspace
+        .write(
+            &inventory_path,
+            r#"
+inventory:
+  - Group:
+      - name: alpha
+        description: Primary host
+        protocol: ssh
+        host: alpha.example
+        user: admin
+        port: 2200
+        profile: work
+        vault-pass: alpha_pass
+        identity-file:
+          - /tmp/id_alpha
+"#,
+        )
+        .expect("write inventory");
+
+    let mut app = AppState::new_for_tests();
+    seed_app_from_inventory(&mut app, &inventory_path);
+    app.set_selected_row(find_host_row(&app, "alpha"));
+    let host_idx = app.selected_host_idx().expect("selected host idx");
+
+    app.open_host_context_menu_for_selected_host(1, 1, host_idx);
+    app.execute_host_context_menu_action(crate::tui::HostContextMenuAction::DuplicateEntry);
+
+    let form = app.selected_host_editor().expect("duplicate host editor");
+    assert_eq!(form.mode, HostEditorMode::Create);
+    assert!(form.original_name.is_none());
+    assert_eq!(form.source_file, inventory_path);
+    assert_eq!(form.name.value, "alpha (copy)");
+    assert_eq!(form.description.value, "Primary host");
+    assert_eq!(form.protocol.value, "ssh");
+    assert_eq!(form.host.value, "alpha.example");
+    assert_eq!(form.user.value, "admin");
+    assert_eq!(form.port.value, "2200");
+    assert_eq!(form.profile.value, "work");
+    assert_eq!(form.vault_pass.value, "alpha_pass");
+    assert!(form.identity_file.value.contains("/tmp/id_alpha"));
+    assert_eq!(form.folder_path.value, "/Group/");
+
+    match &app.tabs[app.selected_tab].editor().expect("editor tab").id {
+        EditorTabId::DuplicateEntry { source_file, source_host_name } => {
+            assert_eq!(source_file, &inventory_path);
+            assert_eq!(source_host_name, "alpha");
+        }
+        other => panic!("expected duplicate editor tab id, got {other:?}"),
+    }
+
+    {
+        let form = app.selected_host_editor_mut().expect("duplicate host editor");
+        form.host.value = "alpha-copy.example".to_string();
+    }
+    app.submit_host_editor();
+
+    let original = app.hosts.iter().find(|host| host.name == "alpha").expect("original host remains");
+    assert_eq!(original.host, "alpha.example");
+
+    let duplicate = app.hosts.iter().find(|host| host.name == "alpha (copy)").expect("duplicated host exists");
+    assert_eq!(duplicate.host, "alpha-copy.example");
+
+    let rendered = fs::read_to_string(&inventory_path).expect("read inventory");
+    assert!(rendered.contains("name: alpha"));
+    assert!(rendered.contains("name: alpha (copy)"));
+    assert!(rendered.contains("alpha-copy.example"));
+}
+
+#[test]
+fn duplicate_entry_uses_distinct_tab_identity_from_edit_tab() {
+    let workspace = TestWorkspace::new("tui", "host_editor_duplicate_tab_identity").expect("temp workspace");
+    let inventory_path = workspace.join("cossh-inventory.yaml");
+    workspace
+        .write(
+            &inventory_path,
+            r#"
+inventory:
+  - name: alpha
+    protocol: ssh
+    host: alpha.example
+"#,
+        )
+        .expect("write inventory");
+
+    let mut app = AppState::new_for_tests();
+    seed_app_from_inventory(&mut app, &inventory_path);
+    app.set_selected_row(find_host_row(&app, "alpha"));
+
+    app.open_host_editor_for_selected_host();
+    assert_eq!(app.selected_host_editor().expect("edit tab").mode, HostEditorMode::Edit);
+    let tabs_before = app.tabs.len();
+
+    let host_idx = app.selected_host_idx().expect("selected host idx");
+    app.open_host_context_menu_for_selected_host(1, 1, host_idx);
+    app.execute_host_context_menu_action(crate::tui::HostContextMenuAction::DuplicateEntry);
+
+    assert_eq!(app.tabs.len(), tabs_before + 1);
+    assert_eq!(app.selected_host_editor().expect("duplicate tab").mode, HostEditorMode::Create);
+    assert_eq!(app.selected_host_editor().expect("duplicate tab").name.value, "alpha (copy)");
+    assert!(
+        app.tabs
+            .iter()
+            .filter_map(|tab| tab.editor())
+            .any(|editor| matches!(editor.id, EditorTabId::ExistingHost { .. })),
+        "existing edit tab should remain open"
+    );
+    assert!(matches!(
+        app.tabs[app.selected_tab].editor().expect("selected editor").id,
+        EditorTabId::DuplicateEntry { .. }
+    ));
+}
+
+#[test]
 fn protocol_field_cycles_with_arrow_keys_and_filters_visible_fields_by_protocol() {
     let mut app = AppState::new_for_tests();
     open_test_editor(
