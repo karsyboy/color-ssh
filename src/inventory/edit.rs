@@ -66,6 +66,148 @@ pub(crate) fn create_inventory_host_entry(source_file: &Path, folder_path: &[Str
     write_inventory_document(source_file, &document)
 }
 
+pub(crate) fn move_inventory_host_entry(source_file: &Path, host_name: &str, target_folder_path: &[String]) -> io::Result<()> {
+    let mut document = load_inventory_document(source_file)?;
+    let nodes = inventory_nodes_mut(&mut document, source_file)?;
+    let current_folder_path = find_host_folder_path_in_nodes(nodes, host_name, &mut Vec::new()).ok_or_else(|| {
+        io::Error::new(
+            io::ErrorKind::NotFound,
+            format!("inventory host '{}' was not found in '{}'", host_name, source_file.display()),
+        )
+    })?;
+
+    if current_folder_path == target_folder_path {
+        return Ok(());
+    }
+
+    let (entry, _source_path) = take_host_entry_in_nodes(nodes, host_name, &mut Vec::new()).ok_or_else(|| {
+        io::Error::new(
+            io::ErrorKind::NotFound,
+            format!("inventory host '{}' was not found in '{}'", host_name, source_file.display()),
+        )
+    })?;
+
+    let target_nodes = ensure_folder_nodes(nodes, target_folder_path, source_file)?;
+    target_nodes.push(entry);
+
+    write_inventory_document(source_file, &document)
+}
+
+pub(crate) fn rename_inventory_folder(source_file: &Path, folder_path: &[String], new_name: &str) -> io::Result<()> {
+    if folder_path.is_empty() {
+        return Err(io::Error::new(io::ErrorKind::InvalidInput, "cannot rename the inventory root folder"));
+    }
+
+    let sanitized_name = new_name.trim();
+    if sanitized_name.is_empty() {
+        return Err(io::Error::new(io::ErrorKind::InvalidInput, "folder name cannot be empty"));
+    }
+    if sanitized_name.contains('/') {
+        return Err(io::Error::new(io::ErrorKind::InvalidInput, "folder name cannot include path separator '/'"));
+    }
+
+    let parent_path = &folder_path[..folder_path.len().saturating_sub(1)];
+    let current_name = &folder_path[folder_path.len().saturating_sub(1)];
+    if current_name == sanitized_name {
+        return Ok(());
+    }
+
+    let mut document = load_inventory_document(source_file)?;
+    let nodes = inventory_nodes_mut(&mut document, source_file)?;
+    let parent_nodes = find_folder_nodes_mut(nodes, parent_path, source_file)?;
+
+    if parent_nodes
+        .iter()
+        .any(|node| folder_entry_name(node).is_some_and(|name| name == sanitized_name))
+    {
+        return Err(io::Error::new(
+            io::ErrorKind::AlreadyExists,
+            format!(
+                "folder '{}' already exists under '{}' in '{}'",
+                sanitized_name,
+                if parent_path.is_empty() {
+                    "/".to_string()
+                } else {
+                    format!("/{}", parent_path.join("/"))
+                },
+                source_file.display()
+            ),
+        ));
+    }
+
+    let folder_index = parent_nodes
+        .iter()
+        .position(|node| folder_entry_name(node).is_some_and(|name| name == current_name))
+        .ok_or_else(|| {
+            io::Error::new(
+                io::ErrorKind::NotFound,
+                format!(
+                    "inventory folder '{}' was not found in '{}'",
+                    format_args!("/{}", folder_path.join("/")),
+                    source_file.display()
+                ),
+            )
+        })?;
+
+    let node = parent_nodes
+        .get_mut(folder_index)
+        .ok_or_else(|| io::Error::new(io::ErrorKind::NotFound, "folder index disappeared unexpectedly"))?;
+    let Value::Mapping(mapping) = node else {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            format!("folder '{}' in '{}' must be a YAML mapping", current_name, source_file.display()),
+        ));
+    };
+
+    let old_key = mapping.keys().next().cloned().ok_or_else(|| {
+        io::Error::new(
+            io::ErrorKind::InvalidData,
+            format!("folder '{}' in '{}' has no name key", current_name, source_file.display()),
+        )
+    })?;
+    let items = mapping.remove(&old_key).ok_or_else(|| {
+        io::Error::new(
+            io::ErrorKind::InvalidData,
+            format!("folder '{}' in '{}' has no child list", current_name, source_file.display()),
+        )
+    })?;
+    mapping.insert(Value::String(sanitized_name.to_string()), items);
+
+    write_inventory_document(source_file, &document)
+}
+
+pub(crate) fn delete_inventory_folder(source_file: &Path, folder_path: &[String]) -> io::Result<usize> {
+    if folder_path.is_empty() {
+        return Err(io::Error::new(io::ErrorKind::InvalidInput, "cannot delete the inventory root folder"));
+    }
+
+    let parent_path = &folder_path[..folder_path.len().saturating_sub(1)];
+    let folder_name = &folder_path[folder_path.len().saturating_sub(1)];
+
+    let mut document = load_inventory_document(source_file)?;
+    let nodes = inventory_nodes_mut(&mut document, source_file)?;
+    let parent_nodes = find_folder_nodes_mut(nodes, parent_path, source_file)?;
+
+    let folder_index = parent_nodes
+        .iter()
+        .position(|node| folder_entry_name(node).is_some_and(|name| name == folder_name))
+        .ok_or_else(|| {
+            io::Error::new(
+                io::ErrorKind::NotFound,
+                format!(
+                    "inventory folder '{}' was not found in '{}'",
+                    format_args!("/{}", folder_path.join("/")),
+                    source_file.display()
+                ),
+            )
+        })?;
+
+    let removed = parent_nodes.remove(folder_index);
+    let removed_host_count = count_hosts_in_node(&removed);
+    write_inventory_document(source_file, &document)?;
+    Ok(removed_host_count)
+}
+
 fn load_inventory_document(source_file: &Path) -> io::Result<Value> {
     if !source_file.exists() {
         return Ok(Value::Mapping(Mapping::new()));
@@ -250,6 +392,92 @@ fn ensure_folder_nodes<'a>(nodes: &'a mut Vec<Value>, folder_path: &[String], so
     }
 
     Ok(current)
+}
+
+fn find_folder_nodes_mut<'a>(nodes: &'a mut Vec<Value>, folder_path: &[String], source_file: &Path) -> io::Result<&'a mut Vec<Value>> {
+    let mut current = nodes;
+    for segment in folder_path {
+        if segment.trim().is_empty() {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                format!("folder path segment cannot be empty in '{}'", source_file.display()),
+            ));
+        }
+
+        let index = current
+            .iter()
+            .position(|node| folder_entry_name(node).is_some_and(|name| name == segment))
+            .ok_or_else(|| {
+                io::Error::new(
+                    io::ErrorKind::NotFound,
+                    format!("folder '{}' was not found in '{}'", segment, source_file.display()),
+                )
+            })?;
+
+        let next = folder_items_mut(&mut current[index]).ok_or_else(|| {
+            io::Error::new(
+                io::ErrorKind::InvalidData,
+                format!("folder '{}' in '{}' must contain a YAML list", segment, source_file.display()),
+            )
+        })?;
+        current = next;
+    }
+
+    Ok(current)
+}
+
+fn find_host_folder_path_in_nodes(nodes: &mut Vec<Value>, host_name: &str, current_path: &mut Vec<String>) -> Option<Vec<String>> {
+    for node in nodes {
+        if let Some(mapping) = host_mapping_mut(node)
+            && host_name_matches(mapping, host_name)
+        {
+            return Some(current_path.clone());
+        }
+
+        let Some(folder_name) = folder_entry_name(node).map(str::to_string) else {
+            continue;
+        };
+        let Some(children) = folder_items_mut(node) else {
+            continue;
+        };
+
+        current_path.push(folder_name);
+        if let Some(found) = find_host_folder_path_in_nodes(children, host_name, current_path) {
+            return Some(found);
+        }
+        current_path.pop();
+    }
+
+    None
+}
+
+fn take_host_entry_in_nodes(nodes: &mut Vec<Value>, host_name: &str, current_path: &mut Vec<String>) -> Option<(Value, Vec<String>)> {
+    let mut index = 0usize;
+    while index < nodes.len() {
+        let matches_target = {
+            let node = &mut nodes[index];
+            host_mapping_mut(node).is_some_and(|mapping| host_name_matches(mapping, host_name))
+        };
+        if matches_target {
+            let removed = nodes.remove(index);
+            return Some((removed, current_path.clone()));
+        }
+
+        let folder_name = folder_entry_name(&nodes[index]).map(str::to_string);
+        if let Some(folder_name) = folder_name
+            && let Some(children) = folder_items_mut(&mut nodes[index])
+        {
+            current_path.push(folder_name);
+            if let Some(found) = take_host_entry_in_nodes(children, host_name, current_path) {
+                return Some(found);
+            }
+            current_path.pop();
+        }
+
+        index += 1;
+    }
+
+    None
 }
 
 fn apply_editable_host_to_mapping(mapping: &mut Mapping, host: &EditableInventoryHost) {
@@ -454,6 +682,33 @@ fn folder_items_mut(value: &mut Value) -> Option<&mut Vec<Value>> {
     };
 
     Some(items)
+}
+
+fn count_hosts_in_nodes(nodes: &[Value]) -> usize {
+    nodes.iter().map(count_hosts_in_node).sum()
+}
+
+fn count_hosts_in_node(node: &Value) -> usize {
+    let Value::Mapping(mapping) = node else {
+        return 0;
+    };
+
+    if is_host_mapping(mapping) {
+        return 1;
+    }
+
+    if mapping.len() != 1 {
+        return 0;
+    }
+
+    let Some((_, value)) = mapping.iter().next() else {
+        return 0;
+    };
+    let Value::Sequence(items) = value else {
+        return 0;
+    };
+
+    count_hosts_in_nodes(items)
 }
 
 fn value_string_key(value: &Value) -> Option<&str> {

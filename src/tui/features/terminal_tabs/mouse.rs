@@ -53,6 +53,21 @@ impl AppState {
             return Ok(());
         }
 
+        if self.folder_picker.is_some() {
+            self.handle_folder_picker_mouse(mouse);
+            return Ok(());
+        }
+
+        if self.folder_rename.is_some() {
+            self.handle_folder_rename_mouse(mouse);
+            return Ok(());
+        }
+
+        if self.folder_delete_confirm.is_some() {
+            self.handle_folder_delete_confirm_mouse(mouse);
+            return Ok(());
+        }
+
         if self.current_tab_search().map(|search_state| search_state.active).unwrap_or(false) && self.is_pty_mouse_mode_active() {
             self.clear_terminal_search();
         }

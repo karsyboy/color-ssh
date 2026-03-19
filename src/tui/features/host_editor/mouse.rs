@@ -165,6 +165,9 @@ impl AppState {
                         form.cycle_identities_only_forward();
                     }
                     HostEditorField::Protocol => {}
+                    HostEditorField::FolderPath => {
+                        self.open_folder_picker_for_editor_placement();
+                    }
                     _ => {
                         if let Some(offset) = Self::host_editor_text_offset(form, inner_area, field, mouse_col) {
                             form.begin_mouse_selection(field, offset);
@@ -281,7 +284,6 @@ impl AppState {
                 | HostEditorField::SshOptions
                 | HostEditorField::RdpDomain
                 | HostEditorField::RdpArgs
-                | HostEditorField::FolderPath
         );
         if !editable {
             return None;

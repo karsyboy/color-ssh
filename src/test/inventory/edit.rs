@@ -1,4 +1,7 @@
-use super::{EditableInventoryHost, create_inventory_host_entry, delete_inventory_host_entry, update_inventory_host_entry};
+use super::{
+    EditableInventoryHost, create_inventory_host_entry, delete_inventory_folder, delete_inventory_host_entry, move_inventory_host_entry,
+    rename_inventory_folder, update_inventory_host_entry,
+};
 use crate::inventory::{ConnectionProtocol, build_inventory_tree};
 use crate::test::support::fs::TestWorkspace;
 use std::collections::BTreeMap;
@@ -114,4 +117,105 @@ inventory:
     let rendered = fs::read_to_string(&inventory_path).expect("read inventory");
     assert!(rendered.contains("folder:"));
     assert!(rendered.contains("folder1:"));
+}
+
+#[test]
+fn move_inventory_host_entry_moves_host_between_folders_in_single_write_flow() {
+    let workspace = TestWorkspace::new("inventory", "edit_move_host").expect("temp workspace");
+    let inventory_path = workspace.join("cossh-inventory.yaml");
+    workspace
+        .write(
+            &inventory_path,
+            r#"
+inventory:
+  - GroupA:
+      - name: alpha
+        protocol: ssh
+        host: alpha.example
+  - GroupB:
+      - name: beta
+        protocol: ssh
+        host: beta.example
+"#,
+        )
+        .expect("write inventory");
+
+    move_inventory_host_entry(&inventory_path, "alpha", &["GroupB".to_string()]).expect("move inventory host entry");
+
+    let tree = build_inventory_tree(&inventory_path).expect("reload inventory");
+    let moved = tree.hosts.iter().find(|host| host.name == "alpha").expect("moved host");
+    assert_eq!(moved.source_folder_path, vec!["GroupB".to_string()]);
+
+    let rendered = fs::read_to_string(&inventory_path).expect("read inventory");
+    let group_a_index = rendered.find("GroupA:").expect("group a exists");
+    let group_b_index = rendered.find("GroupB:").expect("group b exists");
+    let alpha_index = rendered.find("name: alpha").expect("alpha exists");
+    assert!(group_b_index < alpha_index, "alpha should be under GroupB after move");
+    assert!(group_a_index < group_b_index, "GroupA should remain before GroupB in this fixture");
+}
+
+#[test]
+fn rename_inventory_folder_updates_folder_key() {
+    let workspace = TestWorkspace::new("inventory", "edit_rename_folder").expect("temp workspace");
+    let inventory_path = workspace.join("cossh-inventory.yaml");
+    workspace
+        .write(
+            &inventory_path,
+            r#"
+inventory:
+  - old-folder:
+      - name: alpha
+        protocol: ssh
+        host: alpha.example
+"#,
+        )
+        .expect("write inventory");
+
+    rename_inventory_folder(&inventory_path, &["old-folder".to_string()], "new-folder").expect("rename folder");
+
+    let tree = build_inventory_tree(&inventory_path).expect("reload inventory");
+    let host = tree.hosts.iter().find(|item| item.name == "alpha").expect("host");
+    assert_eq!(host.source_folder_path, vec!["new-folder".to_string()]);
+
+    let rendered = fs::read_to_string(&inventory_path).expect("read inventory");
+    assert!(rendered.contains("new-folder:"));
+    assert!(!rendered.contains("old-folder:"));
+}
+
+#[test]
+fn delete_inventory_folder_removes_descendants_and_returns_host_count() {
+    let workspace = TestWorkspace::new("inventory", "edit_delete_folder").expect("temp workspace");
+    let inventory_path = workspace.join("cossh-inventory.yaml");
+    workspace
+        .write(
+            &inventory_path,
+            r#"
+inventory:
+  - Keep:
+      - name: keep-host
+        protocol: ssh
+        host: keep.example
+  - Remove:
+      - name: alpha
+        protocol: ssh
+        host: alpha.example
+      - Nested:
+          - name: beta
+            protocol: ssh
+            host: beta.example
+"#,
+        )
+        .expect("write inventory");
+
+    let removed = delete_inventory_folder(&inventory_path, &["Remove".to_string()]).expect("delete folder");
+    assert_eq!(removed, 2);
+
+    let tree = build_inventory_tree(&inventory_path).expect("reload inventory");
+    assert!(tree.hosts.iter().any(|host| host.name == "keep-host"));
+    assert!(tree.hosts.iter().all(|host| host.name != "alpha"));
+    assert!(tree.hosts.iter().all(|host| host.name != "beta"));
+
+    let rendered = fs::read_to_string(&inventory_path).expect("read inventory");
+    assert!(rendered.contains("Keep:"));
+    assert!(!rendered.contains("Remove:"));
 }

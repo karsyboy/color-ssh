@@ -126,6 +126,26 @@ impl AppState {
                     }
 
                     match field {
+                        HostEditorField::FolderPath => {
+                            let label_style = if form.is_selected_field(field) { selected_label } else { normal_label };
+                            let value_style = if form.is_selected_field(field) { selected_value } else { normal_value };
+                            let hint_style = Style::default().fg(theme::ansi_bright_black());
+                            let folder_display = form
+                                .text_field(HostEditorField::FolderPath)
+                                .map(|input| {
+                                    if input.value.trim().is_empty() {
+                                        "/".to_string()
+                                    } else {
+                                        input.value.clone()
+                                    }
+                                })
+                                .unwrap_or_else(|| "/".to_string());
+                            lines.push(Line::from(vec![
+                                Span::styled(format!("{}: ", field.label()), label_style),
+                                Span::styled(folder_display, value_style),
+                                Span::styled("  (Enter to pick)", hint_style),
+                            ]));
+                        }
                         HostEditorField::IdentitiesOnly => {
                             let label_style = if form.is_selected_field(field) { selected_label } else { normal_label };
                             let value_style = if form.is_selected_field(field) { selected_value } else { normal_value };

@@ -31,6 +31,13 @@ fn find_host_row(app: &AppState, host_name: &str) -> usize {
         .unwrap_or_else(|| panic!("host row '{host_name}' not found"))
 }
 
+fn find_folder_row(app: &AppState, folder_name: &str) -> usize {
+    app.visible_host_rows
+        .iter()
+        .position(|row| matches!(row.kind, crate::tui::HostTreeRowKind::Folder(_)) && row.display_name == folder_name)
+        .unwrap_or_else(|| panic!("folder row '{folder_name}' not found"))
+}
+
 fn open_test_editor(app: &mut AppState, editor_state: HostEditorState) {
     let editor_id = match editor_state.mode {
         HostEditorMode::Create => EditorTabId::for_new_entry(editor_state.source_file.clone()),
@@ -935,6 +942,196 @@ fn host_editor_mouse_selection_allows_drag_highlight_and_delete() {
     let form = app.selected_host_editor().expect("host editor state");
     assert_eq!(form.selected, HostEditorVisibleItem::Field(HostEditorField::Host));
     assert_eq!(form.host.value, ".example");
+}
+
+#[test]
+fn create_mode_folder_path_uses_folder_picker_selection() {
+    let workspace = TestWorkspace::new("tui", "host_editor_folder_picker_create").expect("temp workspace");
+    let inventory_path = workspace.join("cossh-inventory.yaml");
+    workspace
+        .write(
+            &inventory_path,
+            r#"
+inventory:
+  - Group:
+      - name: alpha
+        protocol: ssh
+        host: alpha.example
+"#,
+        )
+        .expect("write inventory");
+
+    let mut app = AppState::new_for_tests();
+    seed_app_from_inventory(&mut app, &inventory_path);
+    app.open_host_editor_for_new_entry(inventory_path.clone());
+
+    {
+        let form = app.selected_host_editor_mut().expect("create editor");
+        form.toggle_section(HostEditorSection::Placement);
+        form.selected = HostEditorField::FolderPath.into();
+    }
+
+    app.handle_host_editor_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+    assert!(app.folder_picker.is_some(), "folder picker should open from placement field");
+
+    {
+        let picker = app.folder_picker.as_mut().expect("folder picker");
+        picker.selected = picker
+            .rows
+            .iter()
+            .position(|row| row.folder_path == vec!["Group".to_string()])
+            .expect("group folder option");
+    }
+    app.handle_folder_picker_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+
+    let form = app.selected_host_editor().expect("create editor");
+    assert_eq!(form.folder_path.value, "/Group/");
+}
+
+#[test]
+fn move_to_folder_context_action_moves_host_and_refreshes_browser() {
+    let workspace = TestWorkspace::new("tui", "host_editor_move_folder").expect("temp workspace");
+    let inventory_path = workspace.join("cossh-inventory.yaml");
+    workspace
+        .write(
+            &inventory_path,
+            r#"
+inventory:
+  - TeamA:
+      - name: alpha
+        protocol: ssh
+        host: alpha.example
+  - TeamB:
+      - name: beta
+        protocol: ssh
+        host: beta.example
+"#,
+        )
+        .expect("write inventory");
+
+    let mut app = AppState::new_for_tests();
+    seed_app_from_inventory(&mut app, &inventory_path);
+    app.set_selected_row(find_host_row(&app, "alpha"));
+    let host_idx = app.selected_host_idx().expect("selected host");
+
+    app.open_host_context_menu_for_selected_host(1, 1, host_idx);
+    app.execute_host_context_menu_action(crate::tui::HostContextMenuAction::MoveToFolder);
+    assert!(app.folder_picker.is_some(), "move action should open folder picker");
+
+    {
+        let picker = app.folder_picker.as_mut().expect("folder picker");
+        picker.selected = picker
+            .rows
+            .iter()
+            .position(|row| row.folder_path == vec!["TeamB".to_string()])
+            .expect("team b folder option");
+    }
+    app.handle_folder_picker_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+
+    let moved = app.hosts.iter().find(|host| host.name == "alpha").expect("moved host");
+    assert_eq!(moved.source_folder_path, vec!["TeamB".to_string()]);
+
+    let rendered = fs::read_to_string(&inventory_path).expect("read inventory");
+    assert!(rendered.contains("TeamB:"));
+    assert!(rendered.contains("name: alpha"));
+}
+
+#[test]
+fn rename_folder_context_action_renames_folder_and_updates_tree() {
+    let workspace = TestWorkspace::new("tui", "host_editor_rename_folder").expect("temp workspace");
+    let inventory_path = workspace.join("cossh-inventory.yaml");
+    workspace
+        .write(
+            &inventory_path,
+            r#"
+inventory:
+  - Old:
+      - name: alpha
+        protocol: ssh
+        host: alpha.example
+"#,
+        )
+        .expect("write inventory");
+
+    let mut app = AppState::new_for_tests();
+    seed_app_from_inventory(&mut app, &inventory_path);
+
+    let folder_row = find_folder_row(&app, "Old");
+    let folder_id = match app.visible_host_rows[folder_row].kind {
+        crate::tui::HostTreeRowKind::Folder(folder_id) => folder_id,
+        _ => panic!("expected folder row"),
+    };
+
+    app.open_host_context_menu_for_folder(1, 1, folder_id, inventory_path.clone());
+    app.execute_host_context_menu_action(crate::tui::HostContextMenuAction::RenameFolder);
+    assert!(app.folder_rename.is_some(), "rename action should open folder rename modal");
+
+    {
+        let state = app.folder_rename.as_mut().expect("rename modal");
+        state.name = "New".to_string();
+        state.cursor = state.name.chars().count();
+        state.selection = None;
+    }
+    app.handle_folder_rename_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+
+    assert!(app.visible_host_rows.iter().any(|row| row.display_name == "New"));
+    assert!(!app.visible_host_rows.iter().any(|row| row.display_name == "Old"));
+
+    let rendered = fs::read_to_string(&inventory_path).expect("read inventory");
+    assert!(rendered.contains("New:"));
+    assert!(!rendered.contains("Old:"));
+}
+
+#[test]
+fn delete_folder_context_action_opens_confirm_with_entry_count_and_deletes() {
+    let workspace = TestWorkspace::new("tui", "host_editor_delete_folder").expect("temp workspace");
+    let inventory_path = workspace.join("cossh-inventory.yaml");
+    workspace
+        .write(
+            &inventory_path,
+            r#"
+inventory:
+  - Keep:
+      - name: keep-host
+        protocol: ssh
+        host: keep.example
+  - Remove:
+      - name: alpha
+        protocol: ssh
+        host: alpha.example
+      - Nested:
+          - name: beta
+            protocol: ssh
+            host: beta.example
+"#,
+        )
+        .expect("write inventory");
+
+    let mut app = AppState::new_for_tests();
+    seed_app_from_inventory(&mut app, &inventory_path);
+
+    let folder_row = find_folder_row(&app, "Remove");
+    let folder_id = match app.visible_host_rows[folder_row].kind {
+        crate::tui::HostTreeRowKind::Folder(folder_id) => folder_id,
+        _ => panic!("expected folder row"),
+    };
+
+    app.open_host_context_menu_for_folder(1, 1, folder_id, inventory_path.clone());
+    app.execute_host_context_menu_action(crate::tui::HostContextMenuAction::DeleteFolder);
+
+    let confirm = app.folder_delete_confirm.as_ref().expect("folder delete confirmation");
+    assert_eq!(confirm.folder_name, "Remove");
+    assert_eq!(confirm.removed_entry_count, 2);
+
+    app.handle_folder_delete_confirm_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+
+    assert!(app.hosts.iter().any(|host| host.name == "keep-host"));
+    assert!(app.hosts.iter().all(|host| host.name != "alpha"));
+    assert!(app.hosts.iter().all(|host| host.name != "beta"));
+
+    let rendered = fs::read_to_string(&inventory_path).expect("read inventory");
+    assert!(rendered.contains("Keep:"));
+    assert!(!rendered.contains("Remove:"));
 }
 
 #[test]

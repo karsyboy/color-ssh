@@ -1,7 +1,7 @@
 //! Host editor keyboard handling and persistence integration.
 
 use crate::auth::vault;
-use crate::inventory::{FolderId, TreeFolder, create_inventory_host_entry, delete_inventory_host_entry, update_inventory_host_entry};
+use crate::inventory::{FolderId, create_inventory_host_entry, delete_inventory_host_entry, update_inventory_host_entry};
 use crate::runtime::{ReloadNoticeToast, format_reload_notice};
 use crate::tui::{
     AppState, EditorTabId, EditorTabState, HostContextMenuAction, HostContextMenuState, HostContextMenuTarget, HostDeleteConfirmState, HostEditorField,
@@ -42,37 +42,6 @@ impl AppState {
         self.host_tree_root.path.clone()
     }
 
-    fn folder_segments_for_folder_id(folder: &TreeFolder, folder_id: FolderId, segments: &mut Vec<String>) -> bool {
-        for child in &folder.children {
-            segments.push(child.name.clone());
-            if child.id == folder_id {
-                return true;
-            }
-            if Self::folder_segments_for_folder_id(child, folder_id, segments) {
-                return true;
-            }
-            let _ = segments.pop();
-        }
-        false
-    }
-
-    fn folder_path_segments_by_id(&self, folder_id: FolderId) -> Option<Vec<String>> {
-        let mut segments = Vec::new();
-        if Self::folder_segments_for_folder_id(&self.host_tree_root, folder_id, &mut segments) {
-            Some(segments)
-        } else {
-            None
-        }
-    }
-
-    fn render_folder_path_input(folder_path: &[String]) -> String {
-        if folder_path.is_empty() {
-            "/".to_string()
-        } else {
-            format!("/{}/", folder_path.join("/"))
-        }
-    }
-
     fn find_editor_tab_index(&self, target_id: &EditorTabId) -> Option<usize> {
         self.tabs
             .iter()
@@ -82,6 +51,9 @@ impl AppState {
     fn open_or_focus_host_editor_tab(&mut self, editor_id: EditorTabId, editor_state: HostEditorState) {
         self.host_context_menu = None;
         self.host_delete_confirm = None;
+        self.folder_picker = None;
+        self.folder_rename = None;
+        self.folder_delete_confirm = None;
 
         if let Some(tab_idx) = self.find_editor_tab_index(&editor_id) {
             self.selected_tab = tab_idx;
@@ -151,7 +123,8 @@ impl AppState {
         let profiles = self.discover_quick_connect_profiles();
         let vault_entries = self.discover_host_editor_vault_pass_entries();
         let mut editor_state = HostEditorState::new_duplicate(&host, profiles, vault_entries);
-        editor_state.folder_path.value = Self::render_folder_path_input(&host.source_folder_path);
+        let folder_path = self.host_folder_path_in_source(&host);
+        editor_state.folder_path.value = Self::format_folder_path(&folder_path);
         editor_state.folder_path.cursor = editor_state.folder_path.value.chars().count();
         editor_state.folder_path.selection = None;
         let editor_id = EditorTabId::for_duplicate_host(&host);
@@ -166,7 +139,7 @@ impl AppState {
         let profiles = self.discover_quick_connect_profiles();
         let vault_entries = self.discover_host_editor_vault_pass_entries();
         let mut editor_state = HostEditorState::new_create(source_file.clone(), profiles, vault_entries);
-        editor_state.folder_path.value = Self::render_folder_path_input(&folder_path);
+        editor_state.folder_path.value = Self::format_folder_path(&folder_path);
         editor_state.folder_path.cursor = editor_state.folder_path.value.chars().count();
         editor_state.folder_path.selection = None;
         let editor_id = EditorTabId::for_new_entry(source_file);
@@ -193,11 +166,6 @@ impl AppState {
 
         self.set_selected_row(row_idx);
         true
-    }
-
-    fn open_host_context_menu_placeholder(&mut self, message: impl Into<String>) {
-        self.reload_notice_toast = Some(ReloadNoticeToast::new(format_reload_notice(&message.into())));
-        self.mark_ui_dirty();
     }
 
     fn open_host_delete_confirmation_with_target(&mut self, source_file: PathBuf, host_name: String, from_editor: bool) {
@@ -298,14 +266,9 @@ impl AppState {
                 }
             }
             HostContextMenuAction::MoveToFolder => {
-                let host_name = match menu.target {
-                    HostContextMenuTarget::Host { host_idx } => self.hosts.get(host_idx).map(|host| host.name.clone()),
-                    _ => None,
+                if let HostContextMenuTarget::Host { host_idx } = menu.target {
+                    self.open_folder_picker_for_move_host(host_idx);
                 }
-                .unwrap_or_else(|| "entry".to_string());
-                self.open_host_context_menu_placeholder(format!(
-                    "Move to Folder for '{host_name}' is not implemented yet (folder picker in a later phase)."
-                ));
             }
             HostContextMenuAction::DeleteEntry => {
                 if let HostContextMenuTarget::Host { host_idx } = menu.target {
@@ -321,7 +284,7 @@ impl AppState {
             }
             HostContextMenuAction::NewEntryInFolder => match menu.target {
                 HostContextMenuTarget::Folder { folder_id, source_file } => {
-                    let folder_path = self.folder_path_segments_by_id(folder_id).unwrap_or_default();
+                    let folder_path = self.folder_path_segments_by_id_in_source(folder_id, &source_file).unwrap_or_default();
                     self.open_host_editor_for_new_entry_with_folder_path(source_file, folder_path);
                 }
                 HostContextMenuTarget::Background { source_file } => {
@@ -331,24 +294,26 @@ impl AppState {
                     let Some(host) = self.hosts.get(host_idx).cloned() else {
                         return;
                     };
-                    self.open_host_editor_for_new_entry_with_folder_path(host.source_file.clone(), host.source_folder_path.clone());
+                    let folder_path = self.host_folder_path_in_source(&host);
+                    self.open_host_editor_for_new_entry_with_folder_path(host.source_file.clone(), folder_path);
                 }
             },
             HostContextMenuAction::RenameFolder => {
-                let folder_name = match menu.target {
-                    HostContextMenuTarget::Folder { folder_id, .. } => self.folder_by_id(folder_id).map(|folder| folder.name.clone()),
-                    _ => None,
+                if let HostContextMenuTarget::Folder { folder_id, source_file } = menu.target {
+                    let folder_path = self.folder_path_segments_by_id_in_source(folder_id, &source_file).unwrap_or_default();
+                    self.open_folder_rename_modal(source_file, folder_path);
                 }
-                .unwrap_or_else(|| "folder".to_string());
-                self.open_host_context_menu_placeholder(format!("Rename Folder for '{folder_name}' is not implemented yet."));
             }
             HostContextMenuAction::DeleteFolder => {
-                let folder_name = match menu.target {
-                    HostContextMenuTarget::Folder { folder_id, .. } => self.folder_by_id(folder_id).map(|folder| folder.name.clone()),
-                    _ => None,
+                if let HostContextMenuTarget::Folder { folder_id, source_file } = menu.target {
+                    let folder_path = self.folder_path_segments_by_id_in_source(folder_id, &source_file).unwrap_or_default();
+                    let folder_name = self
+                        .folder_by_id(folder_id)
+                        .map(|folder| folder.name.clone())
+                        .unwrap_or_else(|| "folder".to_string());
+                    let removed_entry_count = self.folder_descendant_host_count(folder_id);
+                    self.open_folder_delete_confirm_modal(source_file, folder_path, folder_name, removed_entry_count);
                 }
-                .unwrap_or_else(|| "folder".to_string());
-                self.open_host_context_menu_placeholder(format!("Delete Folder for '{folder_name}' is not implemented yet."));
             }
         }
     }
@@ -377,6 +342,7 @@ impl AppState {
                         HostEditorField::Protocol => form.toggle_protocol_forward(),
                         HostEditorField::Profile => form.select_next_profile(),
                         HostEditorField::VaultPass => form.select_next_vault_pass(),
+                        HostEditorField::FolderPath => self.open_folder_picker_for_editor_placement(),
                         HostEditorField::Save => should_submit = true,
                         HostEditorField::Delete => should_open_delete_confirm = true,
                         HostEditorField::Cancel => should_close = true,
@@ -390,6 +356,9 @@ impl AppState {
                 KeyCode::Char(' ') if !key.modifiers.contains(KeyModifiers::CONTROL) && !key.modifiers.contains(KeyModifiers::ALT) => match form.selected {
                     HostEditorVisibleItem::SectionHeader(section) => form.toggle_section(section),
                     HostEditorVisibleItem::Field(HostEditorField::IdentitiesOnly) => form.cycle_identities_only_forward(),
+                    HostEditorVisibleItem::Field(HostEditorField::FolderPath) => {
+                        self.open_folder_picker_for_editor_placement();
+                    }
                     HostEditorVisibleItem::Field(HostEditorField::Description) => {
                         form.insert_char(HostEditorField::Description, ' ');
                         form.error = None;
@@ -401,7 +370,8 @@ impl AppState {
                     Some(HostEditorField::Profile) => form.select_prev_profile(),
                     Some(HostEditorField::VaultPass) => form.select_prev_vault_pass(),
                     Some(HostEditorField::IdentitiesOnly) => form.cycle_identities_only_backward(),
-                    Some(field) => form.move_cursor_left(field),
+                    Some(field) if field != HostEditorField::FolderPath => form.move_cursor_left(field),
+                    Some(_) => {}
                     None => {}
                 },
                 KeyCode::Right => match form.selected_field() {
@@ -409,12 +379,14 @@ impl AppState {
                     Some(HostEditorField::Profile) => form.select_next_profile(),
                     Some(HostEditorField::VaultPass) => form.select_next_vault_pass(),
                     Some(HostEditorField::IdentitiesOnly) => form.cycle_identities_only_forward(),
-                    Some(field) => form.move_cursor_right(field),
+                    Some(field) if field != HostEditorField::FolderPath => form.move_cursor_right(field),
+                    Some(_) => {}
                     None => {}
                 },
                 KeyCode::Home => {
                     if let Some(field) = form.selected_field()
                         && field != HostEditorField::Protocol
+                        && field != HostEditorField::FolderPath
                     {
                         form.move_cursor_home(field);
                     }
@@ -422,6 +394,7 @@ impl AppState {
                 KeyCode::End => {
                     if let Some(field) = form.selected_field()
                         && field != HostEditorField::Protocol
+                        && field != HostEditorField::FolderPath
                     {
                         form.move_cursor_end(field);
                     }
@@ -429,6 +402,7 @@ impl AppState {
                 KeyCode::Backspace => {
                     if let Some(field) = form.selected_field()
                         && field != HostEditorField::Protocol
+                        && field != HostEditorField::FolderPath
                     {
                         form.backspace(field);
                         form.error = None;
@@ -437,6 +411,7 @@ impl AppState {
                 KeyCode::Delete => {
                     if let Some(field) = form.selected_field()
                         && field != HostEditorField::Protocol
+                        && field != HostEditorField::FolderPath
                     {
                         form.delete(field);
                         form.error = None;
@@ -445,6 +420,7 @@ impl AppState {
                 KeyCode::Char('a') if key.modifiers.contains(KeyModifiers::CONTROL) => {
                     if let Some(field) = form.selected_field()
                         && field != HostEditorField::Protocol
+                        && field != HostEditorField::FolderPath
                     {
                         form.move_cursor_home(field);
                     }
@@ -452,6 +428,7 @@ impl AppState {
                 KeyCode::Char('e') if key.modifiers.contains(KeyModifiers::CONTROL) => {
                     if let Some(field) = form.selected_field()
                         && field != HostEditorField::Protocol
+                        && field != HostEditorField::FolderPath
                     {
                         form.move_cursor_end(field);
                     }
@@ -459,6 +436,7 @@ impl AppState {
                 KeyCode::Char(ch) if !key.modifiers.contains(KeyModifiers::CONTROL) && !key.modifiers.contains(KeyModifiers::ALT) => {
                     if let Some(field) = form.selected_field()
                         && field != HostEditorField::Protocol
+                        && field != HostEditorField::FolderPath
                         && form.text_field(field).is_some()
                     {
                         form.insert_char(field, ch);
@@ -492,7 +470,7 @@ impl AppState {
         let Some(field) = form.selected_field() else {
             return;
         };
-        if field == HostEditorField::Protocol || form.text_field(field).is_none() {
+        if field == HostEditorField::Protocol || field == HostEditorField::FolderPath || form.text_field(field).is_none() {
             return;
         }
 
@@ -673,7 +651,7 @@ impl AppState {
         })
     }
 
-    fn select_host_row_by_name(&mut self, name: &str) -> bool {
+    pub(crate) fn select_host_row_by_name(&mut self, name: &str) -> bool {
         let selected_row = self.visible_host_rows.iter().position(|row| {
             if let crate::tui::HostTreeRowKind::Host(host_idx) = row.kind {
                 return self.hosts.get(host_idx).is_some_and(|host| host.name == name);

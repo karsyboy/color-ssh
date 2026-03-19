@@ -1,0 +1,543 @@
+//! Folder picker and folder-management keyboard handling.
+
+use crate::inventory::{FolderId, InventoryHost, TreeFolder, delete_inventory_folder, move_inventory_host_entry, rename_inventory_folder};
+use crate::runtime::{ReloadNoticeToast, format_reload_notice};
+use crate::tui::text_edit;
+use crate::tui::{
+    AppState, FolderDeleteConfirmState, FolderPickerMode, FolderPickerRow, FolderPickerState, FolderRenameState, HostEditorMode, HostTreeRowKind,
+};
+use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+use std::path::{Path, PathBuf};
+
+impl AppState {
+    pub(crate) fn open_folder_picker_for_editor_placement(&mut self) {
+        let Some(form) = self.selected_host_editor() else {
+            return;
+        };
+        if form.mode != HostEditorMode::Create {
+            return;
+        }
+
+        let source_file = form.source_file.clone();
+        let initial_folder_path = Self::parse_folder_path_display(&form.folder_path.value);
+        self.open_folder_picker(source_file, FolderPickerMode::CreatePlacement, initial_folder_path);
+    }
+
+    pub(crate) fn open_folder_picker_for_move_host(&mut self, host_idx: usize) {
+        let Some(host) = self.hosts.get(host_idx).cloned() else {
+            return;
+        };
+
+        let source_file = host.source_file.clone();
+        let initial_folder_path = self.host_folder_path_in_source(&host);
+        self.open_folder_picker(source_file, FolderPickerMode::MoveHost { host_name: host.name.clone() }, initial_folder_path);
+    }
+
+    pub(crate) fn open_folder_rename_modal(&mut self, source_file: PathBuf, folder_path: Vec<String>) {
+        if folder_path.is_empty() {
+            self.reload_notice_toast = Some(ReloadNoticeToast::new(format_reload_notice("Cannot rename the inventory root folder.")));
+            self.mark_ui_dirty();
+            return;
+        }
+
+        self.host_context_menu = None;
+        self.folder_picker = None;
+        self.folder_delete_confirm = None;
+        self.folder_rename = Some(FolderRenameState::new(source_file, folder_path));
+        self.mark_ui_dirty();
+    }
+
+    pub(crate) fn open_folder_delete_confirm_modal(&mut self, source_file: PathBuf, folder_path: Vec<String>, folder_name: String, removed_entry_count: usize) {
+        if folder_path.is_empty() {
+            self.reload_notice_toast = Some(ReloadNoticeToast::new(format_reload_notice("Cannot delete the inventory root folder.")));
+            self.mark_ui_dirty();
+            return;
+        }
+
+        self.host_context_menu = None;
+        self.folder_picker = None;
+        self.folder_rename = None;
+        self.folder_delete_confirm = Some(FolderDeleteConfirmState {
+            source_file,
+            folder_path,
+            folder_name,
+            removed_entry_count,
+        });
+        self.mark_ui_dirty();
+    }
+
+    pub(crate) fn handle_folder_picker_key(&mut self, key: KeyEvent) {
+        if self.folder_picker.is_none() {
+            return;
+        }
+
+        let mut should_close = false;
+        let mut should_submit = false;
+
+        if let Some(picker) = self.folder_picker.as_mut() {
+            match key.code {
+                KeyCode::Esc => should_close = true,
+                KeyCode::Tab | KeyCode::Down => picker.select_next(),
+                KeyCode::BackTab | KeyCode::Up => picker.select_prev(),
+                KeyCode::Enter => should_submit = true,
+                _ => {}
+            }
+        }
+
+        if should_close {
+            self.folder_picker = None;
+            self.mark_ui_dirty();
+            return;
+        }
+
+        if should_submit {
+            self.submit_folder_picker();
+            return;
+        }
+
+        self.mark_ui_dirty();
+    }
+
+    pub(crate) fn handle_folder_rename_key(&mut self, key: KeyEvent) {
+        if self.folder_rename.is_none() {
+            return;
+        }
+
+        let mut should_submit = false;
+        let mut should_close = false;
+        if let Some(state) = self.folder_rename.as_mut() {
+            match key.code {
+                KeyCode::Esc => should_close = true,
+                KeyCode::Enter => should_submit = true,
+                KeyCode::Left => Self::folder_rename_move_cursor_left(state),
+                KeyCode::Right => Self::folder_rename_move_cursor_right(state),
+                KeyCode::Home => Self::folder_rename_move_cursor_home(state),
+                KeyCode::End => Self::folder_rename_move_cursor_end(state),
+                KeyCode::Backspace => {
+                    Self::folder_rename_backspace(state);
+                    state.error = None;
+                }
+                KeyCode::Delete => {
+                    Self::folder_rename_delete(state);
+                    state.error = None;
+                }
+                KeyCode::Char('a') if key.modifiers.contains(KeyModifiers::CONTROL) => Self::folder_rename_select_all(state),
+                KeyCode::Char('e') if key.modifiers.contains(KeyModifiers::CONTROL) => Self::folder_rename_move_cursor_end(state),
+                KeyCode::Char(ch) if !key.modifiers.contains(KeyModifiers::CONTROL) && !key.modifiers.contains(KeyModifiers::ALT) => {
+                    Self::folder_rename_insert_char(state, ch);
+                    state.error = None;
+                }
+                _ => {}
+            }
+        }
+
+        if should_submit {
+            self.submit_folder_rename();
+            return;
+        }
+        if should_close {
+            self.folder_rename = None;
+            self.mark_ui_dirty();
+            return;
+        }
+
+        self.mark_ui_dirty();
+    }
+
+    pub(crate) fn handle_folder_delete_confirm_key(&mut self, key: KeyEvent) {
+        if self.folder_delete_confirm.is_none() {
+            return;
+        }
+
+        match key.code {
+            KeyCode::Esc | KeyCode::Char('n') if key.modifiers.is_empty() => {
+                self.folder_delete_confirm = None;
+                self.mark_ui_dirty();
+            }
+            KeyCode::Enter | KeyCode::Char('y') if key.modifiers.is_empty() => {
+                self.confirm_folder_delete();
+            }
+            _ => {}
+        }
+    }
+
+    pub(crate) fn handle_folder_rename_paste(&mut self, pasted: &str) {
+        let Some(state) = self.folder_rename.as_mut() else {
+            return;
+        };
+
+        let filtered: String = pasted.chars().filter(|ch| !ch.is_control()).collect();
+        if filtered.is_empty() {
+            return;
+        }
+
+        let _ = text_edit::delete_selection(&mut state.name, &mut state.cursor, &mut state.selection);
+        for ch in filtered.chars() {
+            Self::folder_rename_insert_char(state, ch);
+        }
+        state.error = None;
+        self.mark_ui_dirty();
+    }
+
+    pub(crate) fn folder_path_segments_by_id_in_source(&self, folder_id: FolderId, source_file: &Path) -> Option<Vec<String>> {
+        let global_path = self.folder_path_segments_by_id_global(folder_id)?;
+        Some(self.strip_source_file_folder_prefix(source_file, &global_path))
+    }
+
+    pub(crate) fn host_folder_path_in_source(&self, host: &InventoryHost) -> Vec<String> {
+        self.strip_source_file_folder_prefix(&host.source_file, &host.source_folder_path)
+    }
+
+    pub(crate) fn format_folder_path(folder_path: &[String]) -> String {
+        if folder_path.is_empty() {
+            "/".to_string()
+        } else {
+            format!("/{}/", folder_path.join("/"))
+        }
+    }
+
+    fn parse_folder_path_display(path: &str) -> Vec<String> {
+        let trimmed = path.trim();
+        if trimmed.is_empty() || trimmed == "/" {
+            return Vec::new();
+        }
+        let inner = trimmed.trim_matches('/');
+        if inner.is_empty() {
+            return Vec::new();
+        }
+        inner
+            .split('/')
+            .map(str::trim)
+            .filter(|segment| !segment.is_empty())
+            .map(str::to_string)
+            .collect()
+    }
+
+    fn folder_rename_move_cursor_left(state: &mut FolderRenameState) {
+        text_edit::clamp_cursor(&state.name, &mut state.cursor);
+        let active_selection = text_edit::normalized_selection(&state.name, state.selection);
+        state.selection = None;
+        if let Some((start, _)) = active_selection {
+            state.cursor = start;
+        } else if state.cursor > 0 {
+            state.cursor -= 1;
+        }
+    }
+
+    fn folder_rename_move_cursor_right(state: &mut FolderRenameState) {
+        text_edit::clamp_cursor(&state.name, &mut state.cursor);
+        let len = text_edit::char_len(&state.name);
+        let active_selection = text_edit::normalized_selection(&state.name, state.selection);
+        state.selection = None;
+        if let Some((_, end)) = active_selection {
+            state.cursor = end;
+        } else if state.cursor < len {
+            state.cursor += 1;
+        }
+    }
+
+    fn folder_rename_move_cursor_home(state: &mut FolderRenameState) {
+        state.cursor = 0;
+        state.selection = None;
+    }
+
+    fn folder_rename_move_cursor_end(state: &mut FolderRenameState) {
+        state.cursor = text_edit::char_len(&state.name);
+        state.selection = None;
+    }
+
+    fn folder_rename_select_all(state: &mut FolderRenameState) {
+        let len = text_edit::char_len(&state.name);
+        if len == 0 {
+            state.selection = None;
+            state.cursor = 0;
+        } else {
+            state.selection = Some((0, len));
+            state.cursor = len;
+        }
+    }
+
+    fn folder_rename_insert_char(state: &mut FolderRenameState, ch: char) {
+        let _ = text_edit::delete_selection(&mut state.name, &mut state.cursor, &mut state.selection);
+        text_edit::clamp_cursor(&state.name, &mut state.cursor);
+        let insert_at = text_edit::byte_index_for_char(&state.name, state.cursor);
+        state.name.insert(insert_at, ch);
+        state.cursor += 1;
+        state.selection = None;
+    }
+
+    fn folder_rename_backspace(state: &mut FolderRenameState) {
+        if text_edit::delete_selection(&mut state.name, &mut state.cursor, &mut state.selection) {
+            return;
+        }
+
+        text_edit::clamp_cursor(&state.name, &mut state.cursor);
+        if state.cursor == 0 {
+            return;
+        }
+
+        let end = text_edit::byte_index_for_char(&state.name, state.cursor);
+        let start = text_edit::byte_index_for_char(&state.name, state.cursor.saturating_sub(1));
+        state.name.replace_range(start..end, "");
+        state.cursor = state.cursor.saturating_sub(1);
+        state.selection = None;
+    }
+
+    fn folder_rename_delete(state: &mut FolderRenameState) {
+        if text_edit::delete_selection(&mut state.name, &mut state.cursor, &mut state.selection) {
+            return;
+        }
+
+        text_edit::clamp_cursor(&state.name, &mut state.cursor);
+        let len = text_edit::char_len(&state.name);
+        if state.cursor >= len {
+            return;
+        }
+
+        let start = text_edit::byte_index_for_char(&state.name, state.cursor);
+        let end = text_edit::byte_index_for_char(&state.name, state.cursor.saturating_add(1));
+        state.name.replace_range(start..end, "");
+        state.selection = None;
+    }
+
+    fn open_folder_picker(&mut self, source_file: PathBuf, mode: FolderPickerMode, initial_folder_path: Vec<String>) {
+        let rows = self.folder_picker_rows_for_source_file(&source_file);
+        let selected = rows.iter().position(|row| row.folder_path == initial_folder_path).unwrap_or(0);
+
+        self.host_context_menu = None;
+        self.folder_rename = None;
+        self.folder_delete_confirm = None;
+        self.folder_picker = Some(FolderPickerState::new(source_file, mode, rows, selected));
+        self.mark_ui_dirty();
+    }
+
+    pub(crate) fn submit_folder_picker(&mut self) {
+        let Some(picker) = self.folder_picker.clone() else {
+            return;
+        };
+        let source_file = picker.source_file.clone();
+        let selected_folder_path = picker.selected_folder_path();
+        self.folder_picker = None;
+
+        match picker.mode {
+            FolderPickerMode::CreatePlacement => {
+                if let Some(form) = self.selected_host_editor_mut()
+                    && form.mode == HostEditorMode::Create
+                    && form.source_file == source_file
+                {
+                    form.folder_path.value = Self::format_folder_path(&selected_folder_path);
+                    form.folder_path.cursor = text_edit::char_len(&form.folder_path.value);
+                    form.folder_path.selection = None;
+                    form.error = None;
+                }
+                self.mark_ui_dirty();
+            }
+            FolderPickerMode::MoveHost { host_name } => {
+                match move_inventory_host_entry(&source_file, &host_name, &selected_folder_path) {
+                    Ok(()) => {
+                        let root_path = self.host_tree_root.path.clone();
+                        if let Err(err) = self.reload_inventory_tree_from_path(&root_path) {
+                            self.reload_notice_toast = Some(ReloadNoticeToast::new(format_reload_notice(&format!("Moved entry, but reload failed: {err}"))));
+                        } else {
+                            let _ = self.select_host_row_by_name(&host_name);
+                        }
+                    }
+                    Err(err) => {
+                        self.reload_notice_toast = Some(ReloadNoticeToast::new(format_reload_notice(&format!("Failed to move entry: {err}"))));
+                    }
+                }
+                self.mark_ui_dirty();
+            }
+        }
+    }
+
+    pub(crate) fn submit_folder_rename(&mut self) {
+        let Some(state) = self.folder_rename.clone() else {
+            return;
+        };
+
+        let new_name = state.name.trim().to_string();
+        match rename_inventory_folder(&state.source_file, &state.folder_path, &new_name) {
+            Ok(()) => {
+                let mut renamed_path = state.folder_path.clone();
+                if let Some(last) = renamed_path.last_mut() {
+                    *last = new_name.clone();
+                }
+                self.folder_rename = None;
+                let root_path = self.host_tree_root.path.clone();
+                if let Err(err) = self.reload_inventory_tree_from_path(&root_path) {
+                    self.reload_notice_toast = Some(ReloadNoticeToast::new(format_reload_notice(&format!(
+                        "Folder renamed, but reload failed: {err}"
+                    ))));
+                } else {
+                    let _ = self.select_folder_row_by_source_and_path(&state.source_file, &renamed_path);
+                }
+                self.mark_ui_dirty();
+            }
+            Err(err) => {
+                if let Some(rename_state) = self.folder_rename.as_mut() {
+                    rename_state.error = Some(format!("Failed to rename folder: {err}"));
+                }
+                self.mark_ui_dirty();
+            }
+        }
+    }
+
+    fn confirm_folder_delete(&mut self) {
+        let Some(confirm) = self.folder_delete_confirm.clone() else {
+            return;
+        };
+        self.folder_delete_confirm = None;
+
+        match delete_inventory_folder(&confirm.source_file, &confirm.folder_path) {
+            Ok(_) => {
+                let root_path = self.host_tree_root.path.clone();
+                if let Err(err) = self.reload_inventory_tree_from_path(&root_path) {
+                    self.reload_notice_toast = Some(ReloadNoticeToast::new(format_reload_notice(&format!(
+                        "Folder deleted, but reload failed: {err}"
+                    ))));
+                }
+            }
+            Err(err) => {
+                self.reload_notice_toast = Some(ReloadNoticeToast::new(format_reload_notice(&format!("Failed to delete folder: {err}"))));
+            }
+        }
+
+        self.mark_ui_dirty();
+    }
+
+    fn folder_picker_rows_for_source_file(&self, source_file: &Path) -> Vec<FolderPickerRow> {
+        let mut rows = vec![FolderPickerRow {
+            folder_path: Vec::new(),
+            depth: 0,
+            label: "/".to_string(),
+        }];
+
+        let Some(source_root) = Self::find_source_root_folder_recursive(&self.host_tree_root, source_file, false) else {
+            return rows;
+        };
+
+        let mut current_path = Vec::new();
+        Self::collect_folder_picker_rows(source_root, source_file, 1, &mut current_path, &mut rows);
+        rows
+    }
+
+    fn collect_folder_picker_rows(folder: &TreeFolder, source_file: &Path, depth: usize, current_path: &mut Vec<String>, rows: &mut Vec<FolderPickerRow>) {
+        for child in &folder.children {
+            if child.path != source_file {
+                continue;
+            }
+
+            current_path.push(child.name.clone());
+            rows.push(FolderPickerRow {
+                folder_path: current_path.clone(),
+                depth,
+                label: child.name.clone(),
+            });
+            Self::collect_folder_picker_rows(child, source_file, depth + 1, current_path, rows);
+            current_path.pop();
+        }
+    }
+
+    fn find_source_root_folder_recursive<'a>(folder: &'a TreeFolder, source_file: &Path, parent_matches: bool) -> Option<&'a TreeFolder> {
+        let matches_source = folder.path == source_file;
+        if matches_source && !parent_matches {
+            return Some(folder);
+        }
+
+        for child in &folder.children {
+            if let Some(found) = Self::find_source_root_folder_recursive(child, source_file, matches_source) {
+                return Some(found);
+            }
+        }
+
+        None
+    }
+
+    fn source_file_folder_prefix_segments(&self, source_file: &Path) -> Vec<String> {
+        if self.host_tree_root.path == source_file {
+            return Vec::new();
+        }
+
+        Self::source_file_folder_prefix_segments_recursive(&self.host_tree_root, source_file, &mut Vec::new(), false).unwrap_or_default()
+    }
+
+    fn source_file_folder_prefix_segments_recursive(
+        folder: &TreeFolder,
+        source_file: &Path,
+        path_segments: &mut Vec<String>,
+        parent_matches: bool,
+    ) -> Option<Vec<String>> {
+        let matches_source = folder.path == source_file;
+        if matches_source && !parent_matches {
+            return Some(path_segments.clone());
+        }
+
+        for child in &folder.children {
+            path_segments.push(child.name.clone());
+            if let Some(found) = Self::source_file_folder_prefix_segments_recursive(child, source_file, path_segments, matches_source) {
+                return Some(found);
+            }
+            path_segments.pop();
+        }
+
+        None
+    }
+
+    fn strip_source_file_folder_prefix(&self, source_file: &Path, global_folder_path: &[String]) -> Vec<String> {
+        let prefix = self.source_file_folder_prefix_segments(source_file);
+        if prefix.is_empty() {
+            return global_folder_path.to_vec();
+        }
+
+        if global_folder_path.starts_with(prefix.as_slice()) {
+            return global_folder_path[prefix.len()..].to_vec();
+        }
+
+        global_folder_path.to_vec()
+    }
+
+    fn folder_path_segments_by_id_global(&self, folder_id: FolderId) -> Option<Vec<String>> {
+        let mut segments = Vec::new();
+        if Self::folder_segments_for_folder_id(&self.host_tree_root, folder_id, &mut segments) {
+            Some(segments)
+        } else {
+            None
+        }
+    }
+
+    fn folder_segments_for_folder_id(folder: &TreeFolder, folder_id: FolderId, segments: &mut Vec<String>) -> bool {
+        for child in &folder.children {
+            segments.push(child.name.clone());
+            if child.id == folder_id {
+                return true;
+            }
+            if Self::folder_segments_for_folder_id(child, folder_id, segments) {
+                return true;
+            }
+            let _ = segments.pop();
+        }
+
+        false
+    }
+
+    fn select_folder_row_by_source_and_path(&mut self, source_file: &Path, folder_path: &[String]) -> bool {
+        let selected_row = self.visible_host_rows.iter().position(|row| {
+            let HostTreeRowKind::Folder(folder_id) = row.kind else {
+                return false;
+            };
+
+            self.folder_by_id(folder_id).is_some_and(|folder| folder.path == source_file)
+                && self
+                    .folder_path_segments_by_id_in_source(folder_id, source_file)
+                    .is_some_and(|segments| segments == folder_path)
+        });
+
+        if let Some(selected_row) = selected_row {
+            self.set_selected_row(selected_row);
+            true
+        } else {
+            false
+        }
+    }
+}

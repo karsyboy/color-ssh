@@ -118,6 +118,21 @@ impl AppState {
             return Ok(());
         }
 
+        if self.folder_picker.is_some() {
+            self.handle_folder_picker_key(key);
+            return Ok(());
+        }
+
+        if self.folder_rename.is_some() {
+            self.handle_folder_rename_key(key);
+            return Ok(());
+        }
+
+        if self.folder_delete_confirm.is_some() {
+            self.handle_folder_delete_confirm_key(key);
+            return Ok(());
+        }
+
         if self.vault_unlock.is_some() {
             self.handle_vault_unlock_key(key);
             return Ok(());
@@ -156,6 +171,11 @@ impl AppState {
 
         if self.vault_unlock.is_some() {
             self.handle_vault_unlock_paste(&pasted);
+            return Ok(());
+        }
+
+        if self.folder_rename.is_some() {
+            self.handle_folder_rename_paste(&pasted);
             return Ok(());
         }
 
