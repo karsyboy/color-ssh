@@ -1,5 +1,10 @@
 //! Host editor mouse helpers.
 
+use crate::tui::features::host_editor::scroll::{
+    EditorScrollbarGeometry, body_content_width as editor_body_content_width, body_items as host_editor_body_items,
+    body_scroll_offset as host_editor_body_scroll_offset, body_viewport_height as host_editor_body_viewport_height, scroll_offset_from_scrollbar_row,
+    scrollbar_geometry as host_editor_scrollbar_geometry,
+};
 use crate::tui::{AppState, HostEditorField, HostEditorState, HostEditorVisibleItem};
 use crossterm::event::{self, MouseButton, MouseEventKind};
 use ratatui::layout::Rect;
@@ -8,11 +13,49 @@ const SAVE_LABEL: &str = "[ Enter ] Save Entry";
 const DELETE_LABEL: &str = "[ Ctrl+D ] Delete Entry";
 const CANCEL_LABEL: &str = "[ Esc ] Cancel";
 const ACTION_SEPARATOR: &str = " | ";
-// Rendered lines between the last editable field and the bottom action row:
-// blank spacer + message + hint.
-const ACTION_ROW_OFFSET_AFTER_FIELDS: usize = 3;
 
 impl AppState {
+    fn host_editor_scrollbar_geometry(form: &HostEditorState, inner_area: Rect) -> Option<EditorScrollbarGeometry> {
+        let body_items = host_editor_body_items(form);
+        let total_body_lines = body_items.len().saturating_add(2);
+        let viewport_height = host_editor_body_viewport_height(inner_area.height);
+        let scroll_offset = host_editor_body_scroll_offset(form, total_body_lines, viewport_height);
+        host_editor_scrollbar_geometry(inner_area, total_body_lines, viewport_height, scroll_offset)
+    }
+
+    fn host_editor_body_content_width(form: &HostEditorState, inner_area: Rect) -> u16 {
+        editor_body_content_width(inner_area.width, Self::host_editor_scrollbar_geometry(form, inner_area))
+    }
+
+    fn host_editor_set_scroll_from_scrollbar_row(&mut self, mouse_row: u16, inner_area: Rect) {
+        let Some(form) = self.selected_host_editor_mut() else {
+            return;
+        };
+
+        let body_items = host_editor_body_items(form);
+        if body_items.is_empty() {
+            return;
+        }
+
+        let total_body_lines = body_items.len().saturating_add(2);
+        let viewport_height = host_editor_body_viewport_height(inner_area.height);
+        if viewport_height == 0 {
+            return;
+        }
+
+        let current_offset = host_editor_body_scroll_offset(form, total_body_lines, viewport_height);
+        let Some(scrollbar) = host_editor_scrollbar_geometry(inner_area, total_body_lines, viewport_height, current_offset) else {
+            return;
+        };
+
+        let target_offset = scroll_offset_from_scrollbar_row(scrollbar, mouse_row).min(scrollbar.max_offset);
+        let target_selected_row = target_offset.saturating_add(viewport_height.saturating_sub(1));
+        let clamped_selected_row = target_selected_row.clamp(2, total_body_lines.saturating_sub(1));
+        let item_idx = clamped_selected_row.saturating_sub(2).min(body_items.len().saturating_sub(1));
+        form.selected = body_items[item_idx];
+        form.finish_mouse_selection();
+    }
+
     pub(crate) fn host_context_menu_layout(&self) -> Option<(Rect, Rect)> {
         let menu = self.host_context_menu.as_ref()?;
         let full_area = Rect::new(0, 0, self.last_terminal_size.0, self.last_terminal_size.1);
@@ -106,6 +149,8 @@ impl AppState {
 
         match mouse.kind {
             MouseEventKind::Down(MouseButton::Left) => {
+                self.is_dragging_host_editor_scrollbar = false;
+
                 if !Self::host_editor_point_in_rect(area, mouse.column, mouse.row) {
                     if let Some(form) = self.selected_host_editor_mut() {
                         form.finish_mouse_selection();
@@ -120,12 +165,39 @@ impl AppState {
                     return;
                 }
 
+                if let Some(form) = self.selected_host_editor()
+                    && let Some(scrollbar) = Self::host_editor_scrollbar_geometry(form, inner_area)
+                    && Self::host_editor_point_in_rect(scrollbar.area, mouse.column, mouse.row)
+                {
+                    self.is_dragging_host_editor_scrollbar = true;
+                    self.host_editor_set_scroll_from_scrollbar_row(mouse.row, inner_area);
+                    return;
+                }
+
                 self.handle_host_editor_left_click(mouse.column, mouse.row, inner_area);
             }
+            MouseEventKind::ScrollUp => {
+                if let Some(form) = self.selected_host_editor_mut() {
+                    form.select_prev_field();
+                }
+            }
+            MouseEventKind::ScrollDown => {
+                if let Some(form) = self.selected_host_editor_mut() {
+                    form.select_next_field();
+                }
+            }
             MouseEventKind::Drag(MouseButton::Left) => {
+                if self.is_dragging_host_editor_scrollbar {
+                    self.host_editor_set_scroll_from_scrollbar_row(mouse.row, inner_area);
+                    return;
+                }
                 self.handle_host_editor_left_drag(mouse.column, inner_area);
             }
             MouseEventKind::Up(MouseButton::Left) => {
+                if self.is_dragging_host_editor_scrollbar {
+                    self.is_dragging_host_editor_scrollbar = false;
+                    return;
+                }
                 self.handle_host_editor_left_release(mouse.column, inner_area);
             }
             _ => {}
@@ -169,7 +241,8 @@ impl AppState {
                         self.open_folder_picker_for_editor_placement();
                     }
                     _ => {
-                        if let Some(offset) = Self::host_editor_text_offset(form, inner_area, field, mouse_col) {
+                        let body_content_width = Self::host_editor_body_content_width(form, inner_area);
+                        if let Some(offset) = Self::host_editor_text_offset(form, inner_area, body_content_width, field, mouse_col) {
                             form.begin_mouse_selection(field, offset);
                         }
                     }
@@ -195,7 +268,8 @@ impl AppState {
             return;
         };
 
-        if let Some(offset) = Self::host_editor_text_offset(form, inner_area, field, mouse_col) {
+        let body_content_width = Self::host_editor_body_content_width(form, inner_area);
+        if let Some(offset) = Self::host_editor_text_offset(form, inner_area, body_content_width, field, mouse_col) {
             form.extend_mouse_selection(offset);
         }
     }
@@ -206,7 +280,7 @@ impl AppState {
         };
 
         if let Some(field) = form.mouse_drag_field()
-            && let Some(offset) = Self::host_editor_text_offset(form, inner_area, field, mouse_col)
+            && let Some(offset) = Self::host_editor_text_offset(form, inner_area, Self::host_editor_body_content_width(form, inner_area), field, mouse_col)
         {
             form.extend_mouse_selection(offset);
         }
@@ -216,28 +290,31 @@ impl AppState {
 
     fn host_editor_item_at_point(&self, local_row: u16, mouse_col: u16, inner_area: Rect) -> Option<HostEditorVisibleItem> {
         let form = self.selected_host_editor()?;
-        if local_row < 2 {
+        if inner_area.height == 0 {
             return None;
         }
 
-        let row_idx = local_row.saturating_sub(2) as usize;
-        let visible_items = form.visible_items();
-        let body_rows = visible_items
-            .iter()
-            .copied()
-            .filter(|item| !matches!(item, HostEditorVisibleItem::Field(field) if field.is_action()))
-            .collect::<Vec<_>>();
-
-        if row_idx < body_rows.len() {
-            return body_rows.get(row_idx).copied();
-        }
-
-        if row_idx == body_rows.len().saturating_add(ACTION_ROW_OFFSET_AFTER_FIELDS) {
+        let action_row = inner_area.height.saturating_sub(1) as usize;
+        let local_row = local_row as usize;
+        if local_row == action_row {
             let visible_fields = form.visible_fields();
             return Self::host_editor_action_hit(inner_area, mouse_col, visible_fields.contains(&HostEditorField::Delete));
         }
 
-        None
+        let viewport_height = host_editor_body_viewport_height(inner_area.height);
+        if viewport_height == 0 || local_row >= viewport_height {
+            return None;
+        }
+
+        let body_items = host_editor_body_items(form);
+        let total_body_lines = body_items.len().saturating_add(2);
+        let scroll_offset = host_editor_body_scroll_offset(form, total_body_lines, viewport_height);
+        let absolute_row = scroll_offset.saturating_add(local_row);
+        if absolute_row < 2 {
+            return None;
+        }
+
+        body_items.get(absolute_row.saturating_sub(2)).copied()
     }
 
     fn host_editor_action_hit(inner_area: Rect, mouse_col: u16, include_delete: bool) -> Option<HostEditorVisibleItem> {
@@ -265,7 +342,7 @@ impl AppState {
         None
     }
 
-    fn host_editor_text_offset(form: &HostEditorState, inner_area: Rect, field: HostEditorField, mouse_col: u16) -> Option<usize> {
+    fn host_editor_text_offset(form: &HostEditorState, inner_area: Rect, body_content_width: u16, field: HostEditorField, mouse_col: u16) -> Option<usize> {
         let editable = matches!(
             field,
             HostEditorField::Name
@@ -290,7 +367,7 @@ impl AppState {
         }
 
         let start_col = inner_area.x.saturating_add(field.label().chars().count() as u16).saturating_add(2);
-        let value_width = inner_area.width.saturating_sub(field.label().chars().count() as u16).saturating_sub(2);
+        let value_width = body_content_width.saturating_sub(field.label().chars().count() as u16).saturating_sub(2);
         let scroll_offset = form.field_horizontal_scroll_offset(field, value_width);
         Some(scroll_offset.saturating_add(mouse_col.saturating_sub(start_col) as usize))
     }

@@ -76,6 +76,7 @@ impl AppState {
             MouseEventKind::Down(MouseButton::Left) => {
                 self.is_dragging_host_scrollbar = false;
                 self.is_dragging_tab_scrollbar = false;
+                self.is_dragging_host_editor_scrollbar = false;
                 self.is_dragging_host_info_divider = false;
                 self.dragging_tab = None;
 

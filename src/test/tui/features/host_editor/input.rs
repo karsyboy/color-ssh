@@ -1220,15 +1220,7 @@ inventory:
     app.tab_content_area = Rect::new(0, 0, 120, 40);
 
     let (_, inner) = app.host_editor_tab_layout(app.tab_content_area).expect("host editor layout");
-    let action_row = {
-        let form = app.selected_host_editor().expect("host editor state");
-        let non_action_rows = form
-            .visible_items()
-            .iter()
-            .filter(|item| !matches!(item, HostEditorVisibleItem::Field(field) if field.is_action()))
-            .count() as u16;
-        inner.y.saturating_add(2).saturating_add(non_action_rows).saturating_add(3)
-    };
+    let action_row = inner.y.saturating_add(inner.height.saturating_sub(1));
 
     let delete_col = inner.x.saturating_add(("[ Enter ] Save Entry | ".chars().count()) as u16);
     app.handle_mouse(MouseEvent {
@@ -1406,4 +1398,66 @@ fn mouse_click_maps_to_visible_scrolled_text_column_in_host_editor() {
     let form = app.selected_host_editor().expect("host editor state");
     assert_eq!(form.selected, HostEditorVisibleItem::Field(HostEditorField::Host));
     assert_eq!(form.host.cursor, expected_cursor);
+}
+
+#[test]
+fn host_editor_scrollbar_supports_click_and_drag() {
+    let mut app = AppState::new_for_tests();
+    app.last_terminal_size = (80, 24);
+    open_test_editor(
+        &mut app,
+        HostEditorState::new_create(PathBuf::from("/tmp/inventory.yaml"), vec!["default".to_string()], vec!["db_prod".to_string()]),
+    );
+    app.tab_content_area = Rect::new(0, 0, 60, 10);
+
+    let (_, inner) = app.host_editor_tab_layout(app.tab_content_area).expect("host editor layout");
+    let viewport_height = inner.height.saturating_sub(3);
+    assert!(viewport_height > 0, "viewport must be positive");
+
+    let scrollbar_col = inner.x.saturating_add(inner.width.saturating_sub(1));
+    let scrollbar_top = inner.y;
+    let scrollbar_bottom = inner.y.saturating_add(viewport_height.saturating_sub(1));
+
+    let before_row = {
+        let form = app.selected_host_editor().expect("host editor state");
+        editor_body_row_index(form, form.selected)
+    };
+
+    app.handle_mouse(MouseEvent {
+        kind: MouseEventKind::Down(MouseButton::Left),
+        column: scrollbar_col,
+        row: scrollbar_bottom,
+        modifiers: KeyModifiers::NONE,
+    })
+    .expect("mouse down on editor scrollbar");
+    assert!(app.is_dragging_host_editor_scrollbar, "scrollbar drag should start on mouse down");
+
+    let after_click_row = {
+        let form = app.selected_host_editor().expect("host editor state");
+        editor_body_row_index(form, form.selected)
+    };
+    assert!(after_click_row > before_row, "scrollbar click should move selection downward");
+
+    app.handle_mouse(MouseEvent {
+        kind: MouseEventKind::Drag(MouseButton::Left),
+        column: scrollbar_col,
+        row: scrollbar_top,
+        modifiers: KeyModifiers::NONE,
+    })
+    .expect("mouse drag on editor scrollbar");
+
+    let after_drag_row = {
+        let form = app.selected_host_editor().expect("host editor state");
+        editor_body_row_index(form, form.selected)
+    };
+    assert!(after_drag_row < after_click_row, "dragging scrollbar upward should move selection upward");
+
+    app.handle_mouse(MouseEvent {
+        kind: MouseEventKind::Up(MouseButton::Left),
+        column: scrollbar_col,
+        row: scrollbar_top,
+        modifiers: KeyModifiers::NONE,
+    })
+    .expect("mouse up on editor scrollbar");
+    assert!(!app.is_dragging_host_editor_scrollbar, "scrollbar drag should end on mouse up");
 }
