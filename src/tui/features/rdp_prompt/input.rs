@@ -21,6 +21,7 @@ impl AppState {
         let mut should_close = false;
 
         if let Some(prompt) = self.rdp_credentials.as_mut() {
+            prompt.finish_mouse_selection();
             match key.code {
                 KeyCode::Esc => {
                     should_close = true;
@@ -57,7 +58,7 @@ impl AppState {
                     prompt.error = None;
                 }
                 KeyCode::Char('a') if key.modifiers.contains(KeyModifiers::CONTROL) => {
-                    prompt.move_cursor_home(prompt.selected);
+                    prompt.select_all(prompt.selected);
                 }
                 KeyCode::Char('e') if key.modifiers.contains(KeyModifiers::CONTROL) => {
                     prompt.move_cursor_end(prompt.selected);
@@ -83,6 +84,7 @@ impl AppState {
             return;
         };
 
+        prompt.finish_mouse_selection();
         let filtered: String = pasted.chars().filter(|ch| !ch.is_control()).collect();
         if filtered.is_empty() {
             return;

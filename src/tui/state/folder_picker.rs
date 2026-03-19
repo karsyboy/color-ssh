@@ -88,6 +88,7 @@ pub(crate) struct FolderRenameState {
     pub(crate) name: String,
     pub(crate) cursor: usize,
     pub(crate) selection: Option<(usize, usize)>,
+    pub(crate) drag_anchor: Option<usize>,
     pub(crate) error: Option<String>,
 }
 
@@ -101,6 +102,7 @@ impl FolderRenameState {
             name: current_name,
             cursor,
             selection: None,
+            drag_anchor: None,
             error: None,
         }
     }
@@ -121,6 +123,7 @@ pub(crate) struct FolderCreateState {
     pub(crate) name: String,
     pub(crate) cursor: usize,
     pub(crate) selection: Option<(usize, usize)>,
+    pub(crate) drag_anchor: Option<usize>,
     pub(crate) error: Option<String>,
 }
 
@@ -132,6 +135,7 @@ impl FolderCreateState {
             name: String::new(),
             cursor: 0,
             selection: None,
+            drag_anchor: None,
             error: None,
         }
     }

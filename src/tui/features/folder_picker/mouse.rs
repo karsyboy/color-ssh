@@ -174,45 +174,72 @@ impl AppState {
             return;
         };
 
-        if let MouseEventKind::Down(MouseButton::Left) = mouse.kind {
-            if !Self::folder_picker_point_in_rect(area, mouse.column, mouse.row) {
-                self.folder_rename = None;
-                self.mark_ui_dirty();
-                return;
-            }
-
-            if !Self::folder_picker_point_in_rect(inner, mouse.column, mouse.row) {
-                return;
-            }
-
-            let action_row = inner.y.saturating_add(inner.height.saturating_sub(1));
-            if mouse.row == action_row {
-                let save_start = inner.x;
-                let save_end = save_start.saturating_add(SAVE_ACTION_LABEL.chars().count() as u16);
-                if mouse.column >= save_start && mouse.column < save_end {
-                    self.submit_folder_rename();
+        match mouse.kind {
+            MouseEventKind::Down(MouseButton::Left) => {
+                if !Self::folder_picker_point_in_rect(area, mouse.column, mouse.row) {
+                    self.folder_rename = None;
+                    self.mark_ui_dirty();
                     return;
                 }
 
-                let cancel_start = save_end.saturating_add(ACTION_SEPARATOR.chars().count() as u16);
-                let cancel_end = cancel_start.saturating_add(CANCEL_ACTION_LABEL.chars().count() as u16);
-                if mouse.column >= cancel_start && mouse.column < cancel_end {
-                    self.folder_rename = None;
+                if !Self::folder_picker_point_in_rect(inner, mouse.column, mouse.row) {
+                    return;
+                }
+
+                let action_row = inner.y.saturating_add(inner.height.saturating_sub(1));
+                if mouse.row == action_row {
+                    if let Some(state) = self.folder_rename.as_mut() {
+                        state.drag_anchor = None;
+                    }
+                    let save_start = inner.x;
+                    let save_end = save_start.saturating_add(SAVE_ACTION_LABEL.chars().count() as u16);
+                    if mouse.column >= save_start && mouse.column < save_end {
+                        self.submit_folder_rename();
+                        return;
+                    }
+
+                    let cancel_start = save_end.saturating_add(ACTION_SEPARATOR.chars().count() as u16);
+                    let cancel_end = cancel_start.saturating_add(CANCEL_ACTION_LABEL.chars().count() as u16);
+                    if mouse.column >= cancel_start && mouse.column < cancel_end {
+                        self.folder_rename = None;
+                        self.mark_ui_dirty();
+                    }
+                    return;
+                }
+
+                let name_row = inner.y.saturating_add(1);
+                if mouse.row == name_row
+                    && let Some(state) = self.folder_rename.as_mut()
+                    && let Some(cursor) = Self::folder_rename_cursor_from_column(state, inner, mouse.column)
+                {
+                    state.cursor = cursor;
+                    state.selection = None;
+                    state.drag_anchor = Some(cursor);
                     self.mark_ui_dirty();
                 }
-                return;
             }
-
-            let name_row = inner.y.saturating_add(1);
-            if mouse.row == name_row
-                && let Some(state) = self.folder_rename.as_mut()
-            {
-                state.selection = None;
-                if let Some(cursor) = Self::folder_rename_cursor_from_column(state, inner, mouse.column) {
+            MouseEventKind::Drag(MouseButton::Left) => {
+                if let Some(state) = self.folder_rename.as_mut()
+                    && let Some(anchor) = state.drag_anchor
+                    && let Some(cursor) = Self::folder_rename_cursor_from_column(state, inner, mouse.column)
+                {
                     state.cursor = cursor;
+                    state.selection = if cursor == anchor { None } else { Some((anchor, cursor)) };
+                    self.mark_ui_dirty();
                 }
-                self.mark_ui_dirty();
             }
+            MouseEventKind::Up(MouseButton::Left) => {
+                if let Some(state) = self.folder_rename.as_mut()
+                    && let Some(anchor) = state.drag_anchor
+                    && let Some(cursor) = Self::folder_rename_cursor_from_column(state, inner, mouse.column)
+                {
+                    state.cursor = cursor;
+                    state.selection = if cursor == anchor { None } else { Some((anchor, cursor)) };
+                    state.drag_anchor = None;
+                    self.mark_ui_dirty();
+                }
+            }
+            _ => {}
         }
     }
 
@@ -221,51 +248,81 @@ impl AppState {
             return;
         };
 
-        if let MouseEventKind::Down(MouseButton::Left) = mouse.kind {
-            if !Self::folder_picker_point_in_rect(area, mouse.column, mouse.row) {
-                self.folder_create = None;
-                self.mark_ui_dirty();
-                return;
-            }
-
-            if !Self::folder_picker_point_in_rect(inner, mouse.column, mouse.row) {
-                return;
-            }
-
-            let action_row = inner.y.saturating_add(FOLDER_CREATE_ACTION_ROW_OFFSET.min(inner.height.saturating_sub(1)));
-            if mouse.row == action_row {
-                let save_start = inner.x;
-                let save_end = save_start.saturating_add(SAVE_ACTION_LABEL.chars().count() as u16);
-                if mouse.column >= save_start && mouse.column < save_end {
-                    self.submit_folder_create();
+        match mouse.kind {
+            MouseEventKind::Down(MouseButton::Left) => {
+                if !Self::folder_picker_point_in_rect(area, mouse.column, mouse.row) {
+                    self.folder_create = None;
+                    self.mark_ui_dirty();
                     return;
                 }
 
-                let cancel_start = save_end.saturating_add(ACTION_SEPARATOR.chars().count() as u16);
-                let cancel_end = cancel_start.saturating_add(CANCEL_ACTION_LABEL.chars().count() as u16);
-                if mouse.column >= cancel_start && mouse.column < cancel_end {
-                    self.folder_create = None;
+                if !Self::folder_picker_point_in_rect(inner, mouse.column, mouse.row) {
+                    return;
+                }
+
+                let action_row = inner.y.saturating_add(FOLDER_CREATE_ACTION_ROW_OFFSET.min(inner.height.saturating_sub(1)));
+                if mouse.row == action_row {
+                    if let Some(state) = self.folder_create.as_mut() {
+                        state.drag_anchor = None;
+                    }
+                    let save_start = inner.x;
+                    let save_end = save_start.saturating_add(SAVE_ACTION_LABEL.chars().count() as u16);
+                    if mouse.column >= save_start && mouse.column < save_end {
+                        self.submit_folder_create();
+                        return;
+                    }
+
+                    let cancel_start = save_end.saturating_add(ACTION_SEPARATOR.chars().count() as u16);
+                    let cancel_end = cancel_start.saturating_add(CANCEL_ACTION_LABEL.chars().count() as u16);
+                    if mouse.column >= cancel_start && mouse.column < cancel_end {
+                        self.folder_create = None;
+                        self.mark_ui_dirty();
+                    }
+                    return;
+                }
+
+                let parent_row = inner.y.saturating_add(FOLDER_CREATE_PARENT_ROW_OFFSET);
+                if mouse.row == parent_row {
+                    if let Some(state) = self.folder_create.as_mut() {
+                        state.drag_anchor = None;
+                    }
+                    self.open_folder_picker_for_create_folder_parent();
+                    return;
+                }
+
+                let name_row = inner.y.saturating_add(FOLDER_CREATE_NAME_ROW_OFFSET.min(inner.height.saturating_sub(1)));
+                if mouse.row == name_row
+                    && let Some(state) = self.folder_create.as_mut()
+                    && let Some(cursor) = Self::folder_create_cursor_from_column(state, inner, mouse.column)
+                {
+                    state.cursor = cursor;
+                    state.selection = None;
+                    state.drag_anchor = Some(cursor);
                     self.mark_ui_dirty();
                 }
-                return;
             }
-
-            let parent_row = inner.y.saturating_add(FOLDER_CREATE_PARENT_ROW_OFFSET);
-            if mouse.row == parent_row {
-                self.open_folder_picker_for_create_folder_parent();
-                return;
-            }
-
-            let name_row = inner.y.saturating_add(FOLDER_CREATE_NAME_ROW_OFFSET.min(inner.height.saturating_sub(1)));
-            if mouse.row == name_row
-                && let Some(state) = self.folder_create.as_mut()
-            {
-                state.selection = None;
-                if let Some(cursor) = Self::folder_create_cursor_from_column(state, inner, mouse.column) {
+            MouseEventKind::Drag(MouseButton::Left) => {
+                if let Some(state) = self.folder_create.as_mut()
+                    && let Some(anchor) = state.drag_anchor
+                    && let Some(cursor) = Self::folder_create_cursor_from_column(state, inner, mouse.column)
+                {
                     state.cursor = cursor;
+                    state.selection = if cursor == anchor { None } else { Some((anchor, cursor)) };
+                    self.mark_ui_dirty();
                 }
-                self.mark_ui_dirty();
             }
+            MouseEventKind::Up(MouseButton::Left) => {
+                if let Some(state) = self.folder_create.as_mut()
+                    && let Some(anchor) = state.drag_anchor
+                    && let Some(cursor) = Self::folder_create_cursor_from_column(state, inner, mouse.column)
+                {
+                    state.cursor = cursor;
+                    state.selection = if cursor == anchor { None } else { Some((anchor, cursor)) };
+                    state.drag_anchor = None;
+                    self.mark_ui_dirty();
+                }
+            }
+            _ => {}
         }
     }
 

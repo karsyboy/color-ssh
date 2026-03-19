@@ -161,6 +161,7 @@ impl AppState {
         let mut should_close = false;
         let mut should_pick_parent = false;
         if let Some(state) = self.folder_create.as_mut() {
+            state.drag_anchor = None;
             match key.code {
                 KeyCode::Esc => should_close = true,
                 KeyCode::Enter => should_submit = true,
@@ -217,6 +218,7 @@ impl AppState {
         let mut should_submit = false;
         let mut should_close = false;
         if let Some(state) = self.folder_rename.as_mut() {
+            state.drag_anchor = None;
             match key.code {
                 KeyCode::Esc => should_close = true,
                 KeyCode::Enter => should_submit = true,
@@ -281,6 +283,7 @@ impl AppState {
             return;
         };
 
+        state.drag_anchor = None;
         let filtered: String = pasted.chars().filter(|ch| !ch.is_control()).collect();
         if filtered.is_empty() {
             return;
@@ -298,6 +301,7 @@ impl AppState {
             return;
         };
 
+        state.drag_anchor = None;
         let filtered: String = pasted.chars().filter(|ch| !ch.is_control()).collect();
         if filtered.is_empty() {
             return;
@@ -371,6 +375,7 @@ impl AppState {
         state.name = folder_name.clone();
         state.cursor = (*name_cursor).min(text_edit::char_len(&state.name));
         state.selection = text_edit::normalized_selection(&state.name, *name_selection);
+        state.drag_anchor = None;
         Some(state)
     }
 

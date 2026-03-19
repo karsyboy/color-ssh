@@ -307,14 +307,7 @@ impl QuickConnectState {
         }
 
         if let Some((text, cursor, selection)) = self.text_cursor_selection_mut(field) {
-            text_edit::clamp_cursor(text, cursor);
-            let active_selection = text_edit::normalized_selection(text, *selection);
-            *selection = None;
-            if let Some((start, _)) = active_selection {
-                *cursor = start;
-            } else if *cursor > 0 {
-                *cursor -= 1;
-            }
+            text_edit::move_cursor_left(text, cursor, selection);
         }
     }
 
@@ -326,15 +319,7 @@ impl QuickConnectState {
         }
 
         if let Some((text, cursor, selection)) = self.text_cursor_selection_mut(field) {
-            text_edit::clamp_cursor(text, cursor);
-            let len = text_edit::char_len(text);
-            let active_selection = text_edit::normalized_selection(text, *selection);
-            *selection = None;
-            if let Some((_, end)) = active_selection {
-                *cursor = end;
-            } else if *cursor < len {
-                *cursor += 1;
-            }
+            text_edit::move_cursor_right(text, cursor, selection);
         }
     }
 
@@ -346,8 +331,7 @@ impl QuickConnectState {
         }
 
         if let Some((_, cursor, selection)) = self.text_cursor_selection_mut(field) {
-            *cursor = 0;
-            *selection = None;
+            text_edit::move_cursor_home(cursor, selection);
         }
     }
 
@@ -359,8 +343,7 @@ impl QuickConnectState {
         }
 
         if let Some((text, cursor, selection)) = self.text_cursor_selection_mut(field) {
-            *cursor = text_edit::char_len(text);
-            *selection = None;
+            text_edit::move_cursor_end(text, cursor, selection);
         }
     }
 
@@ -372,23 +355,8 @@ impl QuickConnectState {
         }
 
         if let Some((text, cursor, selection)) = self.text_cursor_selection_mut(field) {
-            let len = text_edit::char_len(text);
-            if len == 0 {
-                *selection = None;
-                *cursor = 0;
-            } else {
-                *selection = Some((0, len));
-                *cursor = len;
-            }
+            text_edit::select_all(text, cursor, selection);
         }
-    }
-
-    fn delete_selection(&mut self, field: QuickConnectField) -> bool {
-        let Some((text, cursor, selection)) = self.text_cursor_selection_mut(field) else {
-            return false;
-        };
-
-        text_edit::delete_selection(text, cursor, selection)
     }
 
     pub(crate) fn insert_char(&mut self, field: QuickConnectField, ch: char) {
@@ -399,13 +367,8 @@ impl QuickConnectState {
             return;
         }
 
-        let _ = self.delete_selection(field);
         if let Some((text, cursor, selection)) = self.text_cursor_selection_mut(field) {
-            text_edit::clamp_cursor(text, cursor);
-            let insert_at = text_edit::byte_index_for_char(text, *cursor);
-            text.insert(insert_at, ch);
-            *cursor += 1;
-            *selection = None;
+            text_edit::insert_char(text, cursor, selection, ch);
         }
     }
 
@@ -416,22 +379,8 @@ impl QuickConnectState {
             return;
         }
 
-        if self.delete_selection(field) {
-            return;
-        }
-
         if let Some((text, cursor, selection)) = self.text_cursor_selection_mut(field) {
-            text_edit::clamp_cursor(text, cursor);
-            if *cursor == 0 {
-                *selection = None;
-                return;
-            }
-
-            let end = text_edit::byte_index_for_char(text, *cursor);
-            let start = text_edit::byte_index_for_char(text, *cursor - 1);
-            text.replace_range(start..end, "");
-            *cursor -= 1;
-            *selection = None;
+            text_edit::backspace(text, cursor, selection);
         }
     }
 
@@ -442,22 +391,8 @@ impl QuickConnectState {
             return;
         }
 
-        if self.delete_selection(field) {
-            return;
-        }
-
         if let Some((text, cursor, selection)) = self.text_cursor_selection_mut(field) {
-            text_edit::clamp_cursor(text, cursor);
-            let len = text_edit::char_len(text);
-            if *cursor >= len {
-                *selection = None;
-                return;
-            }
-
-            let start = text_edit::byte_index_for_char(text, *cursor);
-            let end = text_edit::byte_index_for_char(text, *cursor + 1);
-            text.replace_range(start..end, "");
-            *selection = None;
+            text_edit::delete_char(text, cursor, selection);
         }
     }
 

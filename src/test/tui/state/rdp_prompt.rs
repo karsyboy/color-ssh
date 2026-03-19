@@ -67,3 +67,30 @@ fn build_submission_applies_domain_port_and_password() {
     assert_eq!(submission.host.port, Some(3390));
     assert_eq!(submission.manual_password.expect("password").expose_secret(), "secret");
 }
+
+#[test]
+fn ctrl_a_style_select_all_replaces_rdp_text_field() {
+    let host = sample_host();
+    let mut state = RdpCredentialsState::new(
+        &host,
+        RdpCredentialsAction::OpenHostTab {
+            host: Box::new(host.clone()),
+            force_ssh_logging: false,
+            launch_context: RdpCredentialLaunchContext {
+                pass_entry_override: None,
+                pass_fallback_notice: None,
+                disable_vault_autologin: false,
+            },
+        },
+        None,
+    );
+
+    state.user = "alice".to_string();
+    state.user_cursor = state.user.chars().count();
+    state.select_all(RdpCredentialsField::User);
+    state.insert_char(RdpCredentialsField::User, 'z');
+
+    assert_eq!(state.user, "z");
+    assert_eq!(state.user_cursor, 1);
+    assert!(state.selection_for_field(RdpCredentialsField::User).is_none());
+}

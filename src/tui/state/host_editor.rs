@@ -276,79 +276,31 @@ impl TextInput {
     }
 
     fn move_left(&mut self) {
-        text_edit::clamp_cursor(&self.value, &mut self.cursor);
-        let active_selection = text_edit::normalized_selection(&self.value, self.selection);
-        self.selection = None;
-        if let Some((start, _)) = active_selection {
-            self.cursor = start;
-        } else if self.cursor > 0 {
-            self.cursor -= 1;
-        }
+        text_edit::move_cursor_left(&self.value, &mut self.cursor, &mut self.selection);
     }
 
     fn move_right(&mut self) {
-        text_edit::clamp_cursor(&self.value, &mut self.cursor);
-        let len = text_edit::char_len(&self.value);
-        let active_selection = text_edit::normalized_selection(&self.value, self.selection);
-        self.selection = None;
-        if let Some((_, end)) = active_selection {
-            self.cursor = end;
-        } else if self.cursor < len {
-            self.cursor += 1;
-        }
+        text_edit::move_cursor_right(&self.value, &mut self.cursor, &mut self.selection);
     }
 
     fn move_home(&mut self) {
-        self.cursor = 0;
-        self.selection = None;
+        text_edit::move_cursor_home(&mut self.cursor, &mut self.selection);
     }
 
     fn move_end(&mut self) {
-        self.cursor = text_edit::char_len(&self.value);
-        self.selection = None;
+        text_edit::move_cursor_end(&self.value, &mut self.cursor, &mut self.selection);
     }
 
     fn insert_char(&mut self, ch: char) {
-        let _ = text_edit::delete_selection(&mut self.value, &mut self.cursor, &mut self.selection);
-        text_edit::clamp_cursor(&self.value, &mut self.cursor);
-        let insert_at = text_edit::byte_index_for_char(&self.value, self.cursor);
-        self.value.insert(insert_at, ch);
-        self.cursor += 1;
-        self.selection = None;
+        text_edit::insert_char(&mut self.value, &mut self.cursor, &mut self.selection, ch);
     }
 
     fn backspace(&mut self) {
-        if text_edit::delete_selection(&mut self.value, &mut self.cursor, &mut self.selection) {
-            return;
-        }
-        text_edit::clamp_cursor(&self.value, &mut self.cursor);
-        if self.cursor == 0 {
-            self.selection = None;
-            return;
-        }
-
-        let end = text_edit::byte_index_for_char(&self.value, self.cursor);
-        let start = text_edit::byte_index_for_char(&self.value, self.cursor - 1);
-        self.value.replace_range(start..end, "");
-        self.cursor -= 1;
-        self.selection = None;
+        text_edit::backspace(&mut self.value, &mut self.cursor, &mut self.selection);
     }
 
     fn delete(&mut self) {
-        if text_edit::delete_selection(&mut self.value, &mut self.cursor, &mut self.selection) {
-            return;
-        }
-        text_edit::clamp_cursor(&self.value, &mut self.cursor);
-        let len = text_edit::char_len(&self.value);
-        if self.cursor >= len {
-            self.selection = None;
-            return;
-        }
-
-        let start = text_edit::byte_index_for_char(&self.value, self.cursor);
-        let end = text_edit::byte_index_for_char(&self.value, self.cursor + 1);
-        self.value.replace_range(start..end, "");
-        self.selection = None;
+        text_edit::delete_char(&mut self.value, &mut self.cursor, &mut self.selection);
     }
 }
 
@@ -1021,6 +973,13 @@ impl HostEditorState {
         self.finish_mouse_selection();
         if let Some(input) = self.text_field_mut(field) {
             input.move_end();
+        }
+    }
+
+    pub(crate) fn select_all(&mut self, field: HostEditorField) {
+        self.finish_mouse_selection();
+        if let Some(input) = self.text_field_mut(field) {
+            text_edit::select_all(&input.value, &mut input.cursor, &mut input.selection);
         }
     }
 

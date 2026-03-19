@@ -3,6 +3,7 @@
 use crate::auth::vault;
 use crate::inventory::{FolderId, create_inventory_host_entry, delete_inventory_host_entry, update_inventory_host_entry};
 use crate::runtime::{ReloadNoticeToast, format_reload_notice};
+use crate::tui::text_edit;
 use crate::tui::{
     AppState, EditorTabId, EditorTabState, HostContextMenuAction, HostContextMenuState, HostContextMenuTarget, HostDeleteConfirmState, HostEditorField,
     HostEditorMode, HostEditorState, HostEditorVisibleItem, HostTab, HostTreeRowKind,
@@ -133,7 +134,7 @@ impl AppState {
         let mut editor_state = HostEditorState::new_duplicate(&host, profiles, vault_entries);
         let folder_path = self.host_folder_path_in_source(&host);
         editor_state.folder_path.value = Self::format_folder_path(&folder_path);
-        editor_state.folder_path.cursor = editor_state.folder_path.value.chars().count();
+        editor_state.folder_path.cursor = text_edit::char_len(&editor_state.folder_path.value);
         editor_state.folder_path.selection = None;
         let editor_id = EditorTabId::for_duplicate_host(&host);
         self.open_or_focus_host_editor_tab(editor_id, editor_state);
@@ -148,7 +149,7 @@ impl AppState {
         let vault_entries = self.discover_host_editor_vault_pass_entries();
         let mut editor_state = HostEditorState::new_create(source_file.clone(), profiles, vault_entries);
         editor_state.folder_path.value = Self::format_folder_path(&folder_path);
-        editor_state.folder_path.cursor = editor_state.folder_path.value.chars().count();
+        editor_state.folder_path.cursor = text_edit::char_len(&editor_state.folder_path.value);
         editor_state.folder_path.selection = None;
         let editor_id = EditorTabId::for_new_entry(source_file);
         self.open_or_focus_host_editor_tab(editor_id, editor_state);
@@ -483,7 +484,7 @@ impl AppState {
                         && field != HostEditorField::Protocol
                         && field != HostEditorField::FolderPath
                     {
-                        form.move_cursor_home(field);
+                        form.select_all(field);
                     }
                 }
                 KeyCode::Char('e') if key.modifiers.contains(KeyModifiers::CONTROL) => {

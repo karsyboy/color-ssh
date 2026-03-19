@@ -1,6 +1,6 @@
 //! Host browser keyboard handling.
 
-use crate::tui::text_edit::{byte_index_for_char, char_len, clamp_cursor, delete_selection, normalized_selection};
+use crate::tui::text_edit;
 use crate::tui::{AppState, ConnectRequest, HostTreeRowKind};
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use std::io;
@@ -13,95 +13,40 @@ impl AppState {
     }
 
     fn move_host_search_cursor_left(&mut self) {
-        clamp_cursor(&self.search_query, &mut self.search_query_cursor);
-        let active_selection = normalized_selection(&self.search_query, self.search_query_selection);
-        self.search_query_selection = None;
-        if let Some((start, _)) = active_selection {
-            self.search_query_cursor = start;
-        } else if self.search_query_cursor > 0 {
-            self.search_query_cursor -= 1;
-        }
+        text_edit::move_cursor_left(&self.search_query, &mut self.search_query_cursor, &mut self.search_query_selection);
     }
 
     fn move_host_search_cursor_right(&mut self) {
-        clamp_cursor(&self.search_query, &mut self.search_query_cursor);
-        let len = char_len(&self.search_query);
-        let active_selection = normalized_selection(&self.search_query, self.search_query_selection);
-        self.search_query_selection = None;
-        if let Some((_, end)) = active_selection {
-            self.search_query_cursor = end;
-        } else if self.search_query_cursor < len {
-            self.search_query_cursor += 1;
-        }
+        text_edit::move_cursor_right(&self.search_query, &mut self.search_query_cursor, &mut self.search_query_selection);
     }
 
     fn move_host_search_cursor_home(&mut self) {
-        self.search_query_cursor = 0;
-        self.search_query_selection = None;
+        text_edit::move_cursor_home(&mut self.search_query_cursor, &mut self.search_query_selection);
     }
 
     fn move_host_search_cursor_end(&mut self) {
-        self.search_query_cursor = char_len(&self.search_query);
-        self.search_query_selection = None;
+        text_edit::move_cursor_end(&self.search_query, &mut self.search_query_cursor, &mut self.search_query_selection);
     }
 
     fn select_all_host_search_text(&mut self) {
-        let len = char_len(&self.search_query);
-        if len == 0 {
-            self.search_query_selection = None;
-            self.search_query_cursor = 0;
-        } else {
-            self.search_query_selection = Some((0, len));
-            self.search_query_cursor = len;
-        }
+        text_edit::select_all(&self.search_query, &mut self.search_query_cursor, &mut self.search_query_selection);
     }
 
     fn insert_host_search_char(&mut self, ch: char) -> bool {
-        let _ = delete_selection(&mut self.search_query, &mut self.search_query_cursor, &mut self.search_query_selection);
-        clamp_cursor(&self.search_query, &mut self.search_query_cursor);
-        let insert_at = byte_index_for_char(&self.search_query, self.search_query_cursor);
-        self.search_query.insert(insert_at, ch);
-        self.search_query_cursor += 1;
-        self.search_query_selection = None;
+        text_edit::insert_char(&mut self.search_query, &mut self.search_query_cursor, &mut self.search_query_selection, ch);
         true
     }
 
     fn backspace_host_search_text(&mut self) -> bool {
-        if delete_selection(&mut self.search_query, &mut self.search_query_cursor, &mut self.search_query_selection) {
-            return true;
-        }
-
-        clamp_cursor(&self.search_query, &mut self.search_query_cursor);
-        if self.search_query_cursor == 0 {
-            self.search_query_selection = None;
-            return false;
-        }
-
-        let end = byte_index_for_char(&self.search_query, self.search_query_cursor);
-        let start = byte_index_for_char(&self.search_query, self.search_query_cursor - 1);
-        self.search_query.replace_range(start..end, "");
-        self.search_query_cursor -= 1;
-        self.search_query_selection = None;
-        true
+        let len_before = text_edit::char_len(&self.search_query);
+        text_edit::backspace(&mut self.search_query, &mut self.search_query_cursor, &mut self.search_query_selection);
+        text_edit::char_len(&self.search_query) != len_before
     }
 
     fn delete_host_search_text(&mut self) -> bool {
-        if delete_selection(&mut self.search_query, &mut self.search_query_cursor, &mut self.search_query_selection) {
-            return true;
-        }
-
-        clamp_cursor(&self.search_query, &mut self.search_query_cursor);
-        let len = char_len(&self.search_query);
-        if self.search_query_cursor >= len {
-            self.search_query_selection = None;
-            return false;
-        }
-
-        let start = byte_index_for_char(&self.search_query, self.search_query_cursor);
-        let end = byte_index_for_char(&self.search_query, self.search_query_cursor + 1);
-        self.search_query.replace_range(start..end, "");
-        self.search_query_selection = None;
-        true
+        let len_before = text_edit::char_len(&self.search_query);
+        text_edit::delete_char(&mut self.search_query, &mut self.search_query_cursor, &mut self.search_query_selection);
+        text_edit::char_len(&self.search_query) != len_before
     }
 
     // Search-mode input.
@@ -157,7 +102,7 @@ impl AppState {
             return;
         }
 
-        let _ = delete_selection(&mut self.search_query, &mut self.search_query_cursor, &mut self.search_query_selection);
+        let _ = text_edit::delete_selection(&mut self.search_query, &mut self.search_query_cursor, &mut self.search_query_selection);
         for ch in filtered.chars() {
             let _ = self.insert_host_search_char(ch);
         }
@@ -211,12 +156,12 @@ impl AppState {
             }
             KeyCode::Char('f') if self.focus_on_manager && key.modifiers.contains(KeyModifiers::CONTROL) => {
                 self.search_mode = true;
-                self.search_query_cursor = char_len(&self.search_query);
+                self.search_query_cursor = text_edit::char_len(&self.search_query);
                 self.search_query_selection = None;
             }
             KeyCode::Char('/') if self.focus_on_manager && key.modifiers.is_empty() => {
                 self.search_mode = true;
-                self.search_query_cursor = char_len(&self.search_query);
+                self.search_query_cursor = text_edit::char_len(&self.search_query);
                 self.search_query_selection = None;
             }
             KeyCode::Char('q') if self.focus_on_manager && key.modifiers.is_empty() => {

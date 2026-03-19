@@ -1,7 +1,7 @@
 //! Terminal-search keyboard handling.
 
 use crate::tui::AppState;
-use crate::tui::text_edit::{byte_index_for_char, char_len, clamp_cursor, delete_selection, normalized_selection};
+use crate::tui::text_edit;
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use std::io;
 
@@ -16,55 +16,31 @@ impl AppState {
 
     fn move_terminal_search_cursor_left(&mut self) {
         if let Some((query, cursor, selection)) = self.terminal_search_query_mut() {
-            clamp_cursor(query, cursor);
-            let active_selection = normalized_selection(query, *selection);
-            *selection = None;
-            if let Some((start, _)) = active_selection {
-                *cursor = start;
-            } else if *cursor > 0 {
-                *cursor -= 1;
-            }
+            text_edit::move_cursor_left(query, cursor, selection);
         }
     }
 
     fn move_terminal_search_cursor_right(&mut self) {
         if let Some((query, cursor, selection)) = self.terminal_search_query_mut() {
-            clamp_cursor(query, cursor);
-            let len = char_len(query);
-            let active_selection = normalized_selection(query, *selection);
-            *selection = None;
-            if let Some((_, end)) = active_selection {
-                *cursor = end;
-            } else if *cursor < len {
-                *cursor += 1;
-            }
+            text_edit::move_cursor_right(query, cursor, selection);
         }
     }
 
     fn move_terminal_search_cursor_home(&mut self) {
         if let Some((_, cursor, selection)) = self.terminal_search_query_mut() {
-            *cursor = 0;
-            *selection = None;
+            text_edit::move_cursor_home(cursor, selection);
         }
     }
 
     fn move_terminal_search_cursor_end(&mut self) {
         if let Some((query, cursor, selection)) = self.terminal_search_query_mut() {
-            *cursor = char_len(query);
-            *selection = None;
+            text_edit::move_cursor_end(query, cursor, selection);
         }
     }
 
     fn select_all_terminal_search_text(&mut self) {
         if let Some((query, cursor, selection)) = self.terminal_search_query_mut() {
-            let len = char_len(query);
-            if len == 0 {
-                *selection = None;
-                *cursor = 0;
-            } else {
-                *selection = Some((0, len));
-                *cursor = len;
-            }
+            text_edit::select_all(query, cursor, selection);
         }
     }
 
@@ -73,12 +49,7 @@ impl AppState {
             return false;
         };
 
-        let _ = delete_selection(query, cursor, selection);
-        clamp_cursor(query, cursor);
-        let insert_at = byte_index_for_char(query, *cursor);
-        query.insert(insert_at, ch);
-        *cursor += 1;
-        *selection = None;
+        text_edit::insert_char(query, cursor, selection, ch);
         true
     }
 
@@ -87,22 +58,9 @@ impl AppState {
             return false;
         };
 
-        if delete_selection(query, cursor, selection) {
-            return true;
-        }
-
-        clamp_cursor(query, cursor);
-        if *cursor == 0 {
-            *selection = None;
-            return false;
-        }
-
-        let end = byte_index_for_char(query, *cursor);
-        let start = byte_index_for_char(query, *cursor - 1);
-        query.replace_range(start..end, "");
-        *cursor -= 1;
-        *selection = None;
-        true
+        let len_before = text_edit::char_len(query);
+        text_edit::backspace(query, cursor, selection);
+        text_edit::char_len(query) != len_before
     }
 
     fn delete_terminal_search_text(&mut self) -> bool {
@@ -110,22 +68,9 @@ impl AppState {
             return false;
         };
 
-        if delete_selection(query, cursor, selection) {
-            return true;
-        }
-
-        clamp_cursor(query, cursor);
-        let len = char_len(query);
-        if *cursor >= len {
-            *selection = None;
-            return false;
-        }
-
-        let start = byte_index_for_char(query, *cursor);
-        let end = byte_index_for_char(query, *cursor + 1);
-        query.replace_range(start..end, "");
-        *selection = None;
-        true
+        let len_before = text_edit::char_len(query);
+        text_edit::delete_char(query, cursor, selection);
+        text_edit::char_len(query) != len_before
     }
 
     // Search state lifecycle.
@@ -209,14 +154,10 @@ impl AppState {
         }
 
         if let Some((query, cursor, selection)) = self.terminal_search_query_mut() {
-            let _ = delete_selection(query, cursor, selection);
+            let _ = text_edit::delete_selection(query, cursor, selection);
             for ch in filtered.chars() {
-                clamp_cursor(query, cursor);
-                let insert_at = byte_index_for_char(query, *cursor);
-                query.insert(insert_at, ch);
-                *cursor += 1;
+                text_edit::insert_char(query, cursor, selection, ch);
             }
-            *selection = None;
             self.update_terminal_search();
         }
     }

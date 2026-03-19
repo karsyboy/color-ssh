@@ -914,6 +914,31 @@ fn non_description_fields_ignore_space_input() {
 }
 
 #[test]
+fn host_editor_ctrl_a_selects_all_and_replaces_text() {
+    let mut app = AppState::new_for_tests();
+    open_test_editor(
+        &mut app,
+        HostEditorState::new_create(PathBuf::from("/tmp/inventory.yaml"), vec!["default".to_string()], vec!["db_prod".to_string()]),
+    );
+
+    {
+        let form = app.selected_host_editor_mut().expect("host editor state");
+        form.selected = HostEditorField::Host.into();
+        form.host.value = "alpha.example".to_string();
+        form.host.cursor = form.host.value.chars().count();
+        form.host.selection = None;
+    }
+
+    app.handle_host_editor_key(KeyEvent::new(KeyCode::Char('a'), KeyModifiers::CONTROL));
+    app.handle_host_editor_key(KeyEvent::new(KeyCode::Char('z'), KeyModifiers::NONE));
+
+    let form = app.selected_host_editor().expect("host editor state");
+    assert_eq!(form.host.value, "z");
+    assert_eq!(form.host.cursor, 1);
+    assert!(form.host.selection.is_none());
+}
+
+#[test]
 fn manager_slash_shortcut_enters_search_mode() {
     let workspace = TestWorkspace::new("tui", "host_browser_slash_search").expect("temp workspace");
     let inventory_path = workspace.join("cossh-inventory.yaml");
@@ -1620,6 +1645,70 @@ inventory:
     let state = app.folder_create.as_ref().expect("folder create modal");
     assert_eq!(state.name, "z");
     assert_eq!(state.cursor, 1);
+    assert!(state.selection.is_none());
+}
+
+#[test]
+fn folder_create_mouse_drag_selection_matches_keyboard_delete_behavior() {
+    let workspace = TestWorkspace::new("tui", "host_browser_create_folder_mouse_selection").expect("temp workspace");
+    let inventory_path = workspace.join("cossh-inventory.yaml");
+    workspace
+        .write(
+            &inventory_path,
+            r#"
+inventory:
+  - Group:
+      - name: alpha
+        protocol: ssh
+        host: alpha.example
+"#,
+        )
+        .expect("write inventory");
+
+    let mut app = AppState::new_for_tests();
+    app.last_terminal_size = (120, 40);
+    seed_app_from_inventory(&mut app, &inventory_path);
+    app.set_selected_row(find_folder_row(&app, "Group"));
+    app.handle_manager_key(KeyEvent::new(KeyCode::Char('n'), KeyModifiers::CONTROL))
+        .expect("ctrl+n opens folder create modal");
+
+    {
+        let state = app.folder_create.as_mut().expect("folder create modal");
+        state.name = "SampleName".to_string();
+        state.cursor = state.name.chars().count();
+        state.selection = None;
+    }
+
+    let (_, inner) = app.folder_create_modal_layout().expect("folder create layout");
+    let name_row = inner.y.saturating_add(1u16.min(inner.height.saturating_sub(1)));
+    let value_start = inner.x.saturating_add("Name: ".chars().count() as u16);
+
+    app.handle_mouse(MouseEvent {
+        kind: MouseEventKind::Down(MouseButton::Left),
+        column: value_start.saturating_add(1),
+        row: name_row,
+        modifiers: KeyModifiers::NONE,
+    })
+    .expect("mouse down on name");
+    app.handle_mouse(MouseEvent {
+        kind: MouseEventKind::Drag(MouseButton::Left),
+        column: value_start.saturating_add(6),
+        row: name_row,
+        modifiers: KeyModifiers::NONE,
+    })
+    .expect("mouse drag on name");
+    app.handle_mouse(MouseEvent {
+        kind: MouseEventKind::Up(MouseButton::Left),
+        column: value_start.saturating_add(6),
+        row: name_row,
+        modifiers: KeyModifiers::NONE,
+    })
+    .expect("mouse release on name");
+
+    app.handle_folder_create_key(KeyEvent::new(KeyCode::Delete, KeyModifiers::NONE));
+
+    let state = app.folder_create.as_ref().expect("folder create modal");
+    assert_eq!(state.name, "SName");
     assert!(state.selection.is_none());
 }
 

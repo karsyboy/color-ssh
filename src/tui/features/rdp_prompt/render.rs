@@ -33,6 +33,10 @@ impl AppState {
         let selected_value = Style::default().fg(theme::ansi_bright_white()).add_modifier(Modifier::BOLD);
         let normal_value = Style::default().fg(theme::ansi_bright_white());
         let cursor_value = Style::default().fg(theme::ansi_black()).bg(theme::ansi_cyan()).add_modifier(Modifier::BOLD);
+        let selected_region = Style::default()
+            .fg(theme::selection_fg())
+            .bg(theme::selection_bg())
+            .add_modifier(Modifier::BOLD);
         let error_style = Style::default().fg(theme::ansi_red()).add_modifier(Modifier::BOLD);
         let notice_style = Style::default().fg(theme::ansi_yellow()).add_modifier(Modifier::BOLD);
         let hint_style = Style::default().fg(theme::ansi_bright_black());
@@ -45,10 +49,10 @@ impl AppState {
             build_edit_value_spans(
                 prompt.text_for_field(RdpCredentialsField::User).unwrap_or_default(),
                 prompt.cursor_for_field(RdpCredentialsField::User),
-                None,
+                prompt.selection_for_field(RdpCredentialsField::User),
                 selected_value,
                 cursor_value,
-                cursor_value,
+                selected_region,
             )
         } else if prompt.user.trim().is_empty() {
             vec![Span::styled("(required)", normal_value)]
@@ -60,10 +64,10 @@ impl AppState {
             build_edit_value_spans(
                 prompt.text_for_field(RdpCredentialsField::Domain).unwrap_or_default(),
                 prompt.cursor_for_field(RdpCredentialsField::Domain),
-                None,
+                prompt.selection_for_field(RdpCredentialsField::Domain),
                 selected_value,
                 cursor_value,
-                cursor_value,
+                selected_region,
             )
         } else if prompt.domain.trim().is_empty() {
             vec![Span::styled("(optional)", normal_value)]
@@ -75,10 +79,10 @@ impl AppState {
             build_edit_value_spans(
                 prompt.text_for_field(RdpCredentialsField::Port).unwrap_or_default(),
                 prompt.cursor_for_field(RdpCredentialsField::Port),
-                None,
+                prompt.selection_for_field(RdpCredentialsField::Port),
                 selected_value,
                 cursor_value,
-                cursor_value,
+                selected_region,
             )
         } else if prompt.port.trim().is_empty() {
             vec![Span::styled("(optional)", normal_value)]

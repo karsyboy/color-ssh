@@ -3,6 +3,7 @@
 use crate::log_error;
 use crate::tui::AppState;
 use crate::tui::features::terminal_session::pty::{encode_key_event_bytes, encode_paste_bytes};
+use crate::tui::text_edit;
 use crate::tui::ui::theme::display_width;
 use crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
 use std::io;
@@ -321,7 +322,7 @@ impl AppState {
                     let mut should_recompute_search = false;
                     if let Some(search) = self.current_tab_search_mut() {
                         search.active = true;
-                        search.query_cursor = search.query.chars().count();
+                        search.query_cursor = text_edit::char_len(&search.query);
                         search.query_selection = None;
                         search.last_search_query.clear();
                         search.last_scanned_render_epoch = 0;
