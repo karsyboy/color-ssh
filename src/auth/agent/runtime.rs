@@ -7,6 +7,7 @@ use crate::auth::vault::{UnlockedVault, VaultPaths};
 use crate::log_debug;
 use base64::{Engine as _, engine::general_purpose::URL_SAFE_NO_PAD};
 use getrandom::fill as random_fill;
+use std::fmt;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use zeroize::Zeroize;
 
@@ -22,7 +23,6 @@ pub(super) struct AskpassLease {
     expires_at: Instant,
 }
 
-#[derive(Debug)]
 pub(crate) struct AgentRuntime {
     pub(super) data_key: Option<[u8; 32]>,
     pub(super) unlocked_at: Option<Instant>,
@@ -30,6 +30,19 @@ pub(crate) struct AgentRuntime {
     pub(super) absolute_timeout_at: Option<SystemTime>,
     pub(super) policy: Option<UnlockPolicy>,
     pub(super) askpass_leases: Vec<AskpassLease>,
+}
+
+impl fmt::Debug for AgentRuntime {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("AgentRuntime")
+            .field("data_key", &self.data_key.as_ref().map(|_| "[REDACTED]"))
+            .field("unlocked_at", &self.unlocked_at)
+            .field("last_activity_at", &self.last_activity_at)
+            .field("absolute_timeout_at", &self.absolute_timeout_at)
+            .field("policy", &self.policy)
+            .field("askpass_lease_count", &self.askpass_leases.len())
+            .finish()
+    }
 }
 
 impl AgentRuntime {
@@ -153,10 +166,7 @@ impl AgentRuntime {
     /// Issue a short-lived, single-use askpass token for one entry name.
     pub(crate) fn issue_askpass_token(&mut self, entry_name: &str) -> Result<SensitiveString, AgentError> {
         self.prune_expired_askpass_leases();
-        let mut token_bytes = [0u8; ASKPASS_TOKEN_BYTES];
-        random_fill(&mut token_bytes).map_err(|err| AgentError::Protocol(format!("failed to generate askpass token: {err}")))?;
-        let token = SensitiveString::from_owned_string(URL_SAFE_NO_PAD.encode(token_bytes));
-        token_bytes.zeroize();
+        let token = random_secret(ASKPASS_TOKEN_BYTES, "failed to generate askpass token")?;
 
         self.askpass_leases.push(AskpassLease {
             token: token.clone(),
@@ -187,7 +197,19 @@ impl AgentRuntime {
     }
 }
 
+fn random_secret(byte_len: usize, context: &'static str) -> Result<SensitiveString, AgentError> {
+    let mut bytes = vec![0u8; byte_len];
+    random_fill(&mut bytes).map_err(|err| AgentError::Protocol(format!("{context}: {err}")))?;
+    let secret = SensitiveString::from_owned_string(URL_SAFE_NO_PAD.encode(&bytes));
+    bytes.zeroize();
+    Ok(secret)
+}
+
 /// Exponential backoff helper for idle-loop polling.
 pub(crate) fn next_idle_shutdown_poll_interval(current: Duration) -> Duration {
     current.saturating_mul(2).min(AGENT_IDLE_SHUTDOWN_POLL_INTERVAL_MAX)
 }
+
+#[cfg(test)]
+#[path = "../../test/auth/agent/runtime.rs"]
+mod tests;

@@ -137,7 +137,12 @@ impl AppState {
             if let Some(error) = self.inventory_load_error.as_deref() {
                 frame.render_widget(Paragraph::new(inventory_load_error_lines(error)).wrap(Wrap { trim: false }), body_area);
             } else {
-                frame.render_widget(Paragraph::new("No selection").style(Style::default().fg(theme::ansi_bright_black())), body_area);
+                frame.render_widget(
+                    Paragraph::new("No selection")
+                        .style(Style::default().fg(theme::ansi_bright_black()))
+                        .wrap(Wrap { trim: false }),
+                    body_area,
+                );
             }
             return;
         }
@@ -263,7 +268,7 @@ impl AppState {
                     ),
                 ]),
             ];
-            frame.render_widget(Paragraph::new(lines), body_area);
+            frame.render_widget(Paragraph::new(lines).wrap(Wrap { trim: false }), body_area);
             return;
         }
 
@@ -271,7 +276,12 @@ impl AppState {
         if let Some(error) = self.inventory_load_error.as_deref() {
             frame.render_widget(Paragraph::new(inventory_load_error_lines(error)).wrap(Wrap { trim: false }), body_area);
         } else {
-            frame.render_widget(Paragraph::new("No selection").style(Style::default().fg(theme::ansi_bright_black())), body_area);
+            frame.render_widget(
+                Paragraph::new("No selection")
+                    .style(Style::default().fg(theme::ansi_bright_black()))
+                    .wrap(Wrap { trim: false }),
+                body_area,
+            );
         }
     }
 

@@ -1,7 +1,7 @@
 use crate::auth::secret::{ExposeSecret, SensitiveBuffer, SensitiveString};
 use crossterm::event::{self, Event, KeyCode, KeyEventKind, KeyModifiers};
 use crossterm::terminal::{disable_raw_mode, enable_raw_mode};
-use std::io::{self, Write};
+use std::io::{self, BufRead, Write};
 
 struct RawModeGuard;
 
@@ -61,6 +61,25 @@ pub(crate) fn prompt_hidden_secret(prompt: &str) -> io::Result<SensitiveString> 
     }
 }
 
+pub(crate) fn prompt_visible_value(prompt: &str) -> io::Result<String> {
+    let mut stderr = io::stderr().lock();
+    stderr.write_all(b"\r")?;
+    stderr.write_all(prompt.as_bytes())?;
+    stderr.flush()?;
+
+    let mut line = String::new();
+    let bytes_read = io::stdin().lock().read_line(&mut line)?;
+    if bytes_read == 0 {
+        return Err(io::Error::new(io::ErrorKind::UnexpectedEof, "input canceled"));
+    }
+
+    while matches!(line.chars().last(), Some('\n' | '\r')) {
+        line.pop();
+    }
+
+    Ok(line)
+}
+
 pub(crate) fn confirm_hidden_value(prompt: &str, confirm_prompt: &str, empty_message: &str, mismatch_message: &str) -> Result<SensitiveString, String> {
     let value = prompt_hidden_secret(prompt).map_err(|err| err.to_string())?;
     let confirm = prompt_hidden_secret(confirm_prompt).map_err(|err| err.to_string())?;
@@ -109,8 +128,8 @@ pub(crate) fn prompt_existing_master_password_with_label(label: &str) -> Result<
 
 pub(crate) fn prompt_entry_secret() -> Result<SensitiveString, String> {
     confirm_hidden_value(
-        "Enter SSH password to store: ",
-        "Confirm SSH password: ",
+        "Enter password to store: ",
+        "Confirm password: ",
         "password cannot be empty",
         "password confirmation did not match",
     )

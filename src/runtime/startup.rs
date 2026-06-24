@@ -1,4 +1,4 @@
-use crate::{config, log, log_debug, log_error, log_warn};
+use crate::{config, log, log_debug, log_error};
 
 const TITLE_BANNER: &[&str] = &[
     " ",
@@ -39,17 +39,6 @@ pub(crate) fn initialize_config_or_exit(logger: &log::Logger, profile: Option<St
     }
 }
 
-/// Best-effort load of debug setting before interactive startup.
-pub(crate) fn try_load_interactive_debug_mode(profile: Option<String>) -> bool {
-    match config::init_session_config(profile) {
-        Ok(()) => config::with_current_config("reading interactive debug setting", |cfg| cfg.settings.debug_mode),
-        Err(err) => {
-            log_warn!("Failed to initialize config for interactive startup: {}", err);
-            false
-        }
-    }
-}
-
 /// Read runtime settings from the currently installed config.
 pub(crate) fn load_runtime_config_settings() -> RuntimeConfigSettings {
     config::with_current_config("reading global settings", |cfg| RuntimeConfigSettings {
@@ -70,3 +59,21 @@ pub(crate) fn print_title_banner(show_title: bool) {
         println!("{line}\x1b[0m");
     }
 }
+
+/// Build startup banner bytes suitable for terminal-engine output streams.
+pub(crate) fn title_banner_viewport_output(show_title: bool) -> Option<String> {
+    if !show_title {
+        return None;
+    }
+
+    let mut output = String::new();
+    for line in TITLE_BANNER {
+        output.push_str(line);
+        output.push_str("\x1b[0m\r\n");
+    }
+    Some(output)
+}
+
+#[cfg(test)]
+#[path = "../test/runtime/startup.rs"]
+mod tests;

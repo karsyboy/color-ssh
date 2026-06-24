@@ -1,14 +1,41 @@
 //! Fuzzy search and host filtering logic
 
-use crate::inventory::{FolderId, TreeFolder};
+use crate::inventory::{FolderId, InventoryTreeModel, TreeFolder, build_inventory_tree};
 use crate::tui::state::HostSearchEntry;
 use crate::tui::{AppState, HostTreeRow, HostTreeRowKind};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
+use std::io;
+use std::path::{Path, PathBuf};
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+struct FolderRowKey {
+    source_path: PathBuf,
+    names: Vec<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 enum HostRowKey {
-    Folder(FolderId),
-    Host(usize),
+    Folder(FolderRowKey),
+    Host(String),
+}
+
+fn empty_inventory_tree_model(inventory_path: &Path) -> InventoryTreeModel {
+    let root_name = inventory_path
+        .file_name()
+        .and_then(|segment| segment.to_str())
+        .unwrap_or("cossh-inventory.yaml")
+        .to_string();
+
+    InventoryTreeModel {
+        root: TreeFolder {
+            id: 0,
+            name: root_name,
+            path: inventory_path.to_path_buf(),
+            children: Vec::new(),
+            host_indices: Vec::new(),
+        },
+        hosts: Vec::new(),
+    }
 }
 
 fn host_row_indent(depth: usize) -> String {
@@ -134,15 +161,77 @@ fn compute_match_scores(search_entries: &[HostSearchEntry], query_lower: &str) -
 
 impl AppState {
     // Row identity helpers.
-    fn row_key_from_kind(kind: HostTreeRowKind) -> HostRowKey {
+    fn folder_key_by_id_recursive(folder: &TreeFolder, folder_id: FolderId, names: &mut Vec<String>) -> Option<FolderRowKey> {
+        if folder.id == folder_id {
+            return Some(FolderRowKey {
+                source_path: folder.path.clone(),
+                names: names.clone(),
+            });
+        }
+
+        for child in &folder.children {
+            names.push(child.name.clone());
+            if let Some(key) = Self::folder_key_by_id_recursive(child, folder_id, names) {
+                return Some(key);
+            }
+            names.pop();
+        }
+
+        None
+    }
+
+    fn folder_key_by_id(&self, folder_id: FolderId) -> Option<FolderRowKey> {
+        let mut names = Vec::new();
+        Self::folder_key_by_id_recursive(&self.host_tree_root, folder_id, &mut names)
+    }
+
+    fn folder_id_from_key_recursive(folder: &TreeFolder, key: &FolderRowKey, names: &mut Vec<String>) -> Option<FolderId> {
+        if folder.path == key.source_path && names.as_slice() == key.names.as_slice() {
+            return Some(folder.id);
+        }
+
+        for child in &folder.children {
+            names.push(child.name.clone());
+            if let Some(folder_id) = Self::folder_id_from_key_recursive(child, key, names) {
+                return Some(folder_id);
+            }
+            names.pop();
+        }
+
+        None
+    }
+
+    fn folder_id_from_key(&self, key: &FolderRowKey) -> Option<FolderId> {
+        let mut names = Vec::new();
+        Self::folder_id_from_key_recursive(&self.host_tree_root, key, &mut names)
+    }
+
+    fn row_key_from_kind(&self, kind: HostTreeRowKind) -> Option<HostRowKey> {
         match kind {
-            HostTreeRowKind::Folder(id) => HostRowKey::Folder(id),
-            HostTreeRowKind::Host(idx) => HostRowKey::Host(idx),
+            HostTreeRowKind::Folder(id) => self.folder_key_by_id(id).map(HostRowKey::Folder),
+            HostTreeRowKind::Host(idx) => self.hosts.get(idx).map(|host| HostRowKey::Host(host.name.clone())),
         }
     }
 
     fn selected_row_key(&self) -> Option<HostRowKey> {
-        self.visible_host_rows.get(self.selected_host_row).map(|row| Self::row_key_from_kind(row.kind))
+        self.visible_host_rows
+            .get(self.selected_host_row)
+            .and_then(|row| self.row_key_from_kind(row.kind))
+    }
+
+    fn collapsed_folder_keys(&self) -> Vec<FolderRowKey> {
+        self.collapsed_folders
+            .iter()
+            .filter_map(|folder_id| self.folder_key_by_id(*folder_id))
+            .collect()
+    }
+
+    fn restore_collapsed_folders(&mut self, folder_keys: &[FolderRowKey]) {
+        self.collapsed_folders = folder_keys.iter().filter_map(|key| self.folder_id_from_key(key)).collect::<HashSet<_>>();
+    }
+
+    fn row_matches_key(&self, row: &HostTreeRow, key: &HostRowKey) -> bool {
+        self.row_key_from_kind(row.kind).as_ref() == Some(key)
     }
 
     // Visible row rebuild pipeline.
@@ -302,7 +391,7 @@ impl AppState {
         }
 
         if let Some(key) = preferred
-            && let Some(idx) = self.visible_host_rows.iter().position(|row| Self::row_key_from_kind(row.kind) == key)
+            && let Some(idx) = self.visible_host_rows.iter().position(|row| self.row_matches_key(row, &key))
         {
             self.selected_host_row = idx;
             self.sync_host_row_selection_state();
@@ -315,9 +404,7 @@ impl AppState {
 
     // Public filter entry point.
     /// Update the filtered hosts based on search query with fuzzy matching.
-    pub(crate) fn update_filtered_hosts(&mut self) {
-        let previous = self.selected_row_key();
-
+    fn update_filtered_hosts_with_preferred(&mut self, preferred: Option<HostRowKey>) {
         self.host_match_scores.clear();
         if !self.search_query.is_empty() {
             let query_lower = self.search_query.to_lowercase();
@@ -326,7 +413,40 @@ impl AppState {
 
         self.rebuild_visible_host_rows();
         self.host_scroll_offset = 0;
-        self.repair_selection_after_rebuild(previous);
+        self.repair_selection_after_rebuild(preferred);
+    }
+
+    pub(crate) fn update_filtered_hosts(&mut self) {
+        let previous = self.selected_row_key();
+        self.update_filtered_hosts_with_preferred(previous);
+    }
+
+    pub(crate) fn reload_inventory_tree_from_path(&mut self, inventory_path: &Path) -> io::Result<()> {
+        let previous_selection = self.selected_row_key();
+        let collapsed_folder_keys = self.collapsed_folder_keys();
+        let previous_scroll_offset = self.host_scroll_offset;
+        let tree_model = if inventory_path.exists() {
+            match build_inventory_tree(inventory_path) {
+                Ok(tree_model) => tree_model,
+                Err(err) => {
+                    self.inventory_load_error = Some(err.to_string());
+                    self.mark_ui_dirty();
+                    return Err(err);
+                }
+            }
+        } else {
+            empty_inventory_tree_model(inventory_path)
+        };
+
+        self.hosts = tree_model.hosts;
+        self.host_search_index = Self::build_host_search_index(&self.hosts);
+        self.host_tree_root = tree_model.root;
+        self.inventory_load_error = None;
+        self.restore_collapsed_folders(&collapsed_folder_keys);
+        self.update_filtered_hosts_with_preferred(previous_selection);
+        self.host_scroll_offset = previous_scroll_offset.min(self.visible_host_rows.len().saturating_sub(1));
+        self.mark_ui_dirty();
+        Ok(())
     }
 
     // Selection accessors.
@@ -384,7 +504,8 @@ impl AppState {
         }
 
         self.rebuild_visible_host_rows();
-        self.repair_selection_after_rebuild(Some(HostRowKey::Folder(folder_id)));
+        let preferred = self.folder_key_by_id(folder_id).map(HostRowKey::Folder);
+        self.repair_selection_after_rebuild(preferred);
     }
 
     pub(crate) fn toggle_folder(&mut self, folder_id: FolderId) {

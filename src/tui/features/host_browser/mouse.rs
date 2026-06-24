@@ -33,12 +33,12 @@ impl AppState {
         let track_len = viewport_height.saturating_sub(1);
         let local_row = mouse_row.saturating_sub(area.y).min(area.height.saturating_sub(1)) as usize;
 
-        let new_offset = if track_len == 0 {
-            0
-        } else {
-            (local_row.saturating_mul(max_offset) + (track_len / 2)) / track_len
-        }
-        .min(max_offset);
+        let new_offset = local_row
+            .saturating_mul(max_offset)
+            .saturating_add(track_len / 2)
+            .checked_div(track_len)
+            .unwrap_or(0)
+            .min(max_offset);
 
         let relative_row = self
             .selected_host_row

@@ -5,17 +5,15 @@
 
 pub mod args;
 pub mod auth;
-mod command_path;
 pub mod config;
-mod highlighter;
 pub mod inventory;
 pub mod log;
+mod platform;
 mod process;
 pub mod runtime;
-pub mod ssh_args;
 pub mod ssh_config;
+pub(crate) mod terminal;
 pub mod tui;
-mod validation;
 
 #[cfg(test)]
 mod test;

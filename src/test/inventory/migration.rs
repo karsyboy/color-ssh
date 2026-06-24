@@ -10,8 +10,8 @@ fn host_named<'a>(tree: &'a InventoryTreeModel, name: &str) -> &'a InventoryHost
 }
 
 #[test]
-fn migrate_ssh_config_to_inventory_core_metadata_and_protocols_writes_loadable_inventory() {
-    let workspace = TestWorkspace::new("inventory", "migration_core").expect("temp workspace");
+fn migrate_ssh_config_to_inventory_writes_loadable_hosts_with_metadata() {
+    let workspace = TestWorkspace::new("inventory", "migration").expect("temp workspace");
     let ssh_config_path = workspace.join("config");
     let inventory_path = workspace.join("cossh-inventory.yaml");
 

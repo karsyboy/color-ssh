@@ -3,9 +3,9 @@
 use super::include::{expand_include_pattern, resolve_include_pattern};
 use super::model::{SshHost, SshHostTreeModel};
 use super::path::expand_tilde;
+use crate::args::validate_vault_entry_name;
 use crate::inventory::{ConnectionProtocol, FolderId, TreeFolder, sort_tree_folder_by_host_name};
 use crate::log_debug;
-use crate::validation::validate_vault_entry_name;
 use std::collections::HashSet;
 use std::fs::File;
 use std::io::{self, BufRead, BufReader};

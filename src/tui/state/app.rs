@@ -2,20 +2,25 @@
 
 mod init;
 
+use super::folder_picker::{FolderCreateState, FolderDeleteConfirmState, FolderPickerState, FolderRenameState};
 use super::host_browser::{HostSearchEntry, HostTreeRow};
+use super::host_editor::{HostContextMenuState, HostDeleteConfirmState, HostEditorState};
 use super::quick_connect::QuickConnectState;
-use super::tabs::{HostTab, TerminalSearchState};
+use super::rdp_prompt::RdpCredentialsState;
+use super::tabs::{EditorTabState, HostTab, TerminalSearchState, TerminalTabState};
 use super::vault::{VaultStatusModalState, VaultUnlockState};
 use crate::auth::ipc::{self, VaultStatus, VaultStatusEvent, VaultStatusEventKind};
+use crate::config;
 use crate::inventory::{ConnectionProtocol, FolderId, InventoryHost, TreeFolder};
 use crate::log_debug;
+use crate::runtime::{ReloadNoticeToast, format_reload_notice};
+use crate::terminal::{TerminalGridPoint, TerminalSelection};
 use ratatui::layout::Rect;
 use std::collections::{HashMap, HashSet};
 use std::io;
-use std::sync::atomic::Ordering as AtomicOrdering;
 use std::time::{Duration, Instant};
 
-use self::init::{AppStateInit, VaultStatusEventWatcher, load_app_state_init, load_vault_status};
+use self::init::{AppStateInit, InventoryEventWatcher, VaultStatusEventWatcher, load_app_state_init, load_vault_status};
 
 pub(crate) const HOST_PANEL_MIN_WIDTH: u16 = 15;
 pub(crate) const HOST_PANEL_MAX_WIDTH: u16 = 80;
@@ -54,33 +59,45 @@ pub(crate) struct AppState {
     pub(crate) tabs: Vec<HostTab>,
     pub(crate) selected_tab: usize,
     pub(crate) focus_on_manager: bool,
-    pub(crate) selection_start: Option<(i64, u16)>,
-    pub(crate) selection_end: Option<(i64, u16)>,
+    pub(crate) selection_start: Option<TerminalGridPoint>,
+    pub(crate) selection_end: Option<TerminalGridPoint>,
     pub(crate) is_selecting: bool,
     pub(crate) selection_dragged: bool,
     pub(crate) tab_content_area: Rect,
+    pub(crate) tab_scrollbar_area: Rect,
     pub(crate) tab_bar_area: Rect,
     pub(crate) host_panel_area: Rect,
     pub(crate) last_click: Option<(Instant, u16, u16)>,
     pub(crate) is_dragging_divider: bool,
     pub(crate) is_dragging_host_scrollbar: bool,
+    pub(crate) is_dragging_tab_scrollbar: bool,
+    pub(crate) is_dragging_host_editor_scrollbar: bool,
     pub(crate) is_dragging_host_info_divider: bool,
     pub(crate) dragging_tab: Option<usize>,
     pub(crate) tab_scroll_offset: usize,
-    pub(crate) history_buffer: usize,
     pub(crate) host_panel_visible: bool,
     pub(crate) host_info_visible: bool,
     pub(crate) quick_connect: Option<QuickConnectState>,
+    pub(crate) host_context_menu: Option<HostContextMenuState>,
+    pub(crate) host_delete_confirm: Option<HostDeleteConfirmState>,
+    pub(crate) folder_picker: Option<FolderPickerState>,
+    pub(crate) folder_create: Option<FolderCreateState>,
+    pub(crate) folder_rename: Option<FolderRenameState>,
+    pub(crate) folder_delete_confirm: Option<FolderDeleteConfirmState>,
+    pub(crate) rdp_credentials: Option<RdpCredentialsState>,
     pub(crate) vault_unlock: Option<VaultUnlockState>,
     pub(crate) vault_status_modal: Option<VaultStatusModalState>,
     pub(crate) vault_status: VaultStatus,
     pub(crate) quick_connect_default_ssh_logging: bool,
     pub(crate) last_terminal_size: (u16, u16),
+    pub(crate) reload_notice_toast: Option<ReloadNoticeToast>,
     pub(crate) ui_dirty: bool,
     pub(crate) last_draw_at: Instant,
     pub(crate) last_seen_render_epoch: u64,
+    pub(crate) last_seen_config_version: u64,
     pub(crate) last_vault_status_refresh_at: Instant,
     vault_status_events: Option<VaultStatusEventWatcher>,
+    inventory_events: Option<InventoryEventWatcher>,
 }
 
 impl AppState {
@@ -93,7 +110,7 @@ impl AppState {
     }
 
     // Search indexing helpers.
-    fn build_host_search_index(hosts: &[InventoryHost]) -> Vec<HostSearchEntry> {
+    pub(crate) fn build_host_search_index(hosts: &[InventoryHost]) -> Vec<HostSearchEntry> {
         hosts
             .iter()
             .map(|host| HostSearchEntry {
@@ -109,12 +126,15 @@ impl AppState {
     fn current_render_epoch(&self) -> u64 {
         self.tabs
             .iter()
-            .filter_map(|tab| tab.session.as_ref())
-            .fold(0u64, |acc, session| acc.wrapping_add(session.render_epoch.load(AtomicOrdering::Relaxed)))
+            .filter_map(|tab| tab.terminal().and_then(|terminal| terminal.session.as_ref()))
+            .fold(0u64, |acc, session| acc.wrapping_add(session.render_epoch()))
     }
 
     pub(crate) fn should_draw(&self, heartbeat: Duration) -> bool {
-        self.ui_dirty || self.current_render_epoch() != self.last_seen_render_epoch || self.last_draw_at.elapsed() >= heartbeat
+        self.ui_dirty
+            || self.current_render_epoch() != self.last_seen_render_epoch
+            || config::current_config_version() != self.last_seen_config_version
+            || self.last_draw_at.elapsed() >= heartbeat
     }
 
     pub(crate) fn mark_ui_dirty(&mut self) {
@@ -124,6 +144,7 @@ impl AppState {
     pub(crate) fn mark_drawn(&mut self) {
         self.last_draw_at = Instant::now();
         self.last_seen_render_epoch = self.current_render_epoch();
+        self.last_seen_config_version = config::current_config_version();
         self.ui_dirty = false;
     }
 
@@ -163,11 +184,72 @@ impl AppState {
 
     // Current-tab search accessors.
     pub(crate) fn current_tab_search(&self) -> Option<&TerminalSearchState> {
-        self.tabs.get(self.selected_tab).map(|tab| &tab.terminal_search)
+        self.tabs
+            .get(self.selected_tab)
+            .and_then(HostTab::terminal)
+            .map(|terminal| &terminal.terminal_search)
     }
 
     pub(crate) fn current_tab_search_mut(&mut self) -> Option<&mut TerminalSearchState> {
-        self.tabs.get_mut(self.selected_tab).map(|tab| &mut tab.terminal_search)
+        self.tabs
+            .get_mut(self.selected_tab)
+            .and_then(HostTab::terminal_mut)
+            .map(|terminal| &mut terminal.terminal_search)
+    }
+
+    pub(crate) fn selected_terminal_tab(&self) -> Option<&TerminalTabState> {
+        self.tabs.get(self.selected_tab).and_then(HostTab::terminal)
+    }
+
+    pub(crate) fn selected_terminal_tab_mut(&mut self) -> Option<&mut TerminalTabState> {
+        self.tabs.get_mut(self.selected_tab).and_then(HostTab::terminal_mut)
+    }
+
+    pub(crate) fn selected_editor_tab(&self) -> Option<&EditorTabState> {
+        self.tabs.get(self.selected_tab).and_then(HostTab::editor)
+    }
+
+    pub(crate) fn selected_editor_tab_mut(&mut self) -> Option<&mut EditorTabState> {
+        self.tabs.get_mut(self.selected_tab).and_then(HostTab::editor_mut)
+    }
+
+    pub(crate) fn selected_host_editor(&self) -> Option<&HostEditorState> {
+        self.selected_editor_tab().map(|editor| &editor.editor_state)
+    }
+
+    pub(crate) fn selected_host_editor_mut(&mut self) -> Option<&mut HostEditorState> {
+        self.selected_editor_tab_mut().map(|editor| &mut editor.editor_state)
+    }
+
+    pub(crate) fn is_selected_tab_editor(&self) -> bool {
+        self.selected_editor_tab().is_some()
+    }
+
+    pub(crate) fn is_selected_tab_terminal(&self) -> bool {
+        self.selected_terminal_tab().is_some()
+    }
+
+    pub(crate) fn terminal_tab(&self, tab_idx: usize) -> Option<&TerminalTabState> {
+        self.tabs.get(tab_idx).and_then(HostTab::terminal)
+    }
+
+    pub(crate) fn terminal_tab_mut(&mut self, tab_idx: usize) -> Option<&mut TerminalTabState> {
+        self.tabs.get_mut(tab_idx).and_then(HostTab::terminal_mut)
+    }
+
+    pub(crate) fn current_selection(&self) -> Option<TerminalSelection> {
+        Some(TerminalSelection::new(self.selection_start?, self.selection_end?).ordered())
+    }
+
+    /// Terminate and detach every managed tab session.
+    pub(crate) fn terminate_all_sessions(&mut self) {
+        for tab in &mut self.tabs {
+            if let Some(mut session) = tab.terminal_mut().and_then(|terminal| terminal.session.take())
+                && !session.is_exited()
+            {
+                session.terminate();
+            }
+        }
     }
 
     pub(crate) fn set_vault_status(&mut self, status: VaultStatus) {
@@ -219,6 +301,84 @@ impl AppState {
         }
     }
 
+    pub(crate) fn apply_inventory_reload_notifications(&mut self) {
+        if !self.inventory_events.as_ref().is_some_and(InventoryEventWatcher::take_pending_reload) {
+            return;
+        }
+
+        let inventory_path = self.host_tree_root.path.clone();
+        let notice = match self.reload_inventory_tree_from_path(&inventory_path) {
+            Ok(()) => {
+                if let Some(watcher) = InventoryEventWatcher::new(&inventory_path) {
+                    self.inventory_events = Some(watcher);
+                }
+                "Inventory reloaded successfully".to_string()
+            }
+            Err(err) => {
+                crate::log_error!("Inventory reload failed: {}", err);
+                format!("Inventory reload failed: {}", err)
+            }
+        };
+
+        self.reload_notice_toast = Some(ReloadNoticeToast::new(format_reload_notice(&notice)));
+        self.mark_ui_dirty();
+    }
+
+    pub(crate) fn apply_config_reload_notifications(&mut self) {
+        let mut latest_notice = config::take_reload_notices().into_iter().last();
+
+        for event in config::take_profile_reload_events() {
+            if event.success
+                && let Err(err) = self.refresh_tabs_for_profile(&event.profile)
+            {
+                let message = format!("Config profile '{}' reloaded, but existing tabs could not be refreshed: {}", event.profile, err);
+                crate::log_error!("{}", message);
+                latest_notice = Some(message);
+                continue;
+            }
+            latest_notice = Some(event.message);
+        }
+
+        if let Some(notice) = latest_notice {
+            self.reload_notice_toast = Some(ReloadNoticeToast::new(format_reload_notice(&notice)));
+            self.mark_ui_dirty();
+        }
+    }
+
+    fn refresh_tabs_for_profile(&mut self, profile: &str) -> io::Result<usize> {
+        let matching_tabs = self
+            .tabs
+            .iter()
+            .enumerate()
+            .filter_map(|(tab_idx, tab)| {
+                tab.terminal()
+                    .and_then(|terminal| (terminal.host.profile.as_deref() == Some(profile)).then_some(tab_idx))
+            })
+            .collect::<Vec<_>>();
+
+        if matching_tabs.is_empty() {
+            return Ok(0);
+        }
+
+        let session_profile = config::interactive_profile_snapshot(Some(profile))?;
+        for tab_idx in &matching_tabs {
+            if let Some(terminal) = self.tabs[*tab_idx].terminal_mut() {
+                terminal.highlight_overlay = crate::terminal::highlight_overlay::HighlightOverlayEngine::from_snapshot(&session_profile);
+            }
+        }
+
+        self.mark_ui_dirty();
+        Ok(matching_tabs.len())
+    }
+
+    pub(crate) fn expire_reload_notice_toast(&mut self) {
+        let should_clear = self.reload_notice_toast.as_ref().is_some_and(ReloadNoticeToast::expired);
+        if should_clear {
+            self.reload_notice_toast = None;
+            self.mark_ui_dirty();
+        }
+    }
+
     // Construction.
     fn build_from_init(init: AppStateInit) -> Self {
         let host_search_index = Self::build_host_search_index(&init.hosts);
@@ -252,28 +412,40 @@ impl AppState {
             is_selecting: false,
             selection_dragged: false,
             tab_content_area: Rect::default(),
+            tab_scrollbar_area: Rect::default(),
             tab_bar_area: Rect::default(),
             host_panel_area: Rect::default(),
             last_click: None,
             is_dragging_divider: false,
             is_dragging_host_scrollbar: false,
+            is_dragging_tab_scrollbar: false,
+            is_dragging_host_editor_scrollbar: false,
             is_dragging_host_info_divider: false,
             dragging_tab: None,
             tab_scroll_offset: 0,
-            history_buffer: init.history_buffer,
             host_panel_visible: true,
             host_info_visible: init.host_info_visible,
             quick_connect: None,
+            host_context_menu: None,
+            host_delete_confirm: None,
+            folder_picker: None,
+            folder_create: None,
+            folder_rename: None,
+            folder_delete_confirm: None,
+            rdp_credentials: None,
             vault_unlock: None,
             vault_status_modal: None,
             vault_status: init.vault_status,
             quick_connect_default_ssh_logging: init.quick_connect_default_ssh_logging,
             last_terminal_size: init.last_terminal_size,
+            reload_notice_toast: None,
             ui_dirty: true,
             last_draw_at: now,
             last_seen_render_epoch: 0,
+            last_seen_config_version: config::current_config_version(),
             last_vault_status_refresh_at: now,
             vault_status_events: init.vault_status_events,
+            inventory_events: init.inventory_events,
         };
 
         app.update_filtered_hosts();
@@ -286,7 +458,6 @@ impl AppState {
         Ok(Self::build_from_init(load_app_state_init()))
     }
 
-    // Test scaffolding.
     #[cfg(test)]
     pub(crate) fn new_for_tests() -> Self {
         Self::build_from_init(init::test_app_state_init())
@@ -294,5 +465,5 @@ impl AppState {
 }
 
 #[cfg(test)]
-#[path = "../../test/tui/app_state.rs"]
+#[path = "../../test/tui/state/app.rs"]
 mod tests;

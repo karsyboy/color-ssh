@@ -13,6 +13,7 @@ pub enum AgentError {
     EntryNotFound,
     InvalidMasterPassword,
     InvalidOrExpiredAskpassToken,
+    UnauthorizedClient,
     VaultNotInitialized,
     Protocol(String),
 }
@@ -26,6 +27,7 @@ impl fmt::Display for AgentError {
             Self::EntryNotFound => write!(f, "password vault entry was not found"),
             Self::InvalidMasterPassword => write!(f, "invalid master password"),
             Self::InvalidOrExpiredAskpassToken => write!(f, "invalid or expired askpass token"),
+            Self::UnauthorizedClient => write!(f, "password vault agent refused secret access from an untrusted client process"),
             Self::VaultNotInitialized => write!(f, "password vault is not initialized"),
             Self::Protocol(message) => write!(f, "{message}"),
         }
@@ -52,8 +54,13 @@ pub(crate) fn map_remote_error(code: &str, message: String) -> AgentError {
         "entry_not_found" => AgentError::EntryNotFound,
         "invalid_master_password" => AgentError::InvalidMasterPassword,
         "invalid_or_expired_askpass_token" => AgentError::InvalidOrExpiredAskpassToken,
+        "unauthorized_client" => AgentError::UnauthorizedClient,
         "vault_not_initialized" => AgentError::VaultNotInitialized,
         "invalid_entry_name" | "vault_error" | "askpass_token_error" => AgentError::Protocol(message),
         _ => AgentError::Protocol(message),
     }
 }
+
+#[cfg(test)]
+#[path = "../../test/auth/agent/error.rs"]
+mod tests;

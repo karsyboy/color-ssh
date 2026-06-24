@@ -3,8 +3,8 @@
 //! Vault data is stored under `~/.color-ssh/vault` with restrictive
 //! permissions and authenticated encryption at rest.
 
+use crate::args::validate_vault_entry_name;
 use crate::auth::secret::{SensitiveString, sensitive_string};
-use crate::validation::validate_vault_entry_name;
 use argon2::{Algorithm, Argon2, Params, Version};
 use base64::{Engine as _, engine::general_purpose::STANDARD as BASE64};
 use chacha20poly1305::aead::{Aead, Payload};
@@ -151,11 +151,19 @@ impl VaultPaths {
     }
 }
 
-#[derive(Debug)]
 /// Unlocked vault handle carrying decrypted data key material.
 pub struct UnlockedVault {
     paths: VaultPaths,
     data_key: Zeroizing<[u8; DATA_KEY_LEN]>,
+}
+
+impl fmt::Debug for UnlockedVault {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("UnlockedVault")
+            .field("paths", &self.paths)
+            .field("data_key", &"[REDACTED]")
+            .finish()
+    }
 }
 
 impl UnlockedVault {
@@ -533,17 +541,11 @@ fn entry_aad(name: &str) -> String {
 }
 
 fn set_restrictive_directory_permissions(path: &Path) -> Result<(), VaultError> {
-    use std::os::unix::fs::PermissionsExt;
-
-    fs::set_permissions(path, fs::Permissions::from_mode(0o700))?;
-    Ok(())
+    Ok(crate::platform::set_private_directory_permissions(path, 0o700)?)
 }
 
 fn set_restrictive_file_permissions(path: &Path) -> Result<(), VaultError> {
-    use std::os::unix::fs::PermissionsExt;
-
-    fs::set_permissions(path, fs::Permissions::from_mode(0o600))?;
-    Ok(())
+    Ok(crate::platform::set_private_file_permissions(path, 0o600)?)
 }
 
 #[cfg(test)]

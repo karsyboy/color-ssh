@@ -1,9 +1,10 @@
 //! Mouse input handling and PTY mouse forwarding.
 
+use crate::terminal::{MouseProtocolEncoding, MouseProtocolMode, TerminalGridPoint, encode_mouse_event_bytes};
 use crate::tui::state::{HOST_PANEL_MAX_WIDTH, HOST_PANEL_MIN_WIDTH};
-use crate::tui::terminal_emulator;
 use crate::tui::{AppState, HostTreeRowKind};
 use crossterm::event::{self, KeyModifiers, MouseButton, MouseEventKind};
+use ratatui::layout::Rect;
 use std::io;
 use std::time::Instant;
 
@@ -23,6 +24,11 @@ impl AppState {
     // Top-level mouse routing for host panel, tab bar, and terminal area.
     /// Handle mouse events.
     pub(crate) fn handle_mouse(&mut self, mouse: event::MouseEvent) -> io::Result<()> {
+        if self.rdp_credentials.is_some() {
+            self.handle_rdp_credentials_mouse(mouse);
+            return Ok(());
+        }
+
         if self.vault_unlock.is_some() {
             self.handle_vault_unlock_mouse(mouse);
             return Ok(());
@@ -38,6 +44,36 @@ impl AppState {
             return Ok(());
         }
 
+        if self.host_context_menu.is_some() {
+            self.handle_host_context_menu_mouse(mouse);
+            return Ok(());
+        }
+
+        if self.host_delete_confirm.is_some() {
+            self.handle_host_delete_confirm_mouse(mouse);
+            return Ok(());
+        }
+
+        if self.folder_picker.is_some() {
+            self.handle_folder_picker_mouse(mouse);
+            return Ok(());
+        }
+
+        if self.folder_create.is_some() {
+            self.handle_folder_create_mouse(mouse);
+            return Ok(());
+        }
+
+        if self.folder_rename.is_some() {
+            self.handle_folder_rename_mouse(mouse);
+            return Ok(());
+        }
+
+        if self.folder_delete_confirm.is_some() {
+            self.handle_folder_delete_confirm_mouse(mouse);
+            return Ok(());
+        }
+
         if self.current_tab_search().map(|search_state| search_state.active).unwrap_or(false) && self.is_pty_mouse_mode_active() {
             self.clear_terminal_search();
         }
@@ -45,6 +81,8 @@ impl AppState {
         match mouse.kind {
             MouseEventKind::Down(MouseButton::Left) => {
                 self.is_dragging_host_scrollbar = false;
+                self.is_dragging_tab_scrollbar = false;
+                self.is_dragging_host_editor_scrollbar = false;
                 self.is_dragging_host_info_divider = false;
                 self.dragging_tab = None;
 
@@ -181,6 +219,25 @@ impl AppState {
                 }
 
                 let area = self.tab_content_area;
+                let scrollbar_area = self.tab_scrollbar_area;
+                if !self.tabs.is_empty()
+                    && self.selected_tab < self.tabs.len()
+                    && self.is_selected_tab_terminal()
+                    && scrollbar_area.width > 0
+                    && scrollbar_area.height > 0
+                    && mouse.column >= scrollbar_area.x
+                    && mouse.column < scrollbar_area.x + scrollbar_area.width
+                    && mouse.row >= scrollbar_area.y
+                    && mouse.row < scrollbar_area.y + scrollbar_area.height
+                {
+                    self.focus_on_manager = false;
+                    self.search_mode = false;
+                    self.is_dragging_tab_scrollbar = true;
+                    self.set_tab_scroll_from_scrollbar_row(mouse.row);
+                    self.clear_selection_state();
+                    return Ok(());
+                }
+
                 if !self.tabs.is_empty()
                     && self.selected_tab < self.tabs.len()
                     && area.width > 0
@@ -192,11 +249,19 @@ impl AppState {
                 {
                     self.focus_on_manager = false;
                     self.search_mode = false;
+
+                    if self.is_selected_tab_editor() {
+                        self.handle_host_editor_mouse(mouse, area);
+                        return Ok(());
+                    }
+
                     let local_override = force_local_selection(mouse.modifiers);
 
                     if self.is_pty_mouse_mode_active() && !local_override {
-                        if self.tabs[self.selected_tab].scroll_offset > 0 {
-                            self.tabs[self.selected_tab].scroll_offset = 0;
+                        if let Some(terminal) = self.selected_terminal_tab_mut()
+                            && terminal.scroll_offset > 0
+                        {
+                            terminal.scroll_offset = 0;
                         }
                         self.clear_selection_state();
                         self.selection_dragged = false;
@@ -206,10 +271,11 @@ impl AppState {
                     } else if !self.is_pty_mouse_mode_active() || local_override {
                         let vt_row = mouse.row.saturating_sub(area.y);
                         let vt_col = mouse.column.saturating_sub(area.x);
-                        let scroll_offset = self.tabs[self.selected_tab].scroll_offset;
+                        let scroll_offset = self.selected_terminal_tab().map_or(0, |terminal| terminal.scroll_offset);
                         let abs_row = vt_row as i64 - scroll_offset as i64;
-                        self.selection_start = Some((abs_row, vt_col));
-                        self.selection_end = Some((abs_row, vt_col));
+                        let point = TerminalGridPoint::new(abs_row, vt_col);
+                        self.selection_start = Some(point);
+                        self.selection_end = Some(point);
                         self.is_selecting = true;
                         self.selection_dragged = false;
                     }
@@ -236,6 +302,8 @@ impl AppState {
                     }
                 } else if self.is_dragging_host_scrollbar {
                     self.set_host_scroll_from_scrollbar_row(mouse.row);
+                } else if self.is_dragging_tab_scrollbar {
+                    self.set_tab_scroll_from_scrollbar_row(mouse.row);
                 } else if let Some(drag_idx) = self.dragging_tab {
                     let tab_area = self.tab_bar_area;
                     if !self.tabs.is_empty()
@@ -259,15 +327,18 @@ impl AppState {
                                     self.tab_scroll_offset = next_offset;
                                 }
                             }
-                            Some(TabBarHit::TabTitle(target_idx)) | Some(TabBarHit::TabClose(target_idx)) => {
-                                if drag_idx != target_idx && self.move_tab(drag_idx, target_idx) {
-                                    self.dragging_tab = Some(target_idx);
-                                    self.focus_on_manager = false;
-                                }
+                            Some(TabBarHit::TabTitle(target_idx)) | Some(TabBarHit::TabClose(target_idx))
+                                if drag_idx != target_idx && self.move_tab(drag_idx, target_idx) =>
+                            {
+                                self.dragging_tab = Some(target_idx);
+                                self.focus_on_manager = false;
                             }
+                            Some(TabBarHit::TabTitle(_)) | Some(TabBarHit::TabClose(_)) => {}
                             None => {}
                         }
                     }
+                } else if self.is_selected_tab_editor() {
+                    self.handle_host_editor_mouse(mouse, self.tab_content_area);
                 } else if self.is_selecting && !self.tabs.is_empty() && self.selected_tab < self.tabs.len() {
                     self.selection_dragged = true;
                     let area = self.tab_content_area;
@@ -281,25 +352,27 @@ impl AppState {
                         let edge_distance = top_row.saturating_sub(mouse.row).saturating_add(1) as usize;
                         let step = edge_distance.min(10);
                         let max_scrollback = self.max_scrollback_for_tab(self.selected_tab);
-                        let tab = &mut self.tabs[self.selected_tab];
-                        tab.scroll_offset = tab.scroll_offset.saturating_add(step).min(max_scrollback);
+                        if let Some(terminal) = self.selected_terminal_tab_mut() {
+                            terminal.scroll_offset = terminal.scroll_offset.saturating_add(step).min(max_scrollback);
+                        }
                     } else if mouse.row >= bottom_row {
                         let edge_distance = mouse.row.saturating_sub(bottom_row).saturating_add(1) as usize;
                         let step = edge_distance.min(10);
-                        let tab = &mut self.tabs[self.selected_tab];
-                        tab.scroll_offset = tab.scroll_offset.saturating_sub(step);
+                        if let Some(terminal) = self.selected_terminal_tab_mut() {
+                            terminal.scroll_offset = terminal.scroll_offset.saturating_sub(step);
+                        }
                     }
 
                     let clamped_col = mouse.column.max(area.x).min(area.x + area.width.saturating_sub(1));
                     let clamped_row = mouse.row.max(top_row).min(bottom_row);
                     let vt_row = clamped_row.saturating_sub(area.y);
                     let vt_col = clamped_col.saturating_sub(area.x);
-                    let scroll_offset = self.tabs[self.selected_tab].scroll_offset;
+                    let scroll_offset = self.selected_terminal_tab().map_or(0, |terminal| terminal.scroll_offset);
                     let abs_row = vt_row as i64 - scroll_offset as i64;
-                    self.selection_end = Some((abs_row, vt_col));
+                    self.selection_end = Some(TerminalGridPoint::new(abs_row, vt_col));
                 } else if self.is_pty_mouse_mode_active() && !force_local_selection(mouse.modifiers) {
                     let mode = self.pty_mouse_mode();
-                    if (mode == terminal_emulator::MouseProtocolMode::AnyMotion || mode == terminal_emulator::MouseProtocolMode::ButtonMotion)
+                    if (mode == MouseProtocolMode::AnyMotion || mode == MouseProtocolMode::ButtonMotion)
                         && let Some((col, row)) = self.mouse_to_vt_coords(mouse.column, mouse.row)
                     {
                         self.send_mouse_to_pty(32, col, row, false)?;
@@ -307,7 +380,44 @@ impl AppState {
                 }
             }
             MouseEventKind::Down(MouseButton::Right) => {
-                if self.mouse_to_vt_coords(mouse.column, mouse.row).is_some() && self.selection_start.is_some() && self.selection_end.is_some() {
+                let host_area = self.host_list_area;
+                if self.host_panel_visible
+                    && host_area.width > 0
+                    && host_area.height > 0
+                    && mouse.column >= host_area.x
+                    && mouse.column < host_area.x + host_area.width
+                    && mouse.row >= host_area.y
+                    && mouse.row < host_area.y + host_area.height
+                {
+                    self.focus_manager_panel();
+                    let clicked_row = (mouse.row - host_area.y) as usize;
+                    let clicked_index = self.host_scroll_offset + clicked_row;
+
+                    if clicked_index < self.visible_host_rows.len() {
+                        self.set_selected_row(clicked_index);
+                        let row_kind = self.visible_host_rows[clicked_index].kind;
+                        match row_kind {
+                            HostTreeRowKind::Host(host_idx) => {
+                                self.open_host_context_menu_for_selected_host(mouse.column, mouse.row, host_idx);
+                            }
+                            HostTreeRowKind::Folder(folder_id) => {
+                                let source_file = self
+                                    .folder_by_id(folder_id)
+                                    .map(|folder| folder.path.clone())
+                                    .unwrap_or_else(|| self.selected_source_file_for_new_entry());
+                                self.open_host_context_menu_for_folder(mouse.column, mouse.row, folder_id, source_file);
+                            }
+                        }
+                    } else {
+                        let source_file = self.selected_source_file_for_new_entry();
+                        self.open_host_context_menu_for_new_entry(mouse.column, mouse.row, source_file);
+                    }
+
+                    self.clear_selection_state();
+                    return Ok(());
+                }
+
+                if self.mouse_to_vt_coords(mouse.column, mouse.row).is_some() && self.current_selection().is_some() {
                     return Ok(());
                 }
 
@@ -324,8 +434,12 @@ impl AppState {
                     self.is_dragging_host_info_divider = false;
                 } else if self.is_dragging_host_scrollbar {
                     self.is_dragging_host_scrollbar = false;
+                } else if self.is_dragging_tab_scrollbar {
+                    self.is_dragging_tab_scrollbar = false;
                 } else if self.dragging_tab.take().is_some() {
                     self.ensure_tab_visible();
+                } else if self.is_selected_tab_editor() {
+                    self.handle_host_editor_mouse(mouse, self.tab_content_area);
                 } else if self.is_selecting {
                     self.is_selecting = false;
                     if !self.selection_dragged {
@@ -333,7 +447,7 @@ impl AppState {
                     }
                 } else if self.is_pty_mouse_mode_active() {
                     let mode = self.pty_mouse_mode();
-                    if mode != terminal_emulator::MouseProtocolMode::Press
+                    if mode != MouseProtocolMode::Press
                         && let Some((col, row)) = self.mouse_to_vt_coords(mouse.column, mouse.row)
                     {
                         self.send_mouse_to_pty(0, col, row, true)?;
@@ -365,15 +479,16 @@ impl AppState {
                     if self.visible_host_row_count() > 0 && self.selected_host_row > 0 {
                         self.set_selected_row(self.selected_host_row.saturating_sub(1));
                     }
-                } else if !self.tabs.is_empty() && self.selected_tab < self.tabs.len() {
+                } else if !self.tabs.is_empty() && self.selected_tab < self.tabs.len() && self.is_selected_tab_terminal() {
                     if self.is_pty_mouse_mode_active() {
                         if let Some((col, row)) = self.mouse_to_vt_coords(mouse.column, mouse.row) {
                             self.send_mouse_to_pty(64, col, row, false)?;
                         }
                     } else {
                         let max_scrollback = self.max_scrollback_for_tab(self.selected_tab);
-                        let tab = &mut self.tabs[self.selected_tab];
-                        tab.scroll_offset = tab.scroll_offset.saturating_add(3).min(max_scrollback);
+                        if let Some(terminal) = self.selected_terminal_tab_mut() {
+                            terminal.scroll_offset = terminal.scroll_offset.saturating_add(3).min(max_scrollback);
+                        }
                     }
                 }
             }
@@ -403,14 +518,13 @@ impl AppState {
                     if row_count > 0 && self.selected_host_row < row_count.saturating_sub(1) {
                         self.set_selected_row((self.selected_host_row + 1).min(row_count.saturating_sub(1)));
                     }
-                } else if !self.tabs.is_empty() && self.selected_tab < self.tabs.len() {
+                } else if !self.tabs.is_empty() && self.selected_tab < self.tabs.len() && self.is_selected_tab_terminal() {
                     if self.is_pty_mouse_mode_active() {
                         if let Some((col, row)) = self.mouse_to_vt_coords(mouse.column, mouse.row) {
                             self.send_mouse_to_pty(65, col, row, false)?;
                         }
-                    } else {
-                        let tab = &mut self.tabs[self.selected_tab];
-                        tab.scroll_offset = tab.scroll_offset.saturating_sub(3);
+                    } else if let Some(terminal) = self.selected_terminal_tab_mut() {
+                        terminal.scroll_offset = terminal.scroll_offset.saturating_sub(3);
                     }
                 }
             }
@@ -424,7 +538,7 @@ impl AppState {
             MouseEventKind::Up(MouseButton::Middle) => {
                 if self.is_pty_mouse_mode_active() {
                     let mode = self.pty_mouse_mode();
-                    if mode != terminal_emulator::MouseProtocolMode::Press
+                    if mode != MouseProtocolMode::Press
                         && let Some((col, row)) = self.mouse_to_vt_coords(mouse.column, mouse.row)
                     {
                         self.send_mouse_to_pty(1, col, row, true)?;
@@ -432,7 +546,15 @@ impl AppState {
                 }
             }
             MouseEventKind::Up(MouseButton::Right) => {
-                if self.mouse_to_vt_coords(mouse.column, mouse.row).is_some() && self.selection_start.is_some() && self.selection_end.is_some() {
+                if self.is_selected_tab_editor()
+                    && let Some((area, _)) = self.host_editor_tab_layout(self.tab_content_area)
+                    && Self::host_editor_point_in_rect(area, mouse.column, mouse.row)
+                {
+                    self.copy_active_modal_selection_to_clipboard();
+                    return Ok(());
+                }
+
+                if self.mouse_to_vt_coords(mouse.column, mouse.row).is_some() && self.current_selection().is_some() {
                     self.copy_selection_to_clipboard();
                     self.clear_selection_state();
                     return Ok(());
@@ -440,21 +562,19 @@ impl AppState {
 
                 if self.is_pty_mouse_mode_active() {
                     let mode = self.pty_mouse_mode();
-                    if mode != terminal_emulator::MouseProtocolMode::Press
+                    if mode != MouseProtocolMode::Press
                         && let Some((col, row)) = self.mouse_to_vt_coords(mouse.column, mouse.row)
                     {
                         self.send_mouse_to_pty(2, col, row, true)?;
                     }
                 }
             }
-            MouseEventKind::Moved => {
-                if self.is_pty_mouse_mode_active() {
-                    let mode = self.pty_mouse_mode();
-                    if mode == terminal_emulator::MouseProtocolMode::AnyMotion
-                        && let Some((col, row)) = self.mouse_to_vt_coords(mouse.column, mouse.row)
-                    {
-                        self.send_mouse_to_pty(35, col, row, false)?;
-                    }
+            MouseEventKind::Moved if self.is_pty_mouse_mode_active() => {
+                let mode = self.pty_mouse_mode();
+                if mode == MouseProtocolMode::AnyMotion
+                    && let Some((col, row)) = self.mouse_to_vt_coords(mouse.column, mouse.row)
+                {
+                    self.send_mouse_to_pty(35, col, row, false)?;
                 }
             }
             _ => {}
@@ -470,38 +590,33 @@ impl AppState {
         let visual_col = (column.saturating_sub(self.tab_bar_area.x)) as usize;
         let tab_widths: Vec<usize> = self.tabs.iter().enumerate().map(|(idx, _)| self.tab_display_width(idx)).collect();
         let available_width = self.tab_bar_area.width as usize;
-        self.tab_scroll_offset = self.normalize_tab_scroll_offset(self.tab_scroll_offset, available_width);
+        let metrics = self.tab_bar_viewport_metrics(self.tab_scroll_offset, available_width);
+        self.tab_scroll_offset = metrics.scroll_offset;
 
-        let has_left_overflow = self.prev_tab_scroll_offset(self.tab_scroll_offset, available_width).is_some();
-        let left_slot = if has_left_overflow { 1 } else { 0 };
-        let has_right_overflow = self.next_tab_scroll_offset(self.tab_scroll_offset, available_width).is_some();
-        let right_slot = if has_right_overflow { 1 } else { 0 };
-        let visible_tab_width = available_width.saturating_sub(left_slot + right_slot);
-
-        if has_left_overflow && visual_col == 0 {
+        if metrics.has_left_overflow && visual_col == 0 {
             return Some(TabBarHit::LeftOverflow);
         }
-        if has_right_overflow && visual_col == available_width.saturating_sub(1) {
+        if metrics.has_right_overflow && visual_col == available_width.saturating_sub(1) {
             return Some(TabBarHit::RightOverflow);
         }
 
-        if visual_col < left_slot || visual_col >= left_slot + visible_tab_width {
+        if visual_col < metrics.left_slot || visual_col >= metrics.left_slot + metrics.visible_tab_width {
             return None;
         }
-        let local_col = visual_col - left_slot;
+        let local_col = visual_col - metrics.left_slot;
 
         let mut running_start = 0usize;
         let mut first_visible_idx = 0usize;
-        while first_visible_idx < self.tabs.len() && running_start + tab_widths[first_visible_idx] <= self.tab_scroll_offset {
+        while first_visible_idx < self.tabs.len() && running_start + tab_widths[first_visible_idx] <= metrics.scroll_offset {
             running_start += tab_widths[first_visible_idx];
             first_visible_idx += 1;
         }
 
         let mut used = 0usize;
         let mut idx = first_visible_idx;
-        while idx < self.tabs.len() && used < visible_tab_width {
+        while idx < self.tabs.len() && used < metrics.visible_tab_width {
             let tab_width = tab_widths[idx];
-            let visible_end = (used + tab_width).min(visible_tab_width);
+            let visible_end = (used + tab_width).min(metrics.visible_tab_width);
             if local_col < visible_end {
                 let close_pos = used + self.tab_title_display_width(idx) + 1;
                 if close_pos < visible_end && local_col == close_pos {
@@ -521,9 +636,9 @@ impl AppState {
         if tab_idx >= self.tabs.len() {
             return 0;
         }
-        if let Some(session) = &self.tabs[tab_idx].session {
-            if let Ok(parser) = session.parser.lock() {
-                parser.screen().scrollback()
+        if let Some(session) = self.terminal_tab(tab_idx).and_then(|terminal| terminal.session.as_ref()) {
+            if let Ok(engine) = session.engine().lock() {
+                engine.view_model().scrollback()
             } else {
                 0
             }
@@ -534,23 +649,61 @@ impl AppState {
 
     // PTY mouse mode helpers.
     pub(crate) fn is_pty_mouse_mode_active(&self) -> bool {
-        self.pty_mouse_mode() != terminal_emulator::MouseProtocolMode::None
+        self.pty_mouse_mode() != MouseProtocolMode::None
     }
 
-    fn pty_mouse_protocol(&self) -> (terminal_emulator::MouseProtocolMode, terminal_emulator::MouseProtocolEncoding) {
+    fn pty_mouse_protocol(&self) -> (MouseProtocolMode, MouseProtocolEncoding) {
         if self.tabs.is_empty() || self.selected_tab >= self.tabs.len() {
-            return (terminal_emulator::MouseProtocolMode::None, terminal_emulator::MouseProtocolEncoding::Default);
+            return (MouseProtocolMode::None, MouseProtocolEncoding::Default);
         }
-        if let Some(session) = &self.tabs[self.selected_tab].session
-            && let Ok(parser) = session.parser.lock()
+        if let Some(session) = self.selected_terminal_tab().and_then(|terminal| terminal.session.as_ref())
+            && let Ok(engine) = session.engine().lock()
         {
-            return parser.screen().mouse_protocol();
+            return engine.view_model().mouse_protocol();
         }
-        (terminal_emulator::MouseProtocolMode::None, terminal_emulator::MouseProtocolEncoding::Default)
+        (MouseProtocolMode::None, MouseProtocolEncoding::Default)
     }
 
-    fn pty_mouse_mode(&self) -> terminal_emulator::MouseProtocolMode {
+    fn pty_mouse_mode(&self) -> MouseProtocolMode {
         self.pty_mouse_protocol().0
+    }
+
+    fn active_tab_scrollbar_metrics(&self) -> Option<(Rect, u16, usize)> {
+        if self.tabs.is_empty() || self.selected_tab >= self.tabs.len() {
+            return None;
+        }
+
+        let area = self.tab_scrollbar_area;
+        if area.width == 0 || area.height == 0 || self.tab_content_area.height == 0 {
+            return None;
+        }
+
+        let max_scrollback = self.max_scrollback_for_tab(self.selected_tab);
+        let scrollbar_height = area.height as usize;
+        let viewport_height = self.tab_content_area.height as usize;
+        let total_rows = max_scrollback.saturating_add(viewport_height).max(1);
+        let thumb_height = (scrollbar_height.saturating_mul(viewport_height) / total_rows).max(1).min(scrollbar_height) as u16;
+
+        Some((area, thumb_height, max_scrollback))
+    }
+
+    pub(crate) fn set_tab_scroll_from_scrollbar_row(&mut self, mouse_row: u16) {
+        let Some((area, thumb_height, max_scrollback)) = self.active_tab_scrollbar_metrics() else {
+            return;
+        };
+
+        let available_track = area.height.saturating_sub(thumb_height);
+        let new_offset = if available_track == 0 || max_scrollback == 0 {
+            0
+        } else {
+            let relative_row = mouse_row.saturating_sub(area.y).min(area.height.saturating_sub(1));
+            let thumb_anchor = relative_row.saturating_sub(thumb_height / 2).min(available_track);
+            max_scrollback.saturating_sub((thumb_anchor as usize).saturating_mul(max_scrollback) / available_track as usize)
+        };
+
+        if let Some(terminal) = self.selected_terminal_tab_mut() {
+            terminal.scroll_offset = new_offset.min(max_scrollback);
+        }
     }
 
     // Convert screen coords to VT (1-based) coordinates.
@@ -565,32 +718,17 @@ impl AppState {
         }
     }
 
-    // Encode mouse reporting bytes for default and SGR modes.
-    fn encode_mouse_event_bytes(encoding: terminal_emulator::MouseProtocolEncoding, button: u8, col: u16, row: u16, is_release: bool) -> Vec<u8> {
-        match encoding {
-            terminal_emulator::MouseProtocolEncoding::Sgr => {
-                let suffix = if is_release { 'm' } else { 'M' };
-                format!("\x1b[<{};{};{}{}", button, col, row, suffix).into_bytes()
-            }
-            _ => {
-                // Legacy X10 encoding only supports 8-bit coordinates. Clamp to avoid wraparound.
-                let clamped_col = col.clamp(1, 223) as u8;
-                let clamped_row = row.clamp(1, 223) as u8;
-                let cb = if is_release { 3u8 + 32 } else { button.saturating_add(32) };
-                let cx = clamped_col.saturating_add(32);
-                let cy = clamped_row.saturating_add(32);
-                vec![0x1b, b'[', b'M', cb, cx, cy]
-            }
-        }
-    }
-
     // Send encoded mouse bytes to active PTY.
     fn send_mouse_to_pty(&mut self, button: u8, col: u16, row: u16, is_release: bool) -> io::Result<()> {
         if self.selected_tab >= self.tabs.len() {
             return Ok(());
         }
         let encoding = self.pty_mouse_protocol().1;
-        let bytes = Self::encode_mouse_event_bytes(encoding, button, col, row, is_release);
+        let bytes = encode_mouse_event_bytes(encoding, button, col, row, is_release);
         self.write_bytes_to_active_pty(&bytes)
     }
 }
+
+#[cfg(test)]
+#[path = "../../../test/tui/features/terminal_tabs/mouse.rs"]
+mod tests;

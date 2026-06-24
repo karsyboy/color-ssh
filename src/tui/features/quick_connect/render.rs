@@ -1,7 +1,8 @@
 //! Quick-connect modal rendering.
 
+use crate::tui::text_edit::{build_edit_value_spans, byte_index_for_char};
 use crate::tui::ui::theme;
-use crate::tui::{AppState, QuickConnectField};
+use crate::tui::{AppState, QuickConnectField, QuickConnectRow};
 use ratatui::{
     Frame,
     layout::Rect,
@@ -10,73 +11,6 @@ use ratatui::{
     widgets::{Block, Borders, Clear, Paragraph},
 };
 
-fn char_to_byte_index(text: &str, char_index: usize) -> usize {
-    if char_index == 0 {
-        return 0;
-    }
-    let len = text.chars().count();
-    let clamped = char_index.min(len);
-    if clamped == len {
-        text.len()
-    } else {
-        text.char_indices().nth(clamped).map_or(text.len(), |(byte_index, _)| byte_index)
-    }
-}
-
-fn push_if_non_empty(spans: &mut Vec<Span<'static>>, text: &str, style: Style) {
-    if !text.is_empty() {
-        spans.push(Span::styled(text.to_string(), style));
-    }
-}
-
-fn build_edit_value_spans(
-    text: &str,
-    cursor: usize,
-    selection: Option<(usize, usize)>,
-    value_style: Style,
-    cursor_style: Style,
-    selection_style: Style,
-) -> Vec<Span<'static>> {
-    let mut spans = Vec::new();
-    let len = text.chars().count();
-    let cursor = cursor.min(len);
-
-    if let Some((start_raw, end_raw)) = selection {
-        let start = start_raw.min(len);
-        let end = end_raw.min(len);
-        let (start, end) = if start <= end { (start, end) } else { (end, start) };
-
-        if start < end {
-            let start_byte = char_to_byte_index(text, start);
-            let end_byte = char_to_byte_index(text, end);
-
-            push_if_non_empty(&mut spans, &text[..start_byte], value_style);
-            push_if_non_empty(&mut spans, &text[start_byte..end_byte], selection_style);
-            push_if_non_empty(&mut spans, &text[end_byte..], value_style);
-            return spans;
-        }
-    }
-
-    if len == 0 {
-        spans.push(Span::styled(" ".to_string(), cursor_style));
-        return spans;
-    }
-
-    if cursor < len {
-        let cursor_start = char_to_byte_index(text, cursor);
-        let cursor_end = char_to_byte_index(text, cursor + 1);
-
-        push_if_non_empty(&mut spans, &text[..cursor_start], value_style);
-        push_if_non_empty(&mut spans, &text[cursor_start..cursor_end], cursor_style);
-        push_if_non_empty(&mut spans, &text[cursor_end..], value_style);
-    } else {
-        spans.push(Span::styled(text.to_string(), value_style));
-        spans.push(Span::styled(" ".to_string(), cursor_style));
-    }
-
-    spans
-}
-
 impl AppState {
     // Modal rendering.
     pub(crate) fn render_quick_connect_modal(&self, frame: &mut Frame, full_area: Rect) {
@@ -84,8 +18,8 @@ impl AppState {
             return;
         };
 
-        let width = full_area.width.clamp(44, 74);
-        let height = 9;
+        let width = full_area.width.clamp(58, 86);
+        let height = form.modal_height();
         let area = Self::centered_rect(width, height, full_area);
 
         frame.render_widget(Clear, area);
@@ -131,7 +65,7 @@ impl AppState {
 
         let host_cursor_style = if host_error_active { host_error_cursor } else { cursor_value };
 
-        let user_value_spans: Vec<Span<'static>> = if form.selected == QuickConnectField::User {
+        let user_value_spans: Vec<Span<'_>> = if form.selected == QuickConnectField::User {
             build_edit_value_spans(
                 &form.user,
                 form.cursor_for_field(QuickConnectField::User).unwrap_or(0),
@@ -141,11 +75,11 @@ impl AppState {
                 selected_region,
             )
         } else if form.user.is_empty() {
-            vec![Span::styled("(optional)".to_string(), normal_value)]
+            vec![Span::styled(if form.is_rdp() { "" } else { "(optional)" }, normal_value)]
         } else {
-            vec![Span::styled(form.user.clone(), normal_value)]
+            vec![Span::styled(form.user.as_str(), normal_value)]
         };
-        let host_value_spans: Vec<Span<'static>> = if form.selected == QuickConnectField::Host {
+        let host_value_spans: Vec<Span<'_>> = if form.selected == QuickConnectField::Host {
             build_edit_value_spans(
                 &form.host,
                 form.cursor_for_field(QuickConnectField::Host).unwrap_or(0),
@@ -155,11 +89,62 @@ impl AppState {
                 selected_region,
             )
         } else if form.host.is_empty() {
-            vec![Span::styled(String::new(), host_base_value)]
+            vec![Span::styled("", host_base_value)]
         } else {
-            vec![Span::styled(form.host.clone(), host_base_value)]
+            vec![Span::styled(form.host.as_str(), host_base_value)]
         };
-        let profile_text = form.selected_profile_label().to_string();
+        let port_value_spans: Vec<Span<'_>> = if form.selected == QuickConnectField::Port {
+            build_edit_value_spans(
+                &form.port,
+                form.cursor_for_field(QuickConnectField::Port).unwrap_or(0),
+                form.selection_for_field(QuickConnectField::Port),
+                selected_value,
+                cursor_value,
+                selected_region,
+            )
+        } else if form.port.is_empty() {
+            vec![Span::styled("(optional)", normal_value)]
+        } else {
+            vec![Span::styled(form.port.as_str(), normal_value)]
+        };
+        let domain_value_spans: Vec<Span<'_>> = if form.selected == QuickConnectField::Domain {
+            build_edit_value_spans(
+                &form.domain,
+                form.cursor_for_field(QuickConnectField::Domain).unwrap_or(0),
+                form.selection_for_field(QuickConnectField::Domain),
+                selected_value,
+                cursor_value,
+                selected_region,
+            )
+        } else if form.domain.is_empty() {
+            vec![Span::styled("(optional)", normal_value)]
+        } else {
+            vec![Span::styled(form.domain.as_str(), normal_value)]
+        };
+        let password_value_spans: Vec<Span<'_>> = {
+            let masked = form.masked_password();
+            if form.selected == QuickConnectField::Password {
+                let cursor = form.cursor_for_field(QuickConnectField::Password).unwrap_or(0).min(masked.chars().count());
+                if masked.is_empty() {
+                    vec![Span::styled(" ".to_string(), cursor_value)]
+                } else if cursor < masked.chars().count() {
+                    let start = byte_index_for_char(&masked, cursor);
+                    let end = byte_index_for_char(&masked, cursor + 1);
+                    vec![
+                        Span::styled(masked[..start].to_string(), selected_value),
+                        Span::styled(masked[start..end].to_string(), cursor_value),
+                        Span::styled(masked[end..].to_string(), selected_value),
+                    ]
+                } else {
+                    vec![Span::styled(masked, selected_value), Span::styled(" ".to_string(), cursor_value)]
+                }
+            } else if masked.is_empty() {
+                vec![Span::styled("(optional)", normal_value)]
+            } else {
+                vec![Span::styled(masked, normal_value)]
+            }
+        };
+        let profile_text = form.selected_profile_label();
         let mut profile_list_spans = vec![Span::styled("Profiles: ", Style::default().fg(theme::ansi_bright_black()))];
         for (idx, profile_name) in form.profile_options.iter().enumerate() {
             if idx > 0 {
@@ -170,7 +155,7 @@ impl AppState {
             } else {
                 Style::default().fg(theme::ansi_white())
             };
-            profile_list_spans.push(Span::styled(profile_name.clone(), style));
+            profile_list_spans.push(Span::styled(profile_name.as_str(), style));
         }
 
         let logging_mark = if form.ssh_logging { "[x]" } else { "[ ]" };
@@ -191,25 +176,63 @@ impl AppState {
         let mut host_line_spans = vec![Span::styled("Host: ", host_label_style)];
         host_line_spans.extend(host_value_spans);
 
-        let lines = vec![
-            Line::from(user_line_spans),
-            Line::from(host_line_spans),
-            Line::from(vec![
-                Span::styled("Profile: ", field_style(QuickConnectField::Profile, form.selected)),
-                Span::styled(profile_text, value_style(QuickConnectField::Profile, form.selected)),
-            ]),
-            Line::from(profile_list_spans),
-            Line::from(vec![
-                Span::styled("SSH Logging: ", field_style(QuickConnectField::Logging, form.selected)),
-                Span::styled(logging_mark.to_string(), value_style(QuickConnectField::Logging, form.selected)),
-            ]),
-            Line::from(""),
-            Line::from(vec![
-                Span::styled("[ Enter ] Connect", connect_style),
-                Span::styled(" | ", Style::default().fg(theme::ansi_bright_black())),
-                Span::styled("[ Esc ] Cancel", cancel_style),
-            ]),
-        ];
+        let mut port_line_spans = vec![Span::styled("Port: ", field_style(QuickConnectField::Port, form.selected))];
+        port_line_spans.extend(port_value_spans);
+
+        let mut domain_line_spans = vec![Span::styled("Domain: ", field_style(QuickConnectField::Domain, form.selected))];
+        domain_line_spans.extend(domain_value_spans);
+
+        let mut password_line_spans = vec![Span::styled("Password: ", field_style(QuickConnectField::Password, form.selected))];
+        password_line_spans.extend(password_value_spans);
+
+        let message_line = if let Some(error) = &form.error {
+            Line::from(vec![Span::styled(
+                error.clone(),
+                Style::default().fg(theme::ansi_red()).add_modifier(Modifier::BOLD),
+            )])
+        } else if form.is_rdp() {
+            Line::from(vec![Span::styled(
+                "Leave password blank to use the FreeRDP password prompt.",
+                Style::default().fg(theme::ansi_bright_black()),
+            )])
+        } else {
+            Line::from(vec![Span::styled(
+                "Profiles and SSH logging apply only to SSH quick connects.",
+                Style::default().fg(theme::ansi_bright_black()),
+            )])
+        };
+
+        let lines: Vec<Line<'_>> = form
+            .modal_rows()
+            .into_iter()
+            .map(|row| match row {
+                QuickConnectRow::Field(QuickConnectField::Protocol) => Line::from(vec![
+                    Span::styled("Protocol: ", field_style(QuickConnectField::Protocol, form.selected)),
+                    Span::styled(form.protocol_display_name(), value_style(QuickConnectField::Protocol, form.selected)),
+                ]),
+                QuickConnectRow::Field(QuickConnectField::User) => Line::from(user_line_spans.clone()),
+                QuickConnectRow::Field(QuickConnectField::Host) => Line::from(host_line_spans.clone()),
+                QuickConnectRow::Field(QuickConnectField::Port) => Line::from(port_line_spans.clone()),
+                QuickConnectRow::Field(QuickConnectField::Domain) => Line::from(domain_line_spans.clone()),
+                QuickConnectRow::Field(QuickConnectField::Password) => Line::from(password_line_spans.clone()),
+                QuickConnectRow::Field(QuickConnectField::Profile) => Line::from(vec![
+                    Span::styled("Profile: ", field_style(QuickConnectField::Profile, form.selected)),
+                    Span::styled(profile_text, value_style(QuickConnectField::Profile, form.selected)),
+                ]),
+                QuickConnectRow::Field(QuickConnectField::Logging) => Line::from(vec![
+                    Span::styled("SSH Logging: ", field_style(QuickConnectField::Logging, form.selected)),
+                    Span::styled(logging_mark.to_string(), value_style(QuickConnectField::Logging, form.selected)),
+                ]),
+                QuickConnectRow::Field(QuickConnectField::Connect | QuickConnectField::Cancel) => Line::default(),
+                QuickConnectRow::ProfileOptions => Line::from(profile_list_spans.clone()),
+                QuickConnectRow::Message => message_line.clone(),
+                QuickConnectRow::Actions => Line::from(vec![
+                    Span::styled("[ Enter ] Connect", connect_style),
+                    Span::styled(" | ", Style::default().fg(theme::ansi_bright_black())),
+                    Span::styled("[ Esc ] Cancel", cancel_style),
+                ]),
+            })
+            .collect();
 
         frame.render_widget(Paragraph::new(lines), inner);
     }

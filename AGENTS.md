@@ -2,7 +2,13 @@
 
 ## Project Overview
 - `color-ssh` is a single-crate Rust project that builds the `cossh` CLI (`src/main.rs` + `src/lib.rs`).
-- `cossh` wraps SSH and managed RDP launches with a TUI or direct mode, syntax highlighting, inventory loading, and encrypted vault support.
+- `cossh` supports:
+  - Interactive TUI session manager
+  - Direct protocol launches (`ssh`, `rdp`)
+  - Vault commands (`cossh vault ...`)
+  - Inventory migration (`--migrate`)
+  - Internal vault-agent and completion plumbing (hidden CLI surface)
+- Core domains live under `src/`: `auth`, `config`, `inventory`, `process`, `runtime`, `terminal`, `tui`, `ssh_config`.
 - Optimize for safe remote-session behavior, correct config/inventory parsing, and protection of secrets in logs/runtime data.
 
 ## Quick Start Checklist
@@ -11,7 +17,8 @@ Run this before opening or updating a PR:
 1. `cargo fmt --all --check`
 2. `cargo clippy --all-targets --all-features -- -D warnings`
 3. `cargo test --all-targets`
-4. `cargo build --release`
+4. `cargo run -- --help`
+5. `cargo build --release`
 
 ## Setup Commands
 - Clone and enter repo:
@@ -32,6 +39,8 @@ Runtime dependencies (outside Cargo):
 - Run interactive mode: `cargo run --`
 - Run SSH directly: `cargo run -- ssh user@example.com`
 - Run RDP directly: `cargo run -- rdp desktop01`
+- Run vault status: `cargo run -- vault status`
+- Run inventory migration: `cargo run -- --migrate`
 - Format: `cargo fmt --all`
 - Format check: `cargo fmt --all --check`
 - Lint: `cargo clippy --all-targets --all-features -- -D warnings`
@@ -40,7 +49,8 @@ Runtime dependencies (outside Cargo):
 
 Artifact notes:
 - Local release binary is built by `cargo build --release`.
-- CI release artifacts/Homebrew publishing are handled by `.github/workflows/release.yml` (`cargo-dist`), not by normal PR checks.
+- `.github/workflows/release.yml` (`cargo-dist`) runs on pull requests and version tags.
+- Publishing/release upload steps in `release.yml` run only for tag pushes.
 
 ## Code Style & Conventions
 - Single source of truth for required quality gates: `.github/workflows/ci.yml`.
@@ -48,7 +58,9 @@ Artifact notes:
 - Formatting is controlled by `rustfmt.toml` (`max_width = 160`).
 - Clippy warnings are treated as errors (`-D warnings`).
 - Keep code in existing domain modules under `src/` (`auth`, `config`, `inventory`, `process`, `runtime`, `tui`, etc.).
-- When behavior changes, update/add tests under `src/test/**` (the suite is wired through `src/test.rs` and per-module `#[path=...]` test modules).
+- When behavior changes, update/add tests in:
+  - `src/test/**` for module-attached tests (`src/test.rs` wiring + per-module `#[path=...]`)
+  - `tests/**` for black-box CLI/integration smoke coverage
 - Prefer Conventional Commit prefixes (`feat`, `fix`, `docs`, `refactor`, `test`, `chore`) for clean changelog grouping.
 
 ## Testing Guidance
@@ -72,17 +84,17 @@ Useful targeted checks:
 - Run full local verification before pushing.
 - `release-plz` handles version/changelog automation after merges to `main`.
 - `release-plz.yml` path filter is limited to `Cargo.toml` and `src/**`; docs-only changes do not trigger it.
-- Tag-triggered release workflow (`release.yml`) is for maintainers and publishing, not normal feature validation.
+- `release.yml` runs dist planning/build jobs on pull requests and publishes only on tags.
 
 ## Security Considerations
-- Never commit real credentials, vault data, or private inventory host data. Always make sure to use generic examples in test like 10.10.10.10 or 'user'.
+- Never commit real credentials, vault data, or private inventory host data. Use generic examples in tests (for example `10.10.10.10` or `user`).
 - Runtime data lives under `~/.color-ssh/` (config, logs, vault, inventory) and should remain local.
 - Prefer safe debug mode (`-d`) for diagnostics.
 - Raw debug (`-dd`) may capture terminal content, CLI args, and secrets in `~/.color-ssh/logs/cossh.log`; use only for short troubleshooting sessions.
 - Prefer redaction patterns via `settings.remove_secrets` when enabling SSH logging/debug for sensitive environments.
 - Keep remote clipboard writes disabled unless required (`interactive_settings.allow_remote_clipboard_write` defaults to `false`).
 - CI release workflows rely on repository secrets (`RELEASE_PLZ_TOKEN`, `CARGO_REGISTRY_TOKEN`, `HOMEBREW_TAP_TOKEN`); never hardcode tokens.
-- Make sure any code that is added does not compromise the integrity of the vault functions and keeps any passwords used from the vault securely store in memory
+- Preserve vault security invariants: avoid leaking secrets in logs, avoid expanding secret lifetime in memory, and keep password/askpass flows scoped.
 
 ## How to Verify Changes
 Run these before finalizing work:
@@ -98,6 +110,7 @@ If your changes touch vault/inventory/logging behavior, also run:
 
 If your changes touch release automation:
 - Verify related workflow/config consistency across:
+- `.github/workflows/ci.yml`
 - `.github/workflows/release-plz.yml`
 - `.github/workflows/release.yml`
 - `release-plz.toml`

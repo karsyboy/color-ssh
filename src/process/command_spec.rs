@@ -1,11 +1,11 @@
 //! Prepared command model shared by SSH/RDP builders.
 
 use crate::auth::secret::SensitiveString;
-use crate::command_path;
+use crate::platform;
+use std::fmt;
 use std::io;
 use std::process::Command;
 
-#[derive(Debug)]
 pub(crate) struct PreparedCommand {
     /// Program name to execute.
     pub(crate) program: String,
@@ -17,6 +17,19 @@ pub(crate) struct PreparedCommand {
     pub(crate) stdin_payload: Option<SensitiveString>,
     /// Optional user-facing notice when fallback behavior was used.
     pub(crate) fallback_notice: Option<String>,
+}
+
+impl fmt::Debug for PreparedCommand {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let env_keys = self.env.iter().map(|(key, _)| key).collect::<Vec<_>>();
+        f.debug_struct("PreparedCommand")
+            .field("program", &self.program)
+            .field("args", &self.args)
+            .field("env_keys", &env_keys)
+            .field("stdin_payload", &self.stdin_payload.as_ref().map(|_| "[REDACTED]"))
+            .field("fallback_notice", &self.fallback_notice)
+            .finish()
+    }
 }
 
 impl PreparedCommand {
@@ -36,7 +49,7 @@ pub(crate) fn build_plain_ssh_command(args: &[String]) -> PreparedCommand {
 }
 
 pub(crate) fn command_from_spec(spec: &PreparedCommand) -> io::Result<Command> {
-    let program_path = command_path::resolve_known_command_path(&spec.program)?;
+    let program_path = platform::resolve_known_command_path(&spec.program)?;
     let mut command = Command::new(&program_path);
     command.args(&spec.args);
     for (key, value) in &spec.env {
@@ -44,3 +57,7 @@ pub(crate) fn command_from_spec(spec: &PreparedCommand) -> io::Result<Command> {
     }
     Ok(command)
 }
+
+#[cfg(test)]
+#[path = "../test/process/command_spec.rs"]
+mod tests;

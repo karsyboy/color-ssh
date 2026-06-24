@@ -1,7 +1,7 @@
 //! YAML inventory parser and normalization helpers.
 
 use super::error::{InventoryResult, invalid_inventory};
-use super::model::{ConnectionProtocol, InventoryHostRaw, InventoryNodeRaw, ParsedInventoryDocument};
+use super::model::{ConnectionProtocol, InventoryHostRaw, InventoryIncludeRaw, InventoryNodeRaw, ParsedInventoryDocument};
 use serde_yml::{Mapping, Value};
 use std::fs;
 use std::path::Path;
@@ -20,7 +20,7 @@ fn parse_inventory_document_value(yaml: &Value, source_file: &Path) -> Inventory
     };
 
     let include = match mapping_value(mapping, "include") {
-        Some(value) => parse_string_list(value, source_file, "include", false)?,
+        Some(value) => parse_include_entries(value, source_file)?,
         None => Vec::new(),
     };
     let inventory = match mapping_value(mapping, "inventory") {
@@ -29,6 +29,43 @@ fn parse_inventory_document_value(yaml: &Value, source_file: &Path) -> Inventory
     };
 
     Ok(ParsedInventoryDocument { include, inventory })
+}
+
+fn parse_include_entries(value: &Value, source_file: &Path) -> InventoryResult<Vec<InventoryIncludeRaw>> {
+    let mut include = Vec::new();
+    parse_include_entries_with_path(value, source_file, &[], &mut include)?;
+    Ok(include)
+}
+
+fn parse_include_entries_with_path(value: &Value, source_file: &Path, folder_path: &[String], include: &mut Vec<InventoryIncludeRaw>) -> InventoryResult<()> {
+    match value {
+        Value::Null => Ok(()),
+        Value::Sequence(sequence) => {
+            for item in sequence {
+                parse_include_entries_with_path(item, source_file, folder_path, include)?;
+            }
+            Ok(())
+        }
+        Value::Mapping(mapping) => parse_include_mapping(mapping, source_file, folder_path, include),
+        _ => {
+            let pattern = scalar_to_string(value, source_file, "include")?;
+            include.push(InventoryIncludeRaw {
+                pattern,
+                folder_path: folder_path.to_vec(),
+            });
+            Ok(())
+        }
+    }
+}
+
+fn parse_include_mapping(mapping: &Mapping, source_file: &Path, folder_path: &[String], include: &mut Vec<InventoryIncludeRaw>) -> InventoryResult<()> {
+    for (raw_folder_name, value) in mapping {
+        let folder_name = raw_folder_name.clone();
+        let mut nested_folder_path = folder_path.to_vec();
+        nested_folder_path.push(folder_name);
+        parse_include_entries_with_path(value, source_file, &nested_folder_path, include)?;
+    }
+    Ok(())
 }
 
 fn parse_inventory_nodes(value: &Value, source_file: &Path) -> InventoryResult<Vec<InventoryNodeRaw>> {
@@ -62,7 +99,7 @@ fn parse_inventory_node(value: &Value, source_file: &Path) -> InventoryResult<In
         .iter()
         .next()
         .ok_or_else(|| invalid_inventory(source_file, "folder entry cannot be empty"))?;
-    let folder_name = scalar_to_string(folder_name, source_file, "folder name")?;
+    let folder_name = folder_name.clone();
     let items = parse_inventory_nodes(folder_items, source_file)?;
     Ok(InventoryNodeRaw::Folder { name: folder_name, items })
 }
@@ -71,7 +108,7 @@ fn parse_inventory_host(mapping: &Mapping, source_file: &Path) -> InventoryResul
     let mut host = InventoryHostRaw::default();
 
     for (raw_key, value) in mapping {
-        let original_key = scalar_to_string(raw_key, source_file, "host key")?;
+        let original_key = raw_key.clone();
         let canonical_key = canonical_host_key(&original_key);
         match canonical_key {
             "name" => host.name = scalar_to_string(value, source_file, "name")?,
@@ -95,7 +132,7 @@ fn parse_inventory_host(mapping: &Mapping, source_file: &Path) -> InventoryResul
             "remote_forward" => host.remote_forward = parse_string_list(value, source_file, "remote_forward", false)?,
             "ssh_options" => merge_ssh_options(&mut host, value, source_file)?,
             "rdp_domain" => host.rdp_domain = optional_scalar_to_string(value, source_file, "rdp_domain")?,
-            "rdp_args" => host.rdp_args = parse_string_list(value, source_file, "rdp_args", true)?,
+            "rdp_args" => host.rdp_args = parse_string_list(value, source_file, "rdp_args", false)?,
             _ => {
                 // Preserve unknown host keys as custom SSH options.
                 let values = parse_ssh_option_values(value, source_file, &original_key)?;
@@ -119,7 +156,7 @@ fn merge_ssh_options(into: &mut InventoryHostRaw, value: &Value, source_file: &P
     };
 
     for (key, value) in mapping {
-        let key = scalar_to_string(key, source_file, "ssh_options key")?;
+        let key = key.clone();
         match compact_key(&key).as_str() {
             "identityfile" => into
                 .identity_files
@@ -177,21 +214,13 @@ fn normalize_yes_no_string(value: &str) -> String {
 }
 
 fn mapping_value<'a>(mapping: &'a Mapping, key: &str) -> Option<&'a Value> {
-    mapping.iter().find_map(|(candidate_key, value)| {
-        let Value::String(candidate_key) = candidate_key else {
-            return None;
-        };
-        (canonical_top_level_key(candidate_key) == key).then_some(value)
-    })
+    mapping
+        .iter()
+        .find_map(|(candidate_key, value)| (canonical_top_level_key(candidate_key) == key).then_some(value))
 }
 
 fn mapping_has_key(mapping: &Mapping, key: &str) -> bool {
-    mapping.iter().any(|(candidate_key, _)| {
-        let Value::String(candidate_key) = candidate_key else {
-            return false;
-        };
-        canonical_host_key(candidate_key) == key
-    })
+    mapping.iter().any(|(candidate_key, _)| canonical_host_key(candidate_key) == key)
 }
 
 fn parse_string_list(value: &Value, source_file: &Path, field: &str, split_scalar: bool) -> InventoryResult<Vec<String>> {

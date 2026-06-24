@@ -4,16 +4,25 @@
 //! process-wide lock.
 
 mod errors;
+mod highlight;
 mod loader;
 mod paths;
 mod schema;
 mod watcher;
 
 pub use errors::ConfigError;
-pub use schema::{AuthSettings, Config, HighlightRule, InteractiveSettings, Metadata, Settings};
-pub use watcher::config_watcher;
+pub(crate) use highlight::CompiledHighlightRule;
+pub use schema::{AuthSettings, Config, HighlightOverlayAutoPolicy, HighlightOverlayMode, HighlightRule, InteractiveSettings, Metadata, Settings};
+#[cfg(test)]
+pub(crate) use watcher::queue_reload_notice;
+pub(crate) use watcher::take_profile_reload_events;
+pub(crate) use watcher::take_reload_notices;
+pub use watcher::{ConfigWatchScope, ReloadNoticeTarget, config_watcher, config_watcher_with_scope};
 
 use once_cell::sync::OnceCell;
+use regex::Regex;
+use regex::RegexSet;
+use std::io;
 use std::sync::{
     Arc, RwLock,
     atomic::{AtomicU64, Ordering},
@@ -36,6 +45,22 @@ use std::sync::{
 /// ```
 pub static SESSION_CONFIG: OnceCell<Arc<RwLock<Config>>> = OnceCell::new();
 static CONFIG_VERSION: AtomicU64 = AtomicU64::new(0);
+
+#[derive(Debug, Clone)]
+pub(crate) struct InteractiveProfileSnapshot {
+    pub(crate) auth_settings: AuthSettings,
+    pub(crate) show_title: bool,
+    pub(crate) history_buffer: usize,
+    pub(crate) remote_clipboard_write: bool,
+    pub(crate) remote_clipboard_max_bytes: usize,
+    pub(crate) ssh_logging_enabled: bool,
+    pub(crate) secret_patterns: Vec<Regex>,
+    pub(crate) overlay_rules: Vec<CompiledHighlightRule>,
+    pub(crate) overlay_rule_set: Option<RegexSet>,
+    pub(crate) overlay_mode: HighlightOverlayMode,
+    pub(crate) overlay_auto_policy: HighlightOverlayAutoPolicy,
+    pub(crate) config_version: u64,
+}
 
 fn fallback_config() -> Config {
     Config {
@@ -99,24 +124,69 @@ fn install_config(config: Config) {
     replace_config(get_config(), config);
 }
 
+fn snapshot_from_loaded_config(config: Config, config_version: u64) -> InteractiveProfileSnapshot {
+    let Config {
+        settings,
+        auth_settings,
+        interactive_settings,
+        metadata,
+        ..
+    } = config;
+    let interactive = interactive_settings.unwrap_or_default();
+    InteractiveProfileSnapshot {
+        auth_settings,
+        show_title: settings.show_title,
+        history_buffer: interactive.history_buffer,
+        remote_clipboard_write: interactive.allow_remote_clipboard_write,
+        remote_clipboard_max_bytes: interactive.remote_clipboard_max_bytes,
+        ssh_logging_enabled: settings.ssh_logging,
+        secret_patterns: metadata.compiled_secret_patterns,
+        overlay_rules: metadata.compiled_rules,
+        overlay_rule_set: metadata.compiled_rule_set,
+        overlay_mode: interactive.overlay_highlighting,
+        overlay_auto_policy: interactive.overlay_auto_policy,
+        config_version,
+    }
+}
+
+fn current_interactive_profile_snapshot() -> InteractiveProfileSnapshot {
+    with_current_config("reading interactive profile snapshot", |cfg| {
+        let interactive = cfg.interactive_settings.as_ref();
+        InteractiveProfileSnapshot {
+            auth_settings: cfg.auth_settings.clone(),
+            show_title: cfg.settings.show_title,
+            history_buffer: interactive.map(|interactive| interactive.history_buffer).unwrap_or(1000),
+            remote_clipboard_write: interactive.map(|interactive| interactive.allow_remote_clipboard_write).unwrap_or(false),
+            remote_clipboard_max_bytes: interactive.map(|interactive| interactive.remote_clipboard_max_bytes).unwrap_or(4096),
+            ssh_logging_enabled: cfg.settings.ssh_logging,
+            secret_patterns: cfg.metadata.compiled_secret_patterns.clone(),
+            overlay_rules: cfg.metadata.compiled_rules.clone(),
+            overlay_rule_set: cfg.metadata.compiled_rule_set.clone(),
+            overlay_mode: interactive.map(|interactive| interactive.overlay_highlighting).unwrap_or_default(),
+            overlay_auto_policy: interactive.map(|interactive| interactive.overlay_auto_policy).unwrap_or_default(),
+            config_version: current_config_version(),
+        }
+    })
+}
+
+pub(crate) fn interactive_profile_snapshot(profile: Option<&str>) -> io::Result<InteractiveProfileSnapshot> {
+    let profile = profile.map(str::trim).filter(|profile| !profile.is_empty());
+    match profile {
+        Some(profile_name) => {
+            let config_loader = loader::ConfigLoader::new(Some(profile_name.to_string()))?;
+            let config = config_loader.load_config()?;
+            Ok(snapshot_from_loaded_config(config, 0))
+        }
+        None => Ok(current_interactive_profile_snapshot()),
+    }
+}
+
 /// Load and install session configuration for an optional profile.
 pub fn init_session_config(profile: Option<String>) -> Result<(), ConfigError> {
     let config_loader = loader::ConfigLoader::new(profile).map_err(ConfigError::IoError)?;
     let config = config_loader.load_config().map_err(ConfigError::IoError)?;
     install_config(config);
     Ok(())
-}
-
-/// Load `interactive_settings.history_buffer` for a specific profile, if available.
-pub(crate) fn history_buffer_for_profile(profile: Option<&str>) -> Option<usize> {
-    let profile = profile?.trim();
-    if profile.is_empty() {
-        return None;
-    }
-
-    let config_loader = loader::ConfigLoader::new(Some(profile.to_string())).ok()?;
-    let config = config_loader.load_config().ok()?;
-    config.interactive_settings.map(|interactive| interactive.history_buffer)
 }
 
 /// Return auth settings from the currently active configuration.
@@ -131,7 +201,3 @@ pub(crate) fn current_config_version() -> u64 {
 pub(crate) fn set_config_version(version: u64) {
     CONFIG_VERSION.store(version, Ordering::Release);
 }
-
-#[cfg(test)]
-#[path = "../test/config.rs"]
-mod tests;

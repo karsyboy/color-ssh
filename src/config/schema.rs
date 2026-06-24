@@ -3,7 +3,7 @@
 //! This module defines stable user-facing config fields and runtime metadata
 //! attached after parsing.
 
-use crate::highlighter::CompiledHighlightRule;
+use super::CompiledHighlightRule;
 use regex::{Regex, RegexSet};
 use serde::{Deserialize, Deserializer};
 use std::{collections::HashMap, path::PathBuf};
@@ -115,6 +115,38 @@ pub struct InteractiveSettings {
     /// Maximum clipboard payload size accepted from remote OSC 52 requests.
     #[serde(default = "default_remote_clipboard_max_bytes", deserialize_with = "deserialize_remote_clipboard_max_bytes")]
     pub remote_clipboard_max_bytes: usize,
+    /// Highlight overlay behavior for embedded terminal rendering.
+    #[serde(default)]
+    pub overlay_highlighting: HighlightOverlayMode,
+    /// Compatibility policy applied when `overlay_highlighting` is set to `auto`.
+    #[serde(default)]
+    pub overlay_auto_policy: HighlightOverlayAutoPolicy,
+}
+
+/// Renderer-side syntax highlighting policy for embedded terminal views.
+#[derive(Debug, Clone, Copy, Deserialize, PartialEq, Eq, Default)]
+#[serde(rename_all = "kebab-case")]
+pub enum HighlightOverlayMode {
+    /// Enable highlighting when the renderer considers the viewport safe.
+    #[default]
+    Auto,
+    /// Always attempt overlay highlighting, even for alternate-screen apps.
+    Always,
+    /// Disable renderer-side overlay highlighting entirely.
+    Off,
+}
+
+/// Compatibility fallback policy used by `overlay_highlighting: auto`.
+#[derive(Debug, Clone, Copy, Deserialize, PartialEq, Eq, Default)]
+#[serde(rename_all = "kebab-case")]
+pub enum HighlightOverlayAutoPolicy {
+    /// Prefer suppressing overlays rather than risking incorrect decoration.
+    #[default]
+    Safe,
+    /// Keep a small trailing shell region highlighted when a primary-screen fullscreen app is suspected.
+    Reduced,
+    /// Only honor hard suppressions like alternate-screen, mouse-reporting, and volatile repaint churn.
+    Relaxed,
 }
 
 fn default_show_title() -> bool {
@@ -130,7 +162,7 @@ fn default_idle_timeout_seconds() -> u64 {
 }
 
 fn default_session_timeout_seconds() -> u64 {
-    28_800
+    3_600
 }
 
 fn default_direct_password_autologin() -> bool {
@@ -215,9 +247,9 @@ pub struct Metadata {
     /// Path to the loaded configuration file
     #[serde(default)]
     pub config_path: PathBuf,
-    /// Name of the current SSH session (for log file naming)
+    /// Name of the current globally logged protocol session (for log file naming)
     pub session_name: String,
-    /// Compiled regex rules (regex + ANSI color code)
+    /// Compiled regex rules shared by renderer overlays (regex + ANSI style descriptor)
     #[serde(skip)]
     pub(crate) compiled_rules: Vec<CompiledHighlightRule>,
     /// Regex-set prefilter used to cheaply identify rules that might match a chunk.

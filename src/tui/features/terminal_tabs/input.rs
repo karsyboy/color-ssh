@@ -2,25 +2,14 @@
 
 use crate::log_error;
 use crate::tui::AppState;
-use crate::tui::features::terminal_session::pty::encode_key_event_bytes;
+use crate::tui::features::terminal_session::pty::{encode_key_event_bytes, encode_paste_bytes};
+use crate::tui::text_edit;
 use crate::tui::ui::theme::display_width;
 use crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
-use std::io::{self, Write};
+use std::io;
 
 fn tab_title_display_width(title: &str) -> usize {
     display_width(title)
-}
-
-fn encode_paste_bytes(pasted: &str, bracketed: bool) -> Vec<u8> {
-    if !bracketed {
-        return pasted.as_bytes().to_vec();
-    }
-
-    let mut out = Vec::with_capacity(pasted.len() + 12);
-    out.extend_from_slice(b"\x1b[200~");
-    out.extend_from_slice(pasted.as_bytes());
-    out.extend_from_slice(b"\x1b[201~");
-    out
 }
 
 impl AppState {
@@ -86,9 +75,14 @@ impl AppState {
         }
 
         let idx = self.selected_tab;
-        if let Some(session) = self.tabs.get_mut(idx).and_then(|tab| tab.session.take()) {
+        let closing_editor_tab = self.tabs[idx].editor().is_some();
+        if let Some(session) = self.terminal_tab_mut(idx).and_then(|terminal| terminal.session.take()) {
             let mut session = session;
             session.terminate();
+        }
+
+        if closing_editor_tab {
+            self.host_delete_confirm = None;
         }
 
         self.tabs.remove(idx);
@@ -99,6 +93,8 @@ impl AppState {
 
         if self.tabs.is_empty() {
             self.focus_manager_panel();
+        } else {
+            self.ensure_tab_visible();
         }
     }
 
@@ -115,8 +111,43 @@ impl AppState {
             return Ok(());
         }
 
+        if self.host_context_menu.is_some() {
+            self.handle_host_context_menu_key(key);
+            return Ok(());
+        }
+
+        if self.host_delete_confirm.is_some() {
+            self.handle_host_delete_confirm_key(key);
+            return Ok(());
+        }
+
+        if self.folder_picker.is_some() {
+            self.handle_folder_picker_key(key);
+            return Ok(());
+        }
+
+        if self.folder_create.is_some() {
+            self.handle_folder_create_key(key);
+            return Ok(());
+        }
+
+        if self.folder_rename.is_some() {
+            self.handle_folder_rename_key(key);
+            return Ok(());
+        }
+
+        if self.folder_delete_confirm.is_some() {
+            self.handle_folder_delete_confirm_key(key);
+            return Ok(());
+        }
+
         if self.vault_unlock.is_some() {
             self.handle_vault_unlock_key(key);
+            return Ok(());
+        }
+
+        if self.rdp_credentials.is_some() {
+            self.handle_rdp_credentials_key(key);
             return Ok(());
         }
 
@@ -151,6 +182,21 @@ impl AppState {
             return Ok(());
         }
 
+        if self.folder_rename.is_some() {
+            self.handle_folder_rename_paste(&pasted);
+            return Ok(());
+        }
+
+        if self.folder_create.is_some() {
+            self.handle_folder_create_paste(&pasted);
+            return Ok(());
+        }
+
+        if self.rdp_credentials.is_some() {
+            self.handle_rdp_credentials_paste(&pasted);
+            return Ok(());
+        }
+
         if self.vault_status_modal.is_some() {
             return Ok(());
         }
@@ -165,13 +211,20 @@ impl AppState {
             return Ok(());
         }
 
+        if !self.focus_on_manager && self.is_selected_tab_editor() {
+            self.handle_host_editor_paste(&pasted);
+            return Ok(());
+        }
+
         if !self.focus_on_manager && self.current_tab_search().map(|search_state| search_state.active).unwrap_or(false) {
             self.handle_terminal_search_paste(&pasted);
             return Ok(());
         }
 
         if !self.focus_on_manager && !self.tabs.is_empty() && self.selected_tab < self.tabs.len() {
-            self.tabs[self.selected_tab].scroll_offset = 0;
+            if let Some(terminal) = self.selected_terminal_tab_mut() {
+                terminal.scroll_offset = 0;
+            }
             self.clear_selection_state();
             let bracketed = self.pty_bracketed_paste_enabled();
             let bytes = encode_paste_bytes(&pasted, bracketed);
@@ -183,6 +236,46 @@ impl AppState {
 
     // Terminal-tab key handling.
     pub(crate) fn handle_tab_key(&mut self, key: KeyEvent) -> io::Result<()> {
+        if self.is_selected_tab_editor() {
+            match key.code {
+                KeyCode::Char('b') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                    self.host_panel_visible = !self.host_panel_visible;
+                }
+                KeyCode::Char('w') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                    self.close_current_tab();
+                }
+                KeyCode::BackTab => {
+                    self.focus_manager_panel();
+                }
+                KeyCode::Left if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                    self.move_selected_tab_left();
+                }
+                KeyCode::Right if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                    self.move_selected_tab_right();
+                }
+                KeyCode::Left if key.modifiers.contains(KeyModifiers::ALT) => {
+                    if self.selected_tab > 0 {
+                        self.selected_tab -= 1;
+                        self.clear_selection_state();
+                        self.ensure_tab_visible();
+                    }
+                }
+                KeyCode::Right if key.modifiers.contains(KeyModifiers::ALT) => {
+                    if self.selected_tab < self.tabs.len().saturating_sub(1) {
+                        self.selected_tab += 1;
+                        self.clear_selection_state();
+                        self.ensure_tab_visible();
+                    }
+                }
+                _ => self.handle_host_editor_key(key),
+            }
+            return Ok(());
+        }
+
+        if !self.is_selected_tab_terminal() {
+            return Ok(());
+        }
+
         if self.current_tab_search().map(|search_state| search_state.active).unwrap_or(false) {
             return self.handle_terminal_search_key(key);
         }
@@ -192,7 +285,7 @@ impl AppState {
                 self.host_panel_visible = !self.host_panel_visible;
             }
             KeyCode::Char('c') if key.modifiers == KeyModifiers::ALT => {
-                if self.selection_start.is_some() && self.selection_end.is_some() {
+                if self.current_selection().is_some() {
                     self.copy_selection_to_clipboard();
                     self.clear_selection_state();
                 }
@@ -231,7 +324,7 @@ impl AppState {
                     let mut should_recompute_search = false;
                     if let Some(search) = self.current_tab_search_mut() {
                         search.active = true;
-                        search.query_cursor = search.query.chars().count();
+                        search.query_cursor = text_edit::char_len(&search.query);
                         search.query_selection = None;
                         search.last_search_query.clear();
                         search.last_scanned_render_epoch = 0;
@@ -246,31 +339,36 @@ impl AppState {
             }
             KeyCode::PageUp if key.modifiers.contains(KeyModifiers::SHIFT) => {
                 let max_scrollback = self.max_scrollback_for_tab(self.selected_tab);
-                let tab = &mut self.tabs[self.selected_tab];
-                tab.scroll_offset = tab.scroll_offset.saturating_add(10).min(max_scrollback);
+                if let Some(terminal) = self.selected_terminal_tab_mut() {
+                    terminal.scroll_offset = terminal.scroll_offset.saturating_add(10).min(max_scrollback);
+                }
             }
             KeyCode::PageDown if key.modifiers.contains(KeyModifiers::SHIFT) => {
-                let tab = &mut self.tabs[self.selected_tab];
-                tab.scroll_offset = tab.scroll_offset.saturating_sub(10);
+                if let Some(terminal) = self.selected_terminal_tab_mut() {
+                    terminal.scroll_offset = terminal.scroll_offset.saturating_sub(10);
+                }
             }
             KeyCode::Enter => {
-                let tab = &self.tabs[self.selected_tab];
-                let is_exited = tab
-                    .session
-                    .as_ref()
-                    .and_then(|session| session.exited.lock().ok().map(|exited| *exited))
+                let is_exited = self
+                    .selected_terminal_tab()
+                    .and_then(|terminal| terminal.session.as_ref())
+                    .map(|session| session.is_exited())
                     .unwrap_or(true);
 
                 if is_exited {
                     self.reconnect_session();
                 } else {
-                    self.tabs[self.selected_tab].scroll_offset = 0;
+                    if let Some(terminal) = self.selected_terminal_tab_mut() {
+                        terminal.scroll_offset = 0;
+                    }
                     self.clear_selection_state();
                     self.send_key_to_pty(key)?;
                 }
             }
             _ => {
-                self.tabs[self.selected_tab].scroll_offset = 0;
+                if let Some(terminal) = self.selected_terminal_tab_mut() {
+                    terminal.scroll_offset = 0;
+                }
                 self.clear_selection_state();
                 self.send_key_to_pty(key)?;
             }
@@ -281,31 +379,15 @@ impl AppState {
 
     // PTY write helpers.
     pub(crate) fn write_bytes_to_active_pty(&mut self, bytes: &[u8]) -> io::Result<()> {
-        if self.selected_tab >= self.tabs.len() {
-            return Ok(());
-        }
-
-        let tab = &mut self.tabs[self.selected_tab];
-        let Some(session) = &mut tab.session else {
+        let Some(terminal) = self.selected_terminal_tab_mut() else {
             return Ok(());
         };
-        let Some(writer) = session.writer.as_ref() else {
+        let Some(session) = &mut terminal.session else {
             return Ok(());
         };
-
-        let mut writer = match writer.lock() {
-            Ok(writer) => writer,
-            Err(lock_err) => {
-                log_error!("Failed to lock PTY writer: {}", lock_err);
-                return Ok(());
-            }
-        };
-
-        if let Err(err) = writer.write_all(bytes) {
+        if let Err(err) = session.write_input(bytes) {
             log_error!("Failed to write to PTY: {}", err);
-            if let Ok(mut exited) = session.exited.lock() {
-                *exited = true;
-            }
+            session.mark_exited();
             return Ok(());
         }
 
@@ -313,17 +395,15 @@ impl AppState {
     }
 
     fn pty_bracketed_paste_enabled(&self) -> bool {
-        if self.selected_tab >= self.tabs.len() {
+        let Some(terminal) = self.selected_terminal_tab() else {
             return false;
-        }
-
-        let tab = &self.tabs[self.selected_tab];
-        let Some(session) = &tab.session else {
+        };
+        let Some(session) = &terminal.session else {
             return false;
         };
 
-        if let Ok(parser) = session.parser.lock() {
-            return parser.screen().bracketed_paste_enabled();
+        if let Ok(engine) = session.engine().lock() {
+            return engine.view_model().bracketed_paste_enabled();
         }
 
         false
@@ -350,7 +430,7 @@ impl AppState {
         if idx >= self.tabs.len() {
             return 0;
         }
-        tab_title_display_width(&self.tabs[idx].title)
+        tab_title_display_width(&self.tabs[idx].title())
     }
 
     // Keep selected tab visible after focus/selection moves.
@@ -365,14 +445,37 @@ impl AppState {
             return;
         }
 
-        let mut start_pos: usize = 0;
-        for tab_index in 0..self.selected_tab {
-            start_pos += self.tab_display_width(tab_index);
-        }
-        let end_pos = start_pos + self.tab_display_width(self.selected_tab);
+        let selected_start = self.tab_start_offset(self.selected_tab);
+        let selected_width = self.tab_display_width(self.selected_tab);
+        let selected_end = selected_start + selected_width;
 
-        if start_pos < self.tab_scroll_offset || end_pos > self.tab_scroll_offset + tab_bar_width {
-            self.tab_scroll_offset = start_pos;
+        let mut target_offset = self.normalize_tab_scroll_offset(self.tab_scroll_offset, tab_bar_width);
+        if selected_start < target_offset {
+            target_offset = selected_start;
+        } else {
+            loop {
+                let metrics = self.tab_bar_viewport_metrics(target_offset, tab_bar_width);
+                if metrics.visible_tab_width == 0 {
+                    break;
+                }
+
+                if selected_width >= metrics.visible_tab_width || selected_end <= metrics.scroll_offset + metrics.visible_tab_width {
+                    target_offset = metrics.scroll_offset;
+                    break;
+                }
+
+                let Some(next_offset) = self.next_tab_scroll_offset(metrics.scroll_offset, tab_bar_width) else {
+                    target_offset = metrics.scroll_offset;
+                    break;
+                };
+                if next_offset == metrics.scroll_offset {
+                    target_offset = metrics.scroll_offset;
+                    break;
+                }
+                target_offset = next_offset;
+            }
         }
+
+        self.tab_scroll_offset = self.normalize_tab_scroll_offset(target_offset, tab_bar_width);
     }
 }

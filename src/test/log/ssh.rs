@@ -1,6 +1,16 @@
-use super::{LogFileFactory, SshLogCommand, create_private_directory, extract_complete_lines, open_private_append_file, run_worker, sanitize_line};
+use super::{LogFileFactory, SecretPatternSource, SshLogCommand, extract_complete_lines, run_worker, sanitize_line};
+use crate::log::LogError;
 use crate::test::support::fs::TestWorkspace;
 use regex::Regex;
+use std::path::Path;
+
+fn create_private_directory(path: &Path) -> Result<(), LogError> {
+    Ok(crate::platform::create_private_directory(path, 0o700)?)
+}
+
+fn open_private_append_file(path: &Path) -> Result<std::fs::File, LogError> {
+    Ok(crate::platform::open_private_append_file(path, 0o600)?)
+}
 use std::fs;
 use std::os::unix::fs::PermissionsExt;
 use std::sync::{Arc, mpsc};
@@ -21,12 +31,12 @@ fn spawn_worker(log_path: std::path::PathBuf) -> (mpsc::SyncSender<SshLogCommand
             .map_err(crate::log::LogError::from)
     });
 
-    let worker = std::thread::spawn(move || run_worker(rx, formatter, file_factory));
+    let worker = std::thread::spawn(move || run_worker(rx, formatter, file_factory, SecretPatternSource::Fixed(Vec::new())));
     (tx, worker)
 }
 
 #[test]
-fn sanitize_line_and_extract_complete_lines_core_behaviors() {
+fn sanitize_line_and_extract_complete_lines_handle_redaction_and_partial_buffers() {
     let secrets = vec![Regex::new("token=\\w+").expect("regex compiles")];
     let sanitized = sanitize_line("\x1b[31mtoken=abc123\x1b[0m ok", &secrets);
     assert_eq!(sanitized, "[REDACTED] ok");
@@ -39,7 +49,7 @@ fn sanitize_line_and_extract_complete_lines_core_behaviors() {
 
 #[test]
 fn worker_flush_writes_chunks_in_order() {
-    let root = TestWorkspace::new("log", "ssh_worker_core").expect("temp workspace");
+    let root = TestWorkspace::new("log", "ssh_worker").expect("temp workspace");
     let log_path = root.join("session.log");
     let (tx, worker) = spawn_worker(log_path.clone());
 
@@ -59,7 +69,7 @@ fn worker_flush_writes_chunks_in_order() {
 
 #[test]
 fn private_log_file_permissions_are_restrictive() {
-    let root = TestWorkspace::new("log", "ssh_permissions_core").expect("temp workspace");
+    let root = TestWorkspace::new("log", "ssh_permissions").expect("temp workspace");
     let log_dir = root.join("ssh_sessions");
     let log_path = log_dir.join("session.log");
 

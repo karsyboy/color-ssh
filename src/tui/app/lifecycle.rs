@@ -2,7 +2,7 @@
 
 use super::event_loop::run_app;
 use crate::tui::AppState;
-use crate::{command_path, inventory::ConnectionProtocol, log_debug, log_error};
+use crate::{config, inventory::ConnectionProtocol, log_debug, log_error, platform};
 use crossterm::{
     event::{DisableBracketedPaste, DisableMouseCapture, EnableBracketedPaste, EnableMouseCapture},
     execute,
@@ -44,17 +44,19 @@ impl Drop for TerminalModeGuard {
 }
 
 /// Run the interactive session manager.
-pub fn run_session_manager() -> io::Result<()> {
+pub fn run_session_manager(runtime_profile: Option<String>) -> io::Result<()> {
     log_debug!("Starting interactive session manager");
 
     let mut mode_guard = TerminalModeGuard::enter()?;
     let stdout = io::stdout();
     let backend = CrosstermBackend::new(stdout);
     let mut terminal = Terminal::new(backend)?;
+    let _watcher = config::config_watcher_with_scope(runtime_profile, config::ReloadNoticeTarget::Queue, config::ConfigWatchScope::AllProfiles);
 
     let mut app = AppState::new()?;
     let result = run_app(&mut terminal, &mut app);
     let selected_request = app.selected_host_to_connect.take();
+    app.terminate_all_sessions();
     let show_cursor_result = terminal.show_cursor();
 
     mode_guard.cleanup();
@@ -73,7 +75,7 @@ pub fn run_session_manager() -> io::Result<()> {
     if let Some(request) = selected_request {
         log_debug!("Connecting to {} host: {}", request.protocol.display_name(), request.target);
 
-        let cossh_path = command_path::cossh_path()?;
+        let cossh_path = platform::cossh_path()?;
         let mut cmd = Command::new(cossh_path);
 
         if request.force_ssh_logging {

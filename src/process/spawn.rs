@@ -1,5 +1,5 @@
 use super::command_spec::{PreparedCommand, command_from_spec};
-use super::exit::map_exit_code;
+use super::map_exit_code;
 use crate::{Result, log_debug, log_debug_raw, log_error, log_info};
 use std::io::{self, Write};
 use std::process::{Child, ExitCode, Stdio};

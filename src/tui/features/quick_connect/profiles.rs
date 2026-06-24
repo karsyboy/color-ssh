@@ -1,7 +1,7 @@
 //! Quick-connect profile discovery.
 
 use crate::tui::AppState;
-use crate::{config, validation};
+use crate::{args, config};
 use std::cmp::Ordering;
 use std::collections::HashSet;
 use std::fs;
@@ -31,7 +31,7 @@ impl AppState {
                 }
 
                 if let Some(profile_name) = filename.strip_suffix(".cossh-config.yaml")
-                    && validation::validate_profile_name(profile_name)
+                    && args::validate_profile_name(profile_name)
                 {
                     profiles.insert(profile_name.to_string());
                 }

@@ -1,58 +1,9 @@
 //! Host browser keyboard handling.
 
+use crate::tui::text_edit;
 use crate::tui::{AppState, ConnectRequest, HostTreeRowKind};
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use std::io;
-
-fn char_len(text: &str) -> usize {
-    text.chars().count()
-}
-
-fn clamp_cursor(text: &str, cursor: &mut usize) {
-    *cursor = (*cursor).min(char_len(text));
-}
-
-fn normalized_selection(text: &str, selection: Option<(usize, usize)>) -> Option<(usize, usize)> {
-    let (start, end) = selection?;
-    let len = char_len(text);
-    let start = start.min(len);
-    let end = end.min(len);
-    if start == end {
-        None
-    } else if start < end {
-        Some((start, end))
-    } else {
-        Some((end, start))
-    }
-}
-
-fn byte_index_for_char(text: &str, char_index: usize) -> usize {
-    if char_index == 0 {
-        return 0;
-    }
-
-    let max = char_len(text);
-    let clamped = char_index.min(max);
-    if clamped == max {
-        return text.len();
-    }
-
-    text.char_indices().nth(clamped).map_or(text.len(), |(byte_index, _)| byte_index)
-}
-
-fn delete_selection(text: &mut String, cursor: &mut usize, selection: &mut Option<(usize, usize)>) -> bool {
-    let Some((start, end)) = normalized_selection(text, *selection) else {
-        *selection = None;
-        return false;
-    };
-
-    let start_byte = byte_index_for_char(text, start);
-    let end_byte = byte_index_for_char(text, end);
-    text.replace_range(start_byte..end_byte, "");
-    *cursor = start;
-    *selection = None;
-    true
-}
 
 impl AppState {
     fn clear_host_search_query(&mut self) {
@@ -62,95 +13,40 @@ impl AppState {
     }
 
     fn move_host_search_cursor_left(&mut self) {
-        clamp_cursor(&self.search_query, &mut self.search_query_cursor);
-        let active_selection = normalized_selection(&self.search_query, self.search_query_selection);
-        self.search_query_selection = None;
-        if let Some((start, _)) = active_selection {
-            self.search_query_cursor = start;
-        } else if self.search_query_cursor > 0 {
-            self.search_query_cursor -= 1;
-        }
+        text_edit::move_cursor_left(&self.search_query, &mut self.search_query_cursor, &mut self.search_query_selection);
     }
 
     fn move_host_search_cursor_right(&mut self) {
-        clamp_cursor(&self.search_query, &mut self.search_query_cursor);
-        let len = char_len(&self.search_query);
-        let active_selection = normalized_selection(&self.search_query, self.search_query_selection);
-        self.search_query_selection = None;
-        if let Some((_, end)) = active_selection {
-            self.search_query_cursor = end;
-        } else if self.search_query_cursor < len {
-            self.search_query_cursor += 1;
-        }
+        text_edit::move_cursor_right(&self.search_query, &mut self.search_query_cursor, &mut self.search_query_selection);
     }
 
     fn move_host_search_cursor_home(&mut self) {
-        self.search_query_cursor = 0;
-        self.search_query_selection = None;
+        text_edit::move_cursor_home(&mut self.search_query_cursor, &mut self.search_query_selection);
     }
 
     fn move_host_search_cursor_end(&mut self) {
-        self.search_query_cursor = char_len(&self.search_query);
-        self.search_query_selection = None;
+        text_edit::move_cursor_end(&self.search_query, &mut self.search_query_cursor, &mut self.search_query_selection);
     }
 
     fn select_all_host_search_text(&mut self) {
-        let len = char_len(&self.search_query);
-        if len == 0 {
-            self.search_query_selection = None;
-            self.search_query_cursor = 0;
-        } else {
-            self.search_query_selection = Some((0, len));
-            self.search_query_cursor = len;
-        }
+        text_edit::select_all(&self.search_query, &mut self.search_query_cursor, &mut self.search_query_selection);
     }
 
     fn insert_host_search_char(&mut self, ch: char) -> bool {
-        let _ = delete_selection(&mut self.search_query, &mut self.search_query_cursor, &mut self.search_query_selection);
-        clamp_cursor(&self.search_query, &mut self.search_query_cursor);
-        let insert_at = byte_index_for_char(&self.search_query, self.search_query_cursor);
-        self.search_query.insert(insert_at, ch);
-        self.search_query_cursor += 1;
-        self.search_query_selection = None;
+        text_edit::insert_char(&mut self.search_query, &mut self.search_query_cursor, &mut self.search_query_selection, ch);
         true
     }
 
     fn backspace_host_search_text(&mut self) -> bool {
-        if delete_selection(&mut self.search_query, &mut self.search_query_cursor, &mut self.search_query_selection) {
-            return true;
-        }
-
-        clamp_cursor(&self.search_query, &mut self.search_query_cursor);
-        if self.search_query_cursor == 0 {
-            self.search_query_selection = None;
-            return false;
-        }
-
-        let end = byte_index_for_char(&self.search_query, self.search_query_cursor);
-        let start = byte_index_for_char(&self.search_query, self.search_query_cursor - 1);
-        self.search_query.replace_range(start..end, "");
-        self.search_query_cursor -= 1;
-        self.search_query_selection = None;
-        true
+        let len_before = text_edit::char_len(&self.search_query);
+        text_edit::backspace(&mut self.search_query, &mut self.search_query_cursor, &mut self.search_query_selection);
+        text_edit::char_len(&self.search_query) != len_before
     }
 
     fn delete_host_search_text(&mut self) -> bool {
-        if delete_selection(&mut self.search_query, &mut self.search_query_cursor, &mut self.search_query_selection) {
-            return true;
-        }
-
-        clamp_cursor(&self.search_query, &mut self.search_query_cursor);
-        let len = char_len(&self.search_query);
-        if self.search_query_cursor >= len {
-            self.search_query_selection = None;
-            return false;
-        }
-
-        let start = byte_index_for_char(&self.search_query, self.search_query_cursor);
-        let end = byte_index_for_char(&self.search_query, self.search_query_cursor + 1);
-        self.search_query.replace_range(start..end, "");
-        self.search_query_selection = None;
-        true
+        let len_before = text_edit::char_len(&self.search_query);
+        text_edit::delete_char(&mut self.search_query, &mut self.search_query_cursor, &mut self.search_query_selection);
+        text_edit::char_len(&self.search_query) != len_before
     }
 
     // Search-mode input.
@@ -190,10 +86,10 @@ impl AppState {
             KeyCode::Char('e') if key.modifiers.contains(KeyModifiers::CONTROL) => {
                 self.move_host_search_cursor_end();
             }
-            KeyCode::Char(ch) if !key.modifiers.contains(KeyModifiers::CONTROL) && !key.modifiers.contains(KeyModifiers::ALT) => {
-                if self.insert_host_search_char(ch) {
-                    self.update_filtered_hosts();
-                }
+            KeyCode::Char(ch)
+                if !key.modifiers.contains(KeyModifiers::CONTROL) && !key.modifiers.contains(KeyModifiers::ALT) && self.insert_host_search_char(ch) =>
+            {
+                self.update_filtered_hosts();
             }
             _ => {}
         }
@@ -206,7 +102,7 @@ impl AppState {
             return;
         }
 
-        let _ = delete_selection(&mut self.search_query, &mut self.search_query_cursor, &mut self.search_query_selection);
+        let _ = text_edit::delete_selection(&mut self.search_query, &mut self.search_query_cursor, &mut self.search_query_selection);
         for ch in filtered.chars() {
             let _ = self.insert_host_search_char(ch);
         }
@@ -235,8 +131,10 @@ impl AppState {
                 }
             }
             KeyCode::Char('o') if key.modifiers.contains(KeyModifiers::CONTROL) => {
-                if !self.focus_on_manager && !self.tabs.is_empty() {
-                    let tab = &self.tabs[self.selected_tab];
+                if !self.focus_on_manager
+                    && !self.tabs.is_empty()
+                    && let Some(tab) = self.selected_terminal_tab()
+                {
                     self.selected_host_to_connect = Some(ConnectRequest {
                         target: tab.host.name.clone(),
                         profile: tab.host.profile.clone(),
@@ -258,11 +156,43 @@ impl AppState {
             }
             KeyCode::Char('f') if self.focus_on_manager && key.modifiers.contains(KeyModifiers::CONTROL) => {
                 self.search_mode = true;
-                self.search_query_cursor = char_len(&self.search_query);
+                self.search_query_cursor = text_edit::char_len(&self.search_query);
+                self.search_query_selection = None;
+            }
+            KeyCode::Char('/') if self.focus_on_manager && key.modifiers.is_empty() => {
+                self.search_mode = true;
+                self.search_query_cursor = text_edit::char_len(&self.search_query);
                 self.search_query_selection = None;
             }
             KeyCode::Char('q') if self.focus_on_manager && key.modifiers.is_empty() => {
                 self.open_quick_connect_modal();
+            }
+            KeyCode::Char('e') if self.focus_on_manager && key.modifiers.is_empty() => {
+                self.open_host_editor_for_selected_host();
+            }
+            KeyCode::Char('n') if self.focus_on_manager && key.modifiers.contains(KeyModifiers::CONTROL) => {
+                self.open_folder_create_for_selected_row();
+            }
+            KeyCode::Char('n') if self.focus_on_manager && key.modifiers.is_empty() => {
+                self.open_host_editor_for_new_entry_from_selection();
+            }
+            KeyCode::Char('d') if self.focus_on_manager && key.modifiers.contains(KeyModifiers::CONTROL) => {
+                if self.selected_folder_id().is_some() {
+                    self.open_folder_delete_confirmation_for_selected_folder();
+                } else {
+                    self.open_host_delete_confirmation_for_selected_host();
+                }
+            }
+            KeyCode::Char('r') if self.focus_on_manager && key.modifiers.contains(KeyModifiers::CONTROL) => {
+                self.open_folder_rename_for_selected_folder();
+            }
+            KeyCode::Char('x') if self.focus_on_manager && key.modifiers.contains(KeyModifiers::CONTROL) => {
+                if let Some(host_idx) = self.selected_host_idx() {
+                    self.open_folder_picker_for_move_host(host_idx);
+                }
+            }
+            KeyCode::Char('c') if self.focus_on_manager && key.modifiers.contains(KeyModifiers::CONTROL) && self.search_query.is_empty() => {
+                self.open_host_editor_for_selected_host_duplicate();
             }
             KeyCode::Char('v') if self.focus_on_manager && key.modifiers.is_empty() => {
                 if self.vault_status.unlocked {
@@ -344,7 +274,7 @@ impl AppState {
                     self.set_selected_row(row_count.saturating_sub(1));
                 }
             }
-            KeyCode::Enter if self.focus_on_manager => {
+            KeyCode::Enter if self.focus_on_manager && key.modifiers.is_empty() => {
                 if let Some(folder_id) = self.selected_folder_id() {
                     self.toggle_folder(folder_id);
                 } else {

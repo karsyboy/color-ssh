@@ -7,14 +7,93 @@ use crate::auth::{
     vault::VaultPaths,
 };
 use crate::config;
-use crate::inventory::{FolderId, InventoryHost, InventoryTreeModel, TreeFolder, get_default_inventory_path, load_inventory_tree};
+use crate::inventory::{
+    FolderId, InventoryHost, InventoryTreeModel, InventoryWatchPlan, TreeFolder, build_inventory_watch_plan, get_default_inventory_path, load_inventory_tree,
+    should_reload_for_inventory_event,
+};
 use crate::{log_debug, log_error, log_warn};
 use notify::{Event, RecommendedWatcher, RecursiveMode, Watcher};
 use std::collections::HashSet;
 use std::fs;
+use std::path::{Path, PathBuf};
 use std::sync::mpsc::{self, Receiver};
+use std::thread;
+use std::time::Duration;
 
 pub(super) const DEFAULT_TERMINAL_SIZE: (u16, u16) = (100, 30);
+const INVENTORY_WATCHER_DEBOUNCE: Duration = Duration::from_millis(250);
+
+pub(super) struct InventoryEventWatcher {
+    _watcher: RecommendedWatcher,
+    receiver: Receiver<()>,
+}
+
+impl InventoryEventWatcher {
+    pub(super) fn new(inventory_path: &Path) -> Option<Self> {
+        let watch_plan = match build_inventory_watch_plan(inventory_path) {
+            Ok(plan) => plan,
+            Err(err) => {
+                log_warn!("Falling back to root-only inventory watch plan for '{}': {}", inventory_path.display(), err);
+                fallback_inventory_watch_plan(inventory_path)
+            }
+        };
+
+        let (event_tx, event_rx) = mpsc::channel();
+        let (reload_tx, reload_rx) = mpsc::channel();
+        let callback_plan = watch_plan.clone();
+        let mut watcher = match RecommendedWatcher::new(
+            move |res| {
+                if let Ok(event) = res
+                    && should_reload_for_inventory_event(&event, &callback_plan)
+                {
+                    let _ = event_tx.send(());
+                }
+            },
+            notify::Config::default(),
+        ) {
+            Ok(watcher) => watcher,
+            Err(err) => {
+                log_warn!("Inventory hot-reload disabled: {}", err);
+                return None;
+            }
+        };
+
+        for watch_path in &watch_plan.watch_paths {
+            if let Err(err) = watcher.watch(watch_path, RecursiveMode::NonRecursive) {
+                log_warn!("Failed to watch inventory path '{}': {}", watch_path.display(), err);
+                return None;
+            }
+        }
+
+        if let Err(err) = thread::Builder::new().name("inventory-watcher".to_string()).spawn(move || {
+            while let Ok(()) = event_rx.recv() {
+                while let Ok(()) = event_rx.recv_timeout(INVENTORY_WATCHER_DEBOUNCE) {}
+                if reload_tx.send(()).is_err() {
+                    break;
+                }
+            }
+        }) {
+            log_warn!("Failed to spawn inventory watcher thread: {}", err);
+            return None;
+        }
+
+        log_debug!("Watching inventory root '{}' via {:?}", inventory_path.display(), watch_plan.watch_paths);
+
+        Some(Self {
+            _watcher: watcher,
+            receiver: reload_rx,
+        })
+    }
+
+    pub(super) fn take_pending_reload(&self) -> bool {
+        let mut saw_event = false;
+        while let Ok(()) = self.receiver.try_recv() {
+            saw_event = true;
+        }
+
+        saw_event
+    }
+}
 
 pub(super) struct VaultStatusEventWatcher {
     _watcher: RecommendedWatcher,
@@ -88,7 +167,6 @@ impl VaultStatusEventWatcher {
 
 #[derive(Debug, Clone, Copy)]
 struct AppStateConfig {
-    history_buffer: usize,
     host_tree_uncollapsed: bool,
     host_info_visible: bool,
     host_view_size_percent: u16,
@@ -99,7 +177,6 @@ struct AppStateConfig {
 impl Default for AppStateConfig {
     fn default() -> Self {
         Self {
-            history_buffer: 1000,
             host_tree_uncollapsed: false,
             host_info_visible: true,
             host_view_size_percent: 25,
@@ -118,7 +195,6 @@ impl AppStateConfig {
             };
 
             if let Some(interactive) = cfg.interactive_settings.as_ref() {
-                session_config.history_buffer = interactive.history_buffer;
                 session_config.host_tree_uncollapsed = interactive.host_tree_uncollapsed;
                 session_config.host_info_visible = interactive.info_view;
                 session_config.host_view_size_percent = interactive.host_view_size;
@@ -135,7 +211,6 @@ pub(super) struct AppStateInit {
     pub(super) host_tree_root: TreeFolder,
     pub(super) inventory_load_error: Option<String>,
     pub(super) collapsed_folders: HashSet<FolderId>,
-    pub(super) history_buffer: usize,
     pub(super) host_panel_width: u16,
     pub(super) host_panel_default_percent: u16,
     pub(super) host_info_height: u16,
@@ -144,6 +219,28 @@ pub(super) struct AppStateInit {
     pub(super) last_terminal_size: (u16, u16),
     pub(super) vault_status: VaultStatus,
     pub(super) vault_status_events: Option<VaultStatusEventWatcher>,
+    pub(super) inventory_events: Option<InventoryEventWatcher>,
+}
+
+fn fallback_inventory_watch_plan(inventory_path: &Path) -> InventoryWatchPlan {
+    let watch_root = existing_watch_path(inventory_path.parent().unwrap_or(Path::new(".")));
+    InventoryWatchPlan {
+        tracked_files: vec![inventory_path.to_path_buf()],
+        include_dirs: Vec::new(),
+        watch_paths: vec![watch_root],
+    }
+}
+
+fn existing_watch_path(path: &Path) -> PathBuf {
+    let mut current = path.to_path_buf();
+    loop {
+        if current.exists() {
+            return current.canonicalize().unwrap_or(current);
+        }
+        if !current.pop() {
+            return std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
+        }
+    }
 }
 
 fn event_targets_vault_status_marker(event: &Event, marker_name: &str) -> bool {
@@ -204,15 +301,18 @@ fn compute_host_info_height(term_height: u16, info_view_size_percent: u16) -> u1
 }
 
 pub(super) fn load_vault_status() -> VaultStatus {
+    let fallback_vault_exists = VaultPaths::resolve_default().map(|paths| paths.metadata_path().is_file()).unwrap_or(false);
+
     agent::AgentClient::new()
         .and_then(|client| client.status())
-        .unwrap_or_else(|_| VaultStatus::locked(false))
+        .unwrap_or_else(|_| VaultStatus::locked(fallback_vault_exists))
 }
 
 pub(super) fn load_app_state_init() -> AppStateInit {
     let (tree_model, inventory_load_error) = load_host_tree_model();
     let session_config = AppStateConfig::load();
     let host_count = tree_model.hosts.len();
+    let inventory_events = InventoryEventWatcher::new(&tree_model.root.path);
     let host_tree_root = tree_model.root;
     let collapsed_folders = build_collapsed_folders(&host_tree_root, session_config.host_tree_uncollapsed);
     let (term_width, term_height) = crossterm::terminal::size().unwrap_or(DEFAULT_TERMINAL_SIZE);
@@ -226,7 +326,6 @@ pub(super) fn load_app_state_init() -> AppStateInit {
         host_tree_root,
         inventory_load_error,
         collapsed_folders,
-        history_buffer: session_config.history_buffer,
         host_panel_width,
         host_panel_default_percent: session_config.host_view_size_percent,
         host_info_height: compute_host_info_height(term_height, session_config.info_view_size_percent),
@@ -235,6 +334,7 @@ pub(super) fn load_app_state_init() -> AppStateInit {
         last_terminal_size: (term_width, term_height),
         vault_status: load_vault_status(),
         vault_status_events: VaultStatusEventWatcher::new(),
+        inventory_events,
     }
 }
 
@@ -245,7 +345,6 @@ pub(super) fn test_app_state_init() -> AppStateInit {
         host_tree_root: fallback_host_tree_root(),
         inventory_load_error: None,
         collapsed_folders: HashSet::new(),
-        history_buffer: 1000,
         host_panel_width: 25,
         host_panel_default_percent: 25,
         host_info_height: 10,
@@ -254,5 +353,6 @@ pub(super) fn test_app_state_init() -> AppStateInit {
         quick_connect_default_ssh_logging: false,
         last_terminal_size: DEFAULT_TERMINAL_SIZE,
         vault_status_events: None,
+        inventory_events: None,
     }
 }

@@ -1,10 +1,10 @@
 use super::*;
+use crate::args::validate_vault_entry_name;
 use crate::auth::secret::ExposeSecret;
 use crate::test::support::auth::TestVaultEnv;
-use crate::validation::validate_vault_entry_name;
 
 #[test]
-fn validate_vault_entry_name_core_rules() {
+fn validate_vault_entry_name_accepts_safe_and_rejects_unsafe_inputs() {
     assert!(validate_vault_entry_name("shared"));
     assert!(validate_vault_entry_name("ok_1.2-3"));
     assert!(!validate_vault_entry_name("../bad"));
@@ -12,8 +12,8 @@ fn validate_vault_entry_name_core_rules() {
 }
 
 #[test]
-fn vault_round_trip_and_entry_exists_core_behavior() {
-    let env = TestVaultEnv::new("round_trip_core");
+fn vault_round_trip_and_entry_exists_preserve_secret_persistence() {
+    let env = TestVaultEnv::new("round_trip");
     let unlocked = env.init_and_unlock("master-pass");
     unlocked.store_secret("shared", "top-secret").expect("store secret");
 
@@ -23,8 +23,20 @@ fn vault_round_trip_and_entry_exists_core_behavior() {
 }
 
 #[test]
+fn unlocked_vault_debug_redacts_data_key_material() {
+    let env = TestVaultEnv::new("debug_redaction");
+    let unlocked = env.init_and_unlock("master-pass");
+    let leaked_key = format!("{:?}", unlocked.data_key_copy());
+
+    let debug = format!("{unlocked:?}");
+
+    assert!(!debug.contains(&leaked_key));
+    assert!(debug.contains("[REDACTED]"));
+}
+
+#[test]
 fn wrong_master_password_and_uninitialized_list_entries_fail() {
-    let env = TestVaultEnv::new("wrong_password_core");
+    let env = TestVaultEnv::new("wrong_password");
     env.init("master-pass");
 
     assert!(matches!(
@@ -32,13 +44,13 @@ fn wrong_master_password_and_uninitialized_list_entries_fail() {
         Err(VaultError::InvalidMasterPassword)
     ));
 
-    let missing_env = TestVaultEnv::new("list_uninitialized_core");
+    let missing_env = TestVaultEnv::new("list_uninitialized");
     assert!(matches!(list_entries_with_paths(missing_env.paths()), Err(VaultError::VaultNotInitialized)));
 }
 
 #[test]
 fn rotate_master_password_preserves_encrypted_data() {
-    let env = TestVaultEnv::new("rotate_core");
+    let env = TestVaultEnv::new("rotate");
     let unlocked = env.init_and_unlock("old-pass");
     unlocked.store_secret("shared", "top-secret").expect("store secret");
 

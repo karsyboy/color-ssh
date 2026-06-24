@@ -3,47 +3,61 @@
 //! Uses OSC 52 escape sequences via crossterm for clipboard operations.
 //! This works in most modern terminals: Konsole, Kitty, Alacritty, Wezterm, foot, etc.
 
-use super::extract::extract_selection_text;
+use super::extract::current_selection;
+use crate::terminal::TerminalClipboardTarget;
+use crate::terminal::copy_to_clipboard;
 use crate::tui::AppState;
-use crossterm::clipboard::CopyToClipboard;
-use crossterm::execute;
-use std::io::{Write, stdout};
+use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
-/// Copy text to system clipboard using OSC 52 escape sequence
-fn copy_to_clipboard(text: &str) {
-    let _ = execute!(stdout(), CopyToClipboard::to_clipboard_from(text));
-    let _ = stdout().flush();
+pub(crate) fn is_modal_copy_shortcut(key: &KeyEvent) -> bool {
+    matches!(
+        key.code,
+        KeyCode::Char(ch)
+            if ch.eq_ignore_ascii_case(&'c') && (key.modifiers.contains(KeyModifiers::CONTROL) || key.modifiers.contains(KeyModifiers::ALT))
+    )
 }
 
 impl AppState {
     // Selection export.
     /// Copy the current text selection to clipboard
     pub(crate) fn copy_selection_to_clipboard(&self) {
-        let (start, end) = match (self.selection_start, self.selection_end) {
-            (Some(selection_start), Some(selection_end)) => {
-                // Normalize so start <= end in reading order
-                if selection_start.0 < selection_end.0 || (selection_start.0 == selection_end.0 && selection_start.1 <= selection_end.1) {
-                    (selection_start, selection_end)
-                } else {
-                    (selection_end, selection_start)
-                }
-            }
-            _ => return,
+        let Some(selection) = current_selection(self.selection_start, self.selection_end) else {
+            return;
         };
 
         if self.tabs.is_empty() || self.selected_tab >= self.tabs.len() {
             return;
         }
 
-        let tab = &self.tabs[self.selected_tab];
-        let session = match &tab.session {
+        let session = match self.selected_terminal_tab().and_then(|tab| tab.session.as_ref()) {
             Some(session) => session,
             None => return,
         };
 
-        let text = if let Ok(parser) = session.parser.lock() {
-            extract_selection_text(&parser, start, end)
-        } else {
+        let text = match session.selection_text_for(selection) {
+            Ok(text) => text,
+            Err(_) => return,
+        };
+
+        if text.is_empty() {
+            return;
+        }
+
+        copy_to_clipboard(TerminalClipboardTarget::Clipboard, &text);
+    }
+
+    pub(crate) fn active_modal_selection_text(&self) -> Option<String> {
+        self.rdp_credentials
+            .as_ref()
+            .and_then(|prompt| prompt.selected_text())
+            .or_else(|| self.quick_connect.as_ref().and_then(|form| form.selected_text()))
+            .or_else(|| self.folder_rename.as_ref().and_then(|state| state.selected_text()))
+            .or_else(|| self.folder_create.as_ref().and_then(|state| state.selected_text()))
+            .or_else(|| self.selected_host_editor().and_then(|form| form.selected_text()))
+    }
+
+    pub(crate) fn copy_active_modal_selection_to_clipboard(&self) {
+        let Some(text) = self.active_modal_selection_text() else {
             return;
         };
 
@@ -51,6 +65,6 @@ impl AppState {
             return;
         }
 
-        copy_to_clipboard(&text);
+        copy_to_clipboard(TerminalClipboardTarget::Clipboard, &text);
     }
 }

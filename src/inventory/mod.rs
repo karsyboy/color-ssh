@@ -1,5 +1,6 @@
 //! YAML inventory loading and SSH config migration.
 
+mod edit;
 mod error;
 mod include;
 mod migration;
@@ -8,6 +9,7 @@ mod normalize;
 mod parse;
 mod path;
 mod tree;
+mod watcher;
 
 pub use model::{ConnectionProtocol, FolderId, InventoryHost, InventoryTreeModel, RdpHostOptions, SshHostOptions, SshOptionMap, TreeFolder};
 pub use path::{expand_tilde, get_default_inventory_path};
@@ -15,8 +17,13 @@ pub use path::{expand_tilde, get_default_inventory_path};
 use std::io;
 use std::path::Path;
 
+pub(crate) use edit::{
+    EditableInventoryHost, create_inventory_folder, create_inventory_host_entry, delete_inventory_folder, delete_inventory_host_entry,
+    move_inventory_host_entry, relocate_inventory_folder, update_inventory_host_entry,
+};
 pub(crate) use migration::migrate_default_ssh_config_to_inventory;
 pub(crate) use tree::sort_tree_folder_by_host_name;
+pub(crate) use watcher::{InventoryWatchPlan, build_inventory_watch_plan, should_reload_for_inventory_event};
 
 /// Normalize `LocalForward`/`RemoteForward` style specs that were split by
 /// whitespace (for example `"8080 localhost:80"` -> `"8080:localhost:80"`).

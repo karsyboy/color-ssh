@@ -1,0 +1,162 @@
+//! Secure command path resolution for known executables.
+
+use once_cell::sync::OnceCell;
+use std::os::unix::fs::{MetadataExt, PermissionsExt};
+use std::{
+    fs, io,
+    path::{Path, PathBuf},
+};
+
+const EXECUTE_BITS: u32 = 0o111;
+const WORLD_WRITABLE_BIT: u32 = 0o002;
+
+#[derive(Debug, Clone)]
+struct CachedPathError {
+    kind: io::ErrorKind,
+    message: String,
+}
+
+impl CachedPathError {
+    fn from_io(err: io::Error) -> Self {
+        Self {
+            kind: err.kind(),
+            message: err.to_string(),
+        }
+    }
+}
+
+static SSH_PATH: OnceCell<Result<PathBuf, CachedPathError>> = OnceCell::new();
+static XFREERDP_PATH: OnceCell<Result<PathBuf, CachedPathError>> = OnceCell::new();
+static COSSH_PATH: OnceCell<Result<PathBuf, CachedPathError>> = OnceCell::new();
+
+fn resolve_cached(
+    cell: &OnceCell<Result<PathBuf, CachedPathError>>,
+    label: &'static str,
+    resolver: impl FnOnce() -> io::Result<PathBuf>,
+) -> io::Result<PathBuf> {
+    let cached = cell.get_or_init(|| resolver().map_err(CachedPathError::from_io));
+    match cached {
+        Ok(path) => Ok(path.clone()),
+        Err(err) => Err(io::Error::new(err.kind, format!("{label}: {}", err.message))),
+    }
+}
+
+pub(crate) fn ssh_path() -> io::Result<PathBuf> {
+    resolve_cached(&SSH_PATH, "ssh", || resolve_path_from_env("ssh"))
+}
+
+pub(crate) fn cossh_path() -> io::Result<PathBuf> {
+    resolve_cached(&COSSH_PATH, "cossh", resolve_current_exe_path)
+}
+
+pub(crate) fn xfreerdp_path() -> io::Result<PathBuf> {
+    resolve_cached(&XFREERDP_PATH, "xfreerdp3/xfreerdp", || {
+        resolve_path_from_env_candidates(&["xfreerdp3", "xfreerdp"]).map_err(|err| {
+            io::Error::new(
+                err.kind(),
+                format!("{}. Install FreeRDP (`xfreerdp3` or `xfreerdp`) and ensure the binary is in PATH", err),
+            )
+        })
+    })
+}
+
+pub(crate) fn resolve_known_command_path(command: &str) -> io::Result<PathBuf> {
+    match command {
+        "ssh" => ssh_path(),
+        "xfreerdp3" | "xfreerdp" => xfreerdp_path(),
+        "cossh" => cossh_path(),
+        _ => Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            format!("unsupported command path lookup: {command}"),
+        )),
+    }
+}
+
+fn resolve_path_from_env(binary: &str) -> io::Result<PathBuf> {
+    let located = which::which(binary).map_err(|err| io::Error::new(io::ErrorKind::NotFound, format!("{binary} not found in PATH: {err}")))?;
+    validate_executable_path(&located, binary)
+}
+
+fn resolve_path_from_env_candidates(binaries: &[&str]) -> io::Result<PathBuf> {
+    let mut failures: Vec<(String, io::Error)> = Vec::new();
+
+    for &binary in binaries {
+        match resolve_path_from_env(binary) {
+            Ok(path) => return Ok(path),
+            Err(err) => failures.push((binary.to_string(), err)),
+        }
+    }
+
+    if failures.is_empty() {
+        return Err(io::Error::new(io::ErrorKind::NotFound, "no candidate command names were provided"));
+    }
+
+    let kind = failures
+        .iter()
+        .find_map(|(_, err)| (err.kind() != io::ErrorKind::NotFound).then_some(err.kind()))
+        .unwrap_or(io::ErrorKind::NotFound);
+    let details = failures.iter().map(|(binary, err)| format!("{binary}: {err}")).collect::<Vec<_>>().join("; ");
+
+    Err(io::Error::new(kind, format!("no usable command found in PATH ({details})")))
+}
+
+fn resolve_current_exe_path() -> io::Result<PathBuf> {
+    let current =
+        std::env::current_exe().map_err(|err| io::Error::new(io::ErrorKind::NotFound, format!("unable to resolve current executable path: {err}")))?;
+    validate_executable_path(&current, "cossh")
+}
+
+fn validate_executable_path(path: &Path, label: &str) -> io::Result<PathBuf> {
+    let canonical = fs::canonicalize(path).map_err(|err| {
+        io::Error::new(
+            io::ErrorKind::NotFound,
+            format!("unable to canonicalize {label} path '{}': {err}", path.display()),
+        )
+    })?;
+
+    let metadata = fs::metadata(&canonical).map_err(|err| {
+        io::Error::new(
+            io::ErrorKind::NotFound,
+            format!("unable to inspect {label} path '{}': {err}", canonical.display()),
+        )
+    })?;
+
+    if !metadata.is_file() {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            format!("{label} path '{}' is not a regular file", canonical.display()),
+        ));
+    }
+
+    validate_executable_security(&canonical, &metadata, label)?;
+
+    Ok(canonical)
+}
+
+fn validate_executable_security(path: &Path, metadata: &fs::Metadata, label: &str) -> io::Result<()> {
+    let mode = metadata.permissions().mode();
+    if mode & WORLD_WRITABLE_BIT != 0 {
+        return Err(io::Error::new(
+            io::ErrorKind::PermissionDenied,
+            format!("{label} path '{}' is world-writable", path.display()),
+        ));
+    }
+
+    if mode & EXECUTE_BITS == 0 {
+        return Err(io::Error::new(
+            io::ErrorKind::PermissionDenied,
+            format!("{label} path '{}' is not executable", path.display()),
+        ));
+    }
+
+    let owner_uid = metadata.uid();
+    let effective_uid = nix::unistd::Uid::effective().as_raw();
+    if owner_uid != 0 && owner_uid != effective_uid {
+        return Err(io::Error::new(
+            io::ErrorKind::PermissionDenied,
+            format!("{label} path '{}' must be owned by root or the current user", path.display()),
+        ));
+    }
+
+    Ok(())
+}

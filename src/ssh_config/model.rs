@@ -1,7 +1,6 @@
 //! SSH config domain models.
 
 use crate::inventory::{ConnectionProtocol, SshOptionMap, TreeFolder};
-use std::path::PathBuf;
 
 /// Represents a single SSH host configuration.
 #[derive(Debug, Clone)]
@@ -80,21 +79,4 @@ pub struct SshHostTreeModel {
     pub root: TreeFolder,
     /// Flattened host list in discovery order.
     pub hosts: Vec<SshHost>,
-}
-
-impl SshHostTreeModel {
-    #[allow(dead_code)]
-    pub(super) fn empty(root_path: PathBuf) -> Self {
-        let root_name = root_path.file_name().and_then(|segment| segment.to_str()).unwrap_or("config").to_string();
-        Self {
-            root: TreeFolder {
-                id: 0,
-                name: root_name,
-                path: root_path,
-                children: Vec::new(),
-                host_indices: Vec::new(),
-            },
-            hosts: Vec::new(),
-        }
-    }
 }
