@@ -424,14 +424,6 @@ impl AppState {
                 let exists = entry_status.exists;
                 let unlocked = entry_status.status.unlocked;
                 self.set_vault_status(entry_status.status);
-                if exists && unlocked {
-                    return Some(HostPassResolution {
-                        pass_entry_override: Some(pass_key.to_string()),
-                        pass_fallback_notice: None,
-                        disable_vault_autologin: false,
-                        manual_rdp_password: None,
-                    });
-                }
                 if !exists {
                     return Some(HostPassResolution {
                         pass_entry_override: None,
@@ -440,6 +432,14 @@ impl AppState {
                             format!("Password auto-login is unavailable because vault entry '{}' was not found", pass_key),
                         )),
                         disable_vault_autologin: true,
+                        manual_rdp_password: None,
+                    });
+                }
+                if unlocked {
+                    return Some(HostPassResolution {
+                        pass_entry_override: Some(pass_key.to_string()),
+                        pass_fallback_notice: None,
+                        disable_vault_autologin: false,
                         manual_rdp_password: None,
                     });
                 }

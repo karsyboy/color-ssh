@@ -15,3 +15,13 @@ fn runtime_expiry_and_poll_backoff_follow_timeout_rules() {
     assert_eq!(first, Duration::from_millis(10));
     assert_eq!(second, Duration::from_millis(20));
 }
+
+#[test]
+fn runtime_debug_redacts_key_material() {
+    let mut runtime = AgentRuntime::new();
+    runtime.unlock([7u8; 32], UnlockPolicy::new(900, 3600));
+
+    let debug = format!("{runtime:?}");
+    assert!(!debug.contains("[7, 7"));
+    assert!(debug.contains("[REDACTED]"));
+}

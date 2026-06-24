@@ -84,7 +84,8 @@ pub fn run_server() -> Result<(), AgentError> {
 
         let should_shutdown = matches!(&request.payload, AgentRequestPayload::Lock);
         log_debug!("Handling password vault agent request '{}'", request.payload.debug_name());
-        let response = handle_request(&paths, &mut runtime, request);
+        let peer_trust = ipc::agent_peer_trust(&stream);
+        let response = handle_request(&paths, &mut runtime, request, peer_trust);
         let _ = ipc::write_response(&mut stream, &response);
         if should_shutdown {
             log_debug!("Password vault agent exiting after explicit lock request");
@@ -93,7 +94,7 @@ pub fn run_server() -> Result<(), AgentError> {
     }
 }
 
-pub(crate) fn handle_request(paths: &VaultPaths, runtime: &mut AgentRuntime, request: ipc::AgentRequest) -> AgentResponse {
+pub(crate) fn handle_request(paths: &VaultPaths, runtime: &mut AgentRuntime, request: ipc::AgentRequest, peer_trust: ipc::AgentPeerTrust) -> AgentResponse {
     match request.payload {
         AgentRequestPayload::Status => AgentResponse::Status { status: runtime.status(paths) },
         AgentRequestPayload::Lock => {
@@ -119,6 +120,9 @@ pub(crate) fn handle_request(paths: &VaultPaths, runtime: &mut AgentRuntime, req
             Err(err) => agent_error_response(runtime, paths, err),
         },
         AgentRequestPayload::AuthorizeAskpass { name } => {
+            if !peer_trust.is_trusted() {
+                return unauthorized_client_response(runtime, paths);
+            }
             let Some(_unlocked) = runtime.unlocked_vault(paths) else {
                 return AgentResponse::Error {
                     status: runtime.status(paths),
@@ -158,6 +162,9 @@ pub(crate) fn handle_request(paths: &VaultPaths, runtime: &mut AgentRuntime, req
             Err(err) => agent_error_response(runtime, paths, err),
         },
         AgentRequestPayload::GetSecret { token } => {
+            if !peer_trust.is_trusted() {
+                return unauthorized_client_response(runtime, paths);
+            }
             let Some(unlocked) = runtime.unlocked_vault(paths) else {
                 return AgentResponse::Error {
                     status: runtime.status(paths),
@@ -186,6 +193,14 @@ pub(crate) fn handle_request(paths: &VaultPaths, runtime: &mut AgentRuntime, req
                 Err(err) => agent_error_response(runtime, paths, err),
             }
         }
+    }
+}
+
+fn unauthorized_client_response(runtime: &AgentRuntime, paths: &VaultPaths) -> AgentResponse {
+    AgentResponse::Error {
+        status: runtime.status(paths),
+        code: "unauthorized_client".to_string(),
+        message: "password vault secrets can only be requested by a trusted cossh process".to_string(),
     }
 }
 

@@ -1,5 +1,5 @@
 use super::compile_secret_patterns;
-use crate::config::{Config, HighlightOverlayAutoPolicy};
+use crate::config::{AuthSettings, Config, HighlightOverlayAutoPolicy};
 use crate::test::support::config::base_config;
 
 #[test]
@@ -9,6 +9,13 @@ fn compile_secret_patterns_skips_invalid_regex_entries() {
     config.settings.remove_secrets = Some(vec!["token=\\w+".to_string(), "[".to_string()]);
     let patterns = compile_secret_patterns(&config);
     assert_eq!(patterns.len(), 1);
+}
+
+#[test]
+fn config_default_auth_session_timeout_matches_safe_template_default() {
+    let auth_settings = AuthSettings::default();
+
+    assert_eq!(auth_settings.session_timeout_seconds, 3_600);
 }
 
 #[test]

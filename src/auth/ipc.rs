@@ -3,8 +3,10 @@
 use crate::auth::secret::{SensitiveString, serde_sensitive_string};
 use crate::auth::vault::VaultPaths;
 use crate::log_debug;
+use interprocess::local_socket::traits::StreamCommon;
 use interprocess::local_socket::{GenericFilePath, ToFsName};
 use interprocess::local_socket::{Listener as LocalSocketListener, ListenerNonblockingMode, ListenerOptions, Stream as LocalSocketStream, prelude::*};
+use nix::unistd::Uid;
 use serde::{Deserialize, Serialize};
 use std::fs;
 use std::io::{self, BufRead, BufReader, Read, Write};
@@ -13,7 +15,7 @@ use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 use zeroize::Zeroizing;
 
-const AGENT_ENDPOINT_PREFIX: &str = "cossh-agent-v2-";
+const AGENT_ENDPOINT_PREFIX: &str = "cossh-agent-v3-";
 const LEGACY_AGENT_STATE_FILENAME: &str = "agent-state.json";
 const VAULT_STATUS_EVENT_FILENAME: &str = "vault-events";
 const UNIX_SOCKET_MODE: u32 = 0o600;
@@ -37,6 +39,18 @@ pub enum ListenerBindResult {
     Bound(LocalSocketListener),
     /// Another live agent already owns the endpoint.
     AlreadyRunning,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum AgentPeerTrust {
+    TrustedCossh,
+    Untrusted,
+}
+
+impl AgentPeerTrust {
+    pub(crate) fn is_trusted(self) -> bool {
+        matches!(self, Self::TrustedCossh)
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -236,6 +250,17 @@ pub fn connect(paths: &VaultPaths) -> io::Result<LocalSocketStream> {
     Ok(stream)
 }
 
+pub(crate) fn agent_peer_trust(stream: &LocalSocketStream) -> AgentPeerTrust {
+    match is_trusted_cossh_peer(stream) {
+        Ok(true) => AgentPeerTrust::TrustedCossh,
+        Ok(false) => AgentPeerTrust::Untrusted,
+        Err(err) => {
+            log_debug!("Unable to verify password vault agent peer identity: {}", err);
+            AgentPeerTrust::Untrusted
+        }
+    }
+}
+
 /// Remove endpoint resources used by the unlock agent.
 pub fn cleanup_endpoint(paths: &VaultPaths) -> io::Result<()> {
     log_debug!("Cleaning password vault agent endpoint resources");
@@ -389,6 +414,31 @@ fn create_listener_for_endpoint(paths: &VaultPaths, endpoint: &AgentEndpoint) ->
 fn connect_to_endpoint(endpoint: &AgentEndpoint) -> io::Result<LocalSocketStream> {
     let name = endpoint.socket_path.as_os_str().to_fs_name::<GenericFilePath>()?;
     LocalSocketStream::connect(name)
+}
+
+fn is_trusted_cossh_peer(stream: &LocalSocketStream) -> io::Result<bool> {
+    let credentials = stream.peer_creds()?;
+    let Some(peer_euid) = credentials.euid() else {
+        return Ok(false);
+    };
+    if peer_euid != Uid::effective().as_raw() {
+        return Ok(false);
+    }
+
+    #[cfg(target_os = "linux")]
+    {
+        let Some(peer_pid) = credentials.pid() else {
+            return Ok(false);
+        };
+        let peer_exe = fs::canonicalize(format!("/proc/{peer_pid}/exe"))?;
+        let cossh_exe = crate::platform::cossh_path()?;
+        Ok(peer_exe == cossh_exe)
+    }
+
+    #[cfg(not(target_os = "linux"))]
+    {
+        Ok(true)
+    }
 }
 
 fn remove_stale_socket_file(paths: &VaultPaths) -> io::Result<bool> {

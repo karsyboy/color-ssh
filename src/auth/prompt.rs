@@ -128,8 +128,8 @@ pub(crate) fn prompt_existing_master_password_with_label(label: &str) -> Result<
 
 pub(crate) fn prompt_entry_secret() -> Result<SensitiveString, String> {
     confirm_hidden_value(
-        "Enter SSH password to store: ",
-        "Confirm SSH password: ",
+        "Enter password to store: ",
+        "Confirm password: ",
         "password cannot be empty",
         "password confirmation did not match",
     )

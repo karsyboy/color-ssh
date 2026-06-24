@@ -23,6 +23,18 @@ fn vault_round_trip_and_entry_exists_preserve_secret_persistence() {
 }
 
 #[test]
+fn unlocked_vault_debug_redacts_data_key_material() {
+    let env = TestVaultEnv::new("debug_redaction");
+    let unlocked = env.init_and_unlock("master-pass");
+    let leaked_key = format!("{:?}", unlocked.data_key_copy());
+
+    let debug = format!("{unlocked:?}");
+
+    assert!(!debug.contains(&leaked_key));
+    assert!(debug.contains("[REDACTED]"));
+}
+
+#[test]
 fn wrong_master_password_and_uninitialized_list_entries_fail() {
     let env = TestVaultEnv::new("wrong_password");
     env.init("master-pass");

@@ -53,6 +53,18 @@ fn secret_fields_are_redacted_in_debug_output() {
     let debug = format!("{payload:?}");
     assert!(!debug.contains("master-pass"));
     assert!(debug.contains("[REDACTED]"));
+
+    let authorize = AgentRequestPayload::AuthorizeAskpass { name: "shared".to_string() };
+    let debug = format!("{authorize:?}");
+    assert!(debug.contains("shared"));
+
+    let response = AgentResponse::AskpassAuthorized {
+        status: VaultStatus::locked(true),
+        token: sensitive_string("askpass-token"),
+    };
+    let debug = format!("{response:?}");
+    assert!(!debug.contains("askpass-token"));
+    assert!(debug.contains("[REDACTED]"));
 }
 
 #[test]

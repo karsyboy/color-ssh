@@ -1,6 +1,6 @@
 use super::handle_request;
 use crate::auth::agent::runtime::AgentRuntime;
-use crate::auth::ipc::{self, AgentRequest, AgentRequestPayload, AgentResponse, UnlockPolicy, VaultStatusEventKind};
+use crate::auth::ipc::{self, AgentPeerTrust, AgentRequest, AgentRequestPayload, AgentResponse, UnlockPolicy, VaultStatusEventKind};
 use crate::auth::secret::{ExposeSecret, sensitive_string};
 use crate::test::support::auth::TestVaultEnv;
 
@@ -12,7 +12,7 @@ fn handle_request_unlock_authorize_and_get_secret_happy_path() {
 
     let mut runtime = AgentRuntime::new();
 
-    let unlock_response = handle_request(
+    let unlock = handle_request(
         env.paths(),
         &mut runtime,
         AgentRequest {
@@ -21,8 +21,9 @@ fn handle_request_unlock_authorize_and_get_secret_happy_path() {
                 policy: UnlockPolicy::new(900, 28_800),
             },
         },
+        AgentPeerTrust::TrustedCossh,
     );
-    assert!(matches!(unlock_response, AgentResponse::Success { .. }));
+    assert!(matches!(unlock, AgentResponse::Success { .. }));
 
     let token = match handle_request(
         env.paths(),
@@ -30,6 +31,7 @@ fn handle_request_unlock_authorize_and_get_secret_happy_path() {
         AgentRequest {
             payload: AgentRequestPayload::AuthorizeAskpass { name: "shared".to_string() },
         },
+        AgentPeerTrust::TrustedCossh,
     ) {
         AgentResponse::AskpassAuthorized { token, .. } => token,
         other => panic!("unexpected authorize response: {other:?}"),
@@ -41,6 +43,7 @@ fn handle_request_unlock_authorize_and_get_secret_happy_path() {
         AgentRequest {
             payload: AgentRequestPayload::GetSecret { token },
         },
+        AgentPeerTrust::TrustedCossh,
     );
 
     assert!(matches!(response, AgentResponse::Secret { secret, .. } if secret.expose_secret() == "top-secret"));
@@ -61,6 +64,7 @@ fn lock_and_unlock_requests_emit_status_events_and_clear_runtime_state() {
                 policy: UnlockPolicy::new(900, 28_800),
             },
         },
+        AgentPeerTrust::TrustedCossh,
     );
     assert!(matches!(unlock, AgentResponse::Success { .. }));
     assert_eq!(
@@ -74,6 +78,7 @@ fn lock_and_unlock_requests_emit_status_events_and_clear_runtime_state() {
         AgentRequest {
             payload: AgentRequestPayload::Lock,
         },
+        AgentPeerTrust::TrustedCossh,
     );
     assert!(matches!(lock, AgentResponse::Success { .. }));
     assert!(runtime.data_key.is_none());
@@ -98,6 +103,7 @@ fn askpass_token_single_use_and_locked_runtime_errors() {
         AgentRequest {
             payload: AgentRequestPayload::AuthorizeAskpass { name: "shared".to_string() },
         },
+        AgentPeerTrust::TrustedCossh,
     ) {
         AgentResponse::AskpassAuthorized { token, .. } => token,
         other => panic!("unexpected authorize response: {other:?}"),
@@ -109,6 +115,7 @@ fn askpass_token_single_use_and_locked_runtime_errors() {
         AgentRequest {
             payload: AgentRequestPayload::GetSecret { token: token.clone() },
         },
+        AgentPeerTrust::TrustedCossh,
     );
     assert!(matches!(first, AgentResponse::Secret { .. }));
 
@@ -118,6 +125,7 @@ fn askpass_token_single_use_and_locked_runtime_errors() {
         AgentRequest {
             payload: AgentRequestPayload::GetSecret { token },
         },
+        AgentPeerTrust::TrustedCossh,
     );
     assert!(matches!(second, AgentResponse::Error { code, .. } if code == "invalid_or_expired_askpass_token"));
 
@@ -127,6 +135,59 @@ fn askpass_token_single_use_and_locked_runtime_errors() {
         AgentRequest {
             payload: AgentRequestPayload::AuthorizeAskpass { name: "shared".to_string() },
         },
+        AgentPeerTrust::TrustedCossh,
     );
     assert!(matches!(locked_authorize, AgentResponse::Error { code, .. } if code == "locked"));
+}
+
+#[test]
+fn secret_bearing_requests_require_trusted_peer() {
+    let env = TestVaultEnv::new("peer_trust_required");
+    let unlocked = env.init_and_unlock("master-pass");
+    unlocked.store_secret("shared", "top-secret").expect("store secret");
+
+    let mut runtime = AgentRuntime::new();
+    runtime.unlock(unlocked.data_key_copy(), UnlockPolicy::new(900, 28_800));
+
+    let untrusted_authorize = handle_request(
+        env.paths(),
+        &mut runtime,
+        AgentRequest {
+            payload: AgentRequestPayload::AuthorizeAskpass { name: "shared".to_string() },
+        },
+        AgentPeerTrust::Untrusted,
+    );
+    assert!(matches!(untrusted_authorize, AgentResponse::Error { code, .. } if code == "unauthorized_client"));
+
+    let token = match handle_request(
+        env.paths(),
+        &mut runtime,
+        AgentRequest {
+            payload: AgentRequestPayload::AuthorizeAskpass { name: "shared".to_string() },
+        },
+        AgentPeerTrust::TrustedCossh,
+    ) {
+        AgentResponse::AskpassAuthorized { token, .. } => token,
+        other => panic!("unexpected authorize response: {other:?}"),
+    };
+
+    let untrusted_get = handle_request(
+        env.paths(),
+        &mut runtime,
+        AgentRequest {
+            payload: AgentRequestPayload::GetSecret { token: token.clone() },
+        },
+        AgentPeerTrust::Untrusted,
+    );
+    assert!(matches!(untrusted_get, AgentResponse::Error { code, .. } if code == "unauthorized_client"));
+
+    let trusted_get = handle_request(
+        env.paths(),
+        &mut runtime,
+        AgentRequest {
+            payload: AgentRequestPayload::GetSecret { token },
+        },
+        AgentPeerTrust::TrustedCossh,
+    );
+    assert!(matches!(trusted_get, AgentResponse::Secret { secret, .. } if secret.expose_secret() == "top-secret"));
 }

@@ -122,7 +122,7 @@ fn rdp_prompt_fallback_notice(detail: impl Into<String>) -> String {
     )
 }
 
-fn build_rdp_args(host: &InventoryHost, password: Option<&SensitiveString>) -> io::Result<Vec<String>> {
+fn build_rdp_args(host: &InventoryHost, force_native_prompt: bool) -> io::Result<Vec<String>> {
     let Some(user) = host.user.as_deref().map(str::trim).filter(|value| !value.is_empty()) else {
         return Err(io::Error::new(
             io::ErrorKind::InvalidInput,
@@ -140,10 +140,7 @@ fn build_rdp_args(host: &InventoryHost, password: Option<&SensitiveString>) -> i
         args.push(format!("/d:{domain}"));
     }
     args.push(format!("/v:{server}"));
-    if let Some(password) = password {
-        validate_rdp_password_for_startup(password)?;
-        args.push(format!("/p:{}", password.expose_secret()));
-    } else {
+    if force_native_prompt {
         // Force a terminal-backed credential prompt when vault auto-login is unavailable.
         args.push("+force-console-callbacks".to_string());
         args.push("/from-stdin:force".to_string());
@@ -157,8 +154,23 @@ fn build_rdp_args(host: &InventoryHost, password: Option<&SensitiveString>) -> i
     Ok(args)
 }
 
-fn build_rdp_stdin_payload(args: &[String]) -> SensitiveString {
-    SensitiveString::from(args.join("\n"))
+fn push_rdp_stdin_arg(payload: &mut String, arg: &str) {
+    if !payload.is_empty() {
+        payload.push('\n');
+    }
+    payload.push_str(arg);
+}
+
+fn build_rdp_stdin_payload(host: &InventoryHost, password: &SensitiveString) -> io::Result<SensitiveString> {
+    validate_rdp_password_for_startup(password)?;
+    let args = build_rdp_args(host, false)?;
+    let mut payload = String::new();
+    for arg in args {
+        push_rdp_stdin_arg(&mut payload, &arg);
+    }
+    push_rdp_stdin_arg(&mut payload, "/p:");
+    payload.push_str(password.expose_secret());
+    Ok(SensitiveString::from_owned_string(payload))
 }
 
 fn terminal_prompting_available() -> bool {
@@ -229,7 +241,7 @@ where
 fn build_prepared_rdp_command(host: &InventoryHost, auth_mode: RdpAuthMode, fallback_notice: Option<String>) -> io::Result<PreparedRdpLaunch> {
     match auth_mode {
         RdpAuthMode::NativePrompt => {
-            let mut command = PreparedCommand::new("xfreerdp", build_rdp_args(host, None)?);
+            let mut command = PreparedCommand::new("xfreerdp", build_rdp_args(host, true)?);
             command.fallback_notice = fallback_notice;
             Ok(PreparedRdpLaunch {
                 command,
@@ -238,9 +250,8 @@ fn build_prepared_rdp_command(host: &InventoryHost, auth_mode: RdpAuthMode, fall
             })
         }
         RdpAuthMode::SuppliedPassword { password, source } => {
-            let stdin_args = build_rdp_args(host, Some(&password))?;
             let mut command = PreparedCommand::new("xfreerdp", vec!["/args-from:stdin".to_string()]);
-            command.stdin_payload = Some(build_rdp_stdin_payload(&stdin_args));
+            command.stdin_payload = Some(build_rdp_stdin_payload(host, &password)?);
             command.fallback_notice = fallback_notice;
             Ok(PreparedRdpLaunch {
                 command,

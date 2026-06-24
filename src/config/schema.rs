@@ -162,7 +162,7 @@ fn default_idle_timeout_seconds() -> u64 {
 }
 
 fn default_session_timeout_seconds() -> u64 {
-    28_800
+    3_600
 }
 
 fn default_direct_password_autologin() -> bool {

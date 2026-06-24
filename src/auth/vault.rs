@@ -151,11 +151,19 @@ impl VaultPaths {
     }
 }
 
-#[derive(Debug)]
 /// Unlocked vault handle carrying decrypted data key material.
 pub struct UnlockedVault {
     paths: VaultPaths,
     data_key: Zeroizing<[u8; DATA_KEY_LEN]>,
+}
+
+impl fmt::Debug for UnlockedVault {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("UnlockedVault")
+            .field("paths", &self.paths)
+            .field("data_key", &"[REDACTED]")
+            .finish()
+    }
 }
 
 impl UnlockedVault {

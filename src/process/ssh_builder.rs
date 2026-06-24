@@ -2,7 +2,7 @@
 
 use super::DISABLE_VAULT_AUTOLOGIN_ENV;
 use super::command_spec::{PreparedCommand, build_plain_ssh_command};
-use super::vault::{VaultAccessError, query_vault_entry_status};
+use super::vault::{VaultAccessError, authorize_vault_entry};
 use crate::args;
 use crate::args::validate_vault_entry_name;
 use crate::auth::{agent, secret::ExposeSecret, transport};
@@ -538,8 +538,8 @@ pub(crate) fn build_ssh_command(args: &[String], explicit_pass_entry: Option<&st
     }
 
     let client = agent::AgentClient::new().map_err(|err| io::Error::other(err.to_string()))?;
-    let entry_status = match query_vault_entry_status(&client, &pass_entry_name) {
-        Ok(status) => status,
+    match authorize_vault_entry(&client, &pass_entry_name) {
+        Ok(_entry_status) => {}
         Err(VaultAccessError::VaultNotInitialized) => {
             log_debug!("Password vault is not initialized during direct SSH launch");
             return Err(io::Error::new(
@@ -547,14 +547,18 @@ pub(crate) fn build_ssh_command(args: &[String], explicit_pass_entry: Option<&st
                 "password vault is not initialized; run `cossh vault init` or `cossh vault add <name>`",
             ));
         }
+        Err(VaultAccessError::EntryNotFound(name)) => {
+            log_debug!("Password vault entry '{}' was not found", name);
+            return Err(io::Error::new(io::ErrorKind::NotFound, format!("password vault entry '{name}' was not found")));
+        }
         Err(VaultAccessError::Query(err)) => {
             log_debug!("Password vault lookup failed during direct SSH launch: {}", err);
             return Err(io::Error::new(io::ErrorKind::PermissionDenied, err));
         }
-        Err(VaultAccessError::LockedWithoutTerminal) => {
+        Err(VaultAccessError::AuthorizationRequiresTerminal) => {
             return Err(io::Error::new(
                 io::ErrorKind::PermissionDenied,
-                "password vault is locked; run `cossh vault unlock`",
+                "password vault auto-login requires an unlocked vault or an interactive master-password prompt",
             ));
         }
         Err(VaultAccessError::UnlockFailed(err)) => {
@@ -566,14 +570,6 @@ pub(crate) fn build_ssh_command(args: &[String], explicit_pass_entry: Option<&st
             return Ok(command);
         }
     };
-
-    if !entry_status.exists {
-        log_debug!("Password vault entry '{}' was not found", pass_entry_name);
-        return Err(io::Error::new(
-            io::ErrorKind::NotFound,
-            format!("password vault entry '{pass_entry_name}' was not found"),
-        ));
-    }
 
     configure_internal_askpass_for_entry(&mut command, &pass_entry_name)?;
     // At this point SSH can request password prompts through the internal helper.
