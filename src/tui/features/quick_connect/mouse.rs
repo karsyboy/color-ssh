@@ -43,15 +43,11 @@ impl AppState {
             MouseEventKind::Up(MouseButton::Left) => {
                 self.handle_quick_connect_left_release(mouse.column, inner_area);
             }
-            MouseEventKind::ScrollUp => {
-                if self.quick_connect_profile_rows(inner_area, mouse.column, mouse.row) {
-                    self.select_prev_quick_connect_profile();
-                }
+            MouseEventKind::ScrollUp if self.quick_connect_profile_rows(inner_area, mouse.column, mouse.row) => {
+                self.select_prev_quick_connect_profile();
             }
-            MouseEventKind::ScrollDown => {
-                if self.quick_connect_profile_rows(inner_area, mouse.column, mouse.row) {
-                    self.select_next_quick_connect_profile();
-                }
+            MouseEventKind::ScrollDown if self.quick_connect_profile_rows(inner_area, mouse.column, mouse.row) => {
+                self.select_next_quick_connect_profile();
             }
             _ => {}
         }

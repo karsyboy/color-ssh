@@ -327,12 +327,13 @@ impl AppState {
                                     self.tab_scroll_offset = next_offset;
                                 }
                             }
-                            Some(TabBarHit::TabTitle(target_idx)) | Some(TabBarHit::TabClose(target_idx)) => {
-                                if drag_idx != target_idx && self.move_tab(drag_idx, target_idx) {
-                                    self.dragging_tab = Some(target_idx);
-                                    self.focus_on_manager = false;
-                                }
+                            Some(TabBarHit::TabTitle(target_idx)) | Some(TabBarHit::TabClose(target_idx))
+                                if drag_idx != target_idx && self.move_tab(drag_idx, target_idx) =>
+                            {
+                                self.dragging_tab = Some(target_idx);
+                                self.focus_on_manager = false;
                             }
+                            Some(TabBarHit::TabTitle(_)) | Some(TabBarHit::TabClose(_)) => {}
                             None => {}
                         }
                     }
@@ -560,14 +561,12 @@ impl AppState {
                     }
                 }
             }
-            MouseEventKind::Moved => {
-                if self.is_pty_mouse_mode_active() {
-                    let mode = self.pty_mouse_mode();
-                    if mode == MouseProtocolMode::AnyMotion
-                        && let Some((col, row)) = self.mouse_to_vt_coords(mouse.column, mouse.row)
-                    {
-                        self.send_mouse_to_pty(35, col, row, false)?;
-                    }
+            MouseEventKind::Moved if self.is_pty_mouse_mode_active() => {
+                let mode = self.pty_mouse_mode();
+                if mode == MouseProtocolMode::AnyMotion
+                    && let Some((col, row)) = self.mouse_to_vt_coords(mouse.column, mouse.row)
+                {
+                    self.send_mouse_to_pty(35, col, row, false)?;
                 }
             }
             _ => {}

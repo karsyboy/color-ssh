@@ -137,10 +137,10 @@ impl AppState {
             KeyCode::Char('e') if key.modifiers.contains(KeyModifiers::CONTROL) => {
                 self.move_terminal_search_cursor_end();
             }
-            KeyCode::Char(ch) if !key.modifiers.contains(KeyModifiers::CONTROL) && !key.modifiers.contains(KeyModifiers::ALT) => {
-                if self.insert_terminal_search_char(ch) {
-                    self.update_terminal_search();
-                }
+            KeyCode::Char(ch)
+                if !key.modifiers.contains(KeyModifiers::CONTROL) && !key.modifiers.contains(KeyModifiers::ALT) && self.insert_terminal_search_char(ch) =>
+            {
+                self.update_terminal_search();
             }
             _ => {}
         }

@@ -86,10 +86,10 @@ impl AppState {
             KeyCode::Char('e') if key.modifiers.contains(KeyModifiers::CONTROL) => {
                 self.move_host_search_cursor_end();
             }
-            KeyCode::Char(ch) if !key.modifiers.contains(KeyModifiers::CONTROL) && !key.modifiers.contains(KeyModifiers::ALT) => {
-                if self.insert_host_search_char(ch) {
-                    self.update_filtered_hosts();
-                }
+            KeyCode::Char(ch)
+                if !key.modifiers.contains(KeyModifiers::CONTROL) && !key.modifiers.contains(KeyModifiers::ALT) && self.insert_host_search_char(ch) =>
+            {
+                self.update_filtered_hosts();
             }
             _ => {}
         }
