@@ -54,8 +54,7 @@ pub(super) fn compile_rules(config: &Config) -> Vec<CompiledHighlightRule> {
             "\x1b[0m".to_string() // Reset if no valid colors
         };
 
-        // Strip literal newlines from YAML block rules before regex compilation.
-        let clean_regex = rule.regex.replace('\n', "").trim().to_string();
+        let clean_regex = normalize_rule_regex(&rule.regex);
 
         match Regex::new(&clean_regex) {
             Ok(regex) => rules.push(CompiledHighlightRule::new(regex, ansi_style)),
@@ -95,6 +94,32 @@ pub(super) fn compile_rule_set(rules: &[CompiledHighlightRule]) -> Option<RegexS
             None
         }
     }
+}
+
+fn normalize_rule_regex(regex: &str) -> String {
+    let trimmed = regex.trim();
+    if has_global_extended_flag(trimmed) {
+        trimmed.to_string()
+    } else {
+        trimmed.replace('\n', "")
+    }
+}
+
+fn has_global_extended_flag(regex: &str) -> bool {
+    let Some(rest) = regex.strip_prefix("(?") else {
+        return false;
+    };
+
+    let Some(flags_end) = rest.find(')') else {
+        return false;
+    };
+
+    let flags = &rest[..flags_end];
+    if flags.is_empty() || flags.contains(':') {
+        return false;
+    }
+
+    flags.split('-').next().is_some_and(|enabled| enabled.contains('x'))
 }
 
 pub(super) fn is_valid_hex_color(color: &str) -> bool {

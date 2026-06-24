@@ -96,12 +96,4 @@ rules:
 #     (\.\d+)?                     # Optional subinterface like .100
 #     \b
 #   color: Green
-#   bg_color: Black                # Optional: add background color for extra visibility                   # Case-insensitive, extended mode
-#     \b
-#     (gigabitethernet|gi|
-#      fastethernet|fa|
-#      tengigabitethernet|te)
-#     \d+(/\d+)*                   # Port numbers like 0/1 or 0/0/1
-#     (\.\d+)?                     # Optional subinterface like .100
-#     \b
-#   color: Green
+#   bg_color: Black                # Optional: add background color for extra visibility

@@ -1,4 +1,4 @@
-use super::{ColorType, compile_rule_set, compile_rules, hex_to_ansi, is_valid_hex_color};
+use super::{ColorType, compile_rule_set, compile_rules, hex_to_ansi, is_valid_hex_color, normalize_rule_regex};
 use crate::config::HighlightRule;
 use crate::test::support::config::base_config;
 
@@ -55,4 +55,28 @@ fn compile_rule_set_matches_compiled_patterns() {
     let compiled_rules = compile_rules(&config);
     let rule_set = compile_rule_set(&compiled_rules).expect("rule set should compile");
     assert!(rule_set.matches("error").matched(0));
+}
+
+#[test]
+fn normalize_rule_regex_preserves_extended_mode_comments() {
+    let pattern = "
+        (?ix)
+        \\b
+        (success|ok) # documented inline comment
+        \\b
+    ";
+
+    let normalized = normalize_rule_regex(pattern);
+    let regex = regex::Regex::new(&normalized).expect("extended mode regex compiles");
+
+    assert!(regex.is_match("success"));
+    assert!(regex.is_match("OK"));
+    assert!(!regex.is_match("failure"));
+}
+
+#[test]
+fn normalize_rule_regex_flattens_non_extended_yaml_blocks() {
+    let pattern = "(foo|\nbar)";
+
+    assert_eq!(normalize_rule_regex(pattern), "(foo|bar)");
 }

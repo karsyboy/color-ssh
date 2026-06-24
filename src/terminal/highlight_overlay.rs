@@ -1001,3 +1001,7 @@ fn byte_range_to_cell_columns(text: &str, start: usize, end: usize) -> (u16, u16
     let end_col = end_col.unwrap_or(current_col);
     (start_col, end_col)
 }
+
+#[cfg(test)]
+#[path = "../test/terminal/highlight_overlay.rs"]
+mod tests;
