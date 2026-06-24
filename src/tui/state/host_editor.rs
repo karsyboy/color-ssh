@@ -1312,7 +1312,7 @@ fn parse_ssh_options_map(mapping: &Mapping) -> Result<SshOptionMap, HostEditorVa
     let mut options = BTreeMap::new();
 
     for (key, value) in mapping {
-        let key = yaml_scalar_to_string(key, "SSH Options")?;
+        let key = key.clone();
         let values = parse_ssh_option_values(value)?;
         if !values.is_empty() {
             options.insert(key, values);

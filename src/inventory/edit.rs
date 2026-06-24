@@ -99,7 +99,7 @@ pub(crate) fn create_inventory_folder(source_file: &Path, parent_folder_path: &[
     }
 
     let mut folder_mapping = Mapping::new();
-    folder_mapping.insert(Value::String(sanitized_name.to_string()), Value::Sequence(Vec::new()));
+    folder_mapping.insert(sanitized_name, Value::Sequence(Vec::new()));
     parent_nodes.push(Value::Mapping(folder_mapping));
     write_inventory_document(source_file, &document)
 }
@@ -196,7 +196,7 @@ pub(crate) fn relocate_inventory_folder(source_file: &Path, folder_path: &[Strin
             format!("folder '{}' in '{}' has no child list", current_name, source_file.display()),
         )
     })?;
-    mapping.insert(Value::String(sanitized_name.to_string()), items);
+    mapping.insert(sanitized_name, items);
 
     let target_nodes = ensure_folder_nodes(nodes, target_parent_path, source_file)?;
     if target_nodes
@@ -322,16 +322,14 @@ fn inventory_nodes_mut<'a>(document: &'a mut Value, source_file: &Path) -> io::R
     };
 
     let inventory_key = root.iter().find_map(|(key, _)| {
-        value_string_key(key).and_then(|text| {
-            if canonical_top_level_key(text) == "inventory" {
-                Some(key.clone())
-            } else {
-                None
-            }
-        })
+        if canonical_top_level_key(key) == "inventory" {
+            Some(key.clone())
+        } else {
+            None
+        }
     });
 
-    let key = inventory_key.unwrap_or_else(|| Value::String("inventory".to_string()));
+    let key = inventory_key.unwrap_or_else(|| "inventory".to_string());
     if !root.contains_key(&key) {
         root.insert(key.clone(), Value::Sequence(Vec::new()));
     }
@@ -422,7 +420,7 @@ fn ensure_folder_nodes<'a>(nodes: &'a mut Vec<Value>, folder_path: &[String], so
             index
         } else {
             let mut folder_mapping = Mapping::new();
-            folder_mapping.insert(Value::String(segment.clone()), Value::Sequence(Vec::new()));
+            folder_mapping.insert(segment.clone(), Value::Sequence(Vec::new()));
             current.push(Value::Mapping(folder_mapping));
             current.len().saturating_sub(1)
         };
@@ -536,10 +534,8 @@ fn apply_editable_host_to_mapping(mapping: &mut Mapping, host: &EditableInventor
 fn remove_editable_host_keys(mapping: &mut Mapping) {
     let keys_to_remove = mapping
         .keys()
-        .filter_map(|key| {
-            let key_text = value_string_key(key)?;
-            editable_host_key(canonical_host_key(key_text)).then(|| key.clone())
-        })
+        .filter(|key| editable_host_key(canonical_host_key(key)))
+        .cloned()
         .collect::<Vec<_>>();
 
     for key in keys_to_remove {
@@ -575,54 +571,54 @@ fn editable_host_key(key: &str) -> bool {
 fn editable_host_mapping(host: &EditableInventoryHost) -> Mapping {
     let mut mapping = Mapping::new();
 
-    mapping.insert(Value::String("name".to_string()), Value::String(host.name.clone()));
-    mapping.insert(Value::String("protocol".to_string()), Value::String(host.protocol.as_str().to_string()));
-    mapping.insert(Value::String("host".to_string()), Value::String(host.host.clone()));
-    mapping.insert(Value::String("hidden".to_string()), Value::Bool(host.hidden));
+    mapping.insert("name", Value::String(host.name.clone()));
+    mapping.insert("protocol", Value::String(host.protocol.as_str().to_string()));
+    mapping.insert("host", Value::String(host.host.clone()));
+    mapping.insert("hidden", Value::Bool(host.hidden));
 
     if let Some(description) = trimmed_option(&host.description) {
-        mapping.insert(Value::String("description".to_string()), Value::String(description.to_string()));
+        mapping.insert("description", Value::String(description.to_string()));
     }
     if let Some(user) = trimmed_option(&host.user) {
-        mapping.insert(Value::String("user".to_string()), Value::String(user.to_string()));
+        mapping.insert("user", Value::String(user.to_string()));
     }
     if let Some(port) = host.port {
-        mapping.insert(Value::String("port".to_string()), Value::Number(port.into()));
+        mapping.insert("port", Value::Number(port.into()));
     }
     if let Some(profile) = trimmed_option(&host.profile) {
-        mapping.insert(Value::String("profile".to_string()), Value::String(profile.to_string()));
+        mapping.insert("profile", Value::String(profile.to_string()));
     }
     if let Some(vault_pass) = trimmed_option(&host.vault_pass) {
-        mapping.insert(Value::String("vault_pass".to_string()), Value::String(vault_pass.to_string()));
+        mapping.insert("vault_pass", Value::String(vault_pass.to_string()));
     }
 
     if !host.ssh_identity_files.is_empty() {
         mapping.insert(
-            Value::String("identity_file".to_string()),
+            "identity_file",
             Value::Sequence(host.ssh_identity_files.iter().map(|value| Value::String(value.clone())).collect()),
         );
     }
 
     if let Some(identities_only) = host.ssh_identities_only {
-        mapping.insert(Value::String("identities_only".to_string()), Value::Bool(identities_only));
+        mapping.insert("identities_only", Value::Bool(identities_only));
     }
 
     if let Some(proxy_jump) = trimmed_option(&host.ssh_proxy_jump) {
-        mapping.insert(Value::String("proxy_jump".to_string()), Value::String(proxy_jump.to_string()));
+        mapping.insert("proxy_jump", Value::String(proxy_jump.to_string()));
     }
 
     if let Some(proxy_command) = trimmed_option(&host.ssh_proxy_command) {
-        mapping.insert(Value::String("proxy_command".to_string()), Value::String(proxy_command.to_string()));
+        mapping.insert("proxy_command", Value::String(proxy_command.to_string()));
     }
 
     if let Some(forward_agent) = trimmed_option(&host.ssh_forward_agent) {
-        mapping.insert(Value::String("forward_agent".to_string()), Value::String(forward_agent.to_string()));
+        mapping.insert("forward_agent", Value::String(forward_agent.to_string()));
     }
 
     let normalized_local_forward = host.ssh_local_forward.iter().map(|value| normalize_ssh_forward_spec(value)).collect::<Vec<_>>();
     if !normalized_local_forward.is_empty() {
         mapping.insert(
-            Value::String("local_forward".to_string()),
+            "local_forward",
             Value::Sequence(normalized_local_forward.iter().map(|value| Value::String(value.clone())).collect()),
         );
     }
@@ -634,7 +630,7 @@ fn editable_host_mapping(host: &EditableInventoryHost) -> Mapping {
         .collect::<Vec<_>>();
     if !normalized_remote_forward.is_empty() {
         mapping.insert(
-            Value::String("remote_forward".to_string()),
+            "remote_forward",
             Value::Sequence(normalized_remote_forward.iter().map(|value| Value::String(value.clone())).collect()),
         );
     }
@@ -652,21 +648,21 @@ fn editable_host_mapping(host: &EditableInventoryHost) -> Mapping {
                 Value::Sequence(values.iter().map(|item| Value::String(item.clone())).collect())
             };
 
-            ssh_options.insert(Value::String(key.clone()), value);
+            ssh_options.insert(key.clone(), value);
         }
 
         if !ssh_options.is_empty() {
-            mapping.insert(Value::String("ssh_options".to_string()), Value::Mapping(ssh_options));
+            mapping.insert("ssh_options", Value::Mapping(ssh_options));
         }
     }
 
     if let Some(rdp_domain) = trimmed_option(&host.rdp_domain) {
-        mapping.insert(Value::String("rdp_domain".to_string()), Value::String(rdp_domain.to_string()));
+        mapping.insert("rdp_domain", Value::String(rdp_domain.to_string()));
     }
 
     if !host.rdp_args.is_empty() {
         mapping.insert(
-            Value::String("rdp_args".to_string()),
+            "rdp_args",
             Value::Sequence(host.rdp_args.iter().map(|value| Value::String(value.clone())).collect()),
         );
     }
@@ -676,10 +672,7 @@ fn editable_host_mapping(host: &EditableInventoryHost) -> Mapping {
 
 fn host_name_matches(mapping: &Mapping, target_name: &str) -> bool {
     mapping.iter().any(|(key, value)| {
-        let Some(key_text) = value_string_key(key) else {
-            return false;
-        };
-        if canonical_host_key(key_text) != "name" {
+        if canonical_host_key(key) != "name" {
             return false;
         }
 
@@ -695,11 +688,7 @@ fn host_mapping_mut(value: &mut Value) -> Option<&mut Mapping> {
 }
 
 fn is_host_mapping(mapping: &Mapping) -> bool {
-    mapping.iter().any(|(key, _)| {
-        value_string_key(key)
-            .map(canonical_host_key)
-            .is_some_and(|canonical_key| canonical_key == "name")
-    })
+    mapping.iter().any(|(key, _)| canonical_host_key(key) == "name")
 }
 
 fn folder_entry_name(value: &Value) -> Option<&str> {
@@ -711,7 +700,7 @@ fn folder_entry_name(value: &Value) -> Option<&str> {
     }
 
     let (key, _) = mapping.iter().next()?;
-    value_string_key(key)
+    Some(key.as_str())
 }
 
 fn folder_items_mut(value: &mut Value) -> Option<&mut Vec<Value>> {
@@ -755,14 +744,6 @@ fn count_hosts_in_node(node: &Value) -> usize {
     };
 
     count_hosts_in_nodes(items)
-}
-
-fn value_string_key(value: &Value) -> Option<&str> {
-    let Value::String(text) = value else {
-        return None;
-    };
-
-    Some(text.as_str())
 }
 
 fn scalar_value_to_string(value: &Value) -> Option<String> {
