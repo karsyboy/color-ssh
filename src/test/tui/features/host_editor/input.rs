@@ -1,7 +1,10 @@
 use super::*;
 use crate::inventory::build_inventory_tree;
 use crate::test::support::fs::TestWorkspace;
-use crate::tui::{EditorTabId, EditorTabState, HostEditorField, HostEditorMode, HostEditorSection, HostEditorState, HostEditorVisibleItem, HostTab};
+use crate::tui::{
+    EditorTabId, EditorTabState, FolderCreateState, FolderRenameState, HostEditorField, HostEditorMode, HostEditorSection, HostEditorState,
+    HostEditorVisibleItem, HostTab,
+};
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers, MouseButton, MouseEvent, MouseEventKind};
 use ratatui::layout::Rect;
 use std::fs;
@@ -59,6 +62,14 @@ fn editor_body_row_index(form: &HostEditorState, target: HostEditorVisibleItem) 
         .filter(|item| !matches!(item, HostEditorVisibleItem::Field(field) if field.is_action()))
         .position(|item| item == target)
         .expect("editor row index")
+}
+
+fn editor_field_text_position(app: &AppState, field: HostEditorField) -> (u16, u16) {
+    let (_, inner) = app.host_editor_tab_layout(app.tab_content_area).expect("host editor layout");
+    let row_index = editor_body_row_index(app.selected_host_editor().expect("host editor state"), HostEditorVisibleItem::Field(field));
+    let row = inner.y.saturating_add(2).saturating_add(row_index as u16);
+    let text_start_col = inner.x.saturating_add(format!("{}: ", field.label()).chars().count() as u16);
+    (text_start_col, row)
 }
 
 #[test]
@@ -1174,6 +1185,191 @@ fn host_editor_mouse_selection_allows_drag_highlight_and_delete() {
     let form = app.selected_host_editor().expect("host editor state");
     assert_eq!(form.selected, HostEditorVisibleItem::Field(HostEditorField::Host));
     assert_eq!(form.host.value, ".example");
+}
+
+#[test]
+fn host_editor_mouse_selection_exposes_rdp_args_text_for_copy_and_paste_replace() {
+    let mut app = AppState::new_for_tests();
+    app.last_terminal_size = (120, 40);
+    open_test_editor(
+        &mut app,
+        HostEditorState::new_create(PathBuf::from("/tmp/inventory.yaml"), vec!["default".to_string()], vec!["db_prod".to_string()]),
+    );
+
+    {
+        let form = app.selected_host_editor_mut().expect("host editor state");
+        form.toggle_protocol_forward();
+        form.toggle_section(HostEditorSection::Rdp);
+        form.rdp_args.value = "/cert:ignore +clipboard".to_string();
+        form.rdp_args.cursor = form.rdp_args.value.chars().count();
+    }
+
+    let (text_start_col, row) = editor_field_text_position(&app, HostEditorField::RdpArgs);
+    app.handle_mouse(MouseEvent {
+        kind: MouseEventKind::Down(MouseButton::Left),
+        column: text_start_col.saturating_add(1),
+        row,
+        modifiers: KeyModifiers::NONE,
+    })
+    .expect("mouse down on rdp args field");
+    app.handle_mouse(MouseEvent {
+        kind: MouseEventKind::Drag(MouseButton::Left),
+        column: text_start_col.saturating_add(12),
+        row,
+        modifiers: KeyModifiers::NONE,
+    })
+    .expect("mouse drag on rdp args field");
+    app.handle_mouse(MouseEvent {
+        kind: MouseEventKind::Up(MouseButton::Left),
+        column: text_start_col.saturating_add(12),
+        row,
+        modifiers: KeyModifiers::NONE,
+    })
+    .expect("mouse release on rdp args field");
+
+    assert_eq!(
+        app.selected_host_editor().and_then(HostEditorState::selected_text).as_deref(),
+        Some("cert:ignore")
+    );
+
+    app.handle_host_editor_paste("drive:share");
+
+    let form = app.selected_host_editor().expect("host editor state");
+    assert_eq!(form.rdp_args.value, "/drive:share +clipboard");
+    assert!(form.rdp_args.selection.is_none());
+}
+
+#[test]
+fn host_editor_mouse_selection_supports_read_only_text_without_enabling_paste() {
+    let mut app = AppState::new_for_tests();
+    app.last_terminal_size = (120, 40);
+    open_test_editor(
+        &mut app,
+        HostEditorState::new_create(PathBuf::from("/tmp/inventory.yaml"), vec!["default".to_string()], vec!["db_prod".to_string()]),
+    );
+
+    let (text_start_col, row) = editor_field_text_position(&app, HostEditorField::Protocol);
+    app.handle_mouse(MouseEvent {
+        kind: MouseEventKind::Down(MouseButton::Left),
+        column: text_start_col,
+        row,
+        modifiers: KeyModifiers::NONE,
+    })
+    .expect("mouse down on protocol field");
+    app.handle_mouse(MouseEvent {
+        kind: MouseEventKind::Drag(MouseButton::Left),
+        column: text_start_col.saturating_add(3),
+        row,
+        modifiers: KeyModifiers::NONE,
+    })
+    .expect("mouse drag on protocol field");
+    app.handle_mouse(MouseEvent {
+        kind: MouseEventKind::Up(MouseButton::Left),
+        column: text_start_col.saturating_add(3),
+        row,
+        modifiers: KeyModifiers::NONE,
+    })
+    .expect("mouse release on protocol field");
+
+    assert_eq!(app.selected_host_editor().and_then(HostEditorState::selected_text).as_deref(), Some("ssh"));
+
+    app.handle_host_editor_paste("rdp");
+
+    let form = app.selected_host_editor().expect("host editor state");
+    assert_eq!(form.protocol.value, "ssh");
+    assert_eq!(form.selection_for_field(HostEditorField::Protocol), Some((0, 3)));
+}
+
+#[test]
+fn host_editor_folder_path_drag_selects_text_and_plain_click_opens_picker() {
+    let workspace = TestWorkspace::new("tui", "host_editor_folder_path_mouse_select").expect("temp workspace");
+    let inventory_path = workspace.join("cossh-inventory.yaml");
+    workspace
+        .write(
+            &inventory_path,
+            r#"
+inventory:
+  - Group:
+      - name: alpha
+        protocol: ssh
+        host: alpha.example
+"#,
+        )
+        .expect("write inventory");
+
+    let mut app = AppState::new_for_tests();
+    app.last_terminal_size = (120, 40);
+    seed_app_from_inventory(&mut app, &inventory_path);
+    app.open_host_editor_for_new_entry(inventory_path);
+    app.tab_content_area = Rect::new(0, 0, 120, 40);
+
+    {
+        let form = app.selected_host_editor_mut().expect("create editor");
+        form.toggle_section(HostEditorSection::Placement);
+        form.folder_path.value = "/Group/".to_string();
+        form.folder_path.cursor = form.folder_path.value.chars().count();
+    }
+
+    let (text_start_col, row) = editor_field_text_position(&app, HostEditorField::FolderPath);
+    app.handle_mouse(MouseEvent {
+        kind: MouseEventKind::Down(MouseButton::Left),
+        column: text_start_col.saturating_add(1),
+        row,
+        modifiers: KeyModifiers::NONE,
+    })
+    .expect("mouse down on folder path field");
+    app.handle_mouse(MouseEvent {
+        kind: MouseEventKind::Drag(MouseButton::Left),
+        column: text_start_col.saturating_add(6),
+        row,
+        modifiers: KeyModifiers::NONE,
+    })
+    .expect("mouse drag on folder path field");
+    app.handle_mouse(MouseEvent {
+        kind: MouseEventKind::Up(MouseButton::Left),
+        column: text_start_col.saturating_add(6),
+        row,
+        modifiers: KeyModifiers::NONE,
+    })
+    .expect("mouse release on folder path field");
+
+    assert!(app.folder_picker.is_none(), "drag-selecting folder path should not open picker");
+    assert_eq!(app.selected_host_editor().and_then(HostEditorState::selected_text).as_deref(), Some("Group"));
+
+    app.handle_mouse(MouseEvent {
+        kind: MouseEventKind::Down(MouseButton::Left),
+        column: text_start_col,
+        row,
+        modifiers: KeyModifiers::NONE,
+    })
+    .expect("mouse down on folder path field for click");
+    app.handle_mouse(MouseEvent {
+        kind: MouseEventKind::Up(MouseButton::Left),
+        column: text_start_col,
+        row,
+        modifiers: KeyModifiers::NONE,
+    })
+    .expect("mouse release on folder path field for click");
+
+    assert!(app.folder_picker.is_some(), "plain click should still open folder picker");
+}
+
+#[test]
+fn active_modal_selection_text_covers_folder_name_modals() {
+    let mut app = AppState::new_for_tests();
+    let mut create_state = FolderCreateState::new(PathBuf::from("/tmp/inventory.yaml"), Vec::new());
+    create_state.name = "alpha".to_string();
+    create_state.selection = Some((1, 4));
+    app.folder_create = Some(create_state);
+
+    assert_eq!(app.active_modal_selection_text().as_deref(), Some("lph"));
+
+    app.folder_create = None;
+    let mut rename_state = FolderRenameState::new(PathBuf::from("/tmp/inventory.yaml"), vec!["Group".to_string()]);
+    rename_state.selection = Some((0, 5));
+    app.folder_rename = Some(rename_state);
+
+    assert_eq!(app.active_modal_selection_text().as_deref(), Some("Group"));
 }
 
 #[test]

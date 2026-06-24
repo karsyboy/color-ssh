@@ -43,6 +43,11 @@ impl AppState {
             MouseEventKind::Up(MouseButton::Left) => {
                 self.handle_quick_connect_left_release(mouse.column, inner_area);
             }
+            MouseEventKind::Up(MouseButton::Right) => {
+                if Self::point_in_rect(inner_area, mouse.column, mouse.row) {
+                    self.copy_active_modal_selection_to_clipboard();
+                }
+            }
             MouseEventKind::ScrollUp if self.quick_connect_profile_rows(inner_area, mouse.column, mouse.row) => {
                 self.select_prev_quick_connect_profile();
             }

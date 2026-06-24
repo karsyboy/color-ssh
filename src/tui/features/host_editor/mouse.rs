@@ -298,9 +298,17 @@ impl AppState {
                     HostEditorField::IdentitiesOnly => {
                         form.cycle_identities_only_forward();
                     }
-                    HostEditorField::Protocol => {}
+                    HostEditorField::Protocol => {
+                        let body_content_width = Self::host_editor_body_content_width(form, inner_area);
+                        if let Some(offset) = Self::host_editor_text_offset(form, inner_area, body_content_width, field, mouse_col) {
+                            form.begin_mouse_selection(field, offset);
+                        }
+                    }
                     HostEditorField::FolderPath => {
-                        self.open_folder_picker_for_editor_placement();
+                        let body_content_width = Self::host_editor_body_content_width(form, inner_area);
+                        if let Some(offset) = Self::host_editor_text_offset(form, inner_area, body_content_width, field, mouse_col) {
+                            form.begin_mouse_selection(field, offset);
+                        }
                     }
                     _ => {
                         let body_content_width = Self::host_editor_body_content_width(form, inner_area);
@@ -337,17 +345,23 @@ impl AppState {
     }
 
     fn handle_host_editor_left_release(&mut self, mouse_col: u16, inner_area: Rect) {
-        let Some(form) = self.selected_host_editor_mut() else {
-            return;
-        };
+        let mut should_open_folder_picker = false;
 
-        if let Some(field) = form.mouse_drag_field()
-            && let Some(offset) = Self::host_editor_text_offset(form, inner_area, Self::host_editor_body_content_width(form, inner_area), field, mouse_col)
-        {
-            form.extend_mouse_selection(offset);
+        if let Some(form) = self.selected_host_editor_mut() {
+            if let Some(field) = form.mouse_drag_field() {
+                if let Some(offset) = Self::host_editor_text_offset(form, inner_area, Self::host_editor_body_content_width(form, inner_area), field, mouse_col)
+                {
+                    form.extend_mouse_selection(offset);
+                }
+                should_open_folder_picker = field == HostEditorField::FolderPath && form.selection_for_field(field).is_none();
+            }
+
+            form.finish_mouse_selection();
         }
 
-        form.finish_mouse_selection();
+        if should_open_folder_picker {
+            self.open_folder_picker_for_editor_placement();
+        }
     }
 
     fn host_editor_item_at_point(&self, local_row: u16, mouse_col: u16, inner_area: Rect) -> Option<HostEditorVisibleItem> {
@@ -405,28 +419,7 @@ impl AppState {
     }
 
     fn host_editor_text_offset(form: &HostEditorState, inner_area: Rect, body_content_width: u16, field: HostEditorField, mouse_col: u16) -> Option<usize> {
-        let editable = matches!(
-            field,
-            HostEditorField::Name
-                | HostEditorField::Description
-                | HostEditorField::Host
-                | HostEditorField::User
-                | HostEditorField::Port
-                | HostEditorField::Profile
-                | HostEditorField::VaultPass
-                | HostEditorField::IdentityFile
-                | HostEditorField::ProxyJump
-                | HostEditorField::ProxyCommand
-                | HostEditorField::ForwardAgent
-                | HostEditorField::LocalForward
-                | HostEditorField::RemoteForward
-                | HostEditorField::SshOptions
-                | HostEditorField::RdpDomain
-                | HostEditorField::RdpArgs
-        );
-        if !editable {
-            return None;
-        }
+        form.text_field(field)?;
 
         let start_col = inner_area.x.saturating_add(field.label().chars().count() as u16).saturating_add(2);
         let value_width = body_content_width.saturating_sub(field.label().chars().count() as u16).saturating_sub(2);

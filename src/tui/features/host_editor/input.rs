@@ -3,6 +3,7 @@
 use crate::auth::vault;
 use crate::inventory::{FolderId, create_inventory_host_entry, delete_inventory_host_entry, update_inventory_host_entry};
 use crate::runtime::{ReloadNoticeToast, format_reload_notice};
+use crate::tui::features::selection::clipboard::is_modal_copy_shortcut;
 use crate::tui::text_edit;
 use crate::tui::{
     AppState, EditorTabId, EditorTabState, HostContextMenuAction, HostContextMenuState, HostContextMenuTarget, HostDeleteConfirmState, HostEditorField,
@@ -383,6 +384,11 @@ impl AppState {
     pub(crate) fn handle_host_editor_key(&mut self, key: KeyEvent) {
         if self.host_delete_confirm.is_some() {
             self.handle_host_delete_confirm_key(key);
+            return;
+        }
+
+        if is_modal_copy_shortcut(&key) {
+            self.copy_active_modal_selection_to_clipboard();
             return;
         }
 

@@ -99,3 +99,25 @@ fn build_submission_for_ssh_ignores_hidden_rdp_fields() {
     assert!(submission.manual_rdp_password.is_none());
     assert!(submission.force_ssh_logging);
 }
+
+#[test]
+fn selected_text_exposes_non_secret_selection_only() {
+    let mut state = QuickConnectState::new(false, vec!["default".to_string()]);
+    state.host = "desktop01".to_string();
+    state.host_cursor = state.host.chars().count();
+    state.selected = QuickConnectField::Host;
+    state.host_selection = Some((0, 7));
+
+    assert_eq!(state.selected_text().as_deref(), Some("desktop"));
+
+    state.selected = QuickConnectField::Password;
+    state.password.insert_char(0, 's');
+    state.password.insert_char(1, 'e');
+    state.password.insert_char(2, 'c');
+    state.password.insert_char(3, 'r');
+    state.password.insert_char(4, 'e');
+    state.password.insert_char(5, 't');
+    state.password_cursor = 6;
+
+    assert!(state.selected_text().is_none());
+}

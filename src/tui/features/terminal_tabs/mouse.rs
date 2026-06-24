@@ -546,6 +546,14 @@ impl AppState {
                 }
             }
             MouseEventKind::Up(MouseButton::Right) => {
+                if self.is_selected_tab_editor()
+                    && let Some((area, _)) = self.host_editor_tab_layout(self.tab_content_area)
+                    && Self::host_editor_point_in_rect(area, mouse.column, mouse.row)
+                {
+                    self.copy_active_modal_selection_to_clipboard();
+                    return Ok(());
+                }
+
                 if self.mouse_to_vt_coords(mouse.column, mouse.row).is_some() && self.current_selection().is_some() {
                     self.copy_selection_to_clipboard();
                     self.clear_selection_state();

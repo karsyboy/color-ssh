@@ -4,6 +4,7 @@ use crate::inventory::{
     FolderId, InventoryHost, TreeFolder, create_inventory_folder, delete_inventory_folder, move_inventory_host_entry, relocate_inventory_folder,
 };
 use crate::runtime::{ReloadNoticeToast, format_reload_notice};
+use crate::tui::features::selection::clipboard::is_modal_copy_shortcut;
 use crate::tui::text_edit;
 use crate::tui::{
     AppState, FolderCreateState, FolderDeleteConfirmState, FolderPickerMode, FolderPickerRow, FolderPickerState, FolderRenameState, HostEditorMode,
@@ -180,6 +181,11 @@ impl AppState {
         let mut should_submit = false;
         let mut should_close = false;
         let mut should_pick_parent = false;
+        if is_modal_copy_shortcut(&key) {
+            self.copy_active_modal_selection_to_clipboard();
+            return;
+        }
+
         if let Some(state) = self.folder_create.as_mut() {
             state.drag_anchor = None;
             match key.code {
@@ -238,6 +244,11 @@ impl AppState {
         let mut should_submit = false;
         let mut should_close = false;
         let mut should_pick_parent = false;
+        if is_modal_copy_shortcut(&key) {
+            self.copy_active_modal_selection_to_clipboard();
+            return;
+        }
+
         if let Some(state) = self.folder_rename.as_mut() {
             state.drag_anchor = None;
             match key.code {

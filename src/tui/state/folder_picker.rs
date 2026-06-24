@@ -117,6 +117,10 @@ impl FolderRenameState {
         }
     }
 
+    pub(crate) fn selected_text(&self) -> Option<String> {
+        text_edit::selected_text(&self.name, self.selection)
+    }
+
     pub(crate) fn parent_display_path(&self) -> String {
         if self.parent_folder_path.is_empty() {
             "/".to_string()
@@ -148,6 +152,10 @@ impl FolderCreateState {
             drag_anchor: None,
             error: None,
         }
+    }
+
+    pub(crate) fn selected_text(&self) -> Option<String> {
+        text_edit::selected_text(&self.name, self.selection)
     }
 
     pub(crate) fn parent_display_path(&self) -> String {

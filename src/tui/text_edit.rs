@@ -26,6 +26,13 @@ pub(crate) fn normalized_selection(text: &str, selection: TextSelection) -> Text
     }
 }
 
+pub(crate) fn selected_text(text: &str, selection: TextSelection) -> Option<String> {
+    let (start, end) = normalized_selection(text, selection)?;
+    let start_byte = byte_index_for_char(text, start);
+    let end_byte = byte_index_for_char(text, end);
+    Some(text[start_byte..end_byte].to_string())
+}
+
 pub(crate) fn byte_index_for_char(text: &str, char_index: usize) -> usize {
     if char_index == 0 {
         return 0;

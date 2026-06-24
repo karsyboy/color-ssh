@@ -178,6 +178,11 @@ impl RdpCredentialsState {
             .and_then(|(text, _, selection)| text_edit::normalized_selection(text, selection))
     }
 
+    pub(crate) fn selected_text(&self) -> Option<String> {
+        let (text, _, selection) = self.text_field(self.selected)?;
+        text_edit::selected_text(text, selection)
+    }
+
     pub(crate) fn masked_password(&self) -> String {
         self.password.masked()
     }

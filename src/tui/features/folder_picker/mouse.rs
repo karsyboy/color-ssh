@@ -252,6 +252,9 @@ impl AppState {
                     self.mark_ui_dirty();
                 }
             }
+            MouseEventKind::Up(MouseButton::Right) if Self::folder_picker_point_in_rect(inner, mouse.column, mouse.row) => {
+                self.copy_active_modal_selection_to_clipboard();
+            }
             _ => {}
         }
     }
@@ -334,6 +337,9 @@ impl AppState {
                     state.drag_anchor = None;
                     self.mark_ui_dirty();
                 }
+            }
+            MouseEventKind::Up(MouseButton::Right) if Self::folder_picker_point_in_rect(inner, mouse.column, mouse.row) => {
+                self.copy_active_modal_selection_to_clipboard();
             }
             _ => {}
         }

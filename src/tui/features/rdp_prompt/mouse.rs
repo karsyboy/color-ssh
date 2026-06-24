@@ -45,6 +45,9 @@ impl AppState {
             MouseEventKind::Up(MouseButton::Left) => {
                 self.handle_rdp_credentials_left_release(mouse.column, inner_area);
             }
+            MouseEventKind::Up(MouseButton::Right) if Self::rdp_prompt_point_in_rect(inner_area, mouse.column, mouse.row) => {
+                self.copy_active_modal_selection_to_clipboard();
+            }
             _ => {}
         }
     }

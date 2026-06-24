@@ -1,6 +1,7 @@
 //! Launch-time RDP credential modal input handling.
 
 use crate::log_error;
+use crate::tui::features::selection::clipboard::is_modal_copy_shortcut;
 use crate::tui::features::terminal_session::launch::HostPassResolution;
 use crate::tui::{
     AppState, RdpCredentialLaunchContext, RdpCredentialSubmission, RdpCredentialValidationError, RdpCredentialsAction, RdpCredentialsField, RdpCredentialsState,
@@ -19,6 +20,11 @@ impl AppState {
     pub(crate) fn handle_rdp_credentials_key(&mut self, key: KeyEvent) {
         let mut should_submit = false;
         let mut should_close = false;
+
+        if is_modal_copy_shortcut(&key) {
+            self.copy_active_modal_selection_to_clipboard();
+            return;
+        }
 
         if let Some(prompt) = self.rdp_credentials.as_mut() {
             prompt.finish_mouse_selection();

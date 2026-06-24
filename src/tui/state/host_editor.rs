@@ -1028,6 +1028,12 @@ impl HostEditorState {
             .and_then(|input| text_edit::normalized_selection(&input.value, input.selection))
     }
 
+    pub(crate) fn selected_text(&self) -> Option<String> {
+        let field = self.selected_field()?;
+        let input = self.text_field(field)?;
+        text_edit::selected_text(&input.value, input.selection)
+    }
+
     pub(crate) fn field_horizontal_scroll_offset(&self, field: HostEditorField, value_width: u16) -> usize {
         let Some(input) = self.text_field(field) else {
             return 0;

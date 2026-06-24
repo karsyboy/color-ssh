@@ -408,6 +408,11 @@ impl QuickConnectState {
             .and_then(|(text, _, selection)| text_edit::normalized_selection(text, selection))
     }
 
+    pub(crate) fn selected_text(&self) -> Option<String> {
+        let (text, _, selection) = self.text_cursor_selection(self.selected)?;
+        text_edit::selected_text(text, selection)
+    }
+
     pub(crate) fn selected_profile_label(&self) -> &str {
         self.profile_options.get(self.profile_index).map(String::as_str).unwrap_or("default")
     }

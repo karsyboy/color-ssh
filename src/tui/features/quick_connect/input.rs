@@ -1,5 +1,6 @@
 //! Quick-connect keyboard handling.
 
+use crate::tui::features::selection::clipboard::is_modal_copy_shortcut;
 use crate::tui::{AppState, QuickConnectField, QuickConnectState, QuickConnectValidationError};
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
@@ -13,6 +14,11 @@ impl AppState {
     pub(crate) fn handle_quick_connect_key(&mut self, key: KeyEvent) {
         let mut should_submit = false;
         let mut should_close = false;
+
+        if is_modal_copy_shortcut(&key) {
+            self.copy_active_modal_selection_to_clipboard();
+            return;
+        }
 
         if let Some(form) = self.quick_connect.as_mut() {
             form.finish_mouse_selection();
