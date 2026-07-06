@@ -190,7 +190,7 @@ impl UnlockedVault {
         let aad = entry_aad(name);
         let ciphertext = cipher
             .encrypt(
-                XNonce::from_slice(&nonce),
+                <&XNonce>::from(&nonce),
                 Payload {
                     msg: secret.as_bytes(),
                     aad: aad.as_bytes(),
@@ -240,7 +240,7 @@ impl UnlockedVault {
         let aad = entry_aad(name);
         let plaintext = cipher
             .decrypt(
-                XNonce::from_slice(&nonce),
+                <&XNonce>::from(&nonce),
                 Payload {
                     msg: ciphertext.as_slice(),
                     aad: aad.as_bytes(),
@@ -416,7 +416,7 @@ fn build_metadata_from_data_key(master_password: &str, data_key: &[u8; DATA_KEY_
         XChaCha20Poly1305::new_from_slice(&wrapping_key[..]).map_err(|err| VaultError::EncryptFailed(format!("invalid cipher key material: {err}")))?;
     let ciphertext = cipher
         .encrypt(
-            XNonce::from_slice(&nonce),
+            <&XNonce>::from(&nonce),
             Payload {
                 msg: data_key,
                 aad: WRAPPED_KEY_AAD,
@@ -462,7 +462,7 @@ fn decrypt_wrapped_data_key(master_password: &str, metadata: &VaultMetadata) -> 
         XChaCha20Poly1305::new_from_slice(&wrapping_key[..]).map_err(|err| VaultError::EncryptFailed(format!("invalid cipher key material: {err}")))?;
     let mut plaintext = cipher
         .decrypt(
-            XNonce::from_slice(&nonce),
+            <&XNonce>::from(&nonce),
             Payload {
                 msg: ciphertext.as_slice(),
                 aad: WRAPPED_KEY_AAD,
