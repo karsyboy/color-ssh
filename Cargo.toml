@@ -21,8 +21,8 @@ name = "cossh"
 path = "src/lib.rs"
 
 [dependencies]
-argon2 = "0.5.3"
-base64 = "0.22.1"
+argon2 = "0.6.0"
+base64 = "0.23.1"
 chacha20poly1305 = "0.11.0"
 chrono = "0.4.45"
 clap = { version = "4.6.1", features = ["derive"] }
