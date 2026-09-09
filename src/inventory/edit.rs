@@ -845,7 +845,7 @@ fn compact_key(key: &str) -> String {
     key.chars().filter(|ch| ch.is_ascii_alphanumeric()).flat_map(char::to_lowercase).collect()
 }
 
-fn validate_folder_name(name: &str) -> io::Result<()> {
+pub(super) fn validate_folder_name(name: &str) -> io::Result<()> {
     if canonical_host_key(name) == "name" {
         return Err(io::Error::new(
             io::ErrorKind::InvalidInput,

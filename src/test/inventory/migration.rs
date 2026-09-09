@@ -1,6 +1,7 @@
 use super::migrate_ssh_config_to_inventory;
 use crate::inventory::{ConnectionProtocol, InventoryHost, InventoryTreeModel, build_inventory_tree};
 use crate::test::support::fs::TestWorkspace;
+use std::fs;
 use std::process::Command;
 
 fn host_named<'a>(tree: &'a InventoryTreeModel, name: &str) -> &'a InventoryHost {
@@ -93,4 +94,29 @@ fn migration_decodes_openssh_quoted_and_equals_form_values() {
     assert_eq!(migrated.user.as_deref(), Some(effective_value("user")));
     assert_eq!(migrated.port.map(|port| port.to_string()).as_deref(), Some(effective_value("port")));
     assert_eq!(migrated.ssh.identity_files.first().map(String::as_str), Some(effective_value("identityfile")));
+}
+
+#[test]
+fn migration_rejects_reserved_include_stems_without_replacing_inventory() {
+    let workspace = TestWorkspace::new("inventory", "migration_reserved_folder").expect("temp workspace");
+    let original = "inventory:\n  - name: 'existing'\n    protocol: 'ssh'\n    host: 'existing.example'\n";
+
+    for (index, include_name) in ["name.conf", "Name.conf", "na-me.conf", "n_a_m.e.conf"].iter().enumerate() {
+        let ssh_config_path = workspace.join(&format!("config-{index}"));
+        let inventory_path = workspace.join(&format!("cossh-inventory-{index}.yaml"));
+        workspace
+            .write(&ssh_config_path, &format!("Include conf.d/{include_name}\n"))
+            .expect("write SSH config");
+        workspace
+            .write_rel(&format!("conf.d/{include_name}"), "Host migrated\nHostName migrated.example\n")
+            .expect("write SSH include");
+        workspace.write(&inventory_path, original).expect("write existing inventory");
+
+        let err = migrate_ssh_config_to_inventory(&ssh_config_path, &inventory_path).expect_err("reserved include stem should fail migration");
+
+        assert_eq!(err.kind(), std::io::ErrorKind::InvalidInput);
+        assert_eq!(fs::read_to_string(&inventory_path).expect("read inventory"), original);
+        let tree = build_inventory_tree(&inventory_path).expect("reload unchanged inventory");
+        assert_eq!(host_named(&tree, "existing").host, "existing.example");
+    }
 }

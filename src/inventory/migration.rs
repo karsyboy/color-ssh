@@ -1,6 +1,6 @@
 //! Legacy OpenSSH config migration into the YAML inventory format.
 
-use super::path::get_default_inventory_path;
+use super::{edit::validate_folder_name, path::get_default_inventory_path};
 use crate::ssh_config::{SshHost, TreeFolder, get_default_ssh_config_path, parse_ssh_config_for_migration};
 use chrono::Local;
 use std::collections::HashSet;
@@ -125,10 +125,13 @@ fn render_folder_item(folder: &TreeFolder, hosts: &[SshHost], indent: usize, sta
         return Ok(None);
     }
 
+    let folder_name = folder_display_name(folder);
+    validate_folder_name(&folder_name)?;
+
     let indent_str = " ".repeat(indent);
     Ok(Some(format!(
         "{indent_str}- {}:\n{}",
-        quote_yaml_string(&folder_display_name(folder)),
+        quote_yaml_string(&folder_name),
         nested_items.join("\n\n")
     )))
 }
