@@ -74,6 +74,7 @@ pub(crate) fn create_inventory_folder(source_file: &Path, parent_folder_path: &[
     if sanitized_name.contains('/') {
         return Err(io::Error::new(io::ErrorKind::InvalidInput, "folder name cannot include path separator '/'"));
     }
+    validate_folder_name(sanitized_name)?;
 
     let mut document = load_inventory_document(source_file)?;
     let nodes = inventory_nodes_mut(&mut document, source_file)?;
@@ -143,6 +144,7 @@ pub(crate) fn relocate_inventory_folder(source_file: &Path, folder_path: &[Strin
     if sanitized_name.contains('/') {
         return Err(io::Error::new(io::ErrorKind::InvalidInput, "folder name cannot include path separator '/'"));
     }
+    validate_folder_name(sanitized_name)?;
 
     let current_parent_path = &folder_path[..folder_path.len().saturating_sub(1)];
     let current_name = &folder_path[folder_path.len().saturating_sub(1)];
@@ -413,6 +415,7 @@ fn ensure_folder_nodes<'a>(nodes: &'a mut Vec<Value>, folder_path: &[String], so
                 format!("folder path segment cannot be empty in '{}'", source_file.display()),
             ));
         }
+        validate_folder_name(segment)?;
 
         let existing_index = current.iter().position(|node| folder_entry_name(node).is_some_and(|name| name == segment));
 
@@ -794,6 +797,17 @@ fn canonical_host_key(key: &str) -> &str {
 
 fn compact_key(key: &str) -> String {
     key.chars().filter(|ch| ch.is_ascii_alphanumeric()).flat_map(char::to_lowercase).collect()
+}
+
+fn validate_folder_name(name: &str) -> io::Result<()> {
+    if canonical_host_key(name) == "name" {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            format!("folder name '{name}' conflicts with the inventory host name key"),
+        ));
+    }
+
+    Ok(())
 }
 
 #[cfg(test)]

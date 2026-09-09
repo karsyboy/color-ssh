@@ -175,6 +175,37 @@ inventory:
 }
 
 #[test]
+fn create_inventory_folder_rejects_host_name_key_equivalents_without_changes() {
+    let workspace = TestWorkspace::new("inventory", "edit_create_reserved_folder").expect("temp workspace");
+    let inventory_path = workspace.join("cossh-inventory.yaml");
+    let original = "inventory: []\n";
+    workspace.write(&inventory_path, original).expect("write inventory");
+
+    for folder_name in ["name", "Name", "na-me", "n_a m.e"] {
+        let err = create_inventory_folder(&inventory_path, &[], folder_name).expect_err("reserved folder name should fail");
+        assert_eq!(err.kind(), std::io::ErrorKind::InvalidInput);
+        assert_eq!(fs::read_to_string(&inventory_path).expect("read inventory"), original);
+    }
+
+    build_inventory_tree(&inventory_path).expect("reload unchanged inventory");
+}
+
+#[test]
+fn create_inventory_host_entry_rejects_host_name_key_folder_path_without_changes() {
+    let workspace = TestWorkspace::new("inventory", "edit_create_host_reserved_folder").expect("temp workspace");
+    let inventory_path = workspace.join("cossh-inventory.yaml");
+    let original = "inventory: []\n";
+    workspace.write(&inventory_path, original).expect("write inventory");
+
+    let err = create_inventory_host_entry(&inventory_path, &["na-me".to_string()], &editable_host("alpha", "alpha.example"))
+        .expect_err("reserved folder path should fail");
+
+    assert_eq!(err.kind(), std::io::ErrorKind::InvalidInput);
+    assert_eq!(fs::read_to_string(&inventory_path).expect("read inventory"), original);
+    build_inventory_tree(&inventory_path).expect("reload unchanged inventory");
+}
+
+#[test]
 fn move_inventory_host_entry_moves_host_between_folders_in_single_write_flow() {
     let workspace = TestWorkspace::new("inventory", "edit_move_host").expect("temp workspace");
     let inventory_path = workspace.join("cossh-inventory.yaml");
@@ -235,6 +266,28 @@ inventory:
     let rendered = fs::read_to_string(&inventory_path).expect("read inventory");
     assert!(rendered.contains("new-folder:"));
     assert!(!rendered.contains("old-folder:"));
+}
+
+#[test]
+fn rename_inventory_folder_rejects_host_name_key_equivalents_without_changes() {
+    let workspace = TestWorkspace::new("inventory", "edit_rename_reserved_folder").expect("temp workspace");
+    let inventory_path = workspace.join("cossh-inventory.yaml");
+    let original = r#"inventory:
+  - old-folder:
+      - name: alpha
+        protocol: ssh
+        host: alpha.example
+"#;
+    workspace.write(&inventory_path, original).expect("write inventory");
+
+    for folder_name in ["name", "Name", "na-me", "n_a m.e"] {
+        let err = relocate_inventory_folder(&inventory_path, &["old-folder".to_string()], &[], folder_name).expect_err("reserved folder name should fail");
+        assert_eq!(err.kind(), std::io::ErrorKind::InvalidInput);
+        assert_eq!(fs::read_to_string(&inventory_path).expect("read inventory"), original);
+    }
+
+    let tree = build_inventory_tree(&inventory_path).expect("reload unchanged inventory");
+    assert_eq!(tree.hosts[0].source_folder_path, vec!["old-folder".to_string()]);
 }
 
 #[test]
