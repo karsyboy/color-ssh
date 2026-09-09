@@ -386,9 +386,9 @@ impl HostEditorValidationError {
 impl HostEditorState {
     pub(crate) fn new_create(source_file: PathBuf, profile_options: Vec<String>, vault_pass_options: Vec<String>) -> Self {
         let profile_options = normalize_profile_options(profile_options);
-        let vault_pass_options = normalize_cycle_options(vault_pass_options, false);
+        let vault_pass_options = normalize_cycle_options(vault_pass_options, true);
         let default_profile = initial_profile_value(None, &profile_options);
-        let default_vault_pass = initial_vault_pass_value(None, &vault_pass_options);
+        let default_vault_pass = initial_vault_pass_value(None);
 
         let mut state = Self {
             mode: HostEditorMode::Create,
@@ -430,9 +430,9 @@ impl HostEditorState {
 
     pub(crate) fn new_edit(host: &InventoryHost, profile_options: Vec<String>, vault_pass_options: Vec<String>) -> Self {
         let profile_options = normalize_profile_options(profile_options);
-        let vault_pass_options = normalize_cycle_options(vault_pass_options, false);
+        let vault_pass_options = normalize_cycle_options(vault_pass_options, true);
         let default_profile = initial_profile_value(host.profile.as_deref(), &profile_options);
-        let default_vault_pass = initial_vault_pass_value(host.vault_pass.as_deref(), &vault_pass_options);
+        let default_vault_pass = initial_vault_pass_value(host.vault_pass.as_deref());
 
         let mut state = Self {
             mode: HostEditorMode::Edit,
@@ -1243,12 +1243,12 @@ fn initial_profile_value(current: Option<&str>, profile_options: &[String]) -> S
     profile_options.first().cloned().unwrap_or_default()
 }
 
-fn initial_vault_pass_value(current: Option<&str>, vault_pass_options: &[String]) -> String {
+fn initial_vault_pass_value(current: Option<&str>) -> String {
     if let Some(current) = current.map(str::trim).filter(|value| !value.is_empty()) {
         return current.to_string();
     }
 
-    vault_pass_options.first().cloned().unwrap_or_default()
+    String::new()
 }
 
 pub(crate) fn parse_folder_path(path: &str) -> Result<Vec<String>, HostEditorValidationError> {

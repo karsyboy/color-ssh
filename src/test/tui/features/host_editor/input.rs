@@ -108,6 +108,43 @@ inventory:
 }
 
 #[test]
+fn editing_host_without_vault_pass_does_not_assign_available_credential() {
+    let workspace = TestWorkspace::new("tui", "host_editor_edit_without_vault_pass").expect("temp workspace");
+    let inventory_path = workspace.join("cossh-inventory.yaml");
+    workspace
+        .write(
+            &inventory_path,
+            r#"
+inventory:
+  - name: alpha
+    protocol: ssh
+    host: alpha.example
+"#,
+        )
+        .expect("write inventory");
+
+    let mut app = AppState::new_for_tests();
+    seed_app_from_inventory(&mut app, &inventory_path);
+    let host = app.hosts.iter().find(|host| host.name == "alpha").expect("host").clone();
+    open_test_editor(
+        &mut app,
+        HostEditorState::new_edit(&host, vec!["default".to_string()], vec!["unrelated".to_string()]),
+    );
+
+    let form = app.selected_host_editor_mut().expect("host editor state");
+    assert!(form.vault_pass.value.is_empty());
+    form.host.value = "alpha-updated.example".to_string();
+    app.submit_host_editor();
+
+    let host = app.hosts.iter().find(|host| host.name == "alpha").expect("updated host");
+    assert_eq!(host.host, "alpha-updated.example");
+    assert_eq!(host.vault_pass, None);
+
+    let rendered = fs::read_to_string(&inventory_path).expect("read inventory");
+    assert!(!rendered.contains("vault-pass:"));
+}
+
+#[test]
 fn delete_entry_requires_confirmation_and_supports_cancel() {
     let workspace = TestWorkspace::new("tui", "host_editor_delete").expect("temp workspace");
     let inventory_path = workspace.join("cossh-inventory.yaml");
@@ -927,13 +964,13 @@ fn vault_pass_field_cycles_with_arrow_keys() {
 
     let form = app.selected_host_editor_mut().expect("host editor state");
     form.selected = HostEditorField::VaultPass.into();
-    assert_eq!(form.vault_pass.value, "db_prod");
+    assert!(form.vault_pass.value.is_empty());
 
     app.handle_host_editor_key(KeyEvent::new(KeyCode::Right, KeyModifiers::NONE));
-    assert_eq!(app.selected_host_editor().expect("host editor state").vault_pass.value.as_str(), "rdp_lab");
+    assert_eq!(app.selected_host_editor().expect("host editor state").vault_pass.value.as_str(), "db_prod");
 
     app.handle_host_editor_key(KeyEvent::new(KeyCode::Left, KeyModifiers::NONE));
-    assert_eq!(app.selected_host_editor().expect("host editor state").vault_pass.value.as_str(), "db_prod");
+    assert!(app.selected_host_editor().expect("host editor state").vault_pass.value.is_empty());
 }
 
 #[test]
