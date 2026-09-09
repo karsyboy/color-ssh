@@ -12,7 +12,7 @@ use std::fs;
 use std::io::{self, BufRead, BufReader, Read, Write};
 use std::os::unix::fs::FileTypeExt;
 use std::path::{Path, PathBuf};
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use zeroize::Zeroizing;
 
 const AGENT_ENDPOINT_PREFIX: &str = "cossh-agent-v3-";
@@ -300,7 +300,7 @@ pub fn read_vault_status_event(paths: &VaultPaths) -> io::Result<VaultStatusEven
 
 /// Read one IPC request from a connected stream.
 pub fn read_request(stream: &mut LocalSocketStream) -> io::Result<AgentRequest> {
-    read_json_line(stream)
+    read_json_line_with_deadline(stream, AGENT_REQUEST_IO_TIMEOUT)
 }
 
 /// Write one IPC response to a connected stream.
@@ -359,6 +359,34 @@ fn read_json_line<T: for<'de> Deserialize<'de>, R: Read>(stream: &mut R) -> io::
         return Err(io::Error::new(io::ErrorKind::UnexpectedEof, "IPC message was not newline terminated"));
     }
     serde_json::from_slice(&line).map_err(|err| io::Error::other(format!("failed to parse IPC message: {err}")))
+}
+
+fn read_json_line_with_deadline<T: for<'de> Deserialize<'de>>(stream: &mut LocalSocketStream, timeout: Duration) -> io::Result<T> {
+    let mut reader = DeadlineReader {
+        stream,
+        deadline: Instant::now() + timeout,
+    };
+    read_json_line(&mut reader)
+}
+
+struct DeadlineReader<'a> {
+    stream: &'a mut LocalSocketStream,
+    deadline: Instant,
+}
+
+impl Read for DeadlineReader<'_> {
+    fn read(&mut self, buffer: &mut [u8]) -> io::Result<usize> {
+        let remaining = self.deadline.saturating_duration_since(Instant::now());
+        if remaining.is_zero() {
+            return Err(io::Error::new(io::ErrorKind::TimedOut, "IPC message read timed out"));
+        }
+        self.stream.set_recv_timeout(Some(remaining))?;
+        let bytes_read = self.stream.read(buffer)?;
+        if Instant::now() >= self.deadline {
+            return Err(io::Error::new(io::ErrorKind::TimedOut, "IPC message read timed out"));
+        }
+        Ok(bytes_read)
+    }
 }
 
 fn agent_endpoint(paths: &VaultPaths) -> AgentEndpoint {

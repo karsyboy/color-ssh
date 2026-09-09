@@ -4,13 +4,17 @@ use crate::auth::ipc::{self, AgentPeerTrust, AgentRequest, AgentRequestPayload, 
 use crate::auth::secret::{ExposeSecret, sensitive_string};
 use crate::test::support::auth::TestVaultEnv;
 use std::io::Write;
-use std::sync::mpsc;
+use std::sync::{
+    Arc,
+    atomic::{AtomicBool, Ordering},
+    mpsc,
+};
 use std::thread;
 use std::time::{Duration, Instant};
 
 #[test]
-fn partial_client_does_not_block_other_requests_or_expiry() {
-    let env = TestVaultEnv::new("partial_client");
+fn trickling_client_does_not_block_other_requests_or_expiry() {
+    let env = TestVaultEnv::new("trickling_client");
     env.init("master-pass");
 
     let server_paths = env.paths().clone();
@@ -35,15 +39,25 @@ fn partial_client_does_not_block_other_requests_or_expiry() {
         env.paths(),
         &AgentRequestPayload::Unlock {
             master_password: sensitive_string("master-pass"),
-            policy: UnlockPolicy::new(2, 10),
+            policy: UnlockPolicy::new(10, 2),
         },
     )
     .expect("unlock agent");
     assert!(unlocked.status().unlocked);
     let unlocked_at = Instant::now();
 
-    let mut partial = Some(ipc::connect(env.paths()).expect("connect partial client"));
-    partial.as_mut().expect("partial client").write_all(b"{").expect("write partial request");
+    let mut partial = ipc::connect(env.paths()).expect("connect partial client");
+    partial.write_all(b"{").expect("write partial request");
+    let stop_trickling = Arc::new(AtomicBool::new(false));
+    let trickle_stop = Arc::clone(&stop_trickling);
+    let mut trickle = Some(thread::spawn(move || {
+        while !trickle_stop.load(Ordering::Relaxed) {
+            thread::sleep(Duration::from_millis(200));
+            if partial.write_all(b" ").is_err() {
+                break;
+            }
+        }
+    }));
     thread::sleep(Duration::from_millis(100));
 
     let request_paths = env.paths().clone();
@@ -54,11 +68,15 @@ fn partial_client_does_not_block_other_requests_or_expiry() {
 
     let competing = request_rx.recv_timeout(Duration::from_secs(1));
     if competing.is_err() {
-        drop(partial.take());
+        stop_trickling.store(true, Ordering::Relaxed);
+        trickle.take().expect("trickling client handle").join().expect("join trickling client");
     }
 
     let server_result = server_rx.recv_timeout(Duration::from_secs(3));
-    drop(partial.take());
+    stop_trickling.store(true, Ordering::Relaxed);
+    if let Some(trickle) = trickle {
+        trickle.join().expect("join trickling client");
+    }
     if server_result.is_err() {
         let _ = server_rx.recv_timeout(Duration::from_secs(2));
     }
