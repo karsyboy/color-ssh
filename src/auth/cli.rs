@@ -299,7 +299,15 @@ pub(crate) fn run_internal_askpass() -> ExitCode {
     let prompt = super::transport::internal_askpass_prompt();
     let prompt_decision = super::transport::classify_internal_askpass_prompt(prompt.as_deref());
     log_debug!("Internal askpass prompt decision: {:?}", prompt_decision);
-    if prompt_decision != super::transport::AskpassPromptDecision::Allow {
+    if prompt_decision == super::transport::AskpassPromptDecision::ConfirmInteractively {
+        let Some(prompt) = prompt.as_deref() else {
+            return ExitCode::from(1);
+        };
+        return match super::transport::prompt_internal_askpass_confirmation(prompt).and_then(|response| write_askpass_response(&response)) {
+            Ok(()) => ExitCode::SUCCESS,
+            Err(err) => command_failure("Failed to read SSH confirmation", err),
+        };
+    } else if prompt_decision != super::transport::AskpassPromptDecision::Allow {
         eprintln!("Password auto-login is unavailable for this SSH prompt.");
         return ExitCode::from(1);
     }
@@ -320,16 +328,7 @@ pub(crate) fn run_internal_askpass() -> ExitCode {
         Err(err) => return command_failure("Failed to read password vault entry", err),
     };
 
-    let result = {
-        use std::io::Write;
-
-        let stdout = std::io::stdout();
-        let mut stdout = stdout.lock();
-        stdout
-            .write_all(secret.expose_secret().as_bytes())
-            .and_then(|_| stdout.write_all(b"\n"))
-            .and_then(|_| stdout.flush())
-    };
+    let result = write_askpass_response(secret.expose_secret());
 
     match result {
         Ok(()) => {
@@ -338,6 +337,16 @@ pub(crate) fn run_internal_askpass() -> ExitCode {
         }
         Err(err) => command_failure("Failed to write askpass response", err),
     }
+}
+
+fn write_askpass_response(response: &str) -> std::io::Result<()> {
+    use std::io::Write;
+
+    let stdout = std::io::stdout();
+    let mut stdout = stdout.lock();
+    stdout.write_all(response.as_bytes())?;
+    stdout.write_all(b"\n")?;
+    stdout.flush()
 }
 
 pub(crate) fn run_vault_command(vault_command: &args::VaultCommand) -> ExitCode {
