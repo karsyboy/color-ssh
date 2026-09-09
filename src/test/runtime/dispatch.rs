@@ -132,10 +132,11 @@ fn title_banner_printing_moves_inside_direct_pty_viewport_for_interactive_ssh() 
         extra_args: Vec::new(),
     });
 
-    assert!(!should_print_title_banner_before_protocol_launch(&interactive_ssh, true));
-    assert!(should_print_title_banner_before_protocol_launch(&interactive_ssh, false));
-    assert!(should_print_title_banner_before_protocol_launch(&non_interactive_ssh, true));
-    assert!(should_print_title_banner_before_protocol_launch(&rdp, true));
+    assert!(!should_print_title_banner_before_protocol_launch(&interactive_ssh, true, true));
+    assert!(should_print_title_banner_before_protocol_launch(&interactive_ssh, false, true));
+    assert!(!should_print_title_banner_before_protocol_launch(&interactive_ssh, false, false));
+    assert!(!should_print_title_banner_before_protocol_launch(&non_interactive_ssh, false, true));
+    assert!(should_print_title_banner_before_protocol_launch(&rdp, true, false));
 }
 
 #[test]

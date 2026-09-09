@@ -3,7 +3,7 @@
 use super::logging::{APP_VERSION, apply_debug_logging, apply_ssh_logging, flush_debug_logs, resolve_logging_settings, update_session_name_for_logging};
 use super::startup::{initialize_config_or_exit, load_runtime_config_settings, print_title_banner};
 use crate::{Result, args, auth, config, inventory, log, log_debug, log_debug_raw, log_error, log_info, process, tui};
-use std::io;
+use std::io::{self, IsTerminal};
 use std::process::ExitCode;
 
 fn run_interactive_session(logger: &log::Logger, args: &args::MainArgs) -> Result<ExitCode> {
@@ -180,8 +180,15 @@ pub(crate) fn protocol_reload_notice_target(command: &args::ProtocolCommand, pre
     }
 }
 
-pub(crate) fn should_print_title_banner_before_protocol_launch(command: &args::ProtocolCommand, prefer_pty_centered_runtime: bool) -> bool {
-    !matches!(command, args::ProtocolCommand::Ssh(ssh_command) if !ssh_command.is_non_interactive && prefer_pty_centered_runtime)
+pub(crate) fn should_print_title_banner_before_protocol_launch(
+    command: &args::ProtocolCommand,
+    prefer_pty_centered_runtime: bool,
+    stdout_is_terminal: bool,
+) -> bool {
+    match command {
+        args::ProtocolCommand::Ssh(ssh_command) => !ssh_command.is_non_interactive && !prefer_pty_centered_runtime && stdout_is_terminal,
+        args::ProtocolCommand::Rdp(_) => true,
+    }
 }
 
 fn run_protocol_command(command: args::ProtocolCommand, pass_entry: Option<String>) -> Result<ExitCode> {
@@ -250,7 +257,7 @@ pub(crate) fn run() -> Result<ExitCode> {
 
     let protocol_command = protocol_command_for_non_interactive(&args)?;
     let prefer_pty_centered_runtime = process::prefer_pty_centered_interactive_ssh_runtime();
-    if should_print_title_banner_before_protocol_launch(&protocol_command, prefer_pty_centered_runtime) {
+    if should_print_title_banner_before_protocol_launch(&protocol_command, prefer_pty_centered_runtime, io::stdout().is_terminal()) {
         print_title_banner(runtime_settings.show_title);
     }
 
