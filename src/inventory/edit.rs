@@ -543,10 +543,41 @@ fn take_host_entry_in_nodes(nodes: &mut Vec<Value>, host_name: &str, current_pat
 }
 
 fn apply_editable_host_to_mapping(mapping: &mut Mapping, host: &EditableInventoryHost) {
+    let legacy_ssh_option_keys = if matches!(host.protocol, ConnectionProtocol::Rdp) {
+        Vec::new()
+    } else {
+        mapping
+            .keys()
+            .filter(|key| !editable_host_key(canonical_host_key(key)))
+            .cloned()
+            .collect::<Vec<_>>()
+    };
+
     remove_editable_host_keys(mapping);
-    for (key, value) in editable_host_mapping(host) {
+    for key in &legacy_ssh_option_keys {
+        let _ = mapping.remove(key);
+    }
+
+    let mut updated = editable_host_mapping(host);
+    for legacy_key in legacy_ssh_option_keys {
+        if let Some(value) = take_ssh_option(&mut updated, &legacy_key) {
+            updated.insert(legacy_key, value);
+        }
+    }
+
+    for (key, value) in updated {
         mapping.insert(key, value);
     }
+}
+
+fn take_ssh_option(mapping: &mut Mapping, option_key: &str) -> Option<Value> {
+    let ssh_options = mapping.get_mut("ssh_options")?.as_mapping_mut()?;
+    let key = ssh_options.keys().find(|key| compact_key(key) == compact_key(option_key)).cloned()?;
+    let value = ssh_options.remove(&key);
+    if ssh_options.is_empty() {
+        let _ = mapping.remove("ssh_options");
+    }
+    value
 }
 
 fn remove_editable_host_keys(mapping: &mut Mapping) {

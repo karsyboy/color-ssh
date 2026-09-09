@@ -89,7 +89,10 @@ inventory:
     updated.user = Some("admin".to_string());
     updated.vault_pass = Some("shared".to_string());
     updated.hidden = true;
-    updated.ssh_options = BTreeMap::from([("StrictHostKeyChecking".to_string(), vec!["ask".to_string()])]);
+    updated.ssh_options = BTreeMap::from([
+        ("StrictHostKeyChecking".to_string(), vec!["ask".to_string()]),
+        ("custom_keep".to_string(), vec!["still-here".to_string()]),
+    ]);
 
     update_inventory_host_entry(&inventory_path, "alpha", &updated).expect("update inventory host entry");
 
@@ -104,6 +107,40 @@ inventory:
 
     let rendered = fs::read_to_string(&inventory_path).expect("read updated inventory");
     assert!(rendered.contains("custom_keep: still-here"));
+}
+
+#[test]
+fn update_inventory_host_entry_reconciles_legacy_top_level_ssh_options() {
+    let workspace = TestWorkspace::new("inventory", "edit_legacy_ssh_options").expect("temp workspace");
+    let inventory_path = workspace.join("cossh-inventory.yaml");
+    workspace
+        .write(
+            &inventory_path,
+            r#"
+inventory:
+  - name: alpha
+    protocol: ssh
+    host: alpha.example
+    StrictHostKeyChecking: no
+    ServerAliveInterval: 30
+"#,
+        )
+        .expect("write inventory");
+
+    let mut updated = editable_host("alpha", "alpha.example");
+    updated.ssh_options = BTreeMap::from([("StrictHostKeyChecking".to_string(), vec!["ask".to_string()])]);
+
+    update_inventory_host_entry(&inventory_path, "alpha", &updated).expect("update inventory host entry");
+
+    let tree = build_inventory_tree(&inventory_path).expect("reload inventory");
+    let host = tree.hosts.iter().find(|host| host.name == "alpha").expect("updated host");
+    assert_eq!(host.ssh.extra_options.get("StrictHostKeyChecking"), Some(&vec!["ask".to_string()]));
+    assert!(!host.ssh.extra_options.contains_key("ServerAliveInterval"));
+
+    let rendered = fs::read_to_string(&inventory_path).expect("read updated inventory");
+    assert!(rendered.contains("StrictHostKeyChecking: ask"));
+    assert!(!rendered.contains("ServerAliveInterval"));
+    assert!(!rendered.contains("ssh_options:"));
 }
 
 #[test]
