@@ -6,6 +6,31 @@ use crate::inventory::{ConnectionProtocol, build_inventory_tree};
 use crate::test::support::fs::TestWorkspace;
 use std::collections::BTreeMap;
 use std::fs;
+use std::os::unix::fs::PermissionsExt;
+
+const EDITABLE_INVENTORY: &str = r#"inventory:
+  - Source:
+      - name: alpha
+        protocol: ssh
+        host: alpha.example
+  - Target: []
+  - Remove:
+      - name: doomed
+        protocol: ssh
+        host: doomed.example
+"#;
+
+fn assert_mutation_preserves_private_mode(prefix: &str, mutate: impl FnOnce(&std::path::Path)) {
+    let workspace = TestWorkspace::new("inventory", prefix).expect("temp workspace");
+    let inventory_path = workspace.join("cossh-inventory.yaml");
+    workspace.write(&inventory_path, EDITABLE_INVENTORY).expect("write inventory");
+    fs::set_permissions(&inventory_path, fs::Permissions::from_mode(0o600)).expect("protect inventory");
+
+    mutate(&inventory_path);
+
+    let mode = fs::metadata(&inventory_path).expect("inventory metadata").permissions().mode() & 0o777;
+    assert_eq!(mode, 0o600);
+}
 
 fn editable_host(name: &str, host: &str) -> EditableInventoryHost {
     EditableInventoryHost {
@@ -14,6 +39,31 @@ fn editable_host(name: &str, host: &str) -> EditableInventoryHost {
         protocol: ConnectionProtocol::Ssh,
         ..EditableInventoryHost::default()
     }
+}
+
+#[test]
+fn inventory_mutations_preserve_private_file_permissions() {
+    assert_mutation_preserves_private_mode("edit_mode_update_host", |path| {
+        update_inventory_host_entry(path, "alpha", &editable_host("alpha", "updated.example")).expect("update host");
+    });
+    assert_mutation_preserves_private_mode("edit_mode_delete_host", |path| {
+        delete_inventory_host_entry(path, "doomed").expect("delete host");
+    });
+    assert_mutation_preserves_private_mode("edit_mode_create_host", |path| {
+        create_inventory_host_entry(path, &["Target".to_string()], &editable_host("created", "created.example")).expect("create host");
+    });
+    assert_mutation_preserves_private_mode("edit_mode_create_folder", |path| {
+        create_inventory_folder(path, &["Target".to_string()], "Created").expect("create folder");
+    });
+    assert_mutation_preserves_private_mode("edit_mode_move_host", |path| {
+        move_inventory_host_entry(path, "alpha", &["Target".to_string()]).expect("move host");
+    });
+    assert_mutation_preserves_private_mode("edit_mode_relocate_folder", |path| {
+        relocate_inventory_folder(path, &["Source".to_string()], &[], "Renamed").expect("relocate folder");
+    });
+    assert_mutation_preserves_private_mode("edit_mode_delete_folder", |path| {
+        delete_inventory_folder(path, &["Remove".to_string()]).expect("delete folder");
+    });
 }
 
 #[test]

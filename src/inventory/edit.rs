@@ -2,8 +2,9 @@
 
 use super::{ConnectionProtocol, SshOptionMap, normalize_ssh_forward_spec};
 use serde_yml::{Mapping, Value};
-use std::fs;
-use std::io;
+use std::fs::{self, OpenOptions};
+use std::io::{self, Write};
+use std::os::unix::fs::OpenOptionsExt;
 use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -298,9 +299,23 @@ fn write_inventory_document(source_file: &Path, document: &Value) -> io::Result<
         fs::create_dir_all(parent)?;
     }
 
+    let original_permissions = match fs::metadata(source_file) {
+        Ok(metadata) => Some(metadata.permissions()),
+        Err(err) if err.kind() == io::ErrorKind::NotFound => None,
+        Err(err) => return Err(err),
+    };
     let tmp_path = temporary_inventory_path(source_file);
-    fs::write(&tmp_path, rendered)?;
-    if let Err(err) = fs::rename(&tmp_path, source_file) {
+    let write_result = (|| {
+        let mut tmp_file = OpenOptions::new().write(true).create_new(true).mode(0o600).open(&tmp_path)?;
+        tmp_file.write_all(rendered.as_bytes())?;
+        if let Some(permissions) = original_permissions {
+            tmp_file.set_permissions(permissions)?;
+        }
+        drop(tmp_file);
+        fs::rename(&tmp_path, source_file)
+    })();
+
+    if let Err(err) = write_result {
         let _ = fs::remove_file(&tmp_path);
         return Err(err);
     }
