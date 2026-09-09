@@ -16,6 +16,7 @@ use std::sync::{
 #[derive(Debug)]
 struct MockTerminalChild {
     killed: Arc<AtomicBool>,
+    exited: bool,
 }
 
 #[derive(Debug)]
@@ -51,7 +52,7 @@ impl ChildKiller for MockTerminalChildKiller {
 
 impl PtyChild for MockTerminalChild {
     fn try_wait(&mut self) -> std::io::Result<Option<ExitStatus>> {
-        Ok(Some(ExitStatus::with_exit_code(0)))
+        Ok(self.exited.then(|| ExitStatus::with_exit_code(0)))
     }
 
     fn wait(&mut self) -> std::io::Result<ExitStatus> {
@@ -64,11 +65,23 @@ impl PtyChild for MockTerminalChild {
 }
 
 fn mock_terminal_session(killed: Arc<AtomicBool>) -> TerminalSession {
-    mock_terminal_session_with_writer(killed, None)
+    mock_terminal_session_with_status(killed, false)
+}
+
+fn mock_terminal_session_with_status(killed: Arc<AtomicBool>, exited: bool) -> TerminalSession {
+    mock_terminal_session_with_writer_and_status(killed, None, exited)
 }
 
 fn mock_terminal_session_with_writer(killed: Arc<AtomicBool>, input_writer: Option<crate::terminal::TerminalInputWriter>) -> TerminalSession {
-    let child: Arc<Mutex<Box<dyn PtyChild + Send + Sync>>> = Arc::new(Mutex::new(Box::new(MockTerminalChild { killed })));
+    mock_terminal_session_with_writer_and_status(killed, input_writer, false)
+}
+
+fn mock_terminal_session_with_writer_and_status(
+    killed: Arc<AtomicBool>,
+    input_writer: Option<crate::terminal::TerminalInputWriter>,
+    exited: bool,
+) -> TerminalSession {
+    let child: Arc<Mutex<Box<dyn PtyChild + Send + Sync>>> = Arc::new(Mutex::new(Box::new(MockTerminalChild { killed, exited })));
     let engine = Arc::new(Mutex::new(TerminalEngine::new_with_host_and_remote_clipboard_policy(
         24,
         80,
@@ -225,6 +238,18 @@ fn terminate_all_sessions_terminates_and_detaches_tab_children() {
             .iter()
             .all(|tab| tab.terminal().and_then(|terminal| terminal.session.as_ref()).is_none())
     );
+}
+
+#[test]
+fn close_current_tab_does_not_terminate_reaped_child() {
+    let mut app = AppState::new_for_tests();
+    let killed = Arc::new(AtomicBool::new(false));
+    app.tabs = vec![test_tab("alpha", Some(mock_terminal_session_with_status(Arc::clone(&killed), true)))];
+
+    app.close_current_tab();
+
+    assert!(!killed.load(Ordering::Relaxed));
+    assert!(app.tabs.is_empty());
 }
 
 fn seed_app_from_inventory(app: &mut AppState, inventory_path: &std::path::Path) {

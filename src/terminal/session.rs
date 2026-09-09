@@ -137,11 +137,15 @@ impl TerminalSession {
     pub(crate) fn terminate(&mut self) {
         let terminate_result = match &self.child {
             TerminalChild::Pty(child) => match child.lock() {
-                Ok(mut child) => {
-                    let result = child.kill();
-                    let _ = child.try_wait();
-                    result
-                }
+                Ok(mut child) => match child.try_wait() {
+                    Ok(Some(_)) => Ok(()),
+                    Ok(None) => {
+                        let result = child.kill();
+                        let _ = child.try_wait();
+                        result
+                    }
+                    Err(err) => Err(err),
+                },
                 Err(err) => Err(io::Error::other(err.to_string())),
             },
         };
