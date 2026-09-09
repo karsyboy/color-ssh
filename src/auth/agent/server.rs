@@ -24,6 +24,10 @@ impl Drop for EndpointGuard {
 /// Start unlock-agent server loop on the local IPC endpoint.
 pub fn run_server() -> Result<(), AgentError> {
     let paths = VaultPaths::resolve_default()?;
+    run_server_with_paths(paths)
+}
+
+fn run_server_with_paths(paths: VaultPaths) -> Result<(), AgentError> {
     let listener = match ipc::bind_listener(&paths)? {
         ipc::ListenerBindResult::Bound(listener) => listener,
         ipc::ListenerBindResult::AlreadyRunning => {
@@ -56,6 +60,10 @@ pub fn run_server() -> Result<(), AgentError> {
             Err(err) if err.kind() == io::ErrorKind::Interrupted => continue,
             Err(err) => return Err(AgentError::Io(err)),
         };
+        if let Err(err) = ipc::set_server_stream_timeouts(&stream) {
+            log_debug!("Failed to configure password vault agent client timeouts: {}", err);
+            continue;
+        }
 
         let request = match ipc::read_request(&mut stream) {
             Ok(request) => request,

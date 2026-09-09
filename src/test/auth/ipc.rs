@@ -45,6 +45,17 @@ fn endpoint_derivation_and_json_round_trip_are_stable() {
 }
 
 #[test]
+fn json_messages_require_a_delimiter_and_respect_the_size_limit() {
+    let request = br#"{"payload":{"type":"status"}}"#;
+    let err = read_json_line::<AgentRequest, _>(&mut io::Cursor::new(request)).expect_err("unterminated message should fail");
+    assert_eq!(err.kind(), io::ErrorKind::UnexpectedEof);
+
+    let oversized = vec![b' '; MAX_IPC_MESSAGE_BYTES + 1];
+    let err = read_json_line::<AgentRequest, _>(&mut io::Cursor::new(oversized)).expect_err("oversized message should fail");
+    assert_eq!(err.kind(), io::ErrorKind::InvalidData);
+}
+
+#[test]
 fn secret_fields_are_redacted_in_debug_output() {
     let payload = AgentRequestPayload::Unlock {
         master_password: sensitive_string("master-pass"),

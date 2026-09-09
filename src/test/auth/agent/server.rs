@@ -1,8 +1,82 @@
-use super::handle_request;
+use super::{handle_request, run_server_with_paths};
 use crate::auth::agent::runtime::AgentRuntime;
 use crate::auth::ipc::{self, AgentPeerTrust, AgentRequest, AgentRequestPayload, AgentResponse, UnlockPolicy, VaultStatusEventKind};
 use crate::auth::secret::{ExposeSecret, sensitive_string};
 use crate::test::support::auth::TestVaultEnv;
+use std::io::Write;
+use std::sync::mpsc;
+use std::thread;
+use std::time::{Duration, Instant};
+
+#[test]
+fn partial_client_does_not_block_other_requests_or_expiry() {
+    let env = TestVaultEnv::new("partial_client");
+    env.init("master-pass");
+
+    let server_paths = env.paths().clone();
+    let (server_tx, server_rx) = mpsc::channel();
+    let server = thread::spawn(move || {
+        let _ = server_tx.send(run_server_with_paths(server_paths));
+    });
+
+    let startup_deadline = Instant::now() + Duration::from_secs(2);
+    loop {
+        match ipc::connect(env.paths()) {
+            Ok(stream) => {
+                drop(stream);
+                break;
+            }
+            Err(_) if Instant::now() < startup_deadline => thread::sleep(Duration::from_millis(10)),
+            Err(err) => panic!("agent did not start: {err}"),
+        }
+    }
+
+    let unlocked = ipc::send_request(
+        env.paths(),
+        &AgentRequestPayload::Unlock {
+            master_password: sensitive_string("master-pass"),
+            policy: UnlockPolicy::new(2, 10),
+        },
+    )
+    .expect("unlock agent");
+    assert!(unlocked.status().unlocked);
+    let unlocked_at = Instant::now();
+
+    let mut partial = Some(ipc::connect(env.paths()).expect("connect partial client"));
+    partial.as_mut().expect("partial client").write_all(b"{").expect("write partial request");
+    thread::sleep(Duration::from_millis(100));
+
+    let request_paths = env.paths().clone();
+    let (request_tx, request_rx) = mpsc::channel();
+    thread::spawn(move || {
+        let _ = request_tx.send(ipc::send_request(&request_paths, &AgentRequestPayload::Status));
+    });
+
+    let competing = request_rx.recv_timeout(Duration::from_secs(1));
+    if competing.is_err() {
+        drop(partial.take());
+    }
+
+    let server_result = server_rx.recv_timeout(Duration::from_secs(3));
+    drop(partial.take());
+    if server_result.is_err() {
+        let _ = server_rx.recv_timeout(Duration::from_secs(2));
+    }
+    server.join().expect("join agent server");
+
+    let response = competing
+        .expect("a partial client must not block a subsequent request")
+        .expect("status request should succeed");
+    assert!(matches!(response, AgentResponse::Status { .. }));
+    assert!(unlocked_at.elapsed() < Duration::from_secs(3));
+    server_result
+        .expect("agent should expire while partial client remains connected")
+        .expect("agent server should exit cleanly");
+
+    let event = ipc::read_vault_status_event(env.paths()).expect("read expiry event");
+    assert_eq!(event.kind, VaultStatusEventKind::Locked);
+    assert!(!event.status.unlocked);
+}
 
 #[test]
 fn handle_request_unlock_authorize_and_get_secret_happy_path() {

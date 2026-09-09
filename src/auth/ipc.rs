@@ -12,13 +12,16 @@ use std::fs;
 use std::io::{self, BufRead, BufReader, Read, Write};
 use std::os::unix::fs::FileTypeExt;
 use std::path::{Path, PathBuf};
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use zeroize::Zeroizing;
 
 const AGENT_ENDPOINT_PREFIX: &str = "cossh-agent-v3-";
 const LEGACY_AGENT_STATE_FILENAME: &str = "agent-state.json";
 const VAULT_STATUS_EVENT_FILENAME: &str = "vault-events";
 const UNIX_SOCKET_MODE: u32 = 0o600;
+const AGENT_REQUEST_IO_TIMEOUT: Duration = Duration::from_millis(500);
+const AGENT_RESPONSE_TIMEOUT: Duration = Duration::from_secs(30);
+const MAX_IPC_MESSAGE_BYTES: usize = 64 * 1024;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct AgentEndpoint {
@@ -236,6 +239,8 @@ pub fn bind_listener(paths: &VaultPaths) -> io::Result<ListenerBindResult> {
 pub fn send_request(paths: &VaultPaths, payload: &AgentRequestPayload) -> io::Result<AgentResponse> {
     log_debug!("Opening IPC request '{}' to password vault agent", payload.debug_name());
     let mut stream = connect(paths)?;
+    stream.set_send_timeout(Some(AGENT_REQUEST_IO_TIMEOUT))?;
+    stream.set_recv_timeout(Some(AGENT_RESPONSE_TIMEOUT))?;
     let request = AgentRequestRef { payload };
     write_json_line(&mut stream, &request)?;
     read_json_line(&mut stream)
@@ -303,6 +308,12 @@ pub fn write_response(stream: &mut LocalSocketStream, response: &AgentResponse) 
     write_json_line(stream, response)
 }
 
+/// Bound how long one accepted client can occupy the single-threaded agent loop.
+pub(crate) fn set_server_stream_timeouts(stream: &LocalSocketStream) -> io::Result<()> {
+    stream.set_recv_timeout(Some(AGENT_REQUEST_IO_TIMEOUT))?;
+    stream.set_send_timeout(Some(AGENT_REQUEST_IO_TIMEOUT))
+}
+
 fn is_address_in_use(err: &io::Error) -> bool {
     matches!(err.kind(), io::ErrorKind::AddrInUse | io::ErrorKind::AlreadyExists)
 }
@@ -338,9 +349,15 @@ fn write_json_line<T: Serialize, W: Write>(stream: &mut W, value: &T) -> io::Res
 }
 
 fn read_json_line<T: for<'de> Deserialize<'de>, R: Read>(stream: &mut R) -> io::Result<T> {
-    let mut reader = BufReader::new(stream);
+    let mut reader = BufReader::new(stream).take((MAX_IPC_MESSAGE_BYTES + 1) as u64);
     let mut line = Zeroizing::new(Vec::new());
     reader.read_until(b'\n', &mut line)?;
+    if line.len() > MAX_IPC_MESSAGE_BYTES {
+        return Err(io::Error::new(io::ErrorKind::InvalidData, "IPC message exceeded size limit"));
+    }
+    if !line.ends_with(b"\n") {
+        return Err(io::Error::new(io::ErrorKind::UnexpectedEof, "IPC message was not newline terminated"));
+    }
     serde_json::from_slice(&line).map_err(|err| io::Error::other(format!("failed to parse IPC message: {err}")))
 }
 
