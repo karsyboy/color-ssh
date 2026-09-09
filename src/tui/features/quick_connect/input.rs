@@ -52,9 +52,16 @@ impl AppState {
                         form.select_next_field();
                     }
                 },
-                KeyCode::Char(' ') => match form.selected {
+                KeyCode::Char(' ') if !key.modifiers.contains(KeyModifiers::CONTROL) && !key.modifiers.contains(KeyModifiers::ALT) => match form.selected {
                     QuickConnectField::Protocol => form.toggle_protocol_forward(),
                     QuickConnectField::Logging => form.ssh_logging = !form.ssh_logging,
+                    QuickConnectField::User | QuickConnectField::Host | QuickConnectField::Port | QuickConnectField::Domain | QuickConnectField::Password => {
+                        form.insert_char(form.selected, ' ');
+                        if form.selected == QuickConnectField::Host {
+                            form.host_required = false;
+                        }
+                        form.error = None;
+                    }
                     _ => {}
                 },
                 KeyCode::Left => match form.selected {
@@ -170,3 +177,7 @@ impl AppState {
         self.open_quick_connect_host(submission);
     }
 }
+
+#[cfg(test)]
+#[path = "../../../test/tui/features/quick_connect/input.rs"]
+mod tests;

@@ -427,8 +427,11 @@ impl AppState {
                     HostEditorVisibleItem::Field(HostEditorField::FolderPath) => {
                         self.open_folder_picker_for_editor_placement();
                     }
-                    HostEditorVisibleItem::Field(HostEditorField::Description) => {
-                        form.insert_char(HostEditorField::Description, ' ');
+                    HostEditorVisibleItem::Field(field)
+                        if !matches!(field, HostEditorField::Protocol | HostEditorField::Profile | HostEditorField::VaultPass)
+                            && form.text_field(field).is_some() =>
+                    {
+                        form.insert_char(field, ' ');
                         form.error = None;
                     }
                     HostEditorVisibleItem::Field(_) => {}
@@ -547,17 +550,7 @@ impl AppState {
             return;
         }
 
-        let pasted = if field == HostEditorField::Description {
-            filtered
-        } else {
-            filtered.chars().filter(|ch| *ch != ' ').collect::<String>()
-        };
-
-        if pasted.is_empty() {
-            return;
-        }
-
-        for ch in pasted.chars() {
+        for ch in filtered.chars() {
             form.insert_char(field, ch);
         }
         form.error = None;

@@ -1051,7 +1051,7 @@ fn description_field_accepts_space_input() {
 }
 
 #[test]
-fn non_description_fields_ignore_space_input() {
+fn proxy_command_accepts_typed_space_input() {
     let mut app = AppState::new_for_tests();
     open_test_editor(
         &mut app,
@@ -1060,7 +1060,7 @@ fn non_description_fields_ignore_space_input() {
 
     {
         let form = app.selected_host_editor_mut().expect("host editor state");
-        form.selected = HostEditorField::Host.into();
+        form.selected = HostEditorField::ProxyCommand.into();
     }
 
     app.handle_host_editor_key(KeyEvent::new(KeyCode::Char('a'), KeyModifiers::NONE));
@@ -1068,7 +1068,7 @@ fn non_description_fields_ignore_space_input() {
     app.handle_host_editor_key(KeyEvent::new(KeyCode::Char('b'), KeyModifiers::NONE));
 
     let form = app.selected_host_editor().expect("host editor state");
-    assert_eq!(form.host.value, "ab");
+    assert_eq!(form.proxy_command.value, "a b");
 }
 
 #[test]
@@ -1124,7 +1124,7 @@ inventory:
 }
 
 #[test]
-fn host_editor_paste_preserves_spaces_only_for_description() {
+fn host_editor_paste_round_trips_spaces_in_commands_paths_and_yaml_values() {
     let mut app = AppState::new_for_tests();
     open_test_editor(
         &mut app,
@@ -1133,19 +1133,32 @@ fn host_editor_paste_preserves_spaces_only_for_description() {
 
     {
         let form = app.selected_host_editor_mut().expect("host editor state");
-        form.selected = HostEditorField::Host.into();
+        form.name.value = "alpha".to_string();
+        form.host.value = "alpha.example".to_string();
+        form.selected = HostEditorField::ProxyCommand.into();
     }
-    app.handle_host_editor_paste("with spaces");
-    let form = app.selected_host_editor().expect("host editor state");
-    assert_eq!(form.host.value, "withspaces");
+    app.handle_host_editor_paste("ssh -W %h:%p bastion.example");
 
     {
         let form = app.selected_host_editor_mut().expect("host editor state");
-        form.selected = HostEditorField::Description.into();
+        form.selected = HostEditorField::IdentityFile.into();
     }
-    app.handle_host_editor_paste("more spaces");
+    app.handle_host_editor_paste(r#"["/Users/example/My Keys/id_ed25519"]"#);
+
+    {
+        let form = app.selected_host_editor_mut().expect("host editor state");
+        form.selected = HostEditorField::SshOptions.into();
+    }
+    app.handle_host_editor_paste("{ProxyCommand: ssh -W %h:%p jump.example}");
+
     let form = app.selected_host_editor().expect("host editor state");
-    assert_eq!(form.description.value, "more spaces");
+    let submission = form.build_submission().expect("valid host editor submission");
+    assert_eq!(submission.host.ssh_proxy_command.as_deref(), Some("ssh -W %h:%p bastion.example"));
+    assert_eq!(submission.host.ssh_identity_files, vec!["/Users/example/My Keys/id_ed25519"]);
+    assert_eq!(
+        submission.host.ssh_options.get("ProxyCommand"),
+        Some(&vec!["ssh -W %h:%p jump.example".to_string()])
+    );
 }
 
 #[test]
