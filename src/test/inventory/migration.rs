@@ -1,6 +1,7 @@
 use super::migrate_ssh_config_to_inventory;
 use crate::inventory::{ConnectionProtocol, InventoryHost, InventoryTreeModel, build_inventory_tree};
 use crate::test::support::fs::TestWorkspace;
+use std::process::Command;
 
 fn host_named<'a>(tree: &'a InventoryTreeModel, name: &str) -> &'a InventoryHost {
     tree.hosts
@@ -49,4 +50,47 @@ Port 3390
     let desktop = host_named(&tree, "desktop01");
     assert_eq!(desktop.protocol, ConnectionProtocol::Rdp);
     assert_eq!(desktop.rdp.domain.as_deref(), Some("ACME"));
+}
+
+#[test]
+fn migration_decodes_openssh_quoted_and_equals_form_values() {
+    let workspace = TestWorkspace::new("inventory", "migration_syntax").expect("temp workspace");
+    let ssh_config_path = workspace.join("config");
+    let inventory_path = workspace.join("cossh-inventory.yaml");
+    let identity_path = workspace.join("keys/identity with spaces");
+
+    workspace
+        .write(
+            &ssh_config_path,
+            &format!(
+                "Host quoted\nHostName \"example.com\" # inline comment\nUser=\"alice\"\nPort = 2222\nIdentityFile=\"{}\" # another comment\n",
+                identity_path.display()
+            ),
+        )
+        .expect("write ssh config");
+
+    migrate_ssh_config_to_inventory(&ssh_config_path, &inventory_path).expect("migrate inventory");
+    let tree = build_inventory_tree(&inventory_path).expect("load migrated inventory");
+    let migrated = host_named(&tree, "quoted");
+
+    let output = Command::new("ssh")
+        .arg("-G")
+        .arg("-F")
+        .arg(&ssh_config_path)
+        .arg("quoted")
+        .output()
+        .expect("run ssh -G");
+    assert!(output.status.success(), "ssh -G failed: {}", String::from_utf8_lossy(&output.stderr));
+    let effective = String::from_utf8(output.stdout).expect("ssh -G output is UTF-8");
+    let effective_value = |key: &str| {
+        effective
+            .lines()
+            .find_map(|line| line.strip_prefix(key).and_then(|value| value.strip_prefix(' ')))
+            .unwrap_or_else(|| panic!("ssh -G did not emit {key}"))
+    };
+
+    assert_eq!(migrated.host, effective_value("hostname"));
+    assert_eq!(migrated.user.as_deref(), Some(effective_value("user")));
+    assert_eq!(migrated.port.map(|port| port.to_string()).as_deref(), Some(effective_value("port")));
+    assert_eq!(migrated.ssh.identity_files.first().map(String::as_str), Some(effective_value("identityfile")));
 }

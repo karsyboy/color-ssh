@@ -194,6 +194,50 @@ fn push_other_option(host: &mut SshHost, key: &str, value: &str) {
     host.other_options.entry(key.to_string()).or_default().push(value.to_string());
 }
 
+fn tokenize_arguments(value: &str) -> Vec<String> {
+    let mut tokens = Vec::new();
+    let mut chars = value.chars().peekable();
+
+    loop {
+        while chars.next_if(|character| character.is_whitespace()).is_some() {}
+        if chars.peek().is_none() || chars.peek() == Some(&'#') {
+            break;
+        }
+
+        let mut token = String::new();
+        let mut quoted = false;
+        while let Some(character) = chars.next() {
+            match character {
+                '"' => quoted = !quoted,
+                '\\' => {
+                    let escaped = chars.peek().copied();
+                    if escaped == Some('"') || escaped == Some('\\') || (!quoted && escaped.is_some_and(char::is_whitespace)) {
+                        token.push(chars.next().expect("peeked character"));
+                    } else {
+                        token.push(character);
+                    }
+                }
+                character if !quoted && character.is_whitespace() => break,
+                character => token.push(character),
+            }
+        }
+        tokens.push(token);
+    }
+
+    tokens
+}
+
+fn parse_directive(line: &str) -> Option<(String, Vec<String>)> {
+    let separator = line.find(|character: char| character.is_whitespace() || character == '=')?;
+    let keyword = line[..separator].to_ascii_lowercase();
+    let mut value = line[separator..].trim_start();
+    if let Some(after_equals) = value.strip_prefix('=') {
+        value = after_equals.trim_start();
+    }
+
+    Some((keyword, tokenize_arguments(value)))
+}
+
 fn parse_config_file(config_path: &Path, options: ParseOptions) -> io::Result<ParsedConfigFile> {
     let file = File::open(config_path)?;
     let reader = BufReader::new(file);
@@ -266,13 +310,13 @@ fn parse_config_file(config_path: &Path, options: ParseOptions) -> io::Result<Pa
             continue;
         }
 
-        let parts: Vec<&str> = trimmed.splitn(2, char::is_whitespace).collect();
-        if parts.len() < 2 {
+        let Some((keyword, values)) = parse_directive(trimmed) else {
+            continue;
+        };
+        if values.is_empty() {
             continue;
         }
-
-        let keyword = parts[0].to_ascii_lowercase();
-        let value = parts[1].trim();
+        let value = values.join(" ");
 
         if in_match_block && keyword != "host" && keyword != "match" {
             continue;
@@ -283,10 +327,7 @@ fn parse_config_file(config_path: &Path, options: ParseOptions) -> io::Result<Pa
                 in_match_block = false;
                 finalize_current_hosts(&mut parsed, &mut current_hosts, options);
 
-                current_hosts = value.split_whitespace().map(|alias| SshHost::new(alias.to_string())).collect();
-                if current_hosts.is_empty() {
-                    current_hosts.push(SshHost::new(value.to_string()));
-                }
+                current_hosts = values.iter().cloned().map(SshHost::new).collect();
             }
             "hostname" => {
                 for host in &mut current_hosts {
@@ -306,13 +347,13 @@ fn parse_config_file(config_path: &Path, options: ParseOptions) -> io::Result<Pa
                 }
             }
             "identityfile" => {
-                let identity = expand_tilde(value);
+                let identity = expand_tilde(&value);
                 for host in &mut current_hosts {
                     host.identity_files.push(identity.clone());
                 }
             }
             "identitiesonly" => {
-                let parsed_bool = parse_bool_like(value);
+                let parsed_bool = parse_bool_like(&value);
                 for host in &mut current_hosts {
                     host.identities_only = parsed_bool;
                 }
@@ -329,7 +370,7 @@ fn parse_config_file(config_path: &Path, options: ParseOptions) -> io::Result<Pa
             }
             "forwardagent" => {
                 for host in &mut current_hosts {
-                    host.forward_agent = Some(normalize_yes_no_string(value));
+                    host.forward_agent = Some(normalize_yes_no_string(&value));
                 }
             }
             "localforward" => {
@@ -343,9 +384,7 @@ fn parse_config_file(config_path: &Path, options: ParseOptions) -> io::Result<Pa
                 }
             }
             "include" => {
-                for token in value.split_whitespace() {
-                    parsed.include_patterns.push(token.to_string());
-                }
+                parsed.include_patterns.extend(values);
             }
             "match" => {
                 finalize_current_hosts(&mut parsed, &mut current_hosts, options);
@@ -354,7 +393,7 @@ fn parse_config_file(config_path: &Path, options: ParseOptions) -> io::Result<Pa
             }
             _ => {
                 for host in &mut current_hosts {
-                    push_other_option(host, &keyword, value);
+                    push_other_option(host, &keyword, &value);
                 }
             }
         }
