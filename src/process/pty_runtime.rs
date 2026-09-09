@@ -389,9 +389,17 @@ fn spawn_exit_watcher(
     event_tx: SyncSender<PtyRuntimeEvent>,
 ) -> io::Result<()> {
     thread::Builder::new().name("pty-exit-watcher".to_string()).spawn(move || {
-        let exit_result = match child.lock() {
-            Ok(mut child) => child.wait().map_err(io_other_error),
-            Err(err) => Err(io_other_error(err)),
+        let exit_result = loop {
+            let poll_result = match child.lock() {
+                Ok(mut child) => child.try_wait().map_err(io_other_error),
+                Err(err) => Err(io_other_error(err)),
+            };
+
+            match poll_result {
+                Ok(Some(status)) => break Ok(status),
+                Ok(None) => thread::sleep(EVENT_POLL_INTERVAL),
+                Err(err) => break Err(err),
+            }
         };
 
         if let Ok(mut exited) = exited.lock() {

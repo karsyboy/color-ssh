@@ -1,19 +1,138 @@
 use super::{
     DirectRuntimePtySyncDecision, DirectRuntimeResizeDecision, DirectRuntimeViewportState, InteractiveSshRuntime, direct_runtime_exit_cleanup_sequence,
     direct_runtime_inline_viewport_height, direct_runtime_resize_dimensions, direct_runtime_resize_rows, encode_mouse_event, infer_scrolled_line_count,
-    select_interactive_ssh_runtime, take_latest_reload_notice_toast,
+    select_interactive_ssh_runtime, spawn_exit_watcher, take_latest_reload_notice_toast,
 };
 use crate::config;
 use crate::runtime::format_reload_notice;
-use crate::terminal::{MouseProtocolEncoding, MouseProtocolMode};
+use crate::terminal::{MouseProtocolEncoding, MouseProtocolMode, TerminalChild, TerminalEngine, TerminalHostCallbacks, TerminalSession};
 use crate::test::support::state::TestStateGuard;
 use crossterm::event::{KeyModifiers, MouseButton, MouseEvent, MouseEventKind};
+use portable_pty::{Child as PtyChild, ChildKiller, ExitStatus};
 use ratatui::layout::Rect;
+use std::sync::{
+    Arc, Mutex,
+    atomic::{AtomicBool, AtomicU64, Ordering},
+    mpsc,
+};
+use std::thread;
+use std::time::{Duration, Instant};
+
+#[derive(Debug)]
+struct LiveMockChild {
+    observed_by_watcher: Arc<AtomicBool>,
+    killed: Arc<AtomicBool>,
+    reaped: Arc<AtomicBool>,
+}
+
+#[derive(Debug)]
+struct LiveMockChildKiller {
+    killed: Arc<AtomicBool>,
+}
+
+impl ChildKiller for LiveMockChild {
+    fn kill(&mut self) -> std::io::Result<()> {
+        self.killed.store(true, Ordering::SeqCst);
+        Ok(())
+    }
+
+    fn clone_killer(&self) -> Box<dyn ChildKiller + Send + Sync> {
+        Box::new(LiveMockChildKiller {
+            killed: Arc::clone(&self.killed),
+        })
+    }
+}
+
+impl ChildKiller for LiveMockChildKiller {
+    fn kill(&mut self) -> std::io::Result<()> {
+        self.killed.store(true, Ordering::SeqCst);
+        Ok(())
+    }
+
+    fn clone_killer(&self) -> Box<dyn ChildKiller + Send + Sync> {
+        Box::new(Self {
+            killed: Arc::clone(&self.killed),
+        })
+    }
+}
+
+impl PtyChild for LiveMockChild {
+    fn try_wait(&mut self) -> std::io::Result<Option<ExitStatus>> {
+        self.observed_by_watcher.store(true, Ordering::SeqCst);
+        if self.killed.load(Ordering::SeqCst) {
+            self.reaped.store(true, Ordering::SeqCst);
+            Ok(Some(ExitStatus::with_exit_code(0)))
+        } else {
+            Ok(None)
+        }
+    }
+
+    fn wait(&mut self) -> std::io::Result<ExitStatus> {
+        self.observed_by_watcher.store(true, Ordering::SeqCst);
+        while !self.killed.load(Ordering::SeqCst) {
+            thread::sleep(Duration::from_millis(5));
+        }
+        self.reaped.store(true, Ordering::SeqCst);
+        Ok(ExitStatus::with_exit_code(0))
+    }
+
+    fn process_id(&self) -> Option<u32> {
+        Some(42)
+    }
+}
 
 #[test]
 fn select_interactive_ssh_runtime_prefers_pty_only_for_direct_terminals() {
     assert_eq!(select_interactive_ssh_runtime(true), InteractiveSshRuntime::PtyCentered);
     assert_eq!(select_interactive_ssh_runtime(false), InteractiveSshRuntime::CompatibilityPassthrough);
+}
+
+#[test]
+fn frontend_failure_cleanup_terminates_and_reaps_live_child_without_blocking() {
+    let observed_by_watcher = Arc::new(AtomicBool::new(false));
+    let killed = Arc::new(AtomicBool::new(false));
+    let reaped = Arc::new(AtomicBool::new(false));
+    let child: Arc<Mutex<Box<dyn PtyChild + Send + Sync>>> = Arc::new(Mutex::new(Box::new(LiveMockChild {
+        observed_by_watcher: Arc::clone(&observed_by_watcher),
+        killed: Arc::clone(&killed),
+        reaped: Arc::clone(&reaped),
+    })));
+    let exited = Arc::new(Mutex::new(false));
+    let (event_tx, event_rx) = mpsc::sync_channel(1);
+    spawn_exit_watcher(Arc::clone(&child), Arc::clone(&exited), event_tx).expect("spawn exit watcher");
+
+    let observation_deadline = Instant::now() + Duration::from_secs(1);
+    while !observed_by_watcher.load(Ordering::SeqCst) && Instant::now() < observation_deadline {
+        thread::yield_now();
+    }
+    assert!(observed_by_watcher.load(Ordering::SeqCst), "exit watcher did not observe child");
+
+    let engine = Arc::new(Mutex::new(TerminalEngine::new_with_host_and_remote_clipboard_policy(
+        24,
+        80,
+        100,
+        TerminalHostCallbacks::default(),
+        false,
+        1024,
+    )));
+    let mut session = TerminalSession::new(None, None, TerminalChild::Pty(child), engine, Arc::clone(&exited), Arc::new(AtomicU64::new(0)));
+    let (cleanup_tx, cleanup_rx) = mpsc::sync_channel(1);
+    thread::spawn(move || {
+        session.terminate();
+        let _ = cleanup_tx.send(());
+    });
+
+    cleanup_rx
+        .recv_timeout(Duration::from_secs(1))
+        .expect("frontend failure cleanup blocked on live child");
+    let exit_event = event_rx
+        .recv_timeout(Duration::from_secs(1))
+        .expect("exit watcher did not reap terminated child");
+
+    assert!(matches!(exit_event, super::PtyRuntimeEvent::Exited(Ok(_))));
+    assert!(killed.load(Ordering::SeqCst), "cleanup did not terminate child");
+    assert!(reaped.load(Ordering::SeqCst), "exit watcher did not reap child");
+    assert!(*exited.lock().expect("exited state lock"));
 }
 
 #[test]
