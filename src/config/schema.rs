@@ -89,7 +89,7 @@ impl Default for AuthSettings {
 }
 
 /// Interactive-only session manager settings.
-#[derive(Debug, Deserialize, Default)]
+#[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct InteractiveSettings {
     /// History buffer size (scrollback lines for session manager tabs)
@@ -121,6 +121,22 @@ pub struct InteractiveSettings {
     /// Compatibility policy applied when `overlay_highlighting` is set to `auto`.
     #[serde(default)]
     pub overlay_auto_policy: HighlightOverlayAutoPolicy,
+}
+
+impl Default for InteractiveSettings {
+    fn default() -> Self {
+        Self {
+            history_buffer: default_history_buffer(),
+            host_tree_uncollapsed: default_host_tree_uncollapsed(),
+            info_view: default_info_view(),
+            host_view_size: default_host_view_size(),
+            info_view_size: default_info_view_size(),
+            allow_remote_clipboard_write: default_remote_clipboard_write(),
+            remote_clipboard_max_bytes: default_remote_clipboard_max_bytes(),
+            overlay_highlighting: HighlightOverlayMode::default(),
+            overlay_auto_policy: HighlightOverlayAutoPolicy::default(),
+        }
+    }
 }
 
 /// Renderer-side syntax highlighting policy for embedded terminal views.

@@ -1,5 +1,5 @@
 use super::compile_secret_patterns;
-use crate::config::{AuthSettings, Config, HighlightOverlayAutoPolicy};
+use crate::config::{AuthSettings, Config, HighlightOverlayAutoPolicy, InteractiveSettings};
 use crate::test::support::config::base_config;
 
 #[test]
@@ -48,4 +48,28 @@ rules: []
     let config = serde_yml::from_str::<Config>(yaml).expect("overlay auto policy should deserialize");
     let interactive = config.interactive_settings.expect("interactive settings");
     assert_eq!(interactive.overlay_auto_policy, HighlightOverlayAutoPolicy::Reduced);
+}
+
+#[test]
+fn omitted_interactive_settings_match_empty_block_defaults() {
+    fn effective_settings(yaml: &str) -> InteractiveSettings {
+        serde_yml::from_str::<Config>(yaml)
+            .expect("config should deserialize")
+            .interactive_settings
+            .unwrap_or_default()
+    }
+
+    let omitted = effective_settings("palette: {}\nrules: []\n");
+    let empty = effective_settings("interactive_settings: {}\npalette: {}\nrules: []\n");
+
+    assert_eq!(omitted.history_buffer, 1000);
+    assert_eq!(omitted.history_buffer, empty.history_buffer);
+    assert_eq!(omitted.host_tree_uncollapsed, empty.host_tree_uncollapsed);
+    assert_eq!(omitted.info_view, empty.info_view);
+    assert_eq!(omitted.host_view_size, empty.host_view_size);
+    assert_eq!(omitted.info_view_size, empty.info_view_size);
+    assert_eq!(omitted.allow_remote_clipboard_write, empty.allow_remote_clipboard_write);
+    assert_eq!(omitted.remote_clipboard_max_bytes, empty.remote_clipboard_max_bytes);
+    assert_eq!(omitted.overlay_highlighting, empty.overlay_highlighting);
+    assert_eq!(omitted.overlay_auto_policy, empty.overlay_auto_policy);
 }

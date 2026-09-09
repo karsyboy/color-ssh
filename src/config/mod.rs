@@ -151,19 +151,20 @@ fn snapshot_from_loaded_config(config: Config, config_version: u64) -> Interacti
 
 fn current_interactive_profile_snapshot() -> InteractiveProfileSnapshot {
     with_current_config("reading interactive profile snapshot", |cfg| {
-        let interactive = cfg.interactive_settings.as_ref();
+        let default_interactive = InteractiveSettings::default();
+        let interactive = cfg.interactive_settings.as_ref().unwrap_or(&default_interactive);
         InteractiveProfileSnapshot {
             auth_settings: cfg.auth_settings.clone(),
             show_title: cfg.settings.show_title,
-            history_buffer: interactive.map(|interactive| interactive.history_buffer).unwrap_or(1000),
-            remote_clipboard_write: interactive.map(|interactive| interactive.allow_remote_clipboard_write).unwrap_or(false),
-            remote_clipboard_max_bytes: interactive.map(|interactive| interactive.remote_clipboard_max_bytes).unwrap_or(4096),
+            history_buffer: interactive.history_buffer,
+            remote_clipboard_write: interactive.allow_remote_clipboard_write,
+            remote_clipboard_max_bytes: interactive.remote_clipboard_max_bytes,
             ssh_logging_enabled: cfg.settings.ssh_logging,
             secret_patterns: cfg.metadata.compiled_secret_patterns.clone(),
             overlay_rules: cfg.metadata.compiled_rules.clone(),
             overlay_rule_set: cfg.metadata.compiled_rule_set.clone(),
-            overlay_mode: interactive.map(|interactive| interactive.overlay_highlighting).unwrap_or_default(),
-            overlay_auto_policy: interactive.map(|interactive| interactive.overlay_auto_policy).unwrap_or_default(),
+            overlay_mode: interactive.overlay_highlighting,
+            overlay_auto_policy: interactive.overlay_auto_policy,
             config_version: current_config_version(),
         }
     })
