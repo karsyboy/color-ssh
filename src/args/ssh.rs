@@ -17,6 +17,7 @@ pub(crate) struct ParsedSshOption<'a> {
 #[derive(Debug)]
 pub(crate) struct ParsedSshArgs<'a> {
     pub(crate) options: Vec<ParsedSshOption<'a>>,
+    pub(crate) option_terminator_index: Option<usize>,
     pub(crate) destination_index: Option<usize>,
     pub(crate) destination_host: Option<String>,
     pub(crate) explicit_destination_user: Option<String>,
@@ -48,6 +49,7 @@ fn parse_option_token<'a>(arg: &'a str, next_arg: Option<&'a str>) -> (Vec<Parse
 
 pub(crate) fn parse_ssh_args(ssh_args: &[String]) -> ParsedSshArgs<'_> {
     let mut options = Vec::new();
+    let mut option_terminator_index = None;
     let mut destination_index = None;
     let mut destination_host = None;
     let mut explicit_destination_user = None;
@@ -55,6 +57,11 @@ pub(crate) fn parse_ssh_args(ssh_args: &[String]) -> ParsedSshArgs<'_> {
 
     while index < ssh_args.len() {
         let arg = &ssh_args[index];
+        if arg == "--" {
+            option_terminator_index = Some(index);
+            index += 1;
+            break;
+        }
         if arg.starts_with('-') {
             let (parsed_options, consumes_next, recognized) = parse_option_token(arg, ssh_args.get(index + 1).map(String::as_str));
             if destination_index.is_some() && !recognized {
@@ -84,8 +91,25 @@ pub(crate) fn parse_ssh_args(ssh_args: &[String]) -> ParsedSshArgs<'_> {
         break;
     }
 
+    if destination_index.is_none()
+        && let Some(arg) = ssh_args.get(index)
+    {
+        destination_index = Some(index);
+        destination_host = Some(
+            arg.split_once('@')
+                .map(|(user, host)| {
+                    if !user.is_empty() {
+                        explicit_destination_user = Some(user.to_string());
+                    }
+                    host.to_string()
+                })
+                .unwrap_or_else(|| arg.clone()),
+        );
+    }
+
     ParsedSshArgs {
         options,
+        option_terminator_index,
         destination_index,
         destination_host,
         explicit_destination_user,

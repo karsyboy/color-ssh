@@ -15,6 +15,7 @@ use std::io;
 #[derive(Debug, Default)]
 struct SshArgInspection {
     destination_index: Option<usize>,
+    option_terminator_index: Option<usize>,
     explicit_destination_user: Option<String>,
     has_user_flag: bool,
     has_port_flag: bool,
@@ -91,6 +92,7 @@ fn inspect_ssh_args(args: &[String]) -> SshArgInspection {
     let parsed = args::parse_ssh_args(args);
     let mut inspection = SshArgInspection {
         destination_index: parsed.destination_index,
+        option_terminator_index: parsed.option_terminator_index,
         explicit_destination_user: parsed.explicit_destination_user,
         ..SshArgInspection::default()
     };
@@ -143,7 +145,12 @@ fn inspect_ssh_args(args: &[String]) -> SshArgInspection {
 }
 
 fn record_ssh_option(option_arg: &str, inspection: &mut SshArgInspection) {
-    let option_key = option_arg.split_once('=').map(|(key, _)| key).unwrap_or(option_arg).trim().to_ascii_lowercase();
+    let option_key = option_arg
+        .trim()
+        .split(|character: char| character == '=' || character.is_ascii_whitespace())
+        .next()
+        .unwrap_or_default()
+        .to_ascii_lowercase();
     if option_key.is_empty() {
         return;
     }
@@ -282,8 +289,13 @@ pub(crate) fn synthesize_ssh_args(args: &[String], host: &InventoryHost) -> Vec<
     };
 
     let mut effective_args = Vec::with_capacity(args.len() + injected.len());
-    effective_args.extend_from_slice(&args[..destination_index]);
+    let injection_index = inspection
+        .option_terminator_index
+        .filter(|index| *index < destination_index)
+        .unwrap_or(destination_index);
+    effective_args.extend_from_slice(&args[..injection_index]);
     effective_args.extend(injected);
+    effective_args.extend_from_slice(&args[injection_index..destination_index]);
     effective_args.push(destination);
     effective_args.extend_from_slice(&args[destination_index + 1..]);
     effective_args
