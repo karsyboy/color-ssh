@@ -5,7 +5,9 @@ use crate::terminal::highlight_overlay::HighlightOverlayEngine;
 use crate::terminal::{TerminalChild, TerminalEngine, TerminalGridPoint, TerminalHostCallbacks, TerminalSession};
 use crate::test::support::{fs::TestWorkspace, state::TestStateGuard};
 use crate::tui::{HostTab, HostTreeRowKind, TerminalSearchState, TerminalTabState};
+use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use portable_pty::{Child as PtyChild, ChildKiller, ExitStatus};
+use std::io::{self, Write};
 use std::sync::{
     Arc, Mutex,
     atomic::{AtomicBool, AtomicU64, Ordering},
@@ -62,6 +64,10 @@ impl PtyChild for MockTerminalChild {
 }
 
 fn mock_terminal_session(killed: Arc<AtomicBool>) -> TerminalSession {
+    mock_terminal_session_with_writer(killed, None)
+}
+
+fn mock_terminal_session_with_writer(killed: Arc<AtomicBool>, input_writer: Option<crate::terminal::TerminalInputWriter>) -> TerminalSession {
     let child: Arc<Mutex<Box<dyn PtyChild + Send + Sync>>> = Arc::new(Mutex::new(Box::new(MockTerminalChild { killed })));
     let engine = Arc::new(Mutex::new(TerminalEngine::new_with_host_and_remote_clipboard_policy(
         24,
@@ -74,7 +80,20 @@ fn mock_terminal_session(killed: Arc<AtomicBool>) -> TerminalSession {
     let exited = Arc::new(Mutex::new(false));
     let render_epoch = Arc::new(AtomicU64::new(0));
 
-    TerminalSession::new(None, None, TerminalChild::Pty(child), engine, exited, render_epoch)
+    TerminalSession::new(None, input_writer, TerminalChild::Pty(child), engine, exited, render_epoch)
+}
+
+struct RecordingWriter(Arc<Mutex<Vec<u8>>>);
+
+impl Write for RecordingWriter {
+    fn write(&mut self, bytes: &[u8]) -> io::Result<usize> {
+        self.0.lock().expect("recording writer lock").extend_from_slice(bytes);
+        Ok(bytes.len())
+    }
+
+    fn flush(&mut self) -> io::Result<()> {
+        Ok(())
+    }
 }
 
 fn test_tab(name: &str, session: Option<TerminalSession>) -> HostTab {
@@ -89,6 +108,22 @@ fn test_tab(name: &str, session: Option<TerminalSession>) -> HostTab {
         force_ssh_logging: false,
         last_pty_size: None,
     })
+}
+
+#[test]
+fn terminal_tab_forwards_function_keys_to_the_pty() {
+    let captured = Arc::new(Mutex::new(Vec::new()));
+    let input_writer = Arc::new(Mutex::new(Box::new(RecordingWriter(Arc::clone(&captured))) as Box<dyn Write + Send>));
+    let mut app = AppState::new_for_tests();
+    app.tabs = vec![test_tab(
+        "alpha",
+        Some(mock_terminal_session_with_writer(Arc::new(AtomicBool::new(false)), Some(input_writer))),
+    )];
+
+    app.send_key_to_pty(KeyEvent::new(KeyCode::F(12), KeyModifiers::CONTROL))
+        .expect("forward terminal-tab function key");
+
+    assert_eq!(*captured.lock().expect("captured bytes lock"), b"\x1b[24;5~");
 }
 
 #[test]

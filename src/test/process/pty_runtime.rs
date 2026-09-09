@@ -1,15 +1,17 @@
 use super::{
-    DirectRuntimePtySyncDecision, DirectRuntimeResizeDecision, DirectRuntimeViewportState, InteractiveSshRuntime, direct_runtime_exit_cleanup_sequence,
-    direct_runtime_inline_viewport_height, direct_runtime_resize_dimensions, direct_runtime_resize_rows, encode_mouse_event, infer_scrolled_line_count,
-    select_interactive_ssh_runtime, spawn_exit_watcher, take_latest_reload_notice_toast,
+    DirectRuntimePtySyncDecision, DirectRuntimeResizeDecision, DirectRuntimeViewportState, HostScrollbackMirror, InteractivePtyRuntime, InteractiveSshRuntime,
+    direct_runtime_exit_cleanup_sequence, direct_runtime_inline_viewport_height, direct_runtime_resize_dimensions, direct_runtime_resize_rows,
+    encode_mouse_event, infer_scrolled_line_count, process_runtime_input_event, select_interactive_ssh_runtime, spawn_exit_watcher,
+    take_latest_reload_notice_toast,
 };
 use crate::config;
 use crate::runtime::format_reload_notice;
 use crate::terminal::{MouseProtocolEncoding, MouseProtocolMode, TerminalChild, TerminalEngine, TerminalHostCallbacks, TerminalSession};
 use crate::test::support::state::TestStateGuard;
-use crossterm::event::{KeyModifiers, MouseButton, MouseEvent, MouseEventKind};
+use crossterm::event::{Event, KeyCode, KeyEvent, KeyModifiers, MouseButton, MouseEvent, MouseEventKind};
 use portable_pty::{Child as PtyChild, ChildKiller, ExitStatus};
 use ratatui::layout::Rect;
+use std::io::{self, Write};
 use std::sync::{
     Arc, Mutex,
     atomic::{AtomicBool, AtomicU64, Ordering},
@@ -81,10 +83,70 @@ impl PtyChild for LiveMockChild {
     }
 }
 
+struct RecordingWriter(Arc<Mutex<Vec<u8>>>);
+
+impl Write for RecordingWriter {
+    fn write(&mut self, bytes: &[u8]) -> io::Result<usize> {
+        self.0.lock().expect("recording writer lock").extend_from_slice(bytes);
+        Ok(bytes.len())
+    }
+
+    fn flush(&mut self) -> io::Result<()> {
+        Ok(())
+    }
+}
+
 #[test]
 fn select_interactive_ssh_runtime_prefers_pty_only_for_direct_terminals() {
     assert_eq!(select_interactive_ssh_runtime(true), InteractiveSshRuntime::PtyCentered);
     assert_eq!(select_interactive_ssh_runtime(false), InteractiveSshRuntime::CompatibilityPassthrough);
+}
+
+#[test]
+fn direct_runtime_forwards_function_keys_to_the_pty() {
+    let captured = Arc::new(Mutex::new(Vec::new()));
+    let input_writer = Arc::new(Mutex::new(Box::new(RecordingWriter(Arc::clone(&captured))) as Box<dyn Write + Send>));
+    let child: Arc<Mutex<Box<dyn PtyChild + Send + Sync>>> = Arc::new(Mutex::new(Box::new(LiveMockChild {
+        observed_by_watcher: Arc::new(AtomicBool::new(false)),
+        killed: Arc::new(AtomicBool::new(false)),
+        reaped: Arc::new(AtomicBool::new(false)),
+    })));
+    let engine = Arc::new(Mutex::new(TerminalEngine::new_with_host_and_remote_clipboard_policy(
+        24,
+        80,
+        100,
+        TerminalHostCallbacks::default(),
+        false,
+        1024,
+    )));
+    let (_, event_rx) = mpsc::sync_channel(1);
+    let mut runtime = InteractivePtyRuntime {
+        session: TerminalSession::new(
+            None,
+            Some(input_writer),
+            TerminalChild::Pty(child),
+            engine,
+            Arc::new(Mutex::new(false)),
+            Arc::new(AtomicU64::new(0)),
+        ),
+        event_rx,
+        highlight_overlay: crate::terminal::highlight_overlay::HighlightOverlayEngine::new(),
+        host_scrollback: HostScrollbackMirror::new(100),
+        reload_notice_toast: None,
+    };
+    let mut scroll_offset = 0;
+    let mut force_redraw = false;
+
+    process_runtime_input_event(
+        &mut runtime,
+        Event::Key(KeyEvent::new(KeyCode::F(1), KeyModifiers::SHIFT)),
+        Rect::new(0, 0, 80, 24),
+        &mut scroll_offset,
+        &mut force_redraw,
+    )
+    .expect("forward direct function key");
+
+    assert_eq!(*captured.lock().expect("captured bytes lock"), b"\x1b[1;2P");
 }
 
 #[test]

@@ -82,6 +82,23 @@ fn encode_csi_tilde_key(code: u8, modifiers: KeyModifiers) -> Vec<u8> {
     format!("\x1b[{};{}~", code, modifier_parameter(modifiers)).into_bytes()
 }
 
+fn encode_function_key(number: u8, modifiers: KeyModifiers) -> Option<Vec<u8>> {
+    let (code, final_byte) = match number {
+        1..=4 => (None, b'P' + number - 1),
+        5 => (Some(15), 0),
+        6..=10 => (Some(number + 11), 0),
+        11..=12 => (Some(number + 12), 0),
+        _ => return None,
+    };
+
+    Some(match (code, modifiers.is_empty()) {
+        (None, true) => vec![0x1b, b'O', final_byte],
+        (None, false) => format!("\x1b[1;{}{}", modifier_parameter(modifiers), final_byte as char).into_bytes(),
+        (Some(code), true) => format!("\x1b[{code}~").into_bytes(),
+        (Some(code), false) => format!("\x1b[{code};{}~", modifier_parameter(modifiers)).into_bytes(),
+    })
+}
+
 pub(crate) fn encode_key_event_bytes(key: KeyEvent) -> Option<Vec<u8>> {
     let modifiers = key.modifiers & (KeyModifiers::SHIFT | KeyModifiers::ALT | KeyModifiers::CONTROL);
 
@@ -152,8 +169,13 @@ pub(crate) fn encode_key_event_bytes(key: KeyEvent) -> Option<Vec<u8>> {
         KeyCode::PageDown => encode_csi_tilde_key(6, modifiers),
         KeyCode::Delete => encode_csi_tilde_key(3, modifiers),
         KeyCode::Insert => encode_csi_tilde_key(2, modifiers),
+        KeyCode::F(number) => encode_function_key(number, modifiers)?,
         _ => return None,
     };
 
     Some(bytes)
 }
+
+#[cfg(test)]
+#[path = "../test/terminal/protocol.rs"]
+mod tests;
