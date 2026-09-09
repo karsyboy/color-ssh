@@ -4,7 +4,7 @@ use crate::auth::secret::{SensitiveString, sensitive_string};
 use crate::auth::vault::VaultPaths;
 use crate::log_debug;
 use crate::platform;
-use std::process::{Command, Stdio};
+use std::process::{Child, Command, Stdio};
 use std::thread;
 use std::time::{Duration, Instant};
 
@@ -143,7 +143,8 @@ impl AgentClient {
             .env_remove(crate::auth::transport::INTERNAL_ASKPASS_TOKEN_ENV)
             .env_remove("SSH_ASKPASS")
             .env_remove("SSH_ASKPASS_REQUIRE");
-        command.spawn()?;
+        let child = command.spawn()?;
+        spawn_child_waiter(child)?;
 
         // Poll readiness briefly so first caller does not race the agent boot.
         let started_at = Instant::now();
@@ -158,3 +159,17 @@ impl AgentClient {
         Err(AgentError::Protocol("password vault agent did not become ready in time".to_string()))
     }
 }
+
+fn spawn_child_waiter(mut child: Child) -> std::io::Result<()> {
+    let child_id = child.id();
+    thread::Builder::new().name("vault-agent-child-waiter".to_string()).spawn(move || {
+        if let Err(err) = child.wait() {
+            log_debug!("Failed to reap password vault agent process (PID: {}): {}", child_id, err);
+        }
+    })?;
+    Ok(())
+}
+
+#[cfg(all(test, target_os = "linux"))]
+#[path = "../../test/auth/agent/client.rs"]
+mod tests;
