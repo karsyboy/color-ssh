@@ -14,9 +14,12 @@ use crate::{debug_enabled, log_debug, log_error};
 use std::io;
 use std::sync::{
     Arc, Mutex,
-    atomic::{AtomicU64, AtomicUsize, Ordering},
+    atomic::{AtomicU64, Ordering},
 };
-use std::time::Instant;
+use std::thread;
+use std::time::{Duration, Instant};
+
+const PROCESS_EXIT_POLL_INTERVAL: Duration = Duration::from_millis(16);
 
 struct SessionLaunchOptions {
     force_ssh_logging: bool,
@@ -103,9 +106,33 @@ fn rdp_session_launch_mode(launch_mode: process::RdpLaunchMode) -> RdpSessionLau
 
 fn terminate_spawned_child(child: &Arc<Mutex<Box<dyn portable_pty::Child + Send + Sync>>>) {
     if let Ok(mut child) = child.lock() {
-        let _ = child.kill();
-        let _ = child.try_wait();
+        if child.kill().is_ok() {
+            let _ = child.wait();
+        } else {
+            let _ = child.try_wait();
+        }
     }
+}
+
+fn spawn_terminal_session_exit_watcher(child: Arc<Mutex<Box<dyn portable_pty::Child + Send + Sync>>>, exited: Arc<Mutex<bool>>) -> io::Result<()> {
+    thread::Builder::new().name("terminal-session-exit-watcher".to_string()).spawn(move || {
+        loop {
+            let poll_result = match child.lock() {
+                Ok(mut child) => child.try_wait(),
+                Err(err) => Err(io::Error::other(err.to_string())),
+            };
+
+            match poll_result {
+                Ok(Some(_)) | Err(_) => break,
+                Ok(None) => thread::sleep(PROCESS_EXIT_POLL_INTERVAL),
+            }
+        }
+
+        if let Ok(mut exited) = exited.lock() {
+            *exited = true;
+        }
+    })?;
+    Ok(())
 }
 
 fn normalize_captured_output_chunk(normalizer: &mut CapturedOutputNewlineNormalizer, bytes: &[u8]) -> Vec<u8> {
@@ -189,16 +216,14 @@ fn spawn_pty_terminal_session(
                 }
             }
         },
-        {
-            let exited = exited.clone();
-            move || {
-                if let Ok(mut exited) = exited.lock() {
-                    *exited = true;
-                }
-            }
-        },
+        || {},
         PtyLogTarget::session(session_logger),
     )?;
+
+    if let Err(err) = spawn_terminal_session_exit_watcher(child.clone(), exited.clone()) {
+        terminate_spawned_child(&child);
+        return Err(err);
+    }
 
     Ok(TerminalSession::new(
         Some(pty_master),
@@ -240,7 +265,6 @@ fn spawn_captured_terminal_session(
     )));
     let exited = Arc::new(Mutex::new(false));
     let render_epoch = Arc::new(AtomicU64::new(0));
-    let closed_streams = Arc::new(AtomicUsize::new(0));
 
     inject_title_banner(&engine, &render_epoch, session_profile.show_title);
 
@@ -267,22 +291,17 @@ fn spawn_captured_terminal_session(
                     }
                 }
             },
-            {
-                let exited = exited.clone();
-                let closed_streams = closed_streams.clone();
-                move || {
-                    if closed_streams.fetch_add(1, Ordering::Relaxed) + 1 >= 2
-                        && let Ok(mut exited) = exited.lock()
-                    {
-                        *exited = true;
-                    }
-                }
-            },
+            || {},
             PtyLogTarget::Disabled,
         ) {
             terminate_spawned_child(&child);
             return Err(err);
         }
+    }
+
+    if let Err(err) = spawn_terminal_session_exit_watcher(child.clone(), exited.clone()) {
+        terminate_spawned_child(&child);
+        return Err(err);
     }
 
     Ok(TerminalSession::new(None, None, TerminalChild::Pty(child), engine, exited, render_epoch))

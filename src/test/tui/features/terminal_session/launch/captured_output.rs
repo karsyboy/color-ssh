@@ -1,4 +1,46 @@
 use super::*;
+use portable_pty::Child as PtyChild;
+use std::process::{Command, Stdio};
+use std::time::{Duration, Instant};
+
+#[test]
+fn tui_sessions_reap_exited_children_while_manager_remains_running() {
+    let mut exited_states = Vec::new();
+    let mut pids = Vec::new();
+
+    for _ in 0..3 {
+        let child_process = Command::new("/bin/sh")
+            .args(["-c", "exit 0"])
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .spawn()
+            .expect("launch local mock session");
+        pids.push(child_process.id());
+        let child: Arc<Mutex<Box<dyn PtyChild + Send + Sync>>> = Arc::new(Mutex::new(Box::new(child_process)));
+        let exited = Arc::new(Mutex::new(false));
+        spawn_terminal_session_exit_watcher(child, Arc::clone(&exited)).expect("start session exit watcher");
+        exited_states.push(exited);
+    }
+
+    let deadline = Instant::now() + Duration::from_secs(2);
+    while exited_states.iter().any(|exited| !*exited.lock().expect("exited state")) && Instant::now() < deadline {
+        thread::yield_now();
+    }
+
+    assert!(
+        exited_states.iter().all(|exited| *exited.lock().expect("exited state")),
+        "mock sessions did not report process exit"
+    );
+    let reaped = pids
+        .into_iter()
+        .map(|pid| {
+            let result = unsafe { nix::libc::waitpid(pid as nix::libc::pid_t, std::ptr::null_mut(), nix::libc::WNOHANG) };
+            result == -1 && io::Error::last_os_error().raw_os_error() == Some(nix::libc::ECHILD)
+        })
+        .collect::<Vec<_>>();
+    assert!(reaped.iter().all(|reaped| *reaped), "not every mock session child was reaped: {reaped:?}");
+}
 
 #[test]
 fn startup_only_rdp_launch_payload_closes_writer_after_write() {
