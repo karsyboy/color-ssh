@@ -2,6 +2,9 @@ use super::{AppState, TabBarHit};
 use crate::inventory::InventoryHost;
 use crate::terminal::highlight_overlay::HighlightOverlayEngine;
 use crate::tui::{EditorTabId, EditorTabState, HostEditorState, HostTab, TerminalSearchState, TerminalTabState};
+use crossterm::event::{KeyModifiers, MouseButton, MouseEvent, MouseEventKind};
+use ratatui::Terminal;
+use ratatui::backend::TestBackend;
 use ratatui::layout::Rect;
 use std::path::PathBuf;
 
@@ -73,4 +76,34 @@ fn move_tab_preserves_selected_mixed_tab_identity() {
     assert!(app.tabs[2].editor().is_some(), "selected editor tab should remain selected after reorder");
     assert_eq!(app.tabs[0].terminal().map(|terminal| terminal.title.as_str()), Some("alpha"));
     assert_eq!(app.tabs[1].terminal().map(|terminal| terminal.title.as_str()), Some("beta"));
+}
+
+#[test]
+fn dragging_host_info_divider_in_short_terminal_does_not_panic() {
+    for terminal_height in [7, 8] {
+        let mut app = AppState::new_for_tests();
+        let backend = TestBackend::new(80, terminal_height);
+        let mut terminal = Terminal::new(backend).expect("create test terminal");
+
+        terminal.draw(|frame| app.draw(frame)).expect("render short terminal");
+        assert_eq!(app.host_panel_area.height, terminal_height - 2);
+        assert!(app.host_info_area.height > 0);
+
+        app.handle_mouse(MouseEvent {
+            kind: MouseEventKind::Down(MouseButton::Left),
+            column: app.host_info_area.x,
+            row: app.host_info_area.y,
+            modifiers: KeyModifiers::NONE,
+        })
+        .expect("start dragging host information divider");
+        app.handle_mouse(MouseEvent {
+            kind: MouseEventKind::Drag(MouseButton::Left),
+            column: app.host_info_area.x,
+            row: app.host_panel_area.y,
+            modifiers: KeyModifiers::NONE,
+        })
+        .expect("drag host information divider");
+
+        assert_eq!(app.host_info_height, terminal_height - 6);
+    }
 }

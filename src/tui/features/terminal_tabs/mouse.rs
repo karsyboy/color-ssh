@@ -294,8 +294,10 @@ impl AppState {
                     let content_top = self.host_panel_area.y;
                     let content_height = self.host_panel_area.height;
                     if content_height > MIN_HOST_LIST_HEIGHT {
+                        let max_info_height = content_height.saturating_sub(MIN_HOST_LIST_HEIGHT);
+                        let min_info_height = MIN_HOST_INFO_HEIGHT.min(max_info_height);
                         let min_split = content_top.saturating_add(MIN_HOST_LIST_HEIGHT);
-                        let max_split = content_top + content_height.saturating_sub(MIN_HOST_INFO_HEIGHT);
+                        let max_split = content_top + content_height.saturating_sub(min_info_height);
                         let split_row = mouse.row.clamp(min_split, max_split);
                         let list_height = split_row.saturating_sub(content_top);
                         self.host_info_height = content_height.saturating_sub(list_height);
