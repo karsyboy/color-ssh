@@ -97,6 +97,51 @@ fn migration_decodes_openssh_quoted_and_equals_form_values() {
 }
 
 #[test]
+fn migration_preserves_openssh_command_values() {
+    let workspace = TestWorkspace::new("inventory", "migration_commands").expect("temp workspace");
+    let ssh_config_path = workspace.join("config");
+    let inventory_path = workspace.join("cossh-inventory.yaml");
+
+    workspace
+        .write(
+            &ssh_config_path,
+            "Host commands\nHostName destination.example\nPort 2222\nProxyCommand sh -c \"exec nc %h %p\" # proxy comment\nRemoteCommand=sh -c \"echo hello world\" # remote comment\n",
+        )
+        .expect("write ssh config");
+
+    migrate_ssh_config_to_inventory(&ssh_config_path, &inventory_path).expect("migrate inventory");
+    let tree = build_inventory_tree(&inventory_path).expect("load migrated inventory");
+    let migrated = host_named(&tree, "commands");
+
+    let output = Command::new("ssh")
+        .arg("-G")
+        .arg("-F")
+        .arg(&ssh_config_path)
+        .arg("commands")
+        .output()
+        .expect("run ssh -G");
+    assert!(output.status.success(), "ssh -G failed: {}", String::from_utf8_lossy(&output.stderr));
+    let effective = String::from_utf8(output.stdout).expect("ssh -G output is UTF-8");
+    let effective_value = |key: &str| {
+        effective
+            .lines()
+            .find_map(|line| line.strip_prefix(key).and_then(|value| value.strip_prefix(' ')))
+            .unwrap_or_else(|| panic!("ssh -G did not emit {key}"))
+    };
+
+    assert_eq!(migrated.ssh.proxy_command.as_deref(), Some(effective_value("proxycommand")));
+    assert_eq!(
+        migrated
+            .ssh
+            .extra_options
+            .get("remotecommand")
+            .and_then(|values| values.first())
+            .map(String::as_str),
+        Some(effective_value("remotecommand"))
+    );
+}
+
+#[test]
 fn migration_rejects_reserved_include_stems_without_replacing_inventory() {
     let workspace = TestWorkspace::new("inventory", "migration_reserved_folder").expect("temp workspace");
     let original = "inventory:\n  - name: 'existing'\n    protocol: 'ssh'\n    host: 'existing.example'\n";

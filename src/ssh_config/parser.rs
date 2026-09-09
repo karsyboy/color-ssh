@@ -227,7 +227,7 @@ fn tokenize_arguments(value: &str) -> Vec<String> {
     tokens
 }
 
-fn parse_directive(line: &str) -> Option<(String, Vec<String>)> {
+fn parse_directive(line: &str) -> Option<(String, &str)> {
     let separator = line.find(|character: char| character.is_whitespace() || character == '=')?;
     let keyword = line[..separator].to_ascii_lowercase();
     let mut value = line[separator..].trim_start();
@@ -235,7 +235,11 @@ fn parse_directive(line: &str) -> Option<(String, Vec<String>)> {
         value = after_equals.trim_start();
     }
 
-    Some((keyword, tokenize_arguments(value)))
+    Some((keyword, value))
+}
+
+fn is_command_directive(keyword: &str) -> bool {
+    matches!(keyword, "knownhostscommand" | "localcommand" | "proxycommand" | "remotecommand")
 }
 
 fn parse_config_file(config_path: &Path, options: ParseOptions) -> io::Result<ParsedConfigFile> {
@@ -310,13 +314,15 @@ fn parse_config_file(config_path: &Path, options: ParseOptions) -> io::Result<Pa
             continue;
         }
 
-        let Some((keyword, values)) = parse_directive(trimmed) else {
+        let Some((keyword, raw_value)) = parse_directive(trimmed) else {
             continue;
         };
-        if values.is_empty() {
+        let command_directive = is_command_directive(&keyword);
+        let values = tokenize_arguments(raw_value);
+        if (command_directive && raw_value.is_empty()) || (!command_directive && values.is_empty()) {
             continue;
         }
-        let value = values.join(" ");
+        let value = if command_directive { raw_value.to_string() } else { values.join(" ") };
 
         if in_match_block && keyword != "host" && keyword != "match" {
             continue;
