@@ -176,9 +176,8 @@ impl AppState {
         ]);
 
         if !self.tabs.is_empty() {
-            right.push(Span::styled(" · ", Style::default().fg(theme::ansi_bright_black())));
             right.push(Span::styled("S-Tab", Style::default().fg(theme::ansi_cyan())));
-            right.push(Span::styled(":tabs", Style::default().fg(theme::ansi_bright_black())));
+            right.push(Span::styled(":tabs · ", Style::default().fg(theme::ansi_bright_black())));
         }
         right.push(Span::styled("^q", Style::default().fg(theme::ansi_red())));
         right.push(Span::styled(":quit", Style::default().fg(theme::ansi_bright_black())));
