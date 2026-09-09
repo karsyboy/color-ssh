@@ -85,6 +85,19 @@ fn parse_main_args_protocol_commands_map_to_expected_command_payloads() {
 }
 
 #[test]
+fn parse_main_args_keeps_non_interactive_flags_after_remote_command_interactive() {
+    let parsed = parse_ok(&["cossh", "ssh", "example.com", "--", "-G"]);
+
+    assert_eq!(
+        parsed.command,
+        Some(MainCommand::Protocol(ProtocolCommand::Ssh(SshCommandArgs {
+            ssh_args: vec!["example.com".to_string(), "--".to_string(), "-G".to_string()],
+            is_non_interactive: false,
+        })))
+    );
+}
+
+#[test]
 fn parse_main_args_vault_and_migrate_commands_map_to_expected_variants() {
     let vault_cases: Vec<(Vec<&str>, MainCommand)> = vec![
         (

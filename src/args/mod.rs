@@ -6,6 +6,7 @@
 mod ssh;
 mod validation;
 
+pub(crate) use ssh::parse_ssh_args;
 pub use ssh::{extract_destination_host, is_non_interactive_ssh_invocation};
 pub(crate) use validation::{parse_profile_name, parse_vault_entry_name, validate_profile_name, validate_vault_entry_name};
 

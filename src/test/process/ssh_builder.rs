@@ -40,6 +40,28 @@ fn synthesize_ssh_args_inventory_defaults_and_cli_overrides_apply_expected_prece
 }
 
 #[test]
+fn synthesize_ssh_args_honors_post_destination_port_override() {
+    let mut host = InventoryHost::new("switch".to_string());
+    host.host = "10.0.0.10".to_string();
+    host.port = Some(2222);
+
+    let effective_args = synthesize_ssh_args(&["switch".to_string(), "-p".to_string(), "2200".to_string()], &host);
+
+    assert_eq!(effective_args, ["10.0.0.10", "-p", "2200"]);
+}
+
+#[test]
+fn synthesize_ssh_args_resolves_destination_after_bundled_value_flag() {
+    let mut host = InventoryHost::new("switch".to_string());
+    host.host = "10.0.0.10".to_string();
+    host.port = Some(2222);
+
+    let effective_args = synthesize_ssh_args(&["-vp".to_string(), "2200".to_string(), "switch".to_string()], &host);
+
+    assert_eq!(effective_args, ["-vp", "2200", "10.0.0.10"]);
+}
+
+#[test]
 fn build_ssh_command_for_host_uses_synthesized_inventory_defaults() {
     let mut host = InventoryHost::new("switch".to_string());
     host.host = "10.0.0.10".to_string();

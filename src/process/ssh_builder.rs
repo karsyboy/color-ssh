@@ -12,14 +12,9 @@ use crate::log_debug;
 use std::collections::HashSet;
 use std::io;
 
-const SSH_FLAGS_WITH_SEPARATE_VALUES: &[&str] = &[
-    "-b", "-B", "-c", "-D", "-E", "-e", "-F", "-I", "-i", "-J", "-L", "-l", "-m", "-O", "-o", "-p", "-P", "-Q", "-R", "-S", "-w", "-W",
-];
-
 #[derive(Debug, Default)]
 struct SshArgInspection {
     destination_index: Option<usize>,
-    destination_host: Option<String>,
     explicit_destination_user: Option<String>,
     has_user_flag: bool,
     has_port_flag: bool,
@@ -37,45 +32,43 @@ fn mark_option_key(inspection: &mut SshArgInspection, key: &str) {
     inspection.option_keys.insert(key.to_ascii_lowercase());
 }
 
-fn mark_short_flag_override(arg: &str, inspection: &mut SshArgInspection) {
-    for flag in arg.chars().skip(1) {
-        match flag {
-            'A' | 'a' => {
-                inspection.has_forward_agent = true;
-                mark_option_key(inspection, "ForwardAgent");
-            }
-            'C' => {
-                mark_option_key(inspection, "Compression");
-            }
-            'f' => {
-                mark_option_key(inspection, "ForkAfterAuthentication");
-            }
-            'g' => {
-                mark_option_key(inspection, "GatewayPorts");
-            }
-            'M' => {
-                mark_option_key(inspection, "ControlMaster");
-            }
-            'N' | 's' => {
-                mark_option_key(inspection, "SessionType");
-            }
-            'n' => {
-                mark_option_key(inspection, "StdinNull");
-            }
-            'q' | 'v' => {
-                mark_option_key(inspection, "LogLevel");
-            }
-            'T' | 't' => {
-                mark_option_key(inspection, "RequestTTY");
-            }
-            'X' | 'x' => {
-                mark_option_key(inspection, "ForwardX11");
-            }
-            'Y' => {
-                mark_option_key(inspection, "ForwardX11Trusted");
-            }
-            _ => {}
+fn mark_short_flag_override(flag: char, inspection: &mut SshArgInspection) {
+    match flag {
+        'A' | 'a' => {
+            inspection.has_forward_agent = true;
+            mark_option_key(inspection, "ForwardAgent");
         }
+        'C' => {
+            mark_option_key(inspection, "Compression");
+        }
+        'f' => {
+            mark_option_key(inspection, "ForkAfterAuthentication");
+        }
+        'g' => {
+            mark_option_key(inspection, "GatewayPorts");
+        }
+        'M' => {
+            mark_option_key(inspection, "ControlMaster");
+        }
+        'N' | 's' => {
+            mark_option_key(inspection, "SessionType");
+        }
+        'n' => {
+            mark_option_key(inspection, "StdinNull");
+        }
+        'q' | 'v' => {
+            mark_option_key(inspection, "LogLevel");
+        }
+        'T' | 't' => {
+            mark_option_key(inspection, "RequestTTY");
+        }
+        'X' | 'x' => {
+            mark_option_key(inspection, "ForwardX11");
+        }
+        'Y' => {
+            mark_option_key(inspection, "ForwardX11Trusted");
+        }
+        _ => {}
     }
 }
 
@@ -95,251 +88,55 @@ pub(crate) fn resolve_host_by_destination<'a>(destination: &str, hosts: &'a [Inv
 }
 
 fn inspect_ssh_args(args: &[String]) -> SshArgInspection {
-    let mut inspection = SshArgInspection::default();
-    let mut skip_next = false;
+    let parsed = args::parse_ssh_args(args);
+    let mut inspection = SshArgInspection {
+        destination_index: parsed.destination_index,
+        explicit_destination_user: parsed.explicit_destination_user,
+        ..SshArgInspection::default()
+    };
 
-    // Walk args once to identify destination position and caller overrides.
-    for (idx, arg) in args.iter().enumerate() {
-        if skip_next {
-            skip_next = false;
-            continue;
-        }
-
-        match arg.as_str() {
-            "-A" | "-a" => {
-                inspection.has_forward_agent = true;
-                mark_option_key(&mut inspection, "ForwardAgent");
-                continue;
-            }
-            "-C" => {
-                mark_option_key(&mut inspection, "Compression");
-                continue;
-            }
-            "-f" => {
-                mark_option_key(&mut inspection, "ForkAfterAuthentication");
-                continue;
-            }
-            "-g" => {
-                mark_option_key(&mut inspection, "GatewayPorts");
-                continue;
-            }
-            "-l" => {
+    for option in parsed.options {
+        match option.flag {
+            'l' => {
                 inspection.has_user_flag = true;
                 mark_option_key(&mut inspection, "User");
-                skip_next = true;
-                continue;
             }
-            "-M" => {
-                mark_option_key(&mut inspection, "ControlMaster");
-                continue;
-            }
-            "-N" => {
-                mark_option_key(&mut inspection, "SessionType");
-                continue;
-            }
-            "-n" => {
-                mark_option_key(&mut inspection, "StdinNull");
-                continue;
-            }
-            "-p" => {
+            'p' => {
                 inspection.has_port_flag = true;
                 mark_option_key(&mut inspection, "Port");
-                skip_next = true;
-                continue;
             }
-            "-P" => {
-                mark_option_key(&mut inspection, "Tag");
-                skip_next = true;
-                continue;
-            }
-            "-q" => {
-                mark_option_key(&mut inspection, "LogLevel");
-                continue;
-            }
-            "-s" => {
-                mark_option_key(&mut inspection, "SessionType");
-                continue;
-            }
-            "-T" | "-t" => {
-                mark_option_key(&mut inspection, "RequestTTY");
-                continue;
-            }
-            "-X" | "-x" => {
-                mark_option_key(&mut inspection, "ForwardX11");
-                continue;
-            }
-            "-Y" => {
-                mark_option_key(&mut inspection, "ForwardX11Trusted");
-                continue;
-            }
-            "-i" => {
+            'i' => {
                 inspection.has_identity_flag = true;
                 mark_option_key(&mut inspection, "IdentityFile");
-                skip_next = true;
-                continue;
             }
-            "-J" => {
+            'J' => {
                 inspection.has_proxy_jump = true;
                 mark_option_key(&mut inspection, "ProxyJump");
-                skip_next = true;
-                continue;
             }
-            "-b" => {
-                mark_option_key(&mut inspection, "BindAddress");
-                skip_next = true;
-                continue;
-            }
-            "-B" => {
-                mark_option_key(&mut inspection, "BindInterface");
-                skip_next = true;
-                continue;
-            }
-            "-c" => {
-                mark_option_key(&mut inspection, "Ciphers");
-                skip_next = true;
-                continue;
-            }
-            "-D" => {
-                mark_option_key(&mut inspection, "DynamicForward");
-                skip_next = true;
-                continue;
-            }
-            "-I" => {
-                mark_option_key(&mut inspection, "PKCS11Provider");
-                skip_next = true;
-                continue;
-            }
-            "-L" => {
+            'L' => {
                 inspection.has_local_forward = true;
                 mark_option_key(&mut inspection, "LocalForward");
-                skip_next = true;
-                continue;
             }
-            "-m" => {
-                mark_option_key(&mut inspection, "MACs");
-                skip_next = true;
-                continue;
-            }
-            "-R" => {
+            'R' => {
                 inspection.has_remote_forward = true;
                 mark_option_key(&mut inspection, "RemoteForward");
-                skip_next = true;
-                continue;
             }
-            "-S" => {
-                mark_option_key(&mut inspection, "ControlPath");
-                skip_next = true;
-                continue;
-            }
-            "-w" => {
-                mark_option_key(&mut inspection, "Tunnel");
-                skip_next = true;
-                continue;
-            }
-            "-o" => {
-                if let Some(option_arg) = args.get(idx + 1) {
-                    record_ssh_option(option_arg, &mut inspection);
+            'o' => {
+                if let Some(value) = option.value {
+                    record_ssh_option(value, &mut inspection);
                 }
-                skip_next = true;
-                continue;
             }
-            _ => {}
+            'b' => mark_option_key(&mut inspection, "BindAddress"),
+            'B' => mark_option_key(&mut inspection, "BindInterface"),
+            'c' => mark_option_key(&mut inspection, "Ciphers"),
+            'D' => mark_option_key(&mut inspection, "DynamicForward"),
+            'I' => mark_option_key(&mut inspection, "PKCS11Provider"),
+            'm' => mark_option_key(&mut inspection, "MACs"),
+            'S' => mark_option_key(&mut inspection, "ControlPath"),
+            'w' => mark_option_key(&mut inspection, "Tunnel"),
+            'P' => mark_option_key(&mut inspection, "Tag"),
+            flag => mark_short_flag_override(flag, &mut inspection),
         }
-
-        if arg.starts_with("-l") && arg.len() > 2 {
-            inspection.has_user_flag = true;
-            mark_option_key(&mut inspection, "User");
-            continue;
-        }
-        if arg.starts_with("-p") && arg.len() > 2 {
-            inspection.has_port_flag = true;
-            mark_option_key(&mut inspection, "Port");
-            continue;
-        }
-        if arg.starts_with("-i") && arg.len() > 2 {
-            inspection.has_identity_flag = true;
-            mark_option_key(&mut inspection, "IdentityFile");
-            continue;
-        }
-        if arg.starts_with("-J") && arg.len() > 2 {
-            inspection.has_proxy_jump = true;
-            mark_option_key(&mut inspection, "ProxyJump");
-            continue;
-        }
-        if arg.starts_with("-L") && arg.len() > 2 {
-            inspection.has_local_forward = true;
-            mark_option_key(&mut inspection, "LocalForward");
-            continue;
-        }
-        if arg.starts_with("-R") && arg.len() > 2 {
-            inspection.has_remote_forward = true;
-            mark_option_key(&mut inspection, "RemoteForward");
-            continue;
-        }
-        if arg.starts_with("-o") && arg.len() > 2 {
-            record_ssh_option(&arg[2..], &mut inspection);
-            continue;
-        }
-        if arg.starts_with("-b") && arg.len() > 2 {
-            mark_option_key(&mut inspection, "BindAddress");
-            continue;
-        }
-        if arg.starts_with("-B") && arg.len() > 2 {
-            mark_option_key(&mut inspection, "BindInterface");
-            continue;
-        }
-        if arg.starts_with("-c") && arg.len() > 2 {
-            mark_option_key(&mut inspection, "Ciphers");
-            continue;
-        }
-        if arg.starts_with("-D") && arg.len() > 2 {
-            mark_option_key(&mut inspection, "DynamicForward");
-            continue;
-        }
-        if arg.starts_with("-I") && arg.len() > 2 {
-            mark_option_key(&mut inspection, "PKCS11Provider");
-            continue;
-        }
-        if arg.starts_with("-m") && arg.len() > 2 {
-            mark_option_key(&mut inspection, "MACs");
-            continue;
-        }
-        if arg.starts_with("-S") && arg.len() > 2 {
-            mark_option_key(&mut inspection, "ControlPath");
-            continue;
-        }
-        if arg.starts_with("-w") && arg.len() > 2 {
-            mark_option_key(&mut inspection, "Tunnel");
-            continue;
-        }
-        if arg.starts_with("-P") && arg.len() > 2 {
-            mark_option_key(&mut inspection, "Tag");
-            continue;
-        }
-        if arg.starts_with('-') && !arg.starts_with("--") && arg.len() > 2 {
-            mark_short_flag_override(arg, &mut inspection);
-        }
-
-        if arg.starts_with('-') {
-            if SSH_FLAGS_WITH_SEPARATE_VALUES.contains(&arg.as_str()) {
-                skip_next = true;
-            }
-            continue;
-        }
-
-        // First non-flag token is treated as destination.
-        inspection.destination_index = Some(idx);
-        inspection.destination_host = Some(
-            arg.split_once('@')
-                .map(|(user, host)| {
-                    if !user.is_empty() {
-                        inspection.explicit_destination_user = Some(user.to_string());
-                    }
-                    host.to_string()
-                })
-                .unwrap_or_else(|| arg.clone()),
-        );
-        break;
     }
 
     inspection
