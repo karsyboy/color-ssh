@@ -2,6 +2,11 @@
 
 All notable changes to this project will be documented in this file.
 
+## [v0.9.4] - 2026-10-07
+
+### ⚙️ Miscellaneous Tasks
+chore(deps): update dirs requirement from 6.0.0 to 7.0.0 in the dependencies group
+
 ## [v0.9.3] - 2026-09-09
 
 ### 🐛 Bug Fixes
